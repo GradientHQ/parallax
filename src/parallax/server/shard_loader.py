@@ -207,8 +207,24 @@ class MLXModelLoader:
 
             def class_predicate(p, m):
                 # Handle custom per-layer quantizations from the config
-                if p in config["quantization"]:
-                    return config["quantization"][p]
+                qcfg = config.get("quantization", {})
+                # Direct key (Parallax remapped keys usually drop the 'model.' prefix)
+                if p in qcfg:
+                    override = qcfg[p]
+                    if isinstance(override, dict):
+                        logger.debug(
+                            f"[quantize] Using override for '{p}': bits={override.get('bits')} group_size={override.get('group_size')}"
+                        )
+                    return override
+                # Allow config keys that still include the original 'model.' prefix (as in mlx-lm)
+                prefixed = f"model.{p}"
+                if prefixed in qcfg:
+                    override = qcfg[prefixed]
+                    if isinstance(override, dict):
+                        logger.debug(
+                            f"[quantize] Using override for '{prefixed}' (mapped to '{p}'): bits={override.get('bits')} group_size={override.get('group_size')}"
+                        )
+                    return override
                 if not hasattr(m, "to_quantized"):
                     return False
                 # Handle legacy models by checking if quantized weights exist
@@ -218,6 +234,7 @@ class MLXModelLoader:
                 model_shard,
                 group_size=quantization["group_size"],
                 bits=quantization["bits"],
+                mode=quantization.get("mode", "affine"),
                 class_predicate=class_predicate,
             )
 

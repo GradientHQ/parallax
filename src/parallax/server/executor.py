@@ -892,7 +892,7 @@ class Executor:
         Process a batch of requests in MLX.
         """
         # Run model and get updated cache
-        hidden_states, (k_caches, v_caches) = self.model_shard(
+        hidden_states, (k_caches, v_caches, states0, states1) = self.model_shard(
             h_or_tokens=prepared_inputs["h_or_tokens"],
             cache=prepared_inputs["cache"],
             lengths=prepared_inputs["lengths"],
@@ -916,7 +916,9 @@ class Executor:
                 lengths[i] = 1
             else:
                 continue
-        self.kv_cache_manager.update_requests(requests, k_caches, v_caches, lengths)
+        self.kv_cache_manager.update_requests(
+            requests, k_caches, v_caches, lengths, states0, states1
+        )
 
         # Update prefix cache.
         if self.enable_prefix_cache:

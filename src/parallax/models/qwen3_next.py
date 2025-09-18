@@ -7,11 +7,11 @@ from typing import Optional, Tuple
 import mlx.core as mx
 import mlx.nn as nn
 from mlx_lm.models.base import scaled_dot_product_attention
-from mlx_lm.models.qwen3_next import Attention as MLXQwen3NextAttention
+from mlx_lm.models.gated_delta import gated_delta_update
 from mlx_lm.models.qwen3_next import ModelArgs
+from mlx_lm.models.qwen3_next import Qwen3NextAttention as MLXQwen3NextAttention
 from mlx_lm.models.qwen3_next import Qwen3NextDecoderLayer as MLXQwen3NextBlock
 from mlx_lm.models.qwen3_next import Qwen3NextGatedDeltaNet as MLXQwen3NextGatedDeltaNet
-from mlx_lm.models.qwen3_next import recurrent_gated_delta_rule
 
 
 class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
@@ -57,9 +57,9 @@ class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
         keys_new = self.k_norm(
             keys_new.reshape(batch, target_len, self.num_key_value_heads, -1)
         ).transpose(0, 2, 1, 3)
-        values_new = self.v_norm(
-            values_new.reshape(batch, target_len, self.num_key_value_heads, -1)
-        ).transpose(0, 2, 1, 3)
+        values_new = values_new.reshape(batch, target_len, self.num_key_value_heads, -1).transpose(
+            0, 2, 1, 3
+        )
 
         queries_rotated = self.rope(queries_new, offset=offset)
         keys_rotated = self.rope(keys_new, offset=offset)
@@ -90,11 +90,16 @@ class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
         )
 
         output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
-        return self.o_proj(output * mx.sigmoid(gate)), (keys_rotated, values_new)
+        return self.o_proj(output * mx.sigmoid(gate)), (keys_rotated, values_new, None, None)
 
 
 class ParallaxQwen3NextGatedDeltaNet(MLXQwen3NextGatedDeltaNet):
-    def __call__(self, inputs, cache=None):
+
+    def __call__(
+        self,
+        inputs,
+        cache: Optional[Tuple[mx.array, mx.array]] = None,
+    ):
         B, S, _ = inputs.shape
         q, k, v, z, b, a = self.fix_query_key_value_ordering(
             self.in_proj_qkvz(inputs), self.in_proj_ba(inputs)
@@ -112,8 +117,8 @@ class ParallaxQwen3NextGatedDeltaNet(MLXQwen3NextGatedDeltaNet):
             [q.reshape(B, S, -1), k.reshape(B, S, -1), v.reshape(B, S, -1)], axis=-1
         )
         conv_input = mx.concatenate([conv_state, mixed_qkv], axis=1)
-        if cache is not None:
-            cache[0] = conv_input[:, -(self.conv_kernel_size - 1) :]
+
+        state0 = conv_input[:, -(self.conv_kernel_size - 1) :]
         conv_out = nn.silu(self.conv1d(conv_input))
 
         q, k, v = [
@@ -133,7 +138,7 @@ class ParallaxQwen3NextGatedDeltaNet(MLXQwen3NextGatedDeltaNet):
                 dtype=inputs.dtype,
             )
 
-        out, state = recurrent_gated_delta_rule(
+        out, state1 = gated_delta_update(
             q,
             k,
             v,
@@ -145,11 +150,8 @@ class ParallaxQwen3NextGatedDeltaNet(MLXQwen3NextGatedDeltaNet):
             use_qk_l2norm_in_kernel=True,
         )
 
-        if cache is not None:
-            cache[1] = state
-
         out = self.norm(out, z)
-        return self.out_proj(out.reshape(B, S, -1))
+        return self.out_proj(out.reshape(B, S, -1)), (None, None, state0, state1)
 
 
 class ParallaxQwen3NextBlock(MLXQwen3NextBlock):
@@ -163,7 +165,6 @@ class ParallaxQwen3NextBlock(MLXQwen3NextBlock):
             self.linear_attn = ParallaxQwen3NextGatedDeltaNet(args)
         else:
             self.self_attn = ParallaxQwen3NextAttention(args)
-        self.gated_delta_cache = [None, None]
 
     def __call__(
         self,
@@ -174,17 +175,17 @@ class ParallaxQwen3NextBlock(MLXQwen3NextBlock):
         lengths: Optional[mx.array] = None,
     ):
         if self.is_linear:
-            r, (k_cache, v_cache) = self.linear_attn(
+            r, (k_cache, v_cache, state0, state1) = self.linear_attn(
                 self.input_layernorm(x), self.gated_delta_cache
             )
         else:
-            r, (k_cache, v_cache) = self.self_attn(
+            r, (k_cache, v_cache, state0, state1) = self.self_attn(
                 self.input_layernorm(x), mask, cache, offset=offset
             )
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
-        return out, (k_cache, v_cache)
+        return out, (k_cache, v_cache, state0, state1)
 
     @classmethod
     def get_architecture(cls):

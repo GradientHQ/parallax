@@ -61,6 +61,8 @@ class KVCache:
         # (num_layers, num_kv_heads, seq_len, head_dim)
         self.keys = mx.zeros((num_layers, num_kv_heads, num_initial_tokens, head_dim), dtype)
         self.values = mx.zeros((num_layers, num_kv_heads, num_initial_tokens, head_dim), dtype)
+        self.state0 = [None] * num_layers  # For models that need extra state
+        self.state1 = [None] * num_layers
         self.num_tokens = num_initial_tokens
         self.offset = 0
 
@@ -76,9 +78,20 @@ class KVCache:
 
     def fetch(self) -> Tuple[mx.array, mx.array]:
         """Fetches the KV cache for the request."""
-        return self.keys[..., : self.offset, :], self.values[..., : self.offset, :]
+        return (
+            self.keys[..., : self.offset, :],
+            self.values[..., : self.offset, :],
+            self.state0,
+            self.state1,
+        )
 
-    def update(self, keys: mx.array, values: mx.array) -> int:
+    def update(
+        self,
+        keys: mx.array,
+        values: mx.array,
+        state0: Optional[mx.array],
+        state1: Optional[mx.array],
+    ) -> int:
         """
         Updates the cache with new key-value pairs.
 
@@ -86,6 +99,13 @@ class KVCache:
             keys: New keys to add, shape (num_layers, num_kv_heads, target_len, head_dim)
             values: New values to add, shape (num_layers, num_kv_heads, target_len, head_dim)
         """
+        if state1 is not None or state0 is not None:
+            self.state0 = state0
+            self.state1 = state1
+
+        if keys == None or values == None:
+            return 0
+
         prev = self.offset
         seq_len = keys.shape[2]
         prev_tokens = self.num_tokens
@@ -235,7 +255,13 @@ class KVCacheManager:
         return True
 
     def update_requests(
-        self, requests: List[Request], keys: mx.array, values: mx.array, lengths: List[int]
+        self,
+        requests: List[Request],
+        keys: mx.array,
+        values: mx.array,
+        lengths: List[int],
+        states0: Optional[mx.array],
+        states1: Optional[mx.array],
     ) -> bool:
         """
         Updates the requests in the cache.
@@ -260,7 +286,9 @@ class KVCacheManager:
         ), "key and value must have the same number of key-value heads"
         assert head_dim == self.head_dim, "key and value must have the same head dimension"
         # TODO: Use vmap for better performance
-        for request, key, value, length in zip(requests, keys, values, lengths):
+        for request, key, value, length, state0, state1 in zip(
+            requests, keys, values, lengths, states0, states1
+        ):
             length = length.item()
             assert self.has_request(request.request_id), "request not in cache"
             if self.tokens_in_cache + self.round_up_to_step(length) > self.max_num_tokens:
@@ -270,7 +298,7 @@ class KVCacheManager:
                 )
                 return False
             self.tokens_in_cache += self.request_caches[request.request_id].update(
-                key[..., :length, :], value[..., :length, :]
+                key[..., :length, :], value[..., :length, :], state0, state1
             )
         return True
 
