@@ -485,6 +485,8 @@ class Executor:
 
         k_caches = [kv[0] for kv in kv_cache_list]
         v_caches = [kv[1] for kv in kv_cache_list]
+        states0 = [kv[2] for kv in kv_cache_list]
+        states1 = [kv[3] for kv in kv_cache_list]
 
         k_batched, k_padding_mask = pad_inputs(0, k_caches, self.dtype)
         v_batched, _ = pad_inputs(0, v_caches, self.dtype)
@@ -500,7 +502,7 @@ class Executor:
 
         return {
             "h_or_tokens": padded_inputs,
-            "cache": (k_batched, v_batched),
+            "cache": (k_batched, v_batched, states0, states1),
             "lengths": model_lengths,
             "mask": attention_mask,
             "requests": batched_requests,

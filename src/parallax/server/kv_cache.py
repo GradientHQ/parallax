@@ -42,6 +42,12 @@ class KVCache:
         dtype: mx.Dtype,
         block_size: int = 64,
         num_initial_tokens: int = 128,
+        conv_dim: Optional[int] = None,
+        conv_kernel_size: Optional[int] = None,
+        linear_k_dim: Optional[int] = None,
+        linear_v_dim: Optional[int] = None,
+        linear_num_k_heads: Optional[int] = None,
+        linear_num_v_heads: Optional[int] = None,
     ):
         """
         Args:
