@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from parallax_utils.logging_config import get_logger
+from backend.server.constants import NODE_STATUS_AVAILABLE
 
 logger = get_logger(__name__)
 
@@ -37,7 +38,7 @@ class RequestHandler:
         )
         if (
             self.scheduler_manage is None
-            or not self.scheduler_manage.get_schedule_status() == "success"
+            or not self.scheduler_manage.get_schedule_status() == NODE_STATUS_AVAILABLE
         ):
             return JSONResponse(
                 content={"error": "Server is not ready"},

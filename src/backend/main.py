@@ -1,13 +1,18 @@
 import time
+from tkinter import N
 import uuid
+import asyncio
+import json
 
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.server.request_handler import RequestHandler
 from backend.server.scheduler_manage import SchedulerManage
 from backend.server.server_args import parse_args
 from parallax_utils.logging_config import get_logger
+from backend.server.static_config import get_model_list, get_node_join_command
 
 app = FastAPI()
 
@@ -25,6 +30,59 @@ async def get():
 @app.get("/hello")
 async def hello():
     return {"message": "Hello, World!"}
+
+
+@app.get("/model/list")
+async def model_list():
+    return JSONResponse(content={
+        "type": "model_list",
+        "data": get_model_list(),
+    }, status_code=200)
+
+
+@app.post("/scheduler/init")
+async def scheduler_init(raw_request: Request):
+    request_data = await raw_request.json()
+    model_name = request_data.get("model_name")
+    init_nodes_num = request_data.get("init_nodes_num")
+    if scheduler_manage.is_running():
+        # todo reinit
+        pass
+    else:
+        scheduler_manage.run(model_name, init_nodes_num)
+    return JSONResponse(content={
+        "type": "scheduler_init",
+        "data": None,
+    }, status_code=200)
+
+
+@app.get("/node/join/command")
+async def node_join_command():
+    model_name = scheduler_manage.get_model_name()
+    # todo get scheduler addr
+    scheduler_addr = None
+
+    return JSONResponse(content={
+        "type": "node_join_command",
+        "data": get_node_join_command(model_name, scheduler_addr),
+    }, status_code=200)
+
+
+@app.get("/cluster/status")
+async def cluster_status():
+    async def stream_cluster_status():
+        while True:
+            yield json.dumps(scheduler_manage.get_cluster_status(), ensure_ascii=False) + "\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        stream_cluster_status(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
 
 
 @app.post("/v1/completions")
@@ -70,9 +128,6 @@ if __name__ == "__main__":
     init_nodes_num = args.init_nodes_num
     if model_name is not None and init_nodes_num is not None:
         scheduler_manage.run(model_name, init_nodes_num)
-    else:
-        logger.error("model_name and init_nodes_num are not set")
-        exit(1)
 
     port = args.port
 

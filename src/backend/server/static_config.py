@@ -108,8 +108,32 @@ MODEL_INFO_MAP = {
     ),
 }
 
+# Supported model list
+MODEL_LIST = [
+    "Qwen/Qwen3-0.6B",
+    "Qwen/Qwen3-8B",
+    "Qwen/Qwen3-32B",
+    "Qwen/Qwen2.5-72B",
+]
+
+NODE_JOIN_COMMAND = """python src/parallax/launch.py \
+          --model-path {model_name} \
+          --kv-max-tokens-in-cache 1000 \
+          --max-num-tokens-in-batch 16384 \
+          --kv-block-size 1024 \
+          --max-batch-size 1 \
+          --scheduler-addr {scheduler_addr}"""
 
 def get_model_info(model_name):
     if model_name not in MODEL_INFO_MAP:
         model_name = MODEL_NAME_REMAP.get(model_name, model_name)
     return MODEL_INFO_MAP.get(model_name, None)
+
+def get_model_list():
+    return MODEL_LIST
+
+def get_node_join_command(model_name, scheduler_addr):
+    if model_name and scheduler_addr:
+        return NODE_JOIN_COMMAND.format(model_name=model_name, scheduler_addr=scheduler_addr)
+    else:
+        return None
