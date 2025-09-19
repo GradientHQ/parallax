@@ -32,6 +32,8 @@ class NodeHardwareInfo:
 
     node_id: str
     tflops_fp16: float
+    # todo upload gpu name
+    gpu_name: str
     memory_gb: float
     memory_bandwidth_gbps: float
 
@@ -178,6 +180,7 @@ class Node:
     end_layer: Optional[int] = None  # exclusive
     current_requests: int = 0
 
+    # todo upload is_active
     is_active: bool = True
     last_heartbeat: float = 0.0
     # Will be updated by node broadcasting

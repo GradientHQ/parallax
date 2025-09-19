@@ -9,12 +9,15 @@ from backend.server.static_config import get_model_info
 from parallax_utils.logging_config import get_logger
 from scheduling.node import RequestSignal
 from scheduling.scheduler import Scheduler
+from backend.server.static_config import get_node_join_command
+from backend.server.constants import NODE_STATUS_AVAILABLE, NODE_STATUS_WAITING, NODE_STATUS_FAILED
 
 logger = get_logger(__name__)
 
 
 class SchedulerManage:
-    """Coordinates the in-process scheduler and the P2P RPC layer.
+    """
+    Coordinates the in-process scheduler and the P2P RPC layer.
 
     This manager owns the `Scheduler` instance and the Lattica P2P node,
     wiring RPC calls from workers to scheduler events.
@@ -35,28 +38,76 @@ class SchedulerManage:
         self.host_maddrs = host_maddrs
         self.announce_maddrs = announce_maddrs
 
+        self.model_name = None
+        self.init_nodes_num = None
         self.scheduler = None
         self.node_id = f"{dht_prefix}_announce"
         self.lattica = None
         self.stubs = {}
 
     def run(self, model_name, init_nodes_num):
-        """Start the scheduler and the P2P service for RPC handling."""
+        """
+        Start the scheduler and the P2P service for RPC handling.
+        """
         logger.info(
             f"SchedulerManage starting: model_name={model_name}, init_nodes_num={init_nodes_num}"
         )
         self._start_scheduler(model_name, init_nodes_num)
         self._start_lattica()
 
+    def is_running(self):
+        """
+        Returns True if the scheduler is running, False otherwise.
+        """
+        return self.scheduler is not None
+
+    def get_model_name(self):
+        return self.model_name
+    
+    def get_init_nodes_num(self):
+        return self.init_nodes_num
+
+    def get_cluster_status(self):
+        # todo get cluster status
+        return {
+            "type": "cluster_status",
+            "data": {
+                "status": self.get_schedule_status(),
+                "model_name": self.model_name,
+                "init_nodes_num": self.init_nodes_num,
+                "node_join_command": get_node_join_command(self.model_name, self.scheduler_addr),
+                "node_list": self.get_node_list(),
+            }
+        }
+
+    def get_node_list(self):
+        if self.scheduler is None:
+            return []
+        
+        return [self.build_node_info(node) for node in self.scheduler.nodes]
+
+    def build_node_info(self, node):
+        return {
+            "node_id": node.node_id,
+            "status": NODE_STATUS_AVAILABLE if node.is_active else NODE_STATUS_WAITING,
+            "gpu_name": node.hardware.gpu_name,
+            "gpu_memory": node.hardware.memory_gb,
+        }
+
+
     def _start_scheduler(self, model_name, init_nodes_num):
-        """Create the scheduler and start its background run loop if needed."""
+        """
+        Create the scheduler and start its background run loop if needed.
+        """
         if self.scheduler is not None:
             logger.info("Scheduler already started; skipping re-initialization")
             return
 
-        mode_info = get_model_info(model_name)
-        # 初始化 scheduler
-        self.scheduler = Scheduler(mode_info, [], min_nodes_bootstrapping=init_nodes_num)
+        self.model_name = model_name
+        self.init_nodes_num = init_nodes_num
+
+        model_info = get_model_info(model_name)
+        self.scheduler = Scheduler(model_info, [], min_nodes_bootstrapping=init_nodes_num)
 
         # Run the scheduler's event/dispatch loops in background so the process
         # can continue to serve RPCs and HTTP traffic.
@@ -69,7 +120,9 @@ class SchedulerManage:
         logger.info("Scheduler background thread started (poll_interval=0.05)")
 
     def _start_lattica(self):
-        """Initialize and start the Lattica P2P node used for RPCs."""
+        """
+        Initialize and start the Lattica P2P node used for RPCs.
+        """
         logger.info(
             f"Starting Lattica with host_maddrs={self.host_maddrs}, mdns=False, dht_prefix={self.dht_prefix}"
         )
@@ -130,17 +183,22 @@ class SchedulerManage:
         return request.routing_table
 
     def get_schedule_status(self):
-        """Return whether a full pipeline has been allocated across joined nodes."""
+        """
+        Return whether a full pipeline has been allocated across joined nodes.
+        """
         if self.scheduler is None:
             logger.info("SchedulerManage status queried: waiting (scheduler not initialized)")
-            return "waiting"
+            return NODE_STATUS_WAITING
 
-        status = "success" if self.scheduler.layer_allocator.has_full_pipeline() else "waiting"
+        # todo rebalance status
+        status = NODE_STATUS_AVAILABLE if self.scheduler.layer_allocator.has_full_pipeline() else NODE_STATUS_WAITING
         logger.info(f"SchedulerManage status queried: {status}")
         return status
 
     def get_call_url_by_node_id(self, node_id):
-        """Lookup the HTTP endpoint for a given node id managed by the RPC layer."""
+        """
+        Lookup the HTTP endpoint for a given node id managed by the RPC layer.
+        """
         url = self.connection_handler.get_call_url_by_node_id(node_id)
         logger.info(f"Lookup call_url for node_id={node_id} -> {url}")
         return url
