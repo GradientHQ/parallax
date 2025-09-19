@@ -132,6 +132,15 @@ class Executor:
             "hidden_size"
         ) // self.config.get("num_attention_heads")
         self.enable_prefix_cache = enable_prefix_cache
+        self.linear_key_head_dim = self.config.get("linear_key_head_dim", None)
+        self.linear_value_head_dim = self.config.get("linear_value_head_dim", None)
+        self.linear_conv_kernel_dim = self.config.get("linear_conv_kernel_dim", None)
+        self.linear_num_key_heads = self.config.get("linear_num_key_heads", None)
+        self.linear_num_value_heads = self.config.get("linear_num_value_heads", None)
+        self.linear_conv_kernel_dim = self.config.get("linear_conv_kernel_dim", None)
+        self.key_dim = self.linear_key_head_dim * self.linear_num_key_heads
+        self.value_dim = self.linear_value_head_dim * self.linear_num_value_heads
+        self.conv_dim = self.key_dim * 2 + self.value_dim
 
         if self.tokenizer.pad_token_id is None:
             self.pad_token_id = self.tokenizer.eos_token_id
@@ -163,6 +172,12 @@ class Executor:
                 dtype=self.dtype,
                 cache_memory_fraction=kv_cache_memory_fraction,
                 max_num_tokens=kv_max_tokens_in_cache,
+                conv_dim=self.conv_dim if self.conv_dim and self.conv_dim > 0 else None,
+                conv_kernel_size=self.linear_conv_kernel_dim,
+                linear_k_dim=self.linear_key_head_dim,
+                linear_v_dim=self.linear_value_head_dim,
+                linear_num_k_heads=self.linear_num_key_heads,
+                linear_num_v_heads=self.linear_num_value_heads,
             )
             mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
 
@@ -445,6 +460,7 @@ class Executor:
             "lengths": mx.array(actual_lengths) if matched_prefix else mx.array(lengths),
             "mask": mask,
             "requests": batched_requests,
+            "state_cache": None,
         }
 
     def _prepare_mlx_decode_batch(
@@ -499,13 +515,16 @@ class Executor:
         attention_mask = (1.0 - final_padding_mask) * -1e9
 
         model_lengths = mx.array([kv[0].shape[2] for kv in kv_cache_list])
+        states0 = mx.stack(states0, 0)
+        states1 = mx.stack(states1, 0)
 
         return {
             "h_or_tokens": padded_inputs,
-            "cache": (k_batched, v_batched, states0, states1),
+            "cache": (k_batched, v_batched),
             "lengths": model_lengths,
             "mask": attention_mask,
             "requests": batched_requests,
+            "state_cache": (states0, states1),
         }
 
     def _prepare_batch_inputs(self, batched_requests: List[Request]) -> Optional[Dict[str, Any]]:
@@ -899,6 +918,7 @@ class Executor:
             cache=prepared_inputs["cache"],
             lengths=prepared_inputs["lengths"],
             mask=prepared_inputs["mask"],
+            state_cache=prepared_inputs["state_cache"],
         )
         # k_caches shape: (num_layers, B, num_kv_heads, L_padded, head_dim)
         logger.debug(

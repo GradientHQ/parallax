@@ -21,12 +21,25 @@ class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
     This version returns the new K and V states for external caching.
     """
 
+    def __init__(self, args: ModelArgs):
+        super().__init__(args)
+        self.hidden_size = args.hidden_size
+        self.num_v_heads = args.linear_num_value_heads
+        self.num_k_heads = args.linear_num_key_heads
+        self.head_k_dim = args.linear_key_head_dim
+        self.head_v_dim = args.linear_value_head_dim
+        self.conv_kernel_size = args.linear_conv_kernel_dim
+        self.key_dim = self.head_k_dim * self.num_k_heads
+        self.value_dim = self.head_v_dim * self.num_v_heads
+        self.conv_dim = self.key_dim * 2 + self.value_dim
+
     def __call__(
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
         offset: int = 0,
+        state_cache: Optional[Tuple[mx.array, mx.array]] = None,
     ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
         """
         Attention forward pass with explicit KV cache handling.
@@ -44,6 +57,7 @@ class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
             new_v: (batch, n_kv_heads, target_len, head_dim) - New values for this segment.
         """
         batch, target_len, _ = x.shape
+        # print("inputs shape:", x.shape)
 
         queries_new = self.q_proj(x)
         keys_new = self.k_proj(x)
@@ -90,23 +104,45 @@ class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
         )
 
         output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
-        return self.o_proj(output * mx.sigmoid(gate)), (keys_rotated, values_new, None, None)
+
+        return self.o_proj(output * mx.sigmoid(gate)), (
+            keys_rotated,
+            values_new,
+            (
+                state_cache[0]
+                if (state_cache is not None)
+                else mx.zeros((batch, self.conv_kernel_size - 1, self.conv_dim), dtype=x.dtype)
+            ),
+            (
+                state_cache[1]
+                if (state_cache is not None)
+                else mx.zeros(
+                    (batch, self.num_v_heads, self.head_k_dim, self.head_v_dim), dtype=x.dtype
+                )
+            ),
+        )
 
 
 class ParallaxQwen3NextGatedDeltaNet(MLXQwen3NextGatedDeltaNet):
+    def __init__(self, args: ModelArgs):
+        super().__init__(args)
+        self.num_key_value_heads = args.num_key_value_heads
+        self.head_dim = args.head_dim
 
     def __call__(
         self,
         inputs,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
+        state_cache: Optional[Tuple[mx.array, mx.array]] = None,
     ):
         B, S, _ = inputs.shape
+        # print("inputs shape:", inputs.shape)
         q, k, v, z, b, a = self.fix_query_key_value_ordering(
             self.in_proj_qkvz(inputs), self.in_proj_ba(inputs)
         )
 
-        if cache is not None and cache[0] is not None:
-            conv_state = cache[0]
+        if state_cache is not None and state_cache[0] is not None:
+            conv_state = state_cache[0]
         else:
             conv_state = mx.zeros(
                 (B, self.conv_kernel_size - 1, self.conv_dim),
@@ -130,28 +166,31 @@ class ParallaxQwen3NextGatedDeltaNet(MLXQwen3NextGatedDeltaNet):
             )
         ]
 
-        if cache is not None and cache[1] is not None:
-            state = cache[1]
+        if state_cache is not None and state_cache[1] is not None:
+            state = state_cache[1]
         else:
             state = mx.zeros(
                 (B, self.num_v_heads, self.head_k_dim, self.head_v_dim),
                 dtype=inputs.dtype,
             )
 
-        out, state1 = gated_delta_update(
-            q,
-            k,
-            v,
-            a,
-            b,
-            self.A_log,
-            self.dt_bias,
-            state,
-            use_qk_l2norm_in_kernel=True,
-        )
+        out, state1 = gated_delta_update(q, k, v, a, b, self.A_log, self.dt_bias, state)
 
         out = self.norm(out, z)
-        return self.out_proj(out.reshape(B, S, -1)), (None, None, state0, state1)
+        return self.out_proj(out.reshape(B, S, -1)), (
+            (
+                cache[0][..., :S, :]
+                if cache is not None
+                else mx.zeros((B, self.num_key_value_heads, S, self.head_dim), dtype=inputs.dtype)
+            ),
+            (
+                cache[1][..., :S, :]
+                if cache is not None
+                else mx.zeros((B, self.num_key_value_heads, S, self.head_dim), dtype=inputs.dtype)
+            ),
+            state0,
+            state1,
+        )
 
 
 class ParallaxQwen3NextBlock(MLXQwen3NextBlock):
@@ -173,14 +212,15 @@ class ParallaxQwen3NextBlock(MLXQwen3NextBlock):
         cache: Optional[Tuple[mx.array, mx.array]] = None,
         offset: int = 0,
         lengths: Optional[mx.array] = None,
+        state_cache: Optional[Tuple[mx.array, mx.array]] = None,
     ):
         if self.is_linear:
             r, (k_cache, v_cache, state0, state1) = self.linear_attn(
-                self.input_layernorm(x), self.gated_delta_cache
+                self.input_layernorm(x), cache, state_cache
             )
         else:
             r, (k_cache, v_cache, state0, state1) = self.self_attn(
-                self.input_layernorm(x), mask, cache, offset=offset
+                self.input_layernorm(x), mask, cache, offset, state_cache
             )
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
