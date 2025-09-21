@@ -58,6 +58,7 @@ class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
         """
         batch, target_len, _ = x.shape
         # print("inputs shape:", x.shape)
+        # print(f"x.value --- IGNORE --- {x}")
 
         queries_new = self.q_proj(x)
         keys_new = self.k_proj(x)
@@ -136,7 +137,7 @@ class ParallaxQwen3NextGatedDeltaNet(MLXQwen3NextGatedDeltaNet):
         state_cache: Optional[Tuple[mx.array, mx.array]] = None,
     ):
         B, S, _ = inputs.shape
-        # print("inputs shape:", inputs.shape)
+        # print(f"inputs.value --- IGNORE --- {inputs}")
         q, k, v, z, b, a = self.fix_query_key_value_ordering(
             self.in_proj_qkvz(inputs), self.in_proj_ba(inputs)
         )
@@ -165,16 +166,16 @@ class ParallaxQwen3NextGatedDeltaNet(MLXQwen3NextGatedDeltaNet):
                 [self.head_k_dim, self.head_k_dim, self.head_v_dim],
             )
         ]
-
-        if state_cache is not None and state_cache[1] is not None:
-            state = state_cache[1]
+        if state_cache is not None:
+            state1 = state_cache[1]
         else:
-            state = mx.zeros(
-                (B, self.num_v_heads, self.head_k_dim, self.head_v_dim),
-                dtype=inputs.dtype,
-            )
+            state1 = None
 
-        out, state1 = gated_delta_update(q, k, v, a, b, self.A_log, self.dt_bias, state)
+        inv_scale = k.shape[-1] ** -0.5
+        q = (inv_scale**2) * mx.fast.rms_norm(q, None, 1e-6)
+        k = inv_scale * mx.fast.rms_norm(k, None, 1e-6)
+
+        out, state1 = gated_delta_update(q, k, v, a, b, self.A_log, self.dt_bias, state1)
 
         out = self.norm(out, z)
         return self.out_proj(out.reshape(B, S, -1)), (
