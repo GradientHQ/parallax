@@ -179,6 +179,7 @@ def detect_node_hardware(node_id: Optional[str]) -> Dict[str, Any]:
         return {
             "node_id": node_id,
             "tflops_fp16": 50.0,
+            "gpu_name": "Unknown",
             "memory_gb": 16.0,
             "memory_bandwidth_gbps": 100.0,
         }
@@ -187,6 +188,7 @@ def detect_node_hardware(node_id: Optional[str]) -> Dict[str, Any]:
         return {
             "node_id": node_id,
             "tflops_fp16": hw.tflops_fp16,
+            "gpu_name": hw.chip,
             "memory_gb": hw.vram_gb,
             "memory_bandwidth_gbps": hw.memory_bandwidth_gbps,
         }
@@ -196,6 +198,7 @@ def detect_node_hardware(node_id: Optional[str]) -> Dict[str, Any]:
         return {
             "node_id": node_id,
             "tflops_fp16": hw.tflops_fp16,
+            "gpu_name": hw.chip,
             "memory_gb": hw.total_ram_gb,
             "memory_bandwidth_gbps": est_bandwidth,
         }
@@ -203,6 +206,7 @@ def detect_node_hardware(node_id: Optional[str]) -> Dict[str, Any]:
     return {
         "node_id": node_id,
         "tflops_fp16": hw.tflops_fp16,
+        "gpu_name": "Unknown",
         "memory_gb": 16.0,
         "memory_bandwidth_gbps": 100.0,
     }
