@@ -9,7 +9,6 @@ import io
 from typing import Any, List, Optional
 
 import mlx.core as mx
-import torch
 
 from parallax.p2p.proto import forward_pb2
 from parallax.server.request import IntermediateRequest, Request, RequestStatus
@@ -36,9 +35,6 @@ def request_to_proto(
     else:
         raise ValueError(f"Invalid status: {requests[0].status}")
 
-    # Collect all hidden_states and next_token_ids
-    all_hidden_states = []
-
     for request in requests:
         proto_req = forward_pb2.Req()
         proto_req.rid = request.request_id
@@ -46,34 +42,63 @@ def request_to_proto(
         proto_req.input_ids.extend(request.input_ids)
         proto_req.routing_table.extend(request.routing_table)
         proto_req.sampling_params.CopyFrom(sampling_params_to_proto(request.sampling_params))
+
+        if request.hidden_states is not None:
+            proto_req.hidden_states = tensor_to_bytes(request.hidden_states, device=device)
+
+        if request.next_token_id is not None:
+            proto_req.next_token_id = request.next_token_id
+
         forward_request.reqs.append(proto_req)
 
-        # Check if hidden_states contains a single token_id (from Last Peer to First Peer)
-        if hasattr(request.hidden_states, "shape"):
-            if request.hidden_states.shape == (1,) or (
-                len(request.hidden_states.shape) == 1 and request.hidden_states.shape[0] == 1
-            ):
-                # This is a token_id from Last Peer, add to next_token_ids
-                token_id = int(request.hidden_states[0])
-                forward_request.next_token_ids.append(token_id)
-            else:
-                # This is actual hidden states, collect for concatenation
-                all_hidden_states.append(request.hidden_states)
-                # Pass the previous token_id to the next peer.
-                if request.next_token_id is not None:
-                    forward_request.next_token_ids.append(request.next_token_id)
-
-    # Concatenate all hidden_states into a single tensor if any exist
-    if all_hidden_states:
-        # Create a single named tensor for all hidden states
-        named_tensor = forward_pb2.NamedTensor()
-        named_tensor.name = "hidden_states"
-        # all_hidden_states will be concatenated into one in tensor_to_proto()
-        concatenated_tensor = concat_tensor_along_first_dim(all_hidden_states, device=device)
-        named_tensor.tensor.CopyFrom(tensor_to_proto(concatenated_tensor, device=device))
-        forward_request.pp_proxy_tensors.tensors.append(named_tensor)
-
     return forward_request
+
+
+def proto_to_request(
+    proto_request: forward_pb2.ForwardRequest,
+    device: Optional[str] = "mlx",
+) -> List[IntermediateRequest]:
+    """
+    Convert a ForwardRequest protobuf message to a IntermediateRequest object.
+    """
+
+    requests = []
+
+    for proto_req in proto_request.reqs:
+        current_position = len(proto_req.input_ids) + proto_req.output_length
+
+        next_token_id = proto_req.next_token_id
+
+        hidden_states = None
+        if proto_req.hidden_states:
+            hidden_states = bytes_to_tensor(proto_req.hidden_states, device)
+
+        status = None
+        if hidden_states is None:
+            status = RequestStatus.FINISHED_EOS
+        elif proto_request.forward_mode == forward_pb2.ForwardMode.EXTEND:
+            status = RequestStatus.PREFILLING
+        elif proto_request.forward_mode == forward_pb2.ForwardMode.DECODE:
+            status = RequestStatus.DECODING
+        else:
+            raise ValueError(f"Invalid forward mode: {proto_request.forward_mode}")
+
+        sampling_params = proto_to_sampling_params(proto_req.sampling_params)
+
+        request = IntermediateRequest(
+            request_id=proto_req.rid,
+            current_position=current_position,
+            status=status,
+            input_ids=list(proto_req.input_ids),
+            hidden_states=hidden_states,
+            routing_table=proto_req.routing_table,
+            next_token_id=next_token_id,
+            sampling_params=sampling_params,
+        )
+
+        requests.append(request)
+
+    return requests
 
 
 def abort_request_to_proto(reqs: List[Request]) -> forward_pb2.AbortRequest:
@@ -101,83 +126,6 @@ def proto_to_abort_request(proto_request: forward_pb2.AbortRequest) -> List[Inte
             current_position=0,
             status=status,
             routing_table=proto_req.routing_table,
-        )
-
-        requests.append(request)
-
-    return requests
-
-
-def proto_to_hidden_states(
-    proto: forward_pb2.PPProxyTensorsMessage,
-    device: Optional[str] = "mlx",
-) -> Any:
-    """
-    Convert a PPProxyTensorsMessage protobuf message to a list of tensors.
-    """
-    if proto is None:
-        return None
-
-    hidden_states = None
-    for named_tensor in proto.tensors:
-        if named_tensor.name == "hidden_states" or named_tensor.name == "residual":
-            if hidden_states is None:
-                hidden_states = proto_to_tensor(named_tensor.tensor, device)
-            else:
-                hidden_states = hidden_states + proto_to_tensor(named_tensor.tensor, device)
-    return hidden_states
-
-
-def proto_to_request(
-    proto_request: forward_pb2.ForwardRequest,
-    device: Optional[str] = "mlx",
-) -> List[IntermediateRequest]:
-    """
-    Convert a ForwardRequest protobuf message to a IntermediateRequest object.
-    """
-
-    requests = []
-
-    hidden_states = proto_to_hidden_states(proto_request.pp_proxy_tensors, device)
-    if hidden_states is None:
-        status = RequestStatus.FINISHED_EOS
-    elif proto_request.forward_mode == forward_pb2.ForwardMode.EXTEND:
-        status = RequestStatus.PREFILLING
-    elif proto_request.forward_mode == forward_pb2.ForwardMode.DECODE:
-        status = RequestStatus.DECODING
-    else:
-        raise ValueError(f"Invalid forward mode: {proto_request.forward_mode}")
-
-    token_index = 0
-    for index, proto_req in enumerate(proto_request.reqs):
-        current_position = len(proto_req.input_ids) + proto_req.output_length
-
-        current_hidden_states = None
-        if status == RequestStatus.PREFILLING:
-            seq_len = len(proto_req.input_ids)
-            if seq_len == 0:
-                seq_len = len(proto_req.input_ids) + proto_req.output_length
-            current_hidden_states = hidden_states[token_index : token_index + seq_len]
-            token_index += len(proto_req.input_ids)
-        elif status == RequestStatus.DECODING:
-            current_hidden_states = hidden_states[token_index : token_index + 1]
-            token_index += 1
-
-        next_token_id = None
-        if proto_request.next_token_ids:
-            next_token_id = proto_request.next_token_ids[index]
-
-        sampling_params = proto_to_sampling_params(proto_req.sampling_params)
-
-        request = IntermediateRequest(
-            request_id=proto_req.rid,
-            current_position=current_position,
-            status=status,
-            input_ids=list(proto_req.input_ids),
-            hidden_states=current_hidden_states,
-            routing_table=proto_req.routing_table,
-            next_token_id=next_token_id,
-            sampling_params=sampling_params,
         )
 
         requests.append(request)
@@ -230,18 +178,8 @@ def sampling_params_to_proto(params: SamplingParams) -> forward_pb2.SamplingPara
     return proto
 
 
-def concat_tensor_along_first_dim(tensor_list: List[Any], device: Optional[str] = "mlx") -> Any:
-    """Concat tensor along first dim"""
-    if device == "cuda":
-        concatenated_tensor = torch.concatenate(tensor_list, dim=0)
-    else:
-        concatenated_tensor = mx.concatenate(tensor_list, axis=0)
-    return concatenated_tensor
-
-
-def tensor_to_proto(tensor: Any, device: Optional[str] = "mlx") -> forward_pb2.Tensor:
+def tensor_to_bytes(tensor: Any, device: Optional[str] = "mlx") -> bytes:
     """Convert tensor to protobuf Tensor using safetensor serialization."""
-    proto = forward_pb2.Tensor()
     if device == "cuda":
         from safetensors.torch import save
 
@@ -252,28 +190,26 @@ def tensor_to_proto(tensor: Any, device: Optional[str] = "mlx") -> forward_pb2.T
             cpu_tensor = tensor
         # Store buffer using safetensor (dtype and size are automatically preserved)
         serialized_data = save({"tensor": cpu_tensor.contiguous()})
-        proto.buffer = serialized_data
+        return serialized_data
     else:
         assert tensor.size > 0, "Tensor must have size > 0"
         buffer = io.BytesIO()
         mx.save_safetensors(buffer, {"tensor": tensor})
-        proto.buffer = buffer.getvalue()
-
-    return proto
+        return buffer.getvalue()
 
 
-def proto_to_tensor(
-    tensor: forward_pb2.Tensor,
+def bytes_to_tensor(
+    tensor: bytes,
     device: Optional[str] = "mlx",
 ) -> Any:
-    """Convert protobuf Tensor (safetensor format) to tensor."""
+    """Convert bytes (safetensor format) to tensor."""
     if device == "cuda":
         from safetensors.torch import load
 
-        tensor_dict = load(tensor.buffer)
+        tensor_dict = load(tensor)
         tensor = tensor_dict["tensor"].to(device)
     else:
-        buffer = io.BytesIO(tensor.buffer)
+        buffer = io.BytesIO(tensor)
         tensors_dict = mx.load(buffer, format="safetensors")
         tensor = tensors_dict["tensor"]
     return tensor

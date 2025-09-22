@@ -80,7 +80,8 @@ def test_water_filling_rebalance(num_layers: int, gpu_types: list[str], expected
         actual_layers.append(node.end_layer - node.start_layer)
 
     assert sum(actual_layers) == num_layers
-    assert actual_layers == expected_layers
+    # Order-insensitive: only the multiset of stage sizes must match
+    assert Counter(actual_layers) == Counter(expected_layers)
 
     for i, node in enumerate(nodes):
         cap = node.get_decoder_layer_capacity(

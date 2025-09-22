@@ -102,6 +102,7 @@ class Request:
         self.input_ids = input_ids or []
         self.routing_table = routing_table
         self.sampling_params = sampling_params or SamplingParams()
+        self.abort = False
 
     @property
     def is_finished(self) -> bool:
@@ -116,14 +117,12 @@ class Request:
     @property
     def is_prefill(self) -> bool:
         """Checks if the request is in the prefill stage."""
-        """ Continue the prefill stage even if the request is cancelled. """
-        return self.status == RequestStatus.PREFILLING or self.status == RequestStatus.CANCELLED
+        return self.status == RequestStatus.PREFILLING
 
     @property
     def is_decoding(self) -> bool:
         """Checks if the request is in the decoding stage."""
-        """ Continue one decoding step even if the request is cancelled. """
-        return self.status == RequestStatus.DECODING or self.status == RequestStatus.CANCELLED
+        return self.status == RequestStatus.DECODING
 
     def update_status(self, new_status: RequestStatus = RequestStatus.DECODING):
         """

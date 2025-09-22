@@ -30,20 +30,24 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--port", type=int, default=3000, help="Port of the HTTP server")
 
+    parser.add_argument(
+        "--announce-http-addr", type=str, default=None, help="HTTP address to announce"
+    )
+
     # P2P configuration
     parser.add_argument("--initial-peers", nargs="+", default=[], help="List of initial DHT peers")
 
+    parser.add_argument("--scheduler-addr", type=str, default=None, help="Scheduler address")
+
     parser.add_argument("--relay-servers", nargs="+", default=[], help="List of relay DHT peers")
-
-    parser.add_argument(
-        "--announce-maddrs", nargs="+", default=[], help="List of multiaddresses to announce"
-    )
-
-    parser.add_argument("--public-ip", type=str, default=None, help="Public IP address to announce")
 
     parser.add_argument("--dht-port", type=int, default=None, help="Port for DHT communication")
 
     parser.add_argument("--host-maddrs", type=str, default=None, help="Multiaddress to host")
+
+    parser.add_argument(
+        "--announce-maddrs", nargs="+", default=[], help="List of multiaddresses to announce"
+    )
 
     parser.add_argument("--dht-prefix", type=str, default="gradient", help="Prefix for DHT keys")
 
@@ -58,16 +62,22 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Path to the model repository or model name (e.g., 'mlx-community/Qwen3-0.6B-bf16')",
     )
+    parser.add_argument(
+        "--max-sequence-length",
+        type=int,
+        default=None,
+        help="Maximum sequence length for the model",
+    )
 
     parser.add_argument(
         "--start-layer",
         type=int,
-        required=True,
+        default=None,
         help="Starting layer index for this shard (inclusive)",
     )
 
     parser.add_argument(
-        "--end-layer", type=int, required=True, help="Ending layer index for this shard (exclusive)"
+        "--end-layer", type=int, default=None, help="Ending layer index for this shard (exclusive)"
     )
 
     parser.add_argument(
@@ -87,13 +97,6 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--kv-max-tokens-in-cache",
-        type=int,
-        default=None,
-        help="Maximum number of tokens to store in KV cache (None for auto)",
-    )
-
-    parser.add_argument(
         "--kv-block-size", type=int, default=64, help="Block size for KV cache management"
     )
 
@@ -103,11 +106,14 @@ def parse_args() -> argparse.Namespace:
 
     # Scheduler configuration
     parser.add_argument(
-        "--max-batch-size", type=int, default=16, help="Maximum batch size for processing requests"
+        "--max-batch-size",
+        type=int,
+        default=None,
+        help="Maximum batch size for processing requests",
     )
 
     parser.add_argument(
-        "--max-num-tokens-in-batch",
+        "--max-num-tokens-per-batch",
         type=int,
         default=1024,
         help="Maximum number of tokens in a batch",
@@ -133,7 +139,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--attention-backend",
         type=str,
-        default="torch_native",
+        default="flashinfer",
         choices=["torch_native", "flashinfer", "triton", "fa3"],
         help="Choose the GPU attention kernels",
     )
@@ -183,10 +189,10 @@ def validate_args(args: argparse.Namespace) -> None:
         ValueError: If arguments are invalid
     """
     # Validate layer indices
-    if args.start_layer < 0:
+    if args.start_layer is not None and args.start_layer < 0:
         raise ValueError("start_layer must be non-negative")
 
-    if args.end_layer <= args.start_layer:
+    if args.end_layer is not None and args.end_layer <= args.start_layer:
         raise ValueError("end_layer must be greater than start_layer")
 
     # Validate memory fraction
@@ -194,11 +200,18 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("kv_cache_memory_fraction must be between 0.0 and 1.0")
 
     # Validate batch sizes
-    if args.max_batch_size <= 0:
+    if getattr(args, "max_batch_size", None) is not None and args.max_batch_size <= 0:
         raise ValueError("max_batch_size must be positive")
 
-    if args.max_num_tokens_in_batch <= 0:
-        raise ValueError("max_num_tokens_in_batch must be positive")
+    max_seq_len = getattr(args, "max_sequence_length", None)
+    if max_seq_len is not None and max_seq_len <= 0:
+        raise ValueError("max_sequence_len must be positive")
+
+    if max_seq_len is None and getattr(args, "max_batch_size", None) is None:
+        raise ValueError("max_sequence_len or max_batch_size must be provided")
+
+    if args.max_num_tokens_per_batch <= 0:
+        raise ValueError("max_num_tokens_per_batch must be positive")
 
     if args.kv_block_size <= 0:
         raise ValueError("kv_block_size must be positive")
@@ -208,10 +221,6 @@ def validate_args(args: argparse.Namespace) -> None:
 
     if args.scheduler_wait_ms < 0:
         raise ValueError("scheduler_wait_ms must be non-negative")
-
-    # Validate KV cache tokens
-    if args.kv_max_tokens_in_cache is not None and args.kv_max_tokens_in_cache <= 0:
-        raise ValueError("kv_max_tokens_in_cache must be positive if specified")
 
     # Validate supported dtypes
     dtype_list = [

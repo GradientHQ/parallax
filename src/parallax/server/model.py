@@ -205,6 +205,7 @@ class ShardedModel(nn.Module):
                 cache=current_layer_past_kv,
                 offset=offset,
                 state_cache=state_cache,
+                lengths=lengths,
             )
             collected_k_updates.append(new_k)
             collected_v_updates.append(new_v)

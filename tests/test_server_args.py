@@ -22,11 +22,10 @@ class TestValidateArgs:
             dtype="bfloat16",
             kv_cache_memory_fraction=0.5,
             max_batch_size=16,
-            max_num_tokens_in_batch=1024,
+            max_num_tokens_per_batch=1024,
             kv_block_size=16,
             micro_batch_ratio=2,
             scheduler_wait_ms=500,
-            kv_max_tokens_in_cache=None,
         )
 
         # Should not raise any exception
@@ -40,11 +39,10 @@ class TestValidateArgs:
             dtype="bfloat16",
             kv_cache_memory_fraction=0.5,
             max_batch_size=16,
-            max_num_tokens_in_batch=1024,
+            max_num_tokens_per_batch=1024,
             kv_block_size=16,
             micro_batch_ratio=2,
             scheduler_wait_ms=500,
-            kv_max_tokens_in_cache=None,
         )
 
         with pytest.raises(ValueError, match="start_layer must be non-negative"):
@@ -58,11 +56,10 @@ class TestValidateArgs:
             dtype="bfloat16",
             kv_cache_memory_fraction=0.5,
             max_batch_size=16,
-            max_num_tokens_in_batch=1024,
+            max_num_tokens_per_batch=1024,
             kv_block_size=16,
             micro_batch_ratio=2,
             scheduler_wait_ms=500,
-            kv_max_tokens_in_cache=None,
         )
 
         with pytest.raises(ValueError, match="end_layer must be greater than start_layer"):
@@ -82,8 +79,7 @@ class TestCreateExecutorConfig:
             max_batch_size=16,
             kv_block_size=16,
             kv_cache_memory_fraction=0.8,
-            kv_max_tokens_in_cache=None,
-            max_num_tokens_in_batch=1024,
+            max_num_tokens_per_batch=1024,
             prefill_priority=0,
             micro_batch_ratio=2,
             scheduler_wait_ms=500,
@@ -120,6 +116,8 @@ class TestParseArgs:
             "bfloat16",
             "--kv-cache-memory-fraction",
             "0.8",
+            "--max-sequence-length",
+            "1024",
         ],
     )
     def test_parse_valid_args(self):

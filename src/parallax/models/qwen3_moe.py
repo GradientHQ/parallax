@@ -24,6 +24,7 @@ class ParallaxQwen3MoeAttention(MLXQwen3MoeAttention):
         mask: Optional[mx.array] = None,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
         offset: int = 0,
+        lengths: Optional[mx.array] = None,
     ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
         """
         Attention forward pass with explicit KV cache handling.
@@ -55,6 +56,8 @@ class ParallaxQwen3MoeAttention(MLXQwen3MoeAttention):
         values_new = values_new.reshape(batch, target_len, self.n_kv_heads, -1).transpose(
             0, 2, 1, 3
         )
+
+        # for batch, rope offset is not correct due to padding in batch
         queries_rotated = self.rope(queries_new, offset=offset)
         keys_rotated = self.rope(keys_new, offset=offset)
 
@@ -102,6 +105,7 @@ class ParallaxQwen3MoeBlock(MLXQwen3MoeBlock):
         mask: Optional[mx.array] = None,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
         offset: int = 0,
+        lengths: Optional[mx.array] = None,
     ):
         r, (k_cache, v_cache) = self.self_attn(self.input_layernorm(x), mask, cache, offset=offset)
         h = x + r

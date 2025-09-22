@@ -162,20 +162,14 @@ def form_sgl_batch_decode(
     The returned ScheduleBatch is a copy of subset of the running batch.
     ModelWorkerBatch -> ForwardBatch are generated from the selected ScheduleBatch.
     """
-    running_batch_index = list(
-        filter(lambda x: x != -1, [find_index(running_batch, req.request_id) for req in requests])
-    )
-    for index in running_batch_index:
-        running_batch.reqs[index].ready = True
-
     ready_indices = list(
-        filter(lambda i: running_batch.reqs[i].ready, range(len(running_batch.reqs)))
+        filter(lambda x: x != -1, [find_index(running_batch, req.request_id) for req in requests])
     )
     ret = select_batch(running_batch, ready_indices)
     if is_first_rank:
         output_ids = []
-        for i in ready_indices:
-            output_ids.append(requests[i].output_ids[-1])
+        for request in requests:
+            output_ids.append(request.output_ids[-1])
         ret.output_ids = torch.tensor(output_ids, dtype=torch.int64).to(
             ret.device, non_blocking=True
         )

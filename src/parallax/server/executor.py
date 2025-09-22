@@ -34,6 +34,7 @@ from parallax.p2p.message_util import (
 )
 from parallax.p2p.proto import forward_pb2
 from parallax.server.kv_cache import KVCacheManager
+from parallax.server.metrics import update_metrics
 from parallax.server.radix_cache import RadixCache
 from parallax.server.request import (
     InitialRequest,
@@ -50,11 +51,13 @@ from parallax.utils.utils import (
     create_causal_mask,
     get_current_device,
     get_device_dtype,
+    get_infinite_value_by_dtype,
     get_zmq_socket,
     pad_inputs,
     pad_prefix_caches,
 )
 from parallax_utils.logging_config import get_logger
+from parallax_utils.utils import compute_max_batch_size
 
 logger = get_logger(__name__)
 
@@ -70,15 +73,19 @@ class Executor:
         end_layer: int,
         dtype: str = "float16",
         # Scheduler Configs
-        max_batch_size: int = 16,
-        max_num_tokens_in_batch: int = 1024,
+        max_batch_size: Optional[int] = None,
+        max_sequence_length: Optional[int] = None,
+        max_tokens_in_kv_pool: Optional[int] = None,
+        # Controlling perfill / decode ratio
+        max_num_tokens_per_batch: int = 1024,
         prefill_priority: int = 0,
         micro_batch_ratio: int = 2,
         scheduler_wait_ms: int = 500,
+        # Metrics Configs
+        layer_latency_update_every: int = 4096,
         # KV Cache Configs
         kv_block_size: int = 64,
         kv_cache_memory_fraction: float = 0.8,
-        kv_max_tokens_in_cache: Optional[int] = None,
         enable_prefix_cache: Optional[bool] = False,
         # Communication Configs
         # P2P Communication Configs
@@ -93,6 +100,7 @@ class Executor:
     ):
         # Backend
         self.device = get_current_device()
+        logger.info(f"Executor initializing on device: {self.device}")
 
         # Sharded Model
         if self.device == "cuda":
@@ -100,6 +108,9 @@ class Executor:
 
             from parallax.sglang.model_runner import initialize_sgl_model_runner
 
+            logger.info(
+                f"Initializing CUDA model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
+            )
             self.model_runner, self.config, self.tokenizer = initialize_sgl_model_runner(
                 model_repo,
                 start_layer,
@@ -109,16 +120,27 @@ class Executor:
                 kv_block_size,
                 moe_runner_backend,
             )
+            logger.info(
+                f"CUDA model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
+            )
             # SGL KV Cache Manager is already initialized in ScheduleBatch
             # TODO: Replace ScheduleBatch to Parallax inflight batch
             self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
             self.cur_batch = None
         else:
+            logger.info(
+                f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer})"
+            )
             self.shard_loader = MLXModelLoader(
                 model_repo, start_layer=start_layer, end_layer=end_layer
             )
+            t0 = time.time()
             self.model_shard, self.config, self.tokenizer = self.shard_loader.load()
+            logger.info(
+                f"MLX sharded model loaded in {(time.time() - t0) * 1000:.1f} ms; num_layers={self.config.get('num_hidden_layers')}"
+            )
 
+        # for window attention need to calculate causal mask size
         self.finished_batch = []
         self.start_layer = start_layer
         self.end_layer = end_layer
@@ -126,7 +148,14 @@ class Executor:
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
         self.num_shard_layers = end_layer - start_layer
 
+        # Metrics throttling for per-layer latency updates
+        self.layer_latency_update_every = int(max(1, layer_latency_update_every))
+        self._decode_steps_since_metric = self.layer_latency_update_every
+
         self.dtype = get_device_dtype(dtype, self.device)
+        logger.info(
+            f"Executor dtype set to {dtype} (resolved={self.dtype}); shard_layers={self.num_shard_layers}"
+        )
         self.num_key_value_heads = self.config.get("num_key_value_heads")
         self.head_dim = self.config.get("head_dim") or self.config.get(
             "hidden_size"
@@ -141,6 +170,9 @@ class Executor:
         self.key_dim = self.linear_key_head_dim * self.linear_num_key_heads
         self.value_dim = self.linear_value_head_dim * self.linear_num_value_heads
         self.conv_dim = self.key_dim * 2 + self.value_dim
+        logger.debug(
+            f"Model config: n_kv_heads={self.num_key_value_heads}, head_dim={self.head_dim}, tokenizer_pad={self.tokenizer.pad_token_id}"
+        )
 
         if self.tokenizer.pad_token_id is None:
             self.pad_token_id = self.tokenizer.eos_token_id
@@ -151,19 +183,13 @@ class Executor:
         if isinstance(self.eos_token_id, list):
             self.eos_token_id = self.eos_token_id[0]
 
-        # Scheduler
-        self.scheduler = Scheduler(
-            max_batch_size=max_batch_size,
-            max_num_tokens=max_num_tokens_in_batch,
-            prefill_priority=prefill_priority,
-            scheduler_wait_ms=scheduler_wait_ms,
-            micro_batch_ratio=micro_batch_ratio,
-            is_first_peer=self.is_first_peer,
-            tokenizer=self.tokenizer,
-        )
-
         if self.device == "mlx":
             # Other setup for MAC
+            logger.info(
+                "Initializing KVCacheManager (mlx) with block_size=%d, layers=%d",
+                kv_block_size,
+                self.num_shard_layers,
+            )
             self.kv_cache_manager = KVCacheManager(
                 block_size=kv_block_size,
                 num_kv_heads=self.num_key_value_heads,
@@ -171,15 +197,44 @@ class Executor:
                 num_layers=self.num_shard_layers,
                 dtype=self.dtype,
                 cache_memory_fraction=kv_cache_memory_fraction,
-                max_num_tokens=kv_max_tokens_in_cache,
                 conv_dim=self.conv_dim if self.conv_dim and self.conv_dim > 0 else None,
                 conv_kernel_size=self.linear_conv_kernel_dim,
                 linear_k_dim=self.linear_key_head_dim,
                 linear_v_dim=self.linear_value_head_dim,
                 linear_num_k_heads=self.linear_num_key_heads,
                 linear_num_v_heads=self.linear_num_value_heads,
+                max_num_tokens=max_tokens_in_kv_pool,
             )
             mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
+            logger.debug(
+                f"KVCacheManager ready; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}"
+            )
+            self.kv_cache_manager.max_num_tokens
+
+        # Scheduler: derive final max_batch_size with KV constraints
+        max_batch_size = compute_max_batch_size(
+            requested_max_batch_size=max_batch_size,
+            max_sequence_len=max_sequence_length,
+            device=self.device,
+            kv_cache_memory_fraction=kv_cache_memory_fraction,
+            num_shard_layers=self.num_shard_layers,
+            num_key_value_heads=self.num_key_value_heads,
+            head_dim=self.head_dim,
+            dtype=self.dtype,
+        )
+
+        self.scheduler = Scheduler(
+            max_batch_size=max_batch_size,
+            max_num_tokens_per_batch=max_num_tokens_per_batch,
+            prefill_priority=prefill_priority,
+            scheduler_wait_ms=scheduler_wait_ms,
+            micro_batch_ratio=micro_batch_ratio,
+            is_first_peer=self.is_first_peer,
+            tokenizer=self.tokenizer,
+        )
+        logger.info(
+            f"Scheduler initialized (max_batch_size={max_batch_size}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"
+        )
 
         # Prefix Cache Manager
         self.prefix_cache = RadixCache(
@@ -188,7 +243,6 @@ class Executor:
             num_layers=self.num_shard_layers,
             dtype=self.dtype,
             page_size=1,
-            max_num_tokens=kv_max_tokens_in_cache,
         )
 
         # Communication Related
@@ -236,6 +290,8 @@ class Executor:
                 break
             except Exception as e:
                 logger.exception(f"Error receiving http request: {e}")
+        if recv_reqs:
+            logger.debug(f"Received {len(recv_reqs)} HTTP requests")
         return recv_reqs
 
     def recv_requests_from_peer(self) -> List[Request]:
@@ -244,6 +300,7 @@ class Executor:
         while True:
             try:
                 recv_req = self.recv_from_peer_socket.recv_multipart(zmq.NOBLOCK)
+                assert len(recv_req) == 2, f"Received invalid request: {recv_req}"
                 if recv_req[0] == b"forward":
                     # Create a new ForwardRequest instance and parse from bytes
                     forward_request = forward_pb2.ForwardRequest()
@@ -273,6 +330,8 @@ class Executor:
                 break
             except Exception as e:
                 logger.exception(f"Error receiving or deserializing request: {e}")
+        if recv_reqs:
+            logger.debug(f"Received {len(recv_reqs)} peer requests")
         return recv_reqs
 
     def _prepare_cuda_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
@@ -312,15 +371,18 @@ class Executor:
                     "residual": residual,
                 }
             )
+            logger.debug(f"PP Proxy: hidden_states shape: {hidden_states.shape}")
         lengths = []
         for req in batched_requests:
             lengths.append(req.total_length)
-        return {
+        ret = {
             "forward_batch": forward_batch,
             "pp_proxy_tensors": pp_proxy_tensors,
             "lengths": torch.tensor(lengths, device=self.device),
             "requests": batched_requests,
         }
+        logger.info(f"Prepared CUDA prefill batch (size={batch_size})")
+        return ret
 
     def _prepare_cuda_decode_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """
@@ -366,12 +428,15 @@ class Executor:
                     "residual": residual,
                 }
             )
-        return {
+            logger.debug(f"PP Proxy: hidden_states shape: {hidden_states.shape}")
+        ret = {
             "forward_batch": forward_batch,
             "pp_proxy_tensors": pp_proxy_tensors,
             "lengths": torch.tensor(lengths, device=self.device),
             "requests": batched_requests,
         }
+        logger.info(f"Prepared CUDA decode batch (size={batch_size})")
+        return ret
 
     def _prepare_mlx_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """Prepares inputs for ShardedModel from a batch of prefill requests."""
@@ -448,13 +513,15 @@ class Executor:
             k_batched, k_padding_mask = pad_prefix_caches(k_caches, lengths, self.dtype)
             v_batched, _ = pad_prefix_caches(v_caches, lengths, self.dtype)
             padding_mask = k_padding_mask
-            causal_mask = create_causal_mask(padded_inputs.shape[1], max(lengths))
-            mask = combine_padding_and_causal_masks(padding_mask, causal_mask)
+            causal_mask = create_causal_mask(padded_inputs.shape[1], max(lengths), self.dtype)
+            mask = combine_padding_and_causal_masks(padding_mask, causal_mask, self.dtype)
         else:
-            causal_mask = create_causal_mask(padded_inputs.shape[1], padded_inputs.shape[1])
-            mask = combine_padding_and_causal_masks(padding_mask, causal_mask)
+            causal_mask = create_causal_mask(
+                padded_inputs.shape[1], padded_inputs.shape[1], self.dtype
+            )
+            mask = combine_padding_and_causal_masks(padding_mask, causal_mask, self.dtype)
 
-        return {
+        ret = {
             "h_or_tokens": padded_inputs,
             "cache": (k_batched, v_batched) if matched_prefix else None,
             "lengths": mx.array(actual_lengths) if matched_prefix else mx.array(lengths),
@@ -462,6 +529,10 @@ class Executor:
             "requests": batched_requests,
             "state_cache": None,
         }
+        logger.debug(
+            f"Prepared MLX prefill batch (size={batch_size}, matched_prefix={matched_prefix})"
+        )
+        return ret
 
     def _prepare_mlx_decode_batch(
         self, batched_requests: List[Request]
@@ -494,7 +565,7 @@ class Executor:
             kv_cache = self.kv_cache_manager.gather_kv_cache(req.request_id)
             kv_cache_list.append(kv_cache)
 
-        padded_inputs, _ = pad_inputs(0, h_list)
+        padded_inputs, _ = pad_inputs(0, h_list, self.dtype)
 
         if not kv_cache_list:
             raise ValueError("No KV cache found for request.")
@@ -512,13 +583,14 @@ class Executor:
         # to the attention weights of shape (B, n_heads, 1, source_len_padded + 1).
         ones_for_current_token = mx.ones((k_padding_mask.shape[0], 1, 1, 1), dtype=self.dtype)
         final_padding_mask = mx.concatenate([k_padding_mask, ones_for_current_token], axis=3)
-        attention_mask = (1.0 - final_padding_mask) * -1e9
+        inf_value = get_infinite_value_by_dtype(self.dtype)
+        attention_mask = (1.0 - final_padding_mask) * -inf_value
 
         model_lengths = mx.array([kv[0].shape[2] for kv in kv_cache_list])
         states0 = mx.stack(states0, 0)
         states1 = mx.stack(states1, 0)
 
-        return {
+        ret = {
             "h_or_tokens": padded_inputs,
             "cache": (k_batched, v_batched),
             "lengths": model_lengths,
@@ -526,6 +598,8 @@ class Executor:
             "requests": batched_requests,
             "state_cache": (states0, states1),
         }
+        logger.debug(f"Prepared MLX decode batch (size={batch_size})")
+        return ret
 
     def _prepare_batch_inputs(self, batched_requests: List[Request]) -> Optional[Dict[str, Any]]:
         """Prepares inputs for ShardedModel from a batch of requests.
@@ -544,8 +618,8 @@ class Executor:
         if len(batched_requests) == 0:
             return None
 
-        prefill_reqs = []
-        decode_reqs = []
+        prefill_reqs: List[Request] = []
+        decode_reqs: List[Request] = []
         for req in batched_requests:
             if req.is_prefill:
                 prefill_reqs.append(req)
@@ -559,6 +633,10 @@ class Executor:
             decode_batch = self._prepare_mlx_decode_batch(decode_reqs)
         if prefill_batch is None and decode_batch is None:
             return None
+        if prefill_batch is not None:
+            logger.info(f"Prepared prefill batch with {len(prefill_batch['requests'])} requests.")
+        if decode_batch is not None:
+            logger.info(f"Prepared decode batch with {len(decode_batch['requests'])} requests.")
         return {
             "prefill_batch": prefill_batch,
             "decode_batch": decode_batch,
@@ -633,7 +711,8 @@ class Executor:
                     original_req = self.scheduler.get_running_request(req.request_id)
                     if original_req is None:
                         logger.warning(
-                            f"Received IntermediateRequest {req.request_id} but no corresponding request found in scheduler (CUDA). "
+                            f"Received IntermediateRequest {req.request_id}. "
+                            "But no corresponding request found in scheduler (CUDA). "
                             "It might have been cancelled or finished."
                         )
                         continue
@@ -682,6 +761,8 @@ class Executor:
 
     def _handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
+        if len(requests) > 0:
+            logger.info(f"Handling {len(requests)} requests.")
         if not requests:
             return
 
@@ -701,13 +782,15 @@ class Executor:
                     original_req = self.scheduler.get_running_request(req.request_id)
                     if original_req is None:
                         logger.warning(
-                            f"Received IntermediateRequest {req.request_id} but no corresponding request found in scheduler. "
+                            f"Received IntermediateRequest {req.request_id}. "
+                            "But no corresponding request found in scheduler. "
                             "It might have been cancelled or finished."
                         )
                         continue
                     if not self.kv_cache_manager.has_request(req.request_id):
                         logger.warning(
-                            f"Received IntermediateRequest {req.request_id} but no corresponding request found in cache manager. "
+                            f"Received IntermediateRequest {req.request_id}. "
+                            "But no corresponding request found in cache manager. "
                             "It might have been cancelled or finished."
                         )
                         continue
@@ -719,8 +802,12 @@ class Executor:
 
                     # Check for termination.
                     if self.scheduler.check_and_update_request_status(original_req):
-                        logger.info(f"Releasing resources for finished request {req.request_id}")
                         self.kv_cache_manager.release_request(original_req.request_id)
+                        logger.info(
+                            f"Released resources for finished request {req.request_id}, "
+                            f"kv cache manager has {self.kv_cache_manager.tokens_in_cache} tokens, "
+                            f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
+                        )
                         if not self.is_last_peer:
                             self.finished_batch.append(req)
                     else:
@@ -891,10 +978,6 @@ class Executor:
                     else:
                         # Merge running_batch with prefill batch
                         self.running_batch.merge_batch(self.cur_batch)
-            else:
-                # Set decode req conditions
-                for req in self.cur_batch.reqs:
-                    req.ready = False
             self.cur_batch = None
 
         if return_decoded_tokens:
@@ -976,6 +1059,9 @@ class Executor:
             ret = self._process_batch_cuda(prepared_inputs, return_decoded_tokens)
         else:
             ret = self._process_batch_mlx(prepared_inputs, return_decoded_tokens)
+        logger.debug(
+            f"Processed batch (device={self.device}, return_tokens={return_decoded_tokens})"
+        )
         return ret
 
     def run_loop(self):
@@ -1009,6 +1095,7 @@ class Executor:
             batch_to_process = self.scheduler.form_batch()
             if not batch_to_process:
                 continue
+            logger.info(f"Formed batch with {len(batch_to_process)} requests.")
 
             # 6. Process the batch
             try:
@@ -1023,6 +1110,21 @@ class Executor:
                         output = self.process_batch(
                             prepared_inputs, return_decoded_tokens=self.is_last_peer
                         )
+                        # Update metrics with per-layer latency sample (throttled by decode steps)
+                        if batch_type == "decode_batch":
+                            try:
+                                self._decode_steps_since_metric += len(prepared_inputs["requests"])
+                                if (
+                                    self._decode_steps_since_metric
+                                    >= self.layer_latency_update_every
+                                ):
+                                    elapsed_ms = (time.time() - start_time) * 1000.0
+                                    assert self.num_shard_layers > 0
+                                    per_layer_ms = elapsed_ms / float(self.num_shard_layers)
+                                    update_metrics(layer_latency_ms_sample=per_layer_ms)
+                                    self._decode_steps_since_metric = 0
+                            except Exception:
+                                pass
                         # 7. Prepare requests for the next stage in the pipeline
                         next_batch = self._prepare_next_batch_requests(
                             requests=prepared_inputs["requests"],
@@ -1073,7 +1175,7 @@ class Executor:
         logger.info("Executor shutdown complete.")
 
 
-def create_executor_config(args):
+def create_executor_config(args: argparse.Namespace):
     """Create executor configuration from command line arguments."""
 
     config = {
@@ -1081,17 +1183,17 @@ def create_executor_config(args):
         "start_layer": args.start_layer,
         "end_layer": args.end_layer,
         "dtype": args.dtype,
-        "max_batch_size": args.max_batch_size,
+        "max_sequence_length": args.max_sequence_length if "max_sequence_length" in args else None,
+        "max_batch_size": args.max_batch_size if "max_batch_size" in args else None,
         "kv_block_size": args.kv_block_size,
         "kv_cache_memory_fraction": args.kv_cache_memory_fraction,
-        "kv_max_tokens_in_cache": args.kv_max_tokens_in_cache,
         "enable_prefix_cache": args.enable_prefix_cache,
-        "max_num_tokens_in_batch": args.max_num_tokens_in_batch,
+        "max_num_tokens_per_batch": args.max_num_tokens_per_batch,
         "prefill_priority": args.prefill_priority,
         "micro_batch_ratio": args.micro_batch_ratio,
         "scheduler_wait_ms": args.scheduler_wait_ms,
-        "send_to_peer_addr": "ipc:///tmp/parallax_p2p_send_to_peer",
-        "recv_from_peer_addr": "ipc:///tmp/parallax_p2p_recv_from_peer",
+        "send_to_peer_addr": args.send_to_peer_addr if "send_to_peer_addr" in args else None,
+        "recv_from_peer_addr": args.recv_from_peer_addr if "recv_from_peer_addr" in args else None,
         "executor_input_ipc_addr": args.executor_input_ipc,
         "executor_output_ipc_addr": args.executor_output_ipc,
         "attention_backend": args.attention_backend,

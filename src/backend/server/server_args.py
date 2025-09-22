@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
         "--model-name", type=str, default="Qwen/Qwen3-0.6B-MLX-bf16", help="Model name"
     )
 
-    parser.add_argument("--init-nodes-num", type=int, default=4, help="Number of initial nodes")
+    parser.add_argument("--init-nodes-num", type=int, default=1, help="Number of initial nodes")
 
     args = parser.parse_args()
 

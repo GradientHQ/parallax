@@ -14,7 +14,11 @@ from dataclasses import dataclass, field
 from math import floor
 from typing import Callable, Dict, List, Optional
 
+from parallax_utils.logging_config import get_logger
+from parallax_utils.utils import bytes_per_element, compute_max_batch_size
 from scheduling.model_info import ModelInfo
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -39,11 +43,13 @@ class RequestSignal:
 
     - request_id: Unique identifier (hash) for the request
     - received_ts: UNIX timestamp (seconds) when the request was received
+    - routing_table: Set by the scheduler when a path is assigned. Semantics:
+        None -> not assigned yet; [] -> all pipelines full at the moment; [..] -> route
     """
 
     request_id: str
     received_ts: float = field(default_factory=time.time)
-    routing_table: List[str] = field(default_factory=list)
+    routing_table: Optional[List[str]] = None
 
 
 class RooflinePerformanceModel:
@@ -140,9 +146,10 @@ class RooflinePerformanceModel:
 
         compute_time_ms = self.get_compute_roofline_latency_ms(flops)
         io_time_ms = self.get_io_roofline_latency_ms(io_bytes)
-        return num_decoder_layers * max(
-            decoder_layer_compute_latency, decoder_layer_io_latency
-        ) + max(compute_time_ms, io_time_ms)
+        return (
+            num_decoder_layers * max(decoder_layer_compute_latency, decoder_layer_io_latency)
+            + max(compute_time_ms, io_time_ms)
+        ) / num_decoder_layers
 
 
 @dataclass
@@ -165,7 +172,7 @@ class Node:
     param_hosting_ratio: float = 0.5
 
     max_concurrent_requests: int = 16
-    max_sequence_length: int = 1024
+    max_sequence_length: int = 4096
 
     start_layer: Optional[int] = None  # inclusive
     end_layer: Optional[int] = None  # exclusive
@@ -176,9 +183,12 @@ class Node:
     # Will be updated by node broadcasting
     # otherwise, use roofline performance model to estimate
     avg_layer_latency_ms: Optional[float] = None
+    load_compensator: float = 0.05
 
     rtt_to_nodes: Optional[Dict[str, float]] = None
     rtt_getter: Optional[Callable[["Node", "Node"], float]] = None
+
+    _force_max_concurrent_requests: bool = False
 
     def __post_init__(self):
         if self.last_heartbeat == 0.0:
@@ -188,17 +198,37 @@ class Node:
 
     @property
     def max_requests(self) -> int:
-        """Number of requests given by max num KV tokens, assuming all requests have max sequence length."""
-        if self.start_layer is None or self.end_layer is None:
+        """Max concurrent requests bounded by KV budget using sequence length."""
+        if self._force_max_concurrent_requests:
             return self.max_concurrent_requests
 
-        kv_size = self.model_info.per_token_per_layer_kv_size * self.num_decoder_layers
-        num_kv_tokens_can_host = floor(
-            self.hardware.memory_gb * 1024 * 1024 * 1024 * self.kv_cache_ratio / kv_size
+        if self.start_layer is None or self.end_layer is None:
+            return self.max_concurrent_requests
+        try:
+            elem_bytes = bytes_per_element(
+                getattr(self.model_info, "cache_bytes_per_element", None)
+            )
+        except Exception:
+            elem_bytes = 2
+        derived_max = compute_max_batch_size(
+            requested_max_batch_size=self.max_concurrent_requests,
+            max_sequence_len=self.max_sequence_length,
+            device=None,
+            kv_cache_memory_fraction=self.kv_cache_ratio,
+            num_shard_layers=self.num_decoder_layers,
+            num_key_value_heads=self.model_info.num_kv_heads,
+            head_dim=self.model_info.head_size,
+            elem_bytes=elem_bytes,
+            memory_gb=self.hardware.memory_gb,
         )
-        return min(
-            self.max_concurrent_requests, floor(num_kv_tokens_can_host / self.max_sequence_length)
-        )
+        if derived_max <= 0:
+            raise ValueError(
+                f"Node {self.node_id} has invalid max concurrent requests: {derived_max}"
+            )
+        if self.max_concurrent_requests is None:
+            return derived_max
+        else:
+            return min(self.max_concurrent_requests, derived_max)
 
     @property
     def num_current_layers(self) -> int:
@@ -285,10 +315,17 @@ class Node:
 
     def roofline_layer_latency_ms(self) -> float:
         """Get the roofline layer latency for this node."""
+        # Compute an effective compute speedup due to quantization.
+        bytes_per_elem = float(self.model_info.param_bytes_per_element)
+        # bf16/fp16 baseline ~2 bytes
+        base = 1.0 if bytes_per_elem <= 0 else 2.0 / bytes_per_elem
+        # Empirical efficiency factor: int8 often achieves ~80% of theoretical 2x
+        efficiency = 0.8 if bytes_per_elem < 2.0 else 1.0
+        quantization_speedup = max(0.1, base * efficiency)
         perf_model = RooflinePerformanceModel(
             hardware=self.hardware,
             model_info=self.model_info,
-            quantization_speedup=self.quantization_speedup,
+            quantization_speedup=quantization_speedup,
             batch_size=self.current_requests,
             target_seq_len=1,
             source_seq_len=self.max_sequence_length,
@@ -303,10 +340,15 @@ class Node:
     def layer_latency_ms(self) -> float:
         """Get effective layer latency considering both roofline and load."""
         if self.is_overloaded:
+            logger.warning(
+                f"Node {self.node_id} is overloaded: {self.current_requests} >= {self.max_requests}"
+            )
             return float("inf")
         if self.avg_layer_latency_ms is None:
             return self.roofline_layer_latency_ms()
-        return self.avg_layer_latency_ms
+        return self.avg_layer_latency_ms + self.load_compensator * (
+            1.0 * self.current_requests / self.max_requests
+        )
 
     def update_rtt(self, target_node_id: str, rtt_ms: float):
         """Update RTT measurement to another node."""

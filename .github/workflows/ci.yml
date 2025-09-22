@@ -47,8 +47,7 @@ jobs:
       run: |
         python src/parallax/launch.py \
           --model-path Qwen/Qwen3-0.6B-MLX-bf16 \
-          --kv-max-tokens-in-cache 100000 \
-          --max-num-tokens-in-batch 16384 \
+          --max-num-tokens-per-batch 16384 \
           --kv-block-size 1024 \
           --max-batch-size 128 \
           --start-layer 0 \

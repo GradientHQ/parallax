@@ -90,11 +90,11 @@ def _initialize_if_necessary():
         _default_handler.setFormatter(formatter)
 
         # root level from env or INFO
-        level_name = os.getenv("PARALLAX_LOGLEVEL", "INFO").upper()
+        level_name = os.getenv("PARALLAX_LOGLEVEL", "DEBUG").upper()
         logging.getLogger().setLevel(level_name)
 
         # Allow logs from our main packages by default
-        _enable_default_handler(("parallax", "scheduling", "backend"))
+        _enable_default_handler(("parallax", "scheduling", "backend", "sglang"))
 
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:

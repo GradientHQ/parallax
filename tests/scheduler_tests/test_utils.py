@@ -60,7 +60,7 @@ def build_node(
         memory_gb=mem_gb,
         memory_bandwidth_gbps=mem_bandwidth_gbps,
     )
-    n = Node(node_id=node_id, hardware=hw, model_info=model)
+    n = Node(node_id=node_id, hardware=hw, model_info=model, _force_max_concurrent_requests=True)
     # Attach coordinates for RTT synthesis in tests
     setattr(n, "_x", float(x))
     setattr(n, "_y", float(y))

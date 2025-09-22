@@ -24,6 +24,7 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
         mask: Optional[mx.array] = None,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
         offset: int = 0,
+        length: Optional[mx.array] = None,
     ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
         """
         Attention forward pass with explicit KV cache handling.
@@ -57,8 +58,18 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
         )
 
         if cache is not None:
-            queries_rotated = self.rope(queries_new, offset=offset)
-            keys_rotated = self.rope(keys_new, offset=offset)
+            queries_rotated_list = []
+            keys_rotated_list = []
+            for i in range(batch):
+                individual_offset = int(length[i])
+                query_single = queries_new[i : i + 1]
+                key_single = keys_new[i : i + 1]
+                query_rotated_single = self.rope(query_single, offset=individual_offset)
+                key_rotated_single = self.rope(key_single, offset=individual_offset)
+                queries_rotated_list.append(query_rotated_single)
+                keys_rotated_list.append(key_rotated_single)
+            queries_rotated = mx.concatenate(queries_rotated_list, axis=0)
+            keys_rotated = mx.concatenate(keys_rotated_list, axis=0)
             past_k, past_v = cache
             if past_k is not None and past_v is not None:
                 # zeros for sinks are already added to kv cache
@@ -67,9 +78,17 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
             else:
                 raise ValueError("cache was provided but one of k/v was None.")
         else:
-            queries_rotated = self.rope(queries_new)
-            keys_rotated = self.rope(keys_new)
-            # add a 0 key and value to make space for the sink
+            queries_rotated = queries_new
+            keys_rotated = keys_new
+            for i in range(batch):
+                seq_len = int(length[i])
+                q_slice = queries_new[i, :, :seq_len, :]
+                k_slice = keys_new[i, :, :seq_len, :]
+                q_rotated_slice = self.rope(q_slice)
+                k_rotated_slice = self.rope(k_slice)
+                queries_rotated[i, :, :seq_len, :] = q_rotated_slice
+                keys_rotated[i, :, :seq_len, :] = k_rotated_slice
+
             zeros = mx.zeros(
                 (batch, self.num_key_value_heads, 1, self.head_dim), dtype=keys_rotated.dtype
             )
@@ -155,6 +174,32 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
         else:
             return self.get_causal_mask(x, offset)
 
+    def create_pad_mask(self, padlen, L, dtype, offset):
+        batch_size = padlen.shape[0]
+        positions = mx.arange(L)
+        pos_expanded = positions[None, :]
+        padlen_expanded = padlen[:, None]
+        pad_mask = mx.ones((batch_size, L), dtype=dtype)
+        condition = pos_expanded >= (L - padlen_expanded)
+        pad_mask = mx.where(condition, 0.0, pad_mask)
+        if offset == 0:
+            extra_column = mx.ones((batch_size, 1), dtype=dtype)
+            pad_mask = mx.concatenate([extra_column, pad_mask], axis=1)
+        else:
+            extra_column = mx.ones((batch_size, 1), dtype=dtype)
+            pad_mask = mx.concatenate([pad_mask, extra_column], axis=1)
+
+        pad_mask = pad_mask.reshape(batch_size, 1, 1, L + 1)
+
+        return pad_mask
+
+    def get_mask_with_pad(self, x, offset, window_size, pad_lengths, mx_length, dtype):
+        causal_mask = self.get_mask(x, offset, window_size)
+        pad_mask = self.create_pad_mask(pad_lengths, mx_length, dtype, offset)
+        pad_mask = (pad_mask - 1) * 1e9
+        pad_mask = pad_mask.astype(x.dtype)
+        return causal_mask + pad_mask
+
 
 class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
     """A custom transformer block for Parallax, extending the GptOss Block class.
@@ -170,24 +215,60 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
         else:
             self.layer_type = "sliding_attention" if layer_idx % 2 == 0 else "full_attention"
 
+    def get_window_size(self):
+        return self.sliding_window - 1
+
     def __call__(
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
         offset: int = 0,
+        lengths: Optional[mx.array] = None,
     ):
+
+        batch, target_len, _ = x.shape
+        mx_length = offset if offset != 0 else target_len - 1
+        pad_length = mx_length - lengths
+        if offset == 0:
+            pad_length = pad_length + 1
+
         if self.layer_type == "sliding_attention":
             if cache is not None:
-                start_index = max(0, offset - self.sliding_window)
                 past_k, past_v = cache
-                past_k = past_k[..., start_index:offset, :]
-                past_v = past_v[..., start_index:offset, :]
-                cache = (past_k, past_v)
-            mask = self.self_attn.get_mask(x, offset, window_size=self.sliding_window)
-        else:
-            mask = self.self_attn.get_mask(x, offset, window_size=None)
+                new_k, new_v = [], []
+                for i in range(batch):
+                    if lengths[i] >= self.get_window_size():
+                        start_index = (lengths[i] - self.get_window_size()).item()
+                        end_index = lengths[i].item()
+                        new_k.append(past_k[i][:, start_index:end_index, :])
+                        new_v.append(past_v[i][:, start_index:end_index, :])
+                        pad_length[i] = 0
+                    else:
+                        new_k.append(past_k[i][:, : min(offset, self.get_window_size()), :])
+                        new_v.append(past_v[i][:, : min(offset, self.get_window_size()), :])
+                        pad_length[i] = min(pad_length[i], self.get_window_size() - lengths[i])
 
+                cache = (mx.stack(new_k, axis=0), mx.stack(new_v, axis=0))
+                mx_length = min(mx_length, self.get_window_size())
+            mask = self.self_attn.get_mask_with_pad(
+                x,
+                offset,
+                window_size=self.get_window_size(),
+                pad_lengths=pad_length,
+                mx_length=mx_length + 1,
+                dtype=x.dtype,
+            )
+
+        else:
+            mask = self.self_attn.get_mask_with_pad(
+                x,
+                offset,
+                window_size=None,
+                pad_lengths=pad_length,
+                mx_length=mx_length + 1,
+                dtype=x.dtype,
+            )
         # add sink token if cache is not None
         if cache is not None:
             past_k, past_v = cache
@@ -199,7 +280,9 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
                 mx.concatenate([sink_v, past_v], axis=2),
             )
 
-        r, (k_cache, v_cache) = self.self_attn(self.input_layernorm(x), mask, cache, offset=offset)
+        r, (k_cache, v_cache) = self.self_attn(
+            self.input_layernorm(x), mask, cache, offset=offset, length=lengths
+        )
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r.reshape(h.shape)

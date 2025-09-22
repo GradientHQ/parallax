@@ -47,11 +47,20 @@ if __name__ == "__main__":
     args = parse_args()
     logger.info(f"args: {args}")
 
+    host_maddrs = args.host_maddrs
+    dht_port = args.dht_port
+    if args.dht_port is not None:
+        assert host_maddrs is None, "You can't use --dht-port and --host-maddrs at the same time"
+    else:
+        dht_port = 0
+    if host_maddrs is None:
+        host_maddrs = [f"/ip4/0.0.0.0/tcp/{dht_port}", f"/ip6/::/tcp/{dht_port}"]
+
     scheduler_manage = SchedulerManage(
         initial_peers=args.initial_peers,
         relay_servers=args.relay_servers,
         dht_prefix=args.dht_prefix,
-        host_maddrs=args.host_maddrs,
+        host_maddrs=host_maddrs,
         announce_maddrs=args.announce_maddrs,
     )
 

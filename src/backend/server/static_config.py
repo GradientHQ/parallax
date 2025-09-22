@@ -1,24 +1,101 @@
 from scheduling.model_info import ModelInfo
 
+MODEL_NAME_REMAP = {
+    "Qwen/Qwen3-0.6B-MLX-bf16": "Qwen/Qwen3-0.6B",
+    "Qwen/Qwen2.5-72B-Instruct": "Qwen/Qwen2.5-72B",
+}
+
 MODEL_INFO_MAP = {
-    "Qwen/Qwen3-0.6B-MLX-bf16": ModelInfo(
-        model_name="Qwen/Qwen3-0.6B-MLX-bf16",
-        head_size=64,
-        hidden_dim=2880,
-        intermediate_dim=2880,
+    "Qwen/Qwen3-0.6B": ModelInfo(
+        model_name="Qwen/Qwen3-0.6B-bf16",
+        head_size=128,
+        hidden_dim=1024,
+        intermediate_dim=3072,
+        num_attention_heads=16,
+        num_kv_heads=8,
+        vocab_size=151936,
+        num_layers=28,
+        ffn_num_projections=3,
+        param_bytes_per_element=2,
+        cache_bytes_per_element=2,
+        embedding_bytes_per_element=2,
+    ),
+    "Qwen/Qwen3-8B": ModelInfo(
+        model_name="Qwen/Qwen3-8B-bf16",
+        head_size=128,
+        hidden_dim=4096,
+        intermediate_dim=12288,
+        num_attention_heads=32,
+        num_kv_heads=8,
+        vocab_size=151936,
+        num_layers=36,
+        ffn_num_projections=3,
+        param_bytes_per_element=2,
+        cache_bytes_per_element=2,
+        embedding_bytes_per_element=2,
+    ),
+    "Qwen/Qwen3-32B": ModelInfo(
+        model_name="Qwen/Qwen3-32B-bf16",
+        head_size=128,
+        hidden_dim=5120,
+        intermediate_dim=25600,
         num_attention_heads=64,
         num_kv_heads=8,
-        vocab_size=201088,
-        num_layers=100,
+        vocab_size=151936,
+        num_layers=64,
         ffn_num_projections=3,
-        num_local_experts=128,
-        num_experts_per_tok=4,
+        param_bytes_per_element=2,
+        cache_bytes_per_element=2,
+        embedding_bytes_per_element=2,
+    ),
+    "Qwen/Qwen3-32B-FP8": ModelInfo(
+        model_name="Qwen/Qwen3-32B-fp8",
+        head_size=128,
+        hidden_dim=5120,
+        intermediate_dim=25600,
+        num_attention_heads=64,
+        num_kv_heads=8,
+        vocab_size=151936,
+        num_layers=64,
+        ffn_num_projections=3,
         param_bytes_per_element=1,
         cache_bytes_per_element=2,
         embedding_bytes_per_element=2,
-    )
+    ),
+    "Qwen/Qwen2.5-72B": ModelInfo(
+        model_name="Qwen/Qwen2.5-72B-bf16",
+        head_size=128,
+        hidden_dim=8192,
+        intermediate_dim=29568,
+        num_attention_heads=64,
+        num_kv_heads=8,
+        vocab_size=152064,
+        num_layers=80,
+        ffn_num_projections=3,
+        param_bytes_per_element=2,
+        cache_bytes_per_element=2,
+        embedding_bytes_per_element=2,
+    ),
+    "Qwen/Qwen3-235B-A22B": ModelInfo(
+        model_name="Qwen/Qwen3-235B-A22B-bf16",
+        head_size=128,
+        hidden_dim=4096,
+        intermediate_dim=12288,
+        num_attention_heads=64,
+        num_kv_heads=4,
+        vocab_size=151936,
+        num_layers=94,
+        ffn_num_projections=3,
+        param_bytes_per_element=2,
+        cache_bytes_per_element=2,
+        embedding_bytes_per_element=2,
+        num_local_experts=128,
+        num_experts_per_tok=8,
+    ),
 }
 
 
 def get_model_info(model_name):
+    if model_name not in MODEL_INFO_MAP:
+        model_name = MODEL_NAME_REMAP.get(model_name, model_name)
     return MODEL_INFO_MAP.get(model_name, None)

@@ -23,8 +23,8 @@ from typing import Dict, List, Optional, Tuple
 import mlx.core as mx
 
 from parallax.server.request import Request, RequestStatus
-from parallax.server.server_info import HardwareInfo
 from parallax_utils.logging_config import get_logger
+from parallax_utils.utils import compute_max_tokens_in_cache
 
 logger = get_logger(__name__)
 
@@ -41,13 +41,13 @@ class KVCache:
         num_layers: int,
         dtype: mx.Dtype,
         block_size: int = 64,
-        num_initial_tokens: int = 128,
         conv_dim: Optional[int] = None,
         conv_kernel_size: Optional[int] = None,
         linear_k_dim: Optional[int] = None,
         linear_v_dim: Optional[int] = None,
         linear_num_k_heads: Optional[int] = None,
         linear_num_v_heads: Optional[int] = None,
+        num_initial_tokens: int = 0,
     ):
         """
         Args:
@@ -193,13 +193,14 @@ class KVCacheManager:
         self.request_caches: Dict[str, KVCache] = {}
         self.tokens_in_cache = 0
 
-        self.hw_info = HardwareInfo.detect()
-        self.total_ram_gb = self.hw_info.total_ram_gb
-        available_cache_size = round(
-            (self.total_ram_gb * 1024**3 - mx.get_active_memory()) * cache_memory_fraction
+        self.max_num_tokens = compute_max_tokens_in_cache(
+            device="mlx",
+            kv_cache_memory_fraction=cache_memory_fraction,
+            num_shard_layers=num_layers,
+            num_key_value_heads=num_kv_heads,
+            head_dim=head_dim,
+            elem_bytes=dtype.size,
         )
-        per_token_cache_size = num_layers * num_kv_heads * head_dim * 2 * dtype.size
-        self.max_num_tokens = available_cache_size // per_token_cache_size
         if max_num_tokens is not None:
             self.max_num_tokens = min(self.max_num_tokens, max_num_tokens)
 
@@ -326,6 +327,9 @@ class KVCacheManager:
         ):
             length = length.item()
             assert self.has_request(request.request_id), "request not in cache"
+            # TODO: fix this
+            # actual length? double-counted prefill len
+            # decode length 1, why rounding up?
             if self.tokens_in_cache + self.round_up_to_step(length) > self.max_num_tokens:
                 logger.warning(
                     f"can't add request {request.request_id} to cache: "

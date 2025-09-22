@@ -1,7 +1,6 @@
-import json
 import time
 
-from lattica import ConnectionHandler, Lattica, rpc_method
+from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream
 
 from backend.server.static_config import get_model_info
 from parallax_utils.logging_config import get_logger
@@ -27,10 +26,8 @@ class RPCConnectionHandler(ConnectionHandler):
         self.scheduler = scheduler
         self.call_url_map = {}
 
-    @rpc_method
+    @rpc_stream
     def node_join(self, message):
-        print(f"node_join: {message}")
-        node = json.loads(message)
         # node = {
         #     "call_url": "http://127.0.0.1:8000",
         #     "node_id": "lattica peer id",
@@ -46,31 +43,46 @@ class RPCConnectionHandler(ConnectionHandler):
         #     "max_concurrent_requests": 16,
         #     "max_sequence_length": 1024,
         # }
-        node = self.build_node(node)
-        self.scheduler.enqueue_join(node)
+        logger.info(f"receive node_join request: {message}")
+        try:
+            node = self.build_node(message)
+            self.call_url_map[node.node_id] = message.get("call_url")
+            self.scheduler.enqueue_join(node)
 
-        self.call_url_map[node.get("node_id")] = node.get("call_url")
-
-        # 等待 layer 分配完成
-        return self.wait_layer_allocation(node.get("node_id"), wait_seconds=300)
+            response = self.wait_layer_allocation(node.node_id, wait_seconds=300)
+            logger.info(f"node_join response: {response}")
+            return response
+        except Exception as e:
+            logger.exception(f"node_join error: {e}")
+            return {}
 
     @rpc_method
     def node_leave(self, message):
-        print(f"node_leave: {message}")
-        node = json.loads(message)
-        node_id = node.get("node_id")
-        self.scheduler.enqueue_leave(node_id)
-        return {}
+        logger.info(f"receive node_leave request: {message}")
+        try:
+            node = self.build_node(message)
+            self.scheduler.enqueue_leave(node.node_id)
+            self.call_url_map.pop(node.node_id)
+            return {}
+        except Exception as e:
+            logger.exception(f"node_leave error: {e}")
+            return {}
 
     @rpc_method
     def node_update(self, message):
-        print(f"node_update: {message}")
-        node = json.loads(message)
-        self.scheduler.enqueue_node_update(node)
-
-        self.call_url_map[node.get("node_id")] = node.get("call_url")
-
-        return {}
+        logger.debug(f"receive node_update request: {message}")
+        try:
+            node = self.build_node(message)
+            self.scheduler.enqueue_node_update(
+                node.node_id,
+                current_requests=node.current_requests,
+                layer_latency_ms=node.layer_latency_ms,
+                new_rtt_to_nodes=node.rtt_to_nodes,
+            )
+            return {}
+        except Exception as e:
+            logger.exception(f"node_update error: {e}")
+            return {}
 
     def wait_layer_allocation(self, current_node_id, wait_seconds):
         start_time = time.time()
@@ -84,14 +96,13 @@ class RPCConnectionHandler(ConnectionHandler):
 
     def get_layer_allocation(self, current_node_id):
         list_node_allocations = self.scheduler.list_node_allocations()
-        # 判断有哪些需要更新
         for node_id, start_layer, end_layer in list_node_allocations:
             if current_node_id == node_id:
                 return {"node_id": node_id, "start_layer": start_layer, "end_layer": end_layer}
         return {}
 
-    def build_node(self, node_json):
-        return Node(
+    def build_node(self, node_json: dict):
+        node = Node(
             node_id=node_json.get("node_id"),
             hardware=self.build_hardware(node_json.get("hardware")),
             model_info=get_model_info(node_json.get("model_name")),
@@ -100,6 +111,17 @@ class RPCConnectionHandler(ConnectionHandler):
             max_concurrent_requests=node_json.get("max_concurrent_requests"),
             max_sequence_length=node_json.get("max_sequence_length"),
         )
+        if node_json.get("start_layer", None) is not None:
+            node.start_layer = node_json.get("start_layer")
+        if node_json.get("end_layer", None) is not None:
+            node.end_layer = node_json.get("end_layer")
+        if node_json.get("current_requests", None) is not None:
+            node.current_requests = node_json.get("current_requests")
+        if node_json.get("layer_latency_ms", None) is not None:
+            node.avg_layer_latency_ms = node_json.get("layer_latency_ms")
+        if node_json.get("rtt_to_nodes", None) is not None:
+            node.rtt_to_nodes = node_json.get("rtt_to_nodes")
+        return node
 
     def build_hardware(self, hardware_json):
         node_id = hardware_json.get("node_id")

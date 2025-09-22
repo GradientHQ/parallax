@@ -7,8 +7,7 @@ It will start the P2P server and the executor.
 Example command:
 python src/parallax/launch.py \
     --model-path Qwen/Qwen3-0.6B-MLX-bf16 \
-    --kv-max-tokens-in-cache 1000000 \
-    --max-num-tokens-in-batch 16384 \
+    --max-num-tokens-per-batch 16384 \
     --max-batch-size 128 \
     --start-layer 14 \
     --end-layer 28 \
@@ -30,29 +29,66 @@ if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)
     try:
         args = parse_args()
+        logger.info(f"args: {args}")
 
+        args.recv_from_peer_addr = f"ipc://{tempfile.NamedTemporaryFile().name}"
+        args.send_to_peer_addr = f"ipc://{tempfile.NamedTemporaryFile().name}"
         args.executor_input_ipc = f"ipc://{tempfile.NamedTemporaryFile().name}"
         args.executor_output_ipc = f"ipc://{tempfile.NamedTemporaryFile().name}"
 
         logger.info(f"executor_input_addr: {args.executor_input_ipc}")
         logger.info(f"executor_output_addr: {args.executor_output_ipc}")
 
-        launch_http_server(args)
+        if args.scheduler_addr is None:
+            executor = Executor.create_from_args(args)
+            launch_p2p_server(
+                initial_peers=args.initial_peers,
+                scheduler_addr=args.scheduler_addr,
+                relay_servers=args.relay_servers,
+                pp_start_layer=args.start_layer,
+                pp_end_layer=args.end_layer,
+                hidden_layers=executor.config.get("num_hidden_layers"),
+                dht_port=args.dht_port,
+                dht_prefix=args.dht_prefix,
+                host_maddrs=args.host_maddrs,
+                announce_maddrs=args.announce_maddrs,
+                announce_http_addr=args.announce_http_addr,
+                notify_url=args.notify_url,
+                recv_from_peer_addr=args.recv_from_peer_addr,
+                send_to_peer_addr=args.send_to_peer_addr,
+                model_name=args.model_path,
+                max_batch_size=args.max_batch_size,
+                max_sequence_length=args.max_sequence_length,
+            )
+        else:
+            start_layer, end_layer = launch_p2p_server(
+                initial_peers=args.initial_peers,
+                scheduler_addr=args.scheduler_addr,
+                relay_servers=args.relay_servers,
+                pp_start_layer=None,
+                pp_end_layer=None,
+                hidden_layers=None,
+                dht_port=args.dht_port,
+                dht_prefix=args.dht_prefix,
+                host_maddrs=args.host_maddrs,
+                announce_maddrs=args.announce_maddrs,
+                announce_http_addr=args.announce_http_addr,
+                notify_url=args.notify_url,
+                recv_from_peer_addr=args.recv_from_peer_addr,
+                send_to_peer_addr=args.send_to_peer_addr,
+                model_name=args.model_path,
+                max_batch_size=args.max_batch_size,
+                max_sequence_length=args.max_sequence_length,
+            )
+            args.start_layer = start_layer
+            args.end_layer = end_layer
+            logger.info(f"Start Executor with start_layer: {start_layer}, end_layer: {end_layer}")
+            executor = Executor.create_from_args(args)
 
-        executor = Executor.create_from_args(args)
+        # only launch http server on head node
+        if args.start_layer == 0:
+            launch_http_server(args)
 
-        launch_p2p_server(
-            initial_peers=args.initial_peers,
-            relay_servers=args.relay_servers,
-            pp_start_layer=args.start_layer,
-            pp_end_layer=args.end_layer,
-            hidden_layers=executor.config.get("num_hidden_layers"),
-            dht_port=args.dht_port,
-            dht_prefix=args.dht_prefix,
-            host_maddrs=args.host_maddrs,
-            announce_maddrs=args.announce_maddrs,
-            notify_url=args.notify_url,
-        )
         try:
             executor.run_loop()
         except KeyboardInterrupt:

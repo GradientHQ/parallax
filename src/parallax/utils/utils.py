@@ -92,6 +92,14 @@ def get_zmq_socket(context: zmq.Context, socket_type: zmq.SocketType, endpoint: 
     return socket
 
 
+def get_infinite_value_by_dtype(dtype: mx.Dtype):
+    """Returns infinite value according to mx dtype"""
+    inf = 6e4
+    if dtype in (mx.bfloat16, mx.float32):
+        inf = 1e9
+    return inf
+
+
 def pad_prefix_caches(
     cache: List, input_lengths: List, dtype: mx.Dtype = mx.bfloat16
 ) -> tuple[mx.array, mx.array]:
@@ -229,7 +237,8 @@ def create_causal_mask(seq_len: int, total_len: int, dtype=mx.bfloat16) -> mx.ar
     assert (
         total_len >= seq_len
     ), f"Total lengths {total_len} should be no less than input sequence {seq_len}."
-    mask = mx.triu(mx.full((seq_len, seq_len), -1e9, dtype), k=1)
+    inf_value = get_infinite_value_by_dtype(dtype)
+    mask = mx.triu(mx.full((seq_len, seq_len), -inf_value, dtype), k=1)
     if total_len == seq_len:
         return mask
     # total lengths is larger than input sequence length
@@ -253,6 +262,7 @@ def combine_padding_and_causal_masks(
     Returns:
         mx.array: A combined attention mask, typically of shape (B, 1, input_seq, total_seq).
     """
-    padding_mask_float = (padding_mask - 1) * 1e9
+    inf_value = get_infinite_value_by_dtype(dtype)
+    padding_mask_float = (padding_mask - 1) * inf_value
     padding_mask_float = padding_mask_float.astype(dtype)
     return causal_mask + padding_mask_float

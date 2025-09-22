@@ -1,21 +1,25 @@
 """
-hidden_dimefines the Qwen3 model.
+Defines the Llama4 model wrapper for Parallax.
+
+This module adapts MLX llama attention to explicitly handle KV cache and
+exposes the same block interface as Qwen implementations, so that
+`ShardedModel` can drive it uniformly.
 """
 
 from typing import Optional, Tuple
 
 import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention
-from mlx_lm.models.qwen2 import Attention as MLXQwen2Attention
-from mlx_lm.models.qwen2 import ModelArgs
-from mlx_lm.models.qwen2 import TransformerBlock as MLXQwen2Block
+from mlx_lm.models.llama import Attention as MLXLlamaAttention
+from mlx_lm.models.llama import ModelArgs
+from mlx_lm.models.llama import TransformerBlock as MLXLlamaBlock
 
 
-class ParallaxQwen2Attention(MLXQwen2Attention):
-    """A custom attention module for Parallax, extending the Qwen3 Attention class.
+class ParallaxLlamaAttention(MLXLlamaAttention):
+    """Custom attention for Llama, with explicit KV cache returns.
 
-    We apply explicit KV cache handling and passing in `offset` directly from Request.
-    This version returns the new K and V states for external caching.
+    We pass in `offset` for RoPE and return (keys_rotated, values) so that
+    outer KV cache can be maintained by Parallax.
     """
 
     def __call__(
@@ -24,7 +28,6 @@ class ParallaxQwen2Attention(MLXQwen2Attention):
         mask: Optional[mx.array] = None,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
         offset: int = 0,
-        lengths: Optional[mx.array] = None,
     ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
         """
         Attention forward pass with explicit KV cache handling.
@@ -51,7 +54,6 @@ class ParallaxQwen2Attention(MLXQwen2Attention):
         keys = keys.reshape(batch, target_len, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
         values = values.reshape(batch, target_len, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
 
-        # for batch, rope offset is not correct due to padding in batch
         queries_rotated = self.rope(queries, offset=offset)
         keys_rotated = self.rope(keys, offset=offset)
 
@@ -84,14 +86,13 @@ class ParallaxQwen2Attention(MLXQwen2Attention):
         return self.o_proj(output), (keys_rotated, values)
 
 
-class ParallaxQwen2Block(MLXQwen2Block):
-    """A custom transformer block for Parallax, extending the Qwen3 Block class.
-    This version handles the KV cache explicitly and returns new K and V states.
-    """
+class ParallaxLlamaBlock(MLXLlamaBlock):
+    """Transformer block wrapper returning explicit KV cache updates."""
 
     def __init__(self, args: ModelArgs, layer_idx: int):
         super().__init__(args)
-        self.self_attn = ParallaxQwen2Attention(args)
+        self.self_attn = ParallaxLlamaAttention(args)
+        self.layer_idx = layer_idx
 
     def __call__(
         self,
@@ -99,7 +100,6 @@ class ParallaxQwen2Block(MLXQwen2Block):
         mask: Optional[mx.array] = None,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
         offset: int = 0,
-        lengths: Optional[mx.array] = None,
     ):
         r, (k_cache, v_cache) = self.self_attn(self.input_layernorm(x), mask, cache, offset=offset)
         h = x + r
@@ -110,7 +110,7 @@ class ParallaxQwen2Block(MLXQwen2Block):
     @classmethod
     def get_architecture(cls):
         """Get the architecture name for the block."""
-        return "Qwen2ForCausalLM"
+        return "LlamaForCausalLM"
 
 
-EntryClass = ParallaxQwen2Block
+EntryClass = ParallaxLlamaBlock

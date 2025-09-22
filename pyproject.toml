@@ -46,6 +46,15 @@ gpu = [
   "sglang[all]==0.5.1.post3",
 ]
 
+benchmark = [
+  "transformers",
+  "tqdm",
+  "datasets",
+  "pillow",
+  "modelscope",
+  "huggingface-hub",
+]
+
 dev = [
   "black>=24.3",
   "ruff>=0.4",

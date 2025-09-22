@@ -1,4 +1,6 @@
-﻿syntax = "proto3";
+﻿// python -m grpc_tools.protoc -I. --python_out=.  src/parallax/p2p/proto/forward.proto
+
+syntax = "proto3";
 package gradient;
 
 enum ForwardMode {
@@ -7,19 +9,32 @@ enum ForwardMode {
   MIXED = 2;
 }
 
-message Tensor {
-  bytes buffer = 1;
-  repeated uint32 size = 2;
-  string dtype = 3;
+message ForwardRequest {
+  ForwardMode forward_mode = 1;
+  repeated Req reqs = 2;
 }
 
-message NamedTensor {
-  string name = 1;
-  Tensor tensor = 2;
+message ForwardResponse {
 }
 
-message PPProxyTensorsMessage {
-  repeated NamedTensor tensors = 1;
+
+message AbortRequest {
+  repeated Req reqs = 1;
+}
+
+message AbortResponse {
+}
+
+message Req {
+  string rid = 1;
+  int32 output_length = 2;
+  repeated string routing_table = 3;
+
+  repeated int32 input_ids = 4;
+  SamplingParams sampling_params = 5;
+
+  int32 next_token_id = 6;
+  bytes hidden_states = 7;
 }
 
 message SamplingParams {
@@ -36,33 +51,4 @@ message SamplingParams {
   float presence_penalty = 11;
   float frequency_penalty = 12;
   string json_schema = 13;
-}
-
-message Req {
-  string rid = 1;
-  int32 output_length = 2;
-  repeated string routing_table = 3;
-
-  repeated int32 input_ids = 4;
-  SamplingParams sampling_params = 5;
-  bool return_logprob = 6;
-}
-
-message ForwardRequest {
-  ForwardMode forward_mode = 1;
-  repeated Req reqs = 2;
-  repeated int32 next_token_ids = 3;
-  PPProxyTensorsMessage pp_proxy_tensors = 4;
-  Tensor next_token_logprobs = 5;
-}
-
-message ForwardResponse {
-}
-
-
-message AbortRequest {
-  repeated Req reqs = 1;
-}
-
-message AbortResponse {
 }

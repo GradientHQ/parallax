@@ -39,7 +39,6 @@ Implemented in `scheduling.layer_allocation`.
   - Produces disjoint pipelines and then rebalances each via `adjust_pipeline_layers`.
 
 ### Important knobs
-- **`layer_hosting_power_memory_score`**: memory vs FLOPs weighting for hosting power.
 - **`rebalance_threshold`**: coefficient-of-variation threshold of layer loads to trigger global rebalance.
 - **`water_filling_max_iterations`**: iterations for the water-filling search.
 
@@ -81,7 +80,6 @@ Scheduler(
   min_nodes_bootstrapping: int = 1,
   strategy: Literal["greedy", "dp"] = "dp",
   request_arrival_horizon_sec: float = 600.0,
-  layer_hosting_power_memory_score: float = 0.5,
   rebalance_threshold: float = float("inf"),
   water_filling_max_iterations: int = 40,
   request_warm_up_for_reshard: int = 0,
