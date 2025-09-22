@@ -44,14 +44,16 @@ class SchedulerManage:
         self.node_id = f"{dht_prefix}_announce"
         self.lattica = None
         self.stubs = {}
+        self.is_local_network = False
 
-    def run(self, model_name, init_nodes_num):
+    def run(self, model_name, init_nodes_num, is_local_network=False):
         """
         Start the scheduler and the P2P service for RPC handling.
         """
         logger.info(
             f"SchedulerManage starting: model_name={model_name}, init_nodes_num={init_nodes_num}"
         )
+        self.is_local_network = is_local_network
         self._start_scheduler(model_name, init_nodes_num)
         self._start_lattica()
 
@@ -66,6 +68,9 @@ class SchedulerManage:
     
     def get_init_nodes_num(self):
         return self.init_nodes_num
+
+    def get_is_local_network(self):
+        return self.is_local_network
 
     def get_cluster_status(self):
         return {
