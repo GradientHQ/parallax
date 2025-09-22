@@ -1,0 +1,12 @@
+FROM lmsysorg/sglang:v0.5.3rc1
+
+ENV SGL_ENABLE_JIT_DEEPGEMM=0
+
+WORKDIR /parallax
+
+COPY README.md ./README.md
+COPY src ./src
+COPY pyproject.toml ./pyproject.toml
+
+RUN pip install -e '.[gpu]'
+RUN pip install https://github.com/sgl-project/whl/releases/download/v0.3.7/sgl_kernel-0.3.7+cu128-cp310-abi3-manylinux2014_x86_64.whl --force-reinstall
