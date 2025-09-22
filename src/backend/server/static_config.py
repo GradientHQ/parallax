@@ -116,12 +116,19 @@ MODEL_LIST = [
     "Qwen/Qwen2.5-72B",
 ]
 
-NODE_JOIN_COMMAND = """python src/parallax/launch.py \
+NODE_JOIN_COMMAND_LOCAL_NETWORK = """python src/parallax/launch.py \
           --model-path {model_name} \
-          --kv-max-tokens-in-cache 1000 \
-          --max-num-tokens-in-batch 16384 \
+          --max-num-tokens-per-batch 4096 \
           --kv-block-size 1024 \
-          --max-batch-size 1 \
+          --max-batch-size 8 \
+          --scheduler-addr {scheduler_addr}"""
+
+NODE_JOIN_COMMAND_PUBLIC_NETWORK = """python src/parallax/launch.py \
+          --model-path {model_name} \
+          --max-num-tokens-per-batch 4096 \
+          --kv-block-size 1024 \
+          --max-batch-size 8 \
+          --announce-maddrs ${{announce_maddrs}} \
           --scheduler-addr {scheduler_addr}"""
 
 def get_model_info(model_name):
@@ -132,8 +139,11 @@ def get_model_info(model_name):
 def get_model_list():
     return MODEL_LIST
 
-def get_node_join_command(model_name, scheduler_addr):
+def get_node_join_command(model_name, scheduler_addr, is_local_network):
     if model_name and scheduler_addr:
-        return NODE_JOIN_COMMAND.format(model_name=model_name, scheduler_addr=scheduler_addr)
+        if is_local_network:
+            return NODE_JOIN_COMMAND_LOCAL_NETWORK.format(model_name=model_name, scheduler_addr=scheduler_addr)
+        else:
+            return NODE_JOIN_COMMAND_PUBLIC_NETWORK.format(model_name=model_name, scheduler_addr=scheduler_addr)
     else:
         return None

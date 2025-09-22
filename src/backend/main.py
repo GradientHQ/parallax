@@ -44,11 +44,12 @@ async def scheduler_init(raw_request: Request):
     request_data = await raw_request.json()
     model_name = request_data.get("model_name")
     init_nodes_num = request_data.get("init_nodes_num")
+    is_local_network = request_data.get("is_local_network")
     if scheduler_manage.is_running():
         # todo reinit
         pass
     else:
-        scheduler_manage.run(model_name, init_nodes_num)
+        scheduler_manage.run(model_name, init_nodes_num, is_local_network)
     return JSONResponse(content={
         "type": "scheduler_init",
         "data": None,
@@ -58,10 +59,11 @@ async def scheduler_init(raw_request: Request):
 @app.get("/node/join/command")
 async def node_join_command():
     model_name = scheduler_manage.get_model_name()
+    is_local_network = scheduler_manage.get_is_local_network()
     
     return JSONResponse(content={
         "type": "node_join_command",
-        "data": get_node_join_command(model_name, "${scheduler_addr}"),
+        "data": get_node_join_command(model_name, "${scheduler_addr}", is_local_network),
     }, status_code=200)
 
 
