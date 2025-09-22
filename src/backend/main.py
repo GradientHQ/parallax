@@ -1,5 +1,4 @@
 import time
-from tkinter import N
 import uuid
 import asyncio
 import json
