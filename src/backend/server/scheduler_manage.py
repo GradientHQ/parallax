@@ -74,7 +74,7 @@ class SchedulerManage:
                 "status": self.get_schedule_status(),
                 "model_name": self.model_name,
                 "init_nodes_num": self.init_nodes_num,
-                "node_join_command": get_node_join_command(self.model_name, self.scheduler_addr),
+                "node_join_command": get_node_join_command(self.model_name, "${scheduler_addr}"),
                 "node_list": self.get_node_list(),
             }
         }
@@ -129,7 +129,7 @@ class SchedulerManage:
             Lattica.builder()
             .with_listen_addrs(self.host_maddrs)
             .with_mdns(False)
-            .with_key_path(".")
+            # .with_key_path(".")
         )
 
         if len(self.relay_servers) > 0:

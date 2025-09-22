@@ -58,12 +58,10 @@ async def scheduler_init(raw_request: Request):
 @app.get("/node/join/command")
 async def node_join_command():
     model_name = scheduler_manage.get_model_name()
-    # todo get scheduler addr
-    scheduler_addr = None
-
+    
     return JSONResponse(content={
         "type": "node_join_command",
-        "data": get_node_join_command(model_name, scheduler_addr),
+        "data": get_node_join_command(model_name, "${scheduler_addr}"),
     }, status_code=200)
 
 
