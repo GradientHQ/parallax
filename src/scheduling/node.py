@@ -32,7 +32,6 @@ class NodeHardwareInfo:
 
     node_id: str
     tflops_fp16: float
-    # todo upload gpu name
     gpu_name: str
     memory_gb: float
     memory_bandwidth_gbps: float

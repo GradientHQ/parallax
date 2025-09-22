@@ -15,6 +15,7 @@ def _build_node(node_id: str, model: ModelInfo, *, tflops: float, mem_gb: float)
     hw = NodeHardwareInfo(
         node_id=node_id,
         tflops_fp16=tflops,
+        gpu_name="",
         memory_gb=mem_gb,
         memory_bandwidth_gbps=1000.0,
     )

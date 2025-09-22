@@ -68,7 +68,6 @@ class SchedulerManage:
         return self.init_nodes_num
 
     def get_cluster_status(self):
-        # todo get cluster status
         return {
             "type": "cluster_status",
             "data": {
