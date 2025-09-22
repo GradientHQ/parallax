@@ -30,10 +30,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=5000, help="Port to listen on")
 
     parser.add_argument(
-        "--model-name", type=str, default="Qwen/Qwen3-0.6B-MLX-bf16", help="Model name"
+        "--model-name", type=str, default=None, help="Model name"
     )
 
-    parser.add_argument("--init-nodes-num", type=int, default=1, help="Number of initial nodes")
+    parser.add_argument("--init-nodes-num", type=int, default=None, help="Number of initial nodes")
 
     args = parser.parse_args()
 
