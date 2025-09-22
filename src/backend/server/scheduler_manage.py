@@ -166,12 +166,12 @@ class SchedulerManage:
         request = RequestSignal(request_id, received_ts)
         self.scheduler.receive_request(request)
 
-        # 等待最长 5s, 但如果路由表已被设置（包括空列表），则立即返回
+        # Wait up to 5 seconds, but return immediately if the routing table is set (including an empty list)
         start_time = time.time()
         while request.routing_table is None and (time.time() - start_time) < 5.0:
             time.sleep(0.05)
 
-        # 返回routing_table
+        # Return the routing_table
         if request.routing_table is None:
             logger.info(
                 f"Routing table not ready after {(time.time() - start_time):.2f}s for request_id={request_id}"
