@@ -1,11 +1,11 @@
 .idea/
 *.iml
-.vscode/
+/.vscode/
 *~
 __pycache__/
 *.egg-info/
 build/
-dist/
+/dist/
 .venv
 .DS_Store
 *.key
