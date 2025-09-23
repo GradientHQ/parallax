@@ -34,7 +34,8 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
       with:
-        endpoint: tcp://buildkit-buildkit-service:1234
+        driver: remote
+        endpoint: tcp://buildkit-buildkit-service.arc-systems:1234
 
 
     - name: Log in to Container Registry
