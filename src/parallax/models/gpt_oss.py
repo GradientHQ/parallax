@@ -247,7 +247,7 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
                     else:
                         new_k.append(past_k[i][:, : min(offset, self.get_window_size()), :])
                         new_v.append(past_v[i][:, : min(offset, self.get_window_size()), :])
-                        pad_length[i] = min(pad_length[i], self.get_window_size() - lengths[i])
+                        pad_length[i] = min(offset, self.get_window_size()) - lengths[i]
 
                 cache = (mx.stack(new_k, axis=0), mx.stack(new_v, axis=0))
                 mx_length = min(mx_length, self.get_window_size())

@@ -114,6 +114,7 @@ class ShardedModel(nn.Module):
         mask: Optional[mx.array] = None,
         window_size: Optional[int] = None,
         state_cache: Optional[Tuple[mx.array, mx.array]] = None,
+        using_state_cache: Optional[bool] = False,
     ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
         """
         Args:
@@ -185,8 +186,11 @@ class ShardedModel(nn.Module):
 
         collected_k_updates = []
         collected_v_updates = []
-        collected_state0_updates = []
-        collected_state1_updates = []
+        collected_state0_updates = None
+        collected_state1_updates = None
+        if using_state_cache:
+            collected_state0_updates = []
+            collected_state1_updates = []
 
         for i, layer_module in enumerate(self.layers):
             current_layer_past_kv = None
@@ -199,18 +203,27 @@ class ShardedModel(nn.Module):
                 layer_state1_slice = state1_all_layers[:, i, ...]
                 state_cache = (layer_state0_slice, layer_state1_slice)
 
-            h, (new_k, new_v, new_state0, new_state1) = layer_module(
-                h,
-                mask=mask,
-                cache=current_layer_past_kv,
-                offset=offset,
-                state_cache=state_cache,
-                lengths=lengths,
-            )
+            if using_state_cache:
+                h, (new_k, new_v, new_state0, new_state1) = layer_module(
+                    h,
+                    mask=mask,
+                    cache=current_layer_past_kv,
+                    offset=offset,
+                    state_cache=state_cache,
+                    lengths=lengths,
+                )
+                collected_state0_updates.append(new_state0)
+                collected_state1_updates.append(new_state1)
+            else:
+                h, (new_k, new_v) = layer_module(
+                    h,
+                    mask=mask,
+                    cache=current_layer_past_kv,
+                    offset=offset,
+                    lengths=lengths,
+                )
             collected_k_updates.append(new_k)
             collected_v_updates.append(new_v)
-            collected_state0_updates.append(new_state0)
-            collected_state1_updates.append(new_state1)
 
         if self.is_last_shard:
             if self.norm is None or self.lm_head is None:
@@ -218,16 +231,19 @@ class ShardedModel(nn.Module):
             h = self.norm(h)
             h = self.lm_head(h)
 
-        # Stack the collected KV updates for this shard. Resulting:
-        # (batch, n_layers, n_kv_heads, target_len, head_dim)
         stacked_k_updates = mx.stack(collected_k_updates, axis=1)
         stacked_v_updates = mx.stack(collected_v_updates, axis=1)
-        stacked_state0_updates = mx.stack(collected_state0_updates, axis=1)
-        stacked_state1_updates = mx.stack(collected_state1_updates, axis=1)
+        if collected_state0_updates is not None:
+            stacked_state0_updates = mx.stack(collected_state0_updates, axis=1)
+        if collected_state1_updates is not None:
+            stacked_state1_updates = mx.stack(collected_state1_updates, axis=1)
 
-        return h, (
-            stacked_k_updates,
-            stacked_v_updates,
-            stacked_state0_updates,
-            stacked_state1_updates,
-        )
+        if using_state_cache:
+            return h, (
+                stacked_k_updates,
+                stacked_v_updates,
+                stacked_state0_updates,
+                stacked_state1_updates,
+            )
+        else:
+            return h, (stacked_k_updates, stacked_v_updates)
