@@ -58,10 +58,20 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
         )
 
         # for batch, rope offset is not correct due to padding in batch
-        queries_rotated = self.rope(queries_new, offset=offset)
-        keys_rotated = self.rope(keys_new, offset=offset)
 
         if cache is not None:
+            queries_rotated_list = []
+            keys_rotated_list = []
+            for i in range(batch):
+                individual_offset = int(lengths[i])
+                query_single = queries_new[i : i + 1]
+                key_single = keys_new[i : i + 1]
+                query_rotated_single = self.rope(query_single, offset=individual_offset)
+                key_rotated_single = self.rope(key_single, offset=individual_offset)
+                queries_rotated_list.append(query_rotated_single)
+                keys_rotated_list.append(key_rotated_single)
+            queries_rotated = mx.concatenate(queries_rotated_list, axis=0)
+            keys_rotated = mx.concatenate(keys_rotated_list, axis=0)
             past_k, past_v = cache
             if past_k is not None and past_v is not None:
                 if past_k.shape[2] != offset:
@@ -74,6 +84,8 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
             else:
                 raise ValueError("cache was provided but one of k/v was None.")
         else:
+            queries_rotated = self.rope(queries_new)
+            keys_rotated = self.rope(keys_new)
             final_keys_for_attn = keys_rotated
             final_values_for_attn = values_new
 
@@ -107,7 +119,9 @@ class ParallaxQwen3Block(MLXQwen3Block):
         offset: int = 0,
         lengths: Optional[mx.array] = None,
     ):
-        r, (k_cache, v_cache) = self.self_attn(self.input_layernorm(x), mask, cache, offset=offset)
+        r, (k_cache, v_cache) = self.self_attn(
+            self.input_layernorm(x), mask, cache, offset=offset, lengths=lengths
+        )
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
