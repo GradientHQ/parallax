@@ -84,8 +84,16 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
             else:
                 raise ValueError("cache was provided but one of k/v was None.")
         else:
-            queries_rotated = self.rope(queries_new)
-            keys_rotated = self.rope(keys_new)
+            queries_rotated = queries_new
+            keys_rotated = keys_new
+            for i in range(batch):
+                seq_len = int(lengths[i])
+                q_slice = queries_new[i, :, :seq_len, :]
+                k_slice = keys_new[i, :, :seq_len, :]
+                q_rotated_slice = self.rope(q_slice)
+                k_rotated_slice = self.rope(k_slice)
+                queries_rotated[i, :, :seq_len, :] = q_rotated_slice
+                keys_rotated[i, :, :seq_len, :] = k_rotated_slice
             final_keys_for_attn = keys_rotated
             final_values_for_attn = values_new
 
