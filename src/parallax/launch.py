@@ -17,7 +17,7 @@ python src/parallax/launch.py \
 import multiprocessing
 import tempfile
 
-from parallax.p2p.server import launch_p2p_server, ServerState
+from parallax.p2p.server import ServerState, launch_p2p_server
 from parallax.server.executor import Executor
 from parallax.server.http_server import launch_http_server
 from parallax.server.server_args import parse_args
@@ -82,7 +82,9 @@ if __name__ == "__main__":
             )
             args.start_layer = gradient_server.block_start_index
             args.end_layer = gradient_server.block_end_index
-            logger.info(f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}")
+            logger.info(
+                f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}"
+            )
             gradient_server.status = ServerState.INITIALIZING
             executor = Executor.create_from_args(args)
 
