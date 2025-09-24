@@ -17,7 +17,7 @@ python src/parallax/launch.py \
 import multiprocessing
 import tempfile
 
-from parallax.p2p.server import launch_p2p_server
+from parallax.p2p.server import launch_p2p_server, ServerState
 from parallax.server.executor import Executor
 from parallax.server.http_server import launch_http_server
 from parallax.server.server_args import parse_args
@@ -38,7 +38,7 @@ if __name__ == "__main__":
 
         logger.info(f"executor_input_addr: {args.executor_input_ipc}")
         logger.info(f"executor_output_addr: {args.executor_output_ipc}")
-
+        gradient_server = None
         if args.scheduler_addr is None:
             executor = Executor.create_from_args(args)
             launch_p2p_server(
@@ -61,7 +61,7 @@ if __name__ == "__main__":
                 max_sequence_length=args.max_sequence_length,
             )
         else:
-            start_layer, end_layer = launch_p2p_server(
+            gradient_server = launch_p2p_server(
                 initial_peers=args.initial_peers,
                 scheduler_addr=args.scheduler_addr,
                 relay_servers=args.relay_servers,
@@ -80,9 +80,10 @@ if __name__ == "__main__":
                 max_batch_size=args.max_batch_size,
                 max_sequence_length=args.max_sequence_length,
             )
-            args.start_layer = start_layer
-            args.end_layer = end_layer
-            logger.info(f"Start Executor with start_layer: {start_layer}, end_layer: {end_layer}")
+            args.start_layer = gradient_server.block_start_index
+            args.end_layer = gradient_server.block_end_index
+            logger.info(f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}")
+            gradient_server.status = ServerState.INITIALIZING
             executor = Executor.create_from_args(args)
 
         # only launch http server on head node
@@ -90,10 +91,14 @@ if __name__ == "__main__":
             launch_http_server(args)
 
         try:
+            if gradient_server is not None:
+                gradient_server.status = ServerState.READY
             executor.run_loop()
         except KeyboardInterrupt:
             logger.info("Received interrupt signal, shutting down...")
         finally:
+            if gradient_server is not None:
+                gradient_server.shutdown()
             executor.shutdown()
 
     except Exception as e:
