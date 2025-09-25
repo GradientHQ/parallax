@@ -110,3 +110,35 @@ def test_scheduler_bootstrap_wait_and_dynamic_events():
     # Now leave that node to break coverage and trigger global rebalance path
     core_id = sched.nodes[0].node_id
     sched.leave(core_id)
+
+
+def test_scheduler_single_node_leave_then_rejoin_reassigns_layers():
+    """With one node, after leave then re-join, layers should be re-assigned.
+
+    Reproduction of observed issue: when `min_nodes_bootstrapping=1`, after killing the
+    only node (leave) and re-joining it, the scheduler fails to re-assign layers.
+    This test encodes the expected behavior (should re-assign), so it currently fails.
+    """
+    model = build_model_info(12)
+
+    # Start with a single capable node and bootstrap successfully
+    n1 = _build_node("solo-0", model, tflops=312.0, mem_gb=80.0)
+    sched = Scheduler(model, [n1], strategy="dp", min_nodes_bootstrapping=1)
+    ok = sched.bootstrap()
+    assert ok
+    assert n1.start_layer is not None and n1.end_layer is not None
+
+    # Simulate node leave (e.g., the process was killed)
+    sched.leave(n1.node_id)
+    assert n1 not in sched.nodes
+    assert not sched.layer_allocator.has_full_pipeline()
+
+    # Re-join the (same) node id; scheduler should re-assign layers
+    n1_rejoin = _build_node("solo-0", model, tflops=312.0, mem_gb=80.0)
+    sched.enqueue_join(n1_rejoin)
+    sched._process_joins()  # type: ignore[attr-defined]
+
+    # Expected behavior: after re-join with min_nodes_bootstrapping=1, layers are assigned again
+    assert (
+        n1_rejoin.start_layer is not None and n1_rejoin.end_layer is not None
+    ), "After re-join, single node should be assigned a full layer range"
