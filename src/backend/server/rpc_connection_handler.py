@@ -110,6 +110,7 @@ class RPCConnectionHandler(ConnectionHandler):
             param_hosting_ratio=node_json.get("param_hosting_ratio"),
             max_concurrent_requests=node_json.get("max_concurrent_requests"),
             max_sequence_length=node_json.get("max_sequence_length"),
+            is_active=node_json.get("is_active", True),
         )
         if node_json.get("start_layer", None) is not None:
             node.start_layer = node_json.get("start_layer")
