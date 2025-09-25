@@ -30,4 +30,3 @@ echo "$INIT_NODES_NUM"
 echo "$MODEL_NAME"
 
 python3 src/backend/main.py --dht-port 5001 --port 3001 --model-name $MODEL_NAME --init-nodes-num $INIT_NODES_NUM
-
