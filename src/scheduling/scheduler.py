@@ -260,7 +260,6 @@ class Scheduler:
         )
         self.layer_allocator.declare(node)
         if not bootstrap:
-            print(f"Joining node {node.node_id} (bootstrap={bootstrap})")
             self.layer_allocator.join(node)
         # Notify waiters that node count changed
         with self._node_count_cv:
