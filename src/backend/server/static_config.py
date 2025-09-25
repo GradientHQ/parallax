@@ -1,10 +1,13 @@
 import json
+
 from huggingface_hub import hf_hub_download
+
 from scheduling.model_info import ModelInfo
+
 
 def get_model_info(model_name):
     config_path = hf_hub_download(repo_id=model_name, filename="config.json")
-    with open(config_path, 'r') as f:
+    with open(config_path, "r") as f:
         config = json.load(f)
         f.close()
 
