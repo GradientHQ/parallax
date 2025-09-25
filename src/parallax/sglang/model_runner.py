@@ -31,6 +31,7 @@ from sglang.srt.layers.dp_attention import (
     initialize_dp_attention,
 )
 from sglang.srt.layers.moe import initialize_moe_config
+from sglang.srt.model_executor.model_runner import ModelRunner as SGLModelRunner
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils import (
     LayerFn,
@@ -43,8 +44,7 @@ from sglang.srt.utils import (
 )
 from torch.distributed import Backend
 
-# from sglang.srt.model_executor.model_runner import ModelRunner as SGLModelRunner
-from parallax.sglang.monkey_patch.model_runner import ModelRunner as SGLModelRunner
+# from parallax.sglang.monkey_patch.model_runner import ModelRunner as SGLModelRunner
 
 logger = logging.getLogger(__name__)
 
@@ -458,13 +458,19 @@ def monkey_patch_make_layers(
 
 
 def monkey_patch_for_support_qwen3_next():
-    from parallax.sglang.monkey_patch import (
-        model_runner as parallax_model_runner_module,
-    )
     from parallax.sglang.monkey_patch import qwen3_next as parallax_qwen3_next_module
+    from parallax.sglang.monkey_patch.model_runner import (
+        monkey_patch_init_memory_pool,
+        monkey_patch_profile_max_num_token,
+    )
 
     sys.modules["sglang.srt.models.qwen3_next"] = parallax_qwen3_next_module
-    sys.modules["sglang.srt.model_executor.model_runner"] = parallax_model_runner_module
+    sglang.srt.model_executor.model_runner.ModelRunner.profile_max_num_token = (
+        monkey_patch_profile_max_num_token
+    )
+    sglang.srt.model_executor.model_runner.ModelRunner.init_memory_pool = (
+        monkey_patch_init_memory_pool
+    )
 
 
 def form_sgl_server_args(
