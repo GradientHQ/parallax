@@ -5,7 +5,7 @@ A fully decentralized inference engine. Parallax reimagines model inference as a
 
 <h3>
 
-[Gradient Network](https://gradient.network/) | [Blog](https://gradient.network/blog/parallax-world-inference-engine) | [X(Twitter)](https://x.com/Gradient_HQ) | [Discord](discord.gg/gradientnetwork) | [arXiv]()
+[Gradient Network](https://gradient.network/) | [Blog](https://gradient.network/blog/parallax-world-inference-engine) | [X(Twitter)](https://x.com/Gradient_HQ) | [Discord]([https://discord.gg/gradientnetwork) | [arXiv]()
 
 </h3>
 
