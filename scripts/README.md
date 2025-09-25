@@ -1,23 +1,23 @@
 ## Usage example
 
-### Step1. Launch scheduler
-In the root path of parallax, first launch our scheduler on the main node.
-```bash
+### Step 1: Launch scheduler
+First launch our scheduler on the main node.
+```sh
 bash scripts/launch.sh -m {model-name} -n {number-of-worker-nodes}
 ```
 For example:
-```bash
+```sh
 bash scripts/launch.sh -m Qwen/Qwen3-0.6B -n 2
 ```
-Please notice and record the scheduler address generated in this step.
+Please notice and record the scheduler ip4 address generated in the terminal.
 
-### Step2. Join each distributed nodes
-For each distributed nodes including the main node, open a terminal and join the server with the scheduler address generated in the previous step.
-```bash
+### Step 2: Join each distributed nodes
+For each distributed nodes including the main node, open a terminal and join the server with the scheduler address.
+```sh
 bash scripts/join.sh -m {model-name} -i {ip-address-of-current-node} -s {scheduler-address}
 ```
 For example:
-```bash
+```sh
 # first node
 bash scripts/launch.sh -m Qwen/Qwen3-0.6B -i 192.168.1.1 -s /ip4/192.168.1.1/tcp/5001/p2p/xxxxxxxxxxxx
 # second node
