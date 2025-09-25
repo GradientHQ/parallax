@@ -457,20 +457,17 @@ def monkey_patch_make_layers(
     return modules, start_layer, end_layer
 
 
-def monkey_patch_for_support_qwen3_next():
-    from parallax.sglang.monkey_patch import qwen3_next as parallax_qwen3_next_module
-    from parallax.sglang.monkey_patch.model_runner import (
-        monkey_patch_init_memory_pool,
-        monkey_patch_profile_max_num_token,
+## TODO: Move this when sgalang supports qwen3_next pipeline parallelism
+def monkey_patch_qwen3_next():
+    from parallax.sglang.monkey_patch import (
+        qwen3_next_config as parallax_qwen3_next_config_module,
+    )
+    from parallax.sglang.monkey_patch import (
+        qwen3_next_model as parallax_qwen3_next_model_module,
     )
 
-    sys.modules["sglang.srt.models.qwen3_next"] = parallax_qwen3_next_module
-    sglang.srt.model_executor.model_runner.ModelRunner.profile_max_num_token = (
-        monkey_patch_profile_max_num_token
-    )
-    sglang.srt.model_executor.model_runner.ModelRunner.init_memory_pool = (
-        monkey_patch_init_memory_pool
-    )
+    sys.modules["sglang.srt.models.qwen3_next"] = parallax_qwen3_next_model_module
+    sys.modules["sglang.srt.config.qwen3_next"] = parallax_qwen3_next_config_module
 
 
 def form_sgl_server_args(
@@ -502,7 +499,7 @@ def apply_parallax_monkey_patch():
         monkey_patch_initialize_model_parallel
     )
     sglang.srt.utils.make_layers = monkey_patch_make_layers
-    monkey_patch_for_support_qwen3_next()
+    monkey_patch_qwen3_next()
 
 
 def initialize_sgl_model_runner(
@@ -547,6 +544,8 @@ def initialize_sgl_model_runner(
     )
     # TODO: Fix me
     model_config.hf_config.tie_word_embeddings = False
+    model_config.hf_config.start_layer = start_layer
+    model_config.hf_config.end_layer = end_layer
     model_runner = ParallaxModelRunner(
         model_config=model_config,
         mem_fraction_static=kv_cache_memory_fraction,
