@@ -454,6 +454,16 @@ def monkey_patch_make_layers(
     return modules, start_layer, end_layer
 
 
+def monkey_patch_for_support_qwen3_next():
+    from parallax.sglang.monkey_patch import (
+        model_runner as parallax_model_runner_module,
+    )
+    from parallax.sglang.monkey_patch import qwen3_next as parallax_qwen3_next_module
+
+    sglang.srt.models.qwen3_next = parallax_qwen3_next_module
+    sglang.srt.model_executor.model_runner = parallax_model_runner_module
+
+
 def form_sgl_server_args(
     model_path: str,
     dtype: str = "bfloat16",
@@ -483,6 +493,7 @@ def apply_parallax_monkey_patch():
         monkey_patch_initialize_model_parallel
     )
     sglang.srt.utils.make_layers = monkey_patch_make_layers
+    monkey_patch_for_support_qwen3_next()
 
 
 def initialize_sgl_model_runner(
