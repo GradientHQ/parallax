@@ -7,6 +7,7 @@ arguments needed by decentralized inference.
 import logging
 import os
 import random
+import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sglang
@@ -30,7 +31,6 @@ from sglang.srt.layers.dp_attention import (
     initialize_dp_attention,
 )
 from sglang.srt.layers.moe import initialize_moe_config
-from sglang.srt.model_executor.model_runner import ModelRunner as SGLModelRunner
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils import (
     LayerFn,
@@ -42,6 +42,9 @@ from sglang.srt.utils import (
     monkey_patch_p2p_access_check,
 )
 from torch.distributed import Backend
+
+# from sglang.srt.model_executor.model_runner import ModelRunner as SGLModelRunner
+from parallax.sglang.monkey_patch.model_runner import ModelRunner as SGLModelRunner
 
 logger = logging.getLogger(__name__)
 
@@ -460,8 +463,8 @@ def monkey_patch_for_support_qwen3_next():
     )
     from parallax.sglang.monkey_patch import qwen3_next as parallax_qwen3_next_module
 
-    sglang.srt.models.qwen3_next = parallax_qwen3_next_module
-    sglang.srt.model_executor.model_runner = parallax_model_runner_module
+    sys.modules["sglang.srt.models.qwen3_next"] = parallax_qwen3_next_module
+    sys.modules["sglang.srt.model_executor.model_runner"] = parallax_model_runner_module
 
 
 def form_sgl_server_args(

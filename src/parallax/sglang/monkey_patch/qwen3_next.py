@@ -1,19 +1,10 @@
 import enum
 import logging
-from typing import Any, Dict, Iterable, Optional, Set, Tuple
+from typing import Any, Iterable, Optional, Set, Tuple
 
 import torch
-import torch.nn.functional as F
-from torch import nn
-
-from sglang.srt.layers.utils import PPMissingLayer, get_layer_id
 from sglang.srt.configs.qwen3_next import Qwen3NextConfig
-from sglang.srt.distributed import (
-    divide,
-    get_pp_group,
-    get_tensor_model_parallel_rank,
-    get_tensor_model_parallel_world_size,
-)
+from sglang.srt.distributed import divide, get_pp_group
 from sglang.srt.eplb.expert_location import ModelConfigForExpertLocation
 from sglang.srt.layers.attention.fla.layernorm_gated import RMSNorm as RMSNormGated
 from sglang.srt.layers.attention.mamba.mamba import mamba_v2_sharded_weight_loader
@@ -23,10 +14,9 @@ from sglang.srt.layers.dp_attention import (
     get_attention_tp_size,
     is_dp_attention_enabled,
 )
-from sglang.srt.layers.layernorm import GemmaRMSNorm, RMSNorm
+from sglang.srt.layers.layernorm import GemmaRMSNorm
 from sglang.srt.layers.linear import (
     ColumnParallelLinear,
-    MergedColumnParallelLinear,
     QKVParallelLinear,
     RowParallelLinear,
 )
@@ -35,6 +25,7 @@ from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.radix_attention import RadixAttention
 from sglang.srt.layers.rotary_embedding import get_rope
+from sglang.srt.layers.utils import PPMissingLayer, get_layer_id
 from sglang.srt.layers.vocab_parallel_embedding import (
     ParallelLMHead,
     VocabParallelEmbedding,
@@ -48,6 +39,7 @@ from sglang.srt.model_loader.weight_utils import (
 )
 from sglang.srt.models.qwen2_moe import Qwen2MoeMLP, Qwen2MoeSparseMoeBlock
 from sglang.srt.utils import add_prefix, is_cuda, make_layers, set_weight_attrs
+from torch import nn
 
 logger = logging.getLogger(__name__)
 _is_cuda = is_cuda()
