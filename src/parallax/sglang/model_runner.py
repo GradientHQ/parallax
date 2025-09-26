@@ -459,15 +459,19 @@ def monkey_patch_make_layers(
 
 ## TODO: Move this when sgalang supports qwen3_next pipeline parallelism
 def monkey_patch_qwen3_next():
-    from parallax.sglang.monkey_patch import (
-        qwen3_next_config as parallax_qwen3_next_config_module,
+    from parallax.sglang.monkey_patch.qwen3_next_config import (
+        monkey_patch_full_attention_layer_ids,
+        monkey_patch_linear_layer_ids,
     )
     from parallax.sglang.monkey_patch import (
         qwen3_next_model as parallax_qwen3_next_model_module,
     )
 
     sys.modules["sglang.srt.models.qwen3_next"] = parallax_qwen3_next_model_module
-    sys.modules["sglang.srt.config.qwen3_next"] = parallax_qwen3_next_config_module
+    sglang.srt.configs.qwen3_next.Qwen3NextConfig.linear_layer_ids = monkey_patch_linear_layer_ids
+    sglang.srt.configs.qwen3_next.Qwen3NextConfig.full_attention_layer_ids = (
+        monkey_patch_full_attention_layer_ids
+    )
 
 
 def form_sgl_server_args(
@@ -546,6 +550,9 @@ def initialize_sgl_model_runner(
     model_config.hf_config.tie_word_embeddings = False
     model_config.hf_config.start_layer = start_layer
     model_config.hf_config.end_layer = end_layer
+    print("Model config:", model_config)
+    print("model_start_layer:", model_config.hf_config.start_layer)
+    print("model_end_layer:", model_config.hf_config.end_layer)
     model_runner = ParallaxModelRunner(
         model_config=model_config,
         mem_fraction_static=kv_cache_memory_fraction,
