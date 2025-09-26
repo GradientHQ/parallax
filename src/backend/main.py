@@ -5,6 +5,7 @@ import json
 
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.server.request_handler import RequestHandler
@@ -14,6 +15,14 @@ from parallax_utils.logging_config import get_logger
 from backend.server.static_config import get_model_list, get_node_join_command
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 logger = get_logger(__name__)
 
