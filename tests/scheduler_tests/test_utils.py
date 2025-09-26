@@ -11,16 +11,16 @@ from scheduling.model_info import ModelInfo
 from scheduling.node import Node, NodeHardwareInfo
 
 A100_80G = NodeHardwareInfo(
-    node_id="a100-80g", tflops_fp16=312.0, memory_gb=80.0, memory_bandwidth_gbps=2039
+    node_id="a100-80g", tflops_fp16=312.0, gpu_name="", memory_gb=80.0, memory_bandwidth_gbps=2039
 )
 A100_40G = NodeHardwareInfo(
-    node_id="a100-40g", tflops_fp16=312.0, memory_gb=40.0, memory_bandwidth_gbps=1935
+    node_id="a100-40g", tflops_fp16=312.0, gpu_name="", memory_gb=40.0, memory_bandwidth_gbps=1935
 )
 RTX5090 = NodeHardwareInfo(
-    node_id="rtx5090", tflops_fp16=104.8, memory_gb=32.0, memory_bandwidth_gbps=1792
+    node_id="rtx5090", tflops_fp16=104.8, gpu_name="", memory_gb=32.0, memory_bandwidth_gbps=1792
 )
 RTX4090 = NodeHardwareInfo(
-    node_id="rtx4090", tflops_fp16=82.6, memory_gb=24.0, memory_bandwidth_gbps=1008
+    node_id="rtx4090", tflops_fp16=82.6, gpu_name="", memory_gb=24.0, memory_bandwidth_gbps=1008
 )
 
 
@@ -57,6 +57,7 @@ def build_node(
     hw = NodeHardwareInfo(
         node_id=node_id,
         tflops_fp16=tflops,
+        gpu_name="",
         memory_gb=mem_gb,
         memory_bandwidth_gbps=mem_bandwidth_gbps,
     )

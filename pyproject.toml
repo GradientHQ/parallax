@@ -37,14 +37,14 @@ dependencies = [
 
 mac = [
   "torch==2.8.0",
-  "mlx-lm==0.26.4",
-  "mlx==0.28.0",
+  "mlx-lm==0.28.0",
+  "mlx==0.29.1",
 ]
 
 gpu = [
-  "mlx-lm==0.26.4",
-  "mlx[cpu]==0.28.0",
-  "sglang[all]==0.5.1.post3",
+  "mlx-lm==0.28.0",
+  "mlx[cpu]==0.29.1",
+  "sglang[all]==0.5.2",
 ]
 
 benchmark = [

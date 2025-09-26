@@ -161,9 +161,24 @@ class Executor:
             "hidden_size"
         ) // self.config.get("num_attention_heads")
         self.enable_prefix_cache = enable_prefix_cache
-        logger.debug(
-            f"Model config: n_kv_heads={self.num_key_value_heads}, head_dim={self.head_dim}, tokenizer_pad={self.tokenizer.pad_token_id}"
+        self.linear_key_head_dim = self.config.get("linear_key_head_dim", None)
+        self.linear_value_head_dim = self.config.get("linear_value_head_dim", None)
+        self.linear_conv_kernel_dim = self.config.get("linear_conv_kernel_dim", None)
+        self.linear_num_key_heads = self.config.get("linear_num_key_heads", None)
+        self.linear_num_value_heads = self.config.get("linear_num_value_heads", None)
+        self.key_dim, self.value_dim, self.conv_dim = None, None, None
+        if self.linear_key_head_dim is not None and self.linear_num_key_heads is not None:
+            self.key_dim = self.linear_key_head_dim * self.linear_num_key_heads
+        if self.linear_value_head_dim is not None and self.linear_num_value_heads is not None:
+            self.value_dim = self.linear_value_head_dim * self.linear_num_value_heads
+        if self.key_dim is not None and self.value_dim is not None:
+            self.conv_dim = self.key_dim * 2 + self.value_dim
+        self.using_state_cache = (
+            self.linear_conv_kernel_dim is not None and self.conv_dim is not None
         )
+        # logger.debug(
+        #     f"Model config: n_kv_heads={self.num_key_value_heads}, head_dim={self.head_dim}, tokenizer_pad={self.tokenizer.pad_token_id}"
+        # )
 
         if self.tokenizer.pad_token_id is None:
             self.pad_token_id = self.tokenizer.eos_token_id
@@ -188,6 +203,12 @@ class Executor:
                 num_layers=self.num_shard_layers,
                 dtype=self.dtype,
                 cache_memory_fraction=kv_cache_memory_fraction,
+                conv_dim=self.conv_dim if self.conv_dim and self.conv_dim > 0 else None,
+                conv_kernel_size=self.linear_conv_kernel_dim,
+                linear_k_dim=self.linear_key_head_dim,
+                linear_v_dim=self.linear_value_head_dim,
+                linear_num_k_heads=self.linear_num_key_heads,
+                linear_num_v_heads=self.linear_num_value_heads,
                 max_num_tokens=max_tokens_in_kv_pool,
             )
             mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
@@ -512,6 +533,7 @@ class Executor:
             "lengths": mx.array(actual_lengths) if matched_prefix else mx.array(lengths),
             "mask": mask,
             "requests": batched_requests,
+            "state_cache": None,
         }
         logger.debug(
             f"Prepared MLX prefill batch (size={batch_size}, matched_prefix={matched_prefix})"
@@ -556,6 +578,8 @@ class Executor:
 
         k_caches = [kv[0] for kv in kv_cache_list]
         v_caches = [kv[1] for kv in kv_cache_list]
+        states0 = [kv[2] for kv in kv_cache_list]
+        states1 = [kv[3] for kv in kv_cache_list]
 
         k_batched, k_padding_mask = pad_inputs(0, k_caches, self.dtype)
         v_batched, _ = pad_inputs(0, v_caches, self.dtype)
@@ -570,12 +594,17 @@ class Executor:
 
         model_lengths = mx.array([kv[0].shape[2] for kv in kv_cache_list])
 
+        if self.using_state_cache:
+            states0 = mx.stack(states0, 0)
+            states1 = mx.stack(states1, 0)
+
         ret = {
             "h_or_tokens": padded_inputs,
             "cache": (k_batched, v_batched),
             "lengths": model_lengths,
             "mask": attention_mask,
             "requests": batched_requests,
+            "state_cache": (states0, states1),
         }
         logger.debug(f"Prepared MLX decode batch (size={batch_size})")
         return ret
@@ -975,12 +1004,26 @@ class Executor:
         Process a batch of requests in MLX.
         """
         # Run model and get updated cache
-        hidden_states, (k_caches, v_caches) = self.model_shard(
-            h_or_tokens=prepared_inputs["h_or_tokens"],
-            cache=prepared_inputs["cache"],
-            lengths=prepared_inputs["lengths"],
-            mask=prepared_inputs["mask"],
-        )
+        if self.using_state_cache:
+            hidden_states, (k_caches, v_caches, states0, states1) = self.model_shard(
+                h_or_tokens=prepared_inputs["h_or_tokens"],
+                cache=prepared_inputs["cache"],
+                lengths=prepared_inputs["lengths"],
+                mask=prepared_inputs["mask"],
+                state_cache=prepared_inputs["state_cache"],
+                using_state_cache=self.using_state_cache,
+            )
+        else:
+            hidden_states, (k_caches, v_caches) = self.model_shard(
+                h_or_tokens=prepared_inputs["h_or_tokens"],
+                cache=prepared_inputs["cache"],
+                lengths=prepared_inputs["lengths"],
+                mask=prepared_inputs["mask"],
+                using_state_cache=self.using_state_cache,
+            )
+            states0, states1 = [None for _ in range(len(k_caches))], [
+                None for _ in range(len(k_caches))
+            ]
         # k_caches shape: (num_layers, B, num_kv_heads, L_padded, head_dim)
         logger.debug(
             f"Processed batch with {len(prepared_inputs['requests'])} requests, "
@@ -999,7 +1042,9 @@ class Executor:
                 lengths[i] = 1
             else:
                 continue
-        self.kv_cache_manager.update_requests(requests, k_caches, v_caches, lengths)
+        self.kv_cache_manager.update_requests(
+            requests, k_caches, v_caches, lengths, states0, states1
+        )
 
         # Update prefix cache.
         if self.enable_prefix_cache:

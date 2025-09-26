@@ -5,6 +5,30 @@ from huggingface_hub import hf_hub_download
 from scheduling.model_info import ModelInfo
 
 
+# Supported model list
+MODEL_LIST = [
+    "Qwen/Qwen3-0.6B",
+    "Qwen/Qwen3-8B",
+    "Qwen/Qwen3-32B",
+    "Qwen/Qwen2.5-72B",
+]
+
+NODE_JOIN_COMMAND_LOCAL_NETWORK = """python src/parallax/launch.py \
+          --model-path {model_name} \
+          --max-num-tokens-per-batch 4096 \
+          --kv-block-size 1024 \
+          --max-batch-size 8 \
+          --scheduler-addr {scheduler_addr}"""
+
+NODE_JOIN_COMMAND_PUBLIC_NETWORK = """python src/parallax/launch.py \
+          --model-path {model_name} \
+          --max-num-tokens-per-batch 4096 \
+          --kv-block-size 1024 \
+          --max-batch-size 8 \
+          --announce-maddrs ${{announce_maddrs}} \
+          --scheduler-addr {scheduler_addr}"""
+
+
 def get_model_info(model_name):
     config_path = hf_hub_download(repo_id=model_name, filename="config.json")
     with open(config_path, "r") as f:
@@ -41,3 +65,21 @@ def get_model_info(model_name):
         num_experts_per_tok=config.get("num_experts_per_tok", None),
     )
     return model_info
+
+
+def get_model_list():
+    return MODEL_LIST
+
+
+def get_node_join_command(model_name, scheduler_addr, is_local_network):
+    if model_name and scheduler_addr:
+        if is_local_network:
+            return NODE_JOIN_COMMAND_LOCAL_NETWORK.format(
+                model_name=model_name, scheduler_addr=scheduler_addr
+            )
+        else:
+            return NODE_JOIN_COMMAND_PUBLIC_NETWORK.format(
+                model_name=model_name, scheduler_addr=scheduler_addr
+            )
+    else:
+        return None
