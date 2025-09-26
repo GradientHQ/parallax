@@ -5,8 +5,8 @@ import uuid
 
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.server.request_handler import RequestHandler
@@ -110,7 +110,7 @@ async def openai_v1_chat_completions(raw_request: Request):
 
 
 # mount the frontend
-app.mount("/", StaticFiles(directory="src/frontend/dist", html=True), name="static") 
+app.mount("/", StaticFiles(directory="src/frontend/dist", html=True), name="static")
 
 if __name__ == "__main__":
     args = parse_args()
