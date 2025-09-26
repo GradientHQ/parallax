@@ -186,13 +186,6 @@ export const NodeList: FC<NodeListProps> = ({ variant = 'list' }) => {
 
   return (
     <NodeListRoot>
-      {/* <Alert key='info' severity='info' variant='standard'>
-        If your nodes cannot connect properly, retry the above join command to restart the server.
-      </Alert>
-      <Alert key='error' severity='error' variant='standard'>
-        Your selected model requires more nodes. Please go back to the previous step to add more
-        nodes, or choose a smaller model.
-      </Alert> */}
       {variant === 'menu' && (
         <Box
           sx={{

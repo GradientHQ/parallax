@@ -62,16 +62,19 @@ export default function PageJoin() {
 
         <Stack gap={2} flex={1}>
           <Stack gap={1}>
-            <Typography variant='body1'>
-              Step 1 - On all worker nodes, run command line join
-            </Typography>
+            <Typography variant='body1'>Step 2 - Check your live node status</Typography>
             <Typography variant='body2' color='text.secondary' fontWeight='regular'>
               After you successfully start the server on each nodes, you should see them show up on
               the below dashboard.
             </Typography>
           </Stack>
 
-          <NodeList />
+          <Alert key='info' severity='info' variant='standard'>
+            If your nodes cannot connect properly, retry the above join command to restart the
+            server.
+          </Alert>
+
+          <NodeList key='node-list' />
         </Stack>
       </Stack>
     </MainLayout>
