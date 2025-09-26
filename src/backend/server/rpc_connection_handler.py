@@ -28,21 +28,6 @@ class RPCConnectionHandler(ConnectionHandler):
 
     @rpc_stream
     def node_join(self, message):
-        # node = {
-        #     "call_url": "http://127.0.0.1:8000",
-        #     "node_id": "lattica peer id",
-        #     "hardware": {
-        #         "node_id": "lattica peer id",
-        #         "tflops_fp16": 100,
-        #         "memory_gb": 100,
-        #         "memory_bandwidth_gbps": 100,
-        #     },
-        #     "model_name": "",
-        #     "kv_cache_ratio": 0.3,
-        #     "param_hosting_ratio": 0.5,
-        #     "max_concurrent_requests": 16,
-        #     "max_sequence_length": 1024,
-        # }
         logger.info(f"receive node_join request: {message}")
         try:
             node = self.build_node(message)
@@ -78,6 +63,7 @@ class RPCConnectionHandler(ConnectionHandler):
                 current_requests=node.current_requests,
                 layer_latency_ms=node.layer_latency_ms,
                 new_rtt_to_nodes=node.rtt_to_nodes,
+                is_active=node.is_active,
             )
             return {}
         except Exception as e:
@@ -110,6 +96,7 @@ class RPCConnectionHandler(ConnectionHandler):
             param_hosting_ratio=node_json.get("param_hosting_ratio"),
             max_concurrent_requests=node_json.get("max_concurrent_requests"),
             max_sequence_length=node_json.get("max_sequence_length"),
+            is_active=node_json.get("is_active", True),
         )
         if node_json.get("start_layer", None) is not None:
             node.start_layer = node_json.get("start_layer")
@@ -126,11 +113,13 @@ class RPCConnectionHandler(ConnectionHandler):
     def build_hardware(self, hardware_json):
         node_id = hardware_json.get("node_id")
         tflops_fp16 = hardware_json.get("tflops_fp16")
+        gpu_name = hardware_json.get("gpu_name")
         memory_gb = hardware_json.get("memory_gb")
         memory_bandwidth_gbps = hardware_json.get("memory_bandwidth_gbps")
         return NodeHardwareInfo(
             node_id=node_id,
             tflops_fp16=tflops_fp16,
+            gpu_name=gpu_name,
             memory_gb=memory_gb,
             memory_bandwidth_gbps=memory_bandwidth_gbps,
         )

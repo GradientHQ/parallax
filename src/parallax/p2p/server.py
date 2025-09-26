@@ -199,7 +199,7 @@ class GradientServer:
         self.model_name = model_name
         self.max_batch_size = max_batch_size
         self.max_sequence_length = max_sequence_length
-        self.node_id = f"{dht_prefix}_announce"
+        self.prefix_id = f"{dht_prefix}_announce"
         self.lattica = None
         self.routing_table = None
         self.routing_table_update_interval = 10
@@ -208,6 +208,14 @@ class GradientServer:
         self.rtts = {}
         self.rtt_last_update = 0
         self.rtt_update_interval = 60
+        self.status = ServerState.JOINING
+
+        self.scheduler_stub = None
+        self.scheduler_peer_id = None
+        self.routing_table_updater = None
+        self.announcer = None
+        self.connection_handler = None
+        self.stop_event = threading.Event()
 
     def run(self):
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs)
@@ -228,8 +236,6 @@ class GradientServer:
             logger.info(f"Using scheduler addr: {self.scheduler_addr}")
             self.lattica.with_bootstraps([self.scheduler_addr])
             self.scheduler_peer_id = self.scheduler_addr.split("/")[-1]
-        else:
-            self.scheduler_peer_id = None
 
         self.lattica.build()
 
@@ -239,7 +245,7 @@ class GradientServer:
                     self.scheduler_peer_id
                 )
                 response = self.scheduler_stub.node_join(self.get_node_info())
-                response = response.result()
+                response = response.result(timeout=300)
                 if response == {}:
                     logger.error("Failed to join scheduler")
                     exit(1)
@@ -302,7 +308,7 @@ class GradientServer:
 
     def start_routing_table_updater(self):
         def _updater_thread():
-            while True:
+            while True and not self.stop_event.is_set():
                 try:
                     graph = dijkstar.Graph()
                     servers = self.find_servers()
@@ -333,8 +339,8 @@ class GradientServer:
                 time.sleep(self.routing_table_update_interval)
 
         if self.block_start_index == 0:
-            self.updater = threading.Thread(target=_updater_thread, daemon=True)
-            self.updater.start()
+            self.routing_table_updater = threading.Thread(target=_updater_thread, daemon=True)
+            self.routing_table_updater.start()
 
     def start_node_sender(self):
         send_to_peer = get_zmq_socket(zmq.Context(2), zmq.PULL, self.send_to_peer_addr, True)
@@ -358,7 +364,7 @@ class GradientServer:
                 )
             return grouped_requests
 
-        while True:
+        while True and not self.stop_event.is_set():
             try:
                 if (
                     self.scheduler_addr is None
@@ -477,7 +483,7 @@ class GradientServer:
                             self.scheduler_stub.node_update(self.get_node_info(is_update=True))
                         else:
                             self.lattica.store(
-                                key=self.node_id,
+                                key=self.prefix_id,
                                 subkey=self.lattica.peer_id(),
                                 value={
                                     "block_start_index": self.block_start_index,
@@ -486,14 +492,15 @@ class GradientServer:
                                 expiration_time=time.time() + 60,  # Valid for 60 seconds
                             )
                     except Exception as e:
-                        logger.warning(f"Failed to announce {self.node_id}: {e}")
+                        logger.warning(
+                            f"Failed to announce {self.prefix_id}_{self.lattica.peer_id()}: {e}"
+                        )
 
                     time.sleep(10)
             except Exception as e:
                 logger.exception(f"Module announcer thread error: {e}")
 
         # Start announcer thread
-        self.stop_event = threading.Event()
         self.announcer = threading.Thread(target=_announcer_thread, daemon=True)
         self.announcer.start()
 
@@ -538,6 +545,8 @@ class GradientServer:
                 1024 if self.max_sequence_length is None else self.max_sequence_length
             ),
             "rtt_to_nodes": self.rtts,
+            "status": self.status.value,
+            "is_active": self.status == ServerState.READY,
         }
 
         if is_update:
@@ -549,6 +558,18 @@ class GradientServer:
             info["end_layer"] = self.block_end_index
 
         return info
+
+    def shutdown(self):
+        self.stop_event.set()
+        if self.announcer is not None:
+            self.announcer.join()
+        if self.routing_table_updater is not None:
+            self.routing_table_updater.join()
+
+        self.status = ServerState.OFFLINE
+        if self.scheduler_addr is not None:
+            logger.info(f"Leave scheduler: {self.lattica.peer_id()}")
+            self.scheduler_stub.node_leave(self.get_node_info(is_update=True))
 
 
 def launch_p2p_server(
@@ -605,4 +626,4 @@ def launch_p2p_server(
     while server.block_start_index is None:
         time.sleep(1)
 
-    return server.block_start_index, server.block_end_index
+    return server

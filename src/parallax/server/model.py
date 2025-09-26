@@ -113,6 +113,8 @@ class ShardedModel(nn.Module):
         lengths: Optional[mx.array] = None,
         mask: Optional[mx.array] = None,
         window_size: Optional[int] = None,
+        state_cache: Optional[Tuple[mx.array, mx.array]] = None,
+        using_state_cache: Optional[bool] = False,
     ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
         """
         Args:
@@ -125,6 +127,7 @@ class ShardedModel(nn.Module):
             lengths: (batch,) true lengths of each sequence in batch.
             mask: Optional causal mask for the current segment.
             window_size: Optional int, if provided, will use a sliding window attention mask.
+            state_cache: Optional tuple of (state0, state1) for this qwen3-next model.
 
         Returns:
             h: (batch, L_padded, D) or (batch, L_padded, vocab_size) if last_shard
@@ -145,6 +148,7 @@ class ShardedModel(nn.Module):
 
         source_len = 0
         k_past_all_layers, v_past_all_layers = None, None
+        state0_all_layers, state1_all_layers = None, None
 
         if cache is not None:
             k_past_all_layers, v_past_all_layers = cache
@@ -154,6 +158,15 @@ class ShardedModel(nn.Module):
                 ), f"Unexpected k_past_all_layers ndim: {k_past_all_layers.ndim}"
                 # (batch, n_layers, n_kv_heads, source_len, head_dim)
                 source_len = k_past_all_layers.shape[3]
+        if state_cache is not None:
+            state0_all_layers, state1_all_layers = state_cache
+            if state0_all_layers is not None:
+                assert (
+                    state0_all_layers.ndim == 4
+                ), f"Unexpected state0_all_layers ndim: {state0_all_layers.ndim}"
+                assert (
+                    state1_all_layers.ndim == 5
+                ), f"Unexpected state1_all_layers ndim: {state1_all_layers.ndim}"
 
         if lengths is None:
             lengths = mx.full((batch,), target_len + source_len, dtype=mx.int32)
@@ -173,6 +186,11 @@ class ShardedModel(nn.Module):
 
         collected_k_updates = []
         collected_v_updates = []
+        collected_state0_updates = None
+        collected_state1_updates = None
+        if using_state_cache:
+            collected_state0_updates = []
+            collected_state1_updates = []
 
         for i, layer_module in enumerate(self.layers):
             current_layer_past_kv = None
@@ -180,14 +198,30 @@ class ShardedModel(nn.Module):
                 layer_k_past_slice = k_past_all_layers[:, i, ...]
                 layer_v_past_slice = v_past_all_layers[:, i, ...]
                 current_layer_past_kv = (layer_k_past_slice, layer_v_past_slice)
+            if state0_all_layers is not None and state1_all_layers is not None:
+                layer_state0_slice = state0_all_layers[:, i, ...]
+                layer_state1_slice = state1_all_layers[:, i, ...]
+                state_cache = (layer_state0_slice, layer_state1_slice)
 
-            h, (new_k, new_v) = layer_module(
-                h,
-                mask=mask,
-                cache=current_layer_past_kv,
-                offset=offset,
-                lengths=lengths,
-            )
+            if using_state_cache:
+                h, (new_k, new_v, new_state0, new_state1) = layer_module(
+                    h,
+                    mask=mask,
+                    cache=current_layer_past_kv,
+                    offset=offset,
+                    state_cache=state_cache,
+                    lengths=lengths,
+                )
+                collected_state0_updates.append(new_state0)
+                collected_state1_updates.append(new_state1)
+            else:
+                h, (new_k, new_v) = layer_module(
+                    h,
+                    mask=mask,
+                    cache=current_layer_past_kv,
+                    offset=offset,
+                    lengths=lengths,
+                )
             collected_k_updates.append(new_k)
             collected_v_updates.append(new_v)
 
@@ -197,9 +231,19 @@ class ShardedModel(nn.Module):
             h = self.norm(h)
             h = self.lm_head(h)
 
-        # Stack the collected KV updates for this shard. Resulting:
-        # (batch, n_layers, n_kv_heads, target_len, head_dim)
         stacked_k_updates = mx.stack(collected_k_updates, axis=1)
         stacked_v_updates = mx.stack(collected_v_updates, axis=1)
+        if collected_state0_updates is not None:
+            stacked_state0_updates = mx.stack(collected_state0_updates, axis=1)
+        if collected_state1_updates is not None:
+            stacked_state1_updates = mx.stack(collected_state1_updates, axis=1)
 
-        return h, (stacked_k_updates, stacked_v_updates)
+        if using_state_cache:
+            return h, (
+                stacked_k_updates,
+                stacked_v_updates,
+                stacked_state0_updates,
+                stacked_state1_updates,
+            )
+        else:
+            return h, (stacked_k_updates, stacked_v_updates)
