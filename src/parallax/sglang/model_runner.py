@@ -460,7 +460,6 @@ def monkey_patch_make_layers(
 ## TODO: Move this when sgalang supports qwen3_next pipeline parallelism
 def monkey_patch_qwen3_next():
     from parallax.sglang.monkey_patch.qwen3_next_config import (
-        monkey_patch_full_attention_layer_ids,
         monkey_patch_linear_layer_ids,
     )
     from parallax.sglang.monkey_patch import (
@@ -469,9 +468,6 @@ def monkey_patch_qwen3_next():
 
     sys.modules["sglang.srt.models.qwen3_next"] = parallax_qwen3_next_model_module
     sglang.srt.configs.qwen3_next.Qwen3NextConfig.linear_layer_ids = monkey_patch_linear_layer_ids
-    sglang.srt.configs.qwen3_next.Qwen3NextConfig.full_attention_layer_ids = (
-        monkey_patch_full_attention_layer_ids
-    )
 
 
 def form_sgl_server_args(
