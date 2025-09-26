@@ -70,7 +70,7 @@ async def node_join_command():
     return JSONResponse(
         content={
             "type": "node_join_command",
-            "data": get_node_join_command(model_name, "${scheduler_addr}", is_local_network),
+            "data": get_node_join_command(model_name, "${scheduler-addr}", is_local_network),
         },
         status_code=200,
     )

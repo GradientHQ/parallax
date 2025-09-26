@@ -29,20 +29,11 @@ MODEL_LIST = [
     "meta-llama/Llama-3.2-3B-Instruct",
 ]
 
-NODE_JOIN_COMMAND_LOCAL_NETWORK = """python src/parallax/launch.py \
-          --model-path {model_name} \
-          --max-num-tokens-per-batch 4096 \
-          --kv-block-size 1024 \
-          --max-batch-size 8 \
-          --scheduler-addr {scheduler_addr}"""
+NODE_JOIN_COMMAND_LOCAL_NETWORK = (
+    """bash scripts/join_local.sh -m {model_name} -s {scheduler_addr}"""
+)
 
-NODE_JOIN_COMMAND_PUBLIC_NETWORK = """python src/parallax/launch.py \
-          --model-path {model_name} \
-          --max-num-tokens-per-batch 4096 \
-          --kv-block-size 1024 \
-          --max-batch-size 8 \
-          --announce-maddrs ${{announce_maddrs}} \
-          --scheduler-addr {scheduler_addr}"""
+NODE_JOIN_COMMAND_PUBLIC_NETWORK = """bash scripts/join.sh -m {model_name} -i ${{ip-address-of-current-node}} -s {scheduler_addr}"""
 
 
 def get_model_info(model_name):
