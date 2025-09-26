@@ -134,7 +134,7 @@ class SchedulerManage:
             Lattica.builder()
             .with_listen_addrs(self.host_maddrs)
             .with_mdns(False)
-            # .with_key_path(".")
+            .with_key_path(".")
         )
 
         if len(self.relay_servers) > 0:
