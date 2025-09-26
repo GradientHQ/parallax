@@ -104,6 +104,8 @@ def compute_max_batch_size(
     dtype=None,
     elem_bytes: Optional[int] = None,
     memory_gb: Optional[float] = None,
+    head_dim_k: Optional[int] = None,
+    head_dim_v: Optional[int] = None,
 ) -> int:
     """Compute final max_batch_size by chaining dtype->elem_bytes, KV capacity, and clamping.
 
@@ -119,8 +121,8 @@ def compute_max_batch_size(
         kv_cache_memory_fraction=kv_cache_memory_fraction,
         num_shard_layers=num_shard_layers,
         num_key_value_heads=num_key_value_heads,
-        head_dim_k=head_dim,
-        head_dim_v=head_dim,
+        head_dim_k=head_dim_k if head_dim_k is not None else head_dim,
+        head_dim_v=head_dim_v if head_dim_v is not None else head_dim,
         elem_bytes=eb,
         available_cache_bytes=available_cache_bytes,
     )

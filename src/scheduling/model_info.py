@@ -35,10 +35,23 @@ class ModelInfo:
     cache_bytes_per_element: int = 1
     embedding_bytes_per_element: int = 1
 
+    qk_nope_head_dim: Optional[int] = None
+    qk_rope_head_dim: Optional[int] = None
+    if qk_nope_head_dim is not None and qk_rope_head_dim is not None:
+        head_size_k: int = qk_nope_head_dim + qk_rope_head_dim
+    else:
+        head_size_k: int = head_size
+    head_size_v: int = head_size
+
     @property
-    def kv_dim(self) -> int:
+    def v_dim(self) -> int:
         """Return key and value head dim."""
-        return self.num_kv_heads * self.head_size
+        return self.num_kv_heads * self.head_size_v
+
+    @property
+    def k_dim(self) -> int:
+        """Return key head dim."""
+        return self.num_kv_heads * self.head_size_k
 
     @property
     def embedding_io_bytes(self) -> int:
@@ -48,7 +61,7 @@ class ModelInfo:
     @property
     def per_token_per_layer_kv_size(self) -> int:
         """Return bytes per token for KV cache."""
-        return 2 * self.cache_bytes_per_element * self.kv_dim
+        return self.cache_bytes_per_element * (self.k_dim + self.v_dim)
 
     def per_layer_kv_cache_size(self, *, batch_size: int = 1, source_seq_len: int = 256) -> int:
         """Return size of KV cache in bytes for given request dimensions."""
@@ -81,7 +94,7 @@ class ModelInfo:
         # Q/O projections: (T, hidden_dim) @ (hidden_dim, hidden_dim)
         qo_flops = 2 * 2 * target_seq_len * self.hidden_dim * self.hidden_dim
         # K/V projections: (T, hidden_dim) @ (hidden_dim, kv_dim)
-        kv_flops = 2 * 2 * target_seq_len * self.hidden_dim * self.kv_dim
+        kv_flops = 2 * target_seq_len * self.hidden_dim * (self.k_dim + self.v_dim)
         projection_flops = qo_flops + kv_flops
 
         # 'roof' estimation for GQA
@@ -123,8 +136,8 @@ class ModelInfo:
             source_seq_len: Source sequence length (prompt tokens)
         """
         # Attention params
-        qo_params = self.param_bytes_per_element * self.hidden_dim * self.hidden_dim
-        kv_params = self.param_bytes_per_element * self.hidden_dim * self.kv_dim
+        qo_params = self.param_bytes_per_element * self.hidden_dim * self.hidden_dim * 2
+        kv_params = self.param_bytes_per_element * self.hidden_dim * (self.k_dim + self.v_dim)
         attention_params = qo_params + kv_params
 
         # FFN params
