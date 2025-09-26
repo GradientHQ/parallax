@@ -50,6 +50,7 @@ const ListItem = styled(MuiListItem)(({ theme }) => {
   return {
     flex: 'none',
     padding: spacing(2),
+    overflow: 'hidden',
   };
 }) as typeof MuiListItem;
 
@@ -205,7 +206,7 @@ export const NodeList: FC<NodeListProps> = ({ variant = 'list' }) => {
         />
       )}
       <List variant={variant}>
-        {[...nodeInfoList, ...nodeInfoList].map((node) => (
+        {nodeInfoList.map((node) => (
           <Node key={node.id} variant={variant} node={node} />
         ))}
       </List>

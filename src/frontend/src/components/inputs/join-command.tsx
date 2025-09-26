@@ -15,6 +15,8 @@ const JoinCommandRoot = styled('div')(({ theme }) => {
     paddingBlock: spacing(1.5),
     gap: spacing(1),
 
+    overflow: 'hidden',
+
     borderRadius: '0.7rem',
     backgroundColor: palette.background.area,
   };
@@ -44,10 +46,10 @@ export const JoinCommand: FC = () => {
 
   return (
     <JoinCommandRoot>
-      <Typography sx={{ lineHeight: '1.125rem', whiteSpace: 'pre-wrap' }} variant='pre'>
+      <Typography sx={{ flex: 1, lineHeight: '1.125rem', whiteSpace: 'wrap' }} variant='pre'>
         {nodeJoinCommand}
       </Typography>
-      <IconButton sx={{ fontSize: '1.5rem' }} size='em' onClick={onCopy}>
+      <IconButton sx={{ flex: 'none', fontSize: '1.5rem' }} size='em' onClick={onCopy}>
         {(isCopied && <IconCopyCheck />) || <IconCopy />}
       </IconButton>
     </JoinCommandRoot>

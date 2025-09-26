@@ -10,7 +10,7 @@ import {
   IconLayoutSidebarRightExpand,
   IconPlus,
 } from '@tabler/icons-react';
-import { NodeList } from '../inputs';
+import { JoinCommand, NodeList } from '../inputs';
 
 const DrawerLayoutRoot = styled(Stack)(({ theme }) => {
   const { spacing } = theme;
@@ -78,7 +78,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
     },
   ] = useCluster();
 
-  const [dialogRebalancing, { open, close }] = useAlertDialog({
+  const [dialogRebalancing, { open: openRebalancing }] = useAlertDialog({
     color: 'error',
     titleIcon: true,
     title: '',
@@ -94,11 +94,22 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
   });
   useEffect(() => {
     if (clusterStatus === 'rebalancing') {
-      open();
+      openRebalancing();
     }
-  }, [clusterStatus, open]);
+  }, [clusterStatus, openRebalancing]);
 
   const [sidebarExpanded, setMenuOpen] = useState(true);
+
+  const [dialogJoinCommand, { open: openJoinCommand }] = useAlertDialog({
+    color: 'success',
+    title: 'Add Nodes',
+    content: (
+      <>
+        <Typography variant='subtitle1'>To add nodes, use the join command below.</Typography>
+        <JoinCommand />
+      </>
+    ),
+  });
 
   return (
     <DrawerLayoutRoot direction='row'>
@@ -119,9 +130,10 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
         {sidebarExpanded && (
           <Stack sx={{ gap: 4 }}>
             <NodeList variant='menu' />
-            <Button color='info' startIcon={<IconPlus />}>
+            <Button color='info' startIcon={<IconPlus />} onClick={openJoinCommand}>
               Add Nodes
             </Button>
+            {dialogJoinCommand}
           </Stack>
         )}
       </DrawerLayoutSide>
