@@ -6,13 +6,13 @@ from typing import Optional, Tuple
 
 import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention
-from mlx_lm.models.deepseek_v3 import DeepseekV3Attention as MLXDeepseekV3Attention
-from mlx_lm.models.deepseek_v3 import ModelArgs
-from mlx_lm.models.deepseek_v3 import DeepseekV3DecoderLayer as MLXDeepseekV3Block
+from mlx_lm.models.deepseek_v2 import DeepseekV2Attention as MLXDeepseekV2Attention
+from mlx_lm.models.deepseek_v2 import ModelArgs
+from mlx_lm.models.deepseek_v2 import DeepseekV2DecoderLayer as MLXDeepseekV2Block
 
 
-class ParallaxKimiK2Attention(MLXDeepseekV3Attention):
-    """A custom attention module for Parallax, extending the DeepseekV3 Attention class.
+class ParallaxDeepSeekV2Attention(MLXDeepseekV2Attention):
+    """A custom attention module for Parallax, extending the DeepseekV2 Attention class.
 
     We apply explicit KV cache handling and passing in `offset` directly from Request.
     This version returns the new K and V states for external caching.
@@ -93,14 +93,14 @@ class ParallaxKimiK2Attention(MLXDeepseekV3Attention):
         return self.o_proj(output), (mx.concatenate([k_nope, k_pe], axis=-1), values)
 
 
-class ParallaxKimiK2Block(MLXDeepseekV3Block):
+class ParallaxDeepSeekV2Block(MLXDeepseekV2Block):
     """A custom transformer block for Parallax, extending the Qwen3 Block class.
     This version handles the KV cache explicitly and returns new K and V states.
     """
 
     def __init__(self, args: ModelArgs, layer_idx: int):
         super().__init__(args, layer_idx=layer_idx)
-        self.self_attn = ParallaxKimiK2Attention(args)
+        self.self_attn = ParallaxDeepSeekV2Attention(args)
 
     def __call__(
         self,
@@ -119,7 +119,7 @@ class ParallaxKimiK2Block(MLXDeepseekV3Block):
     @classmethod
     def get_architecture(cls):
         """Get the architecture name for the block."""
-        return "DeepseekV3ForCausalLM"
+        return "DeepseekV2ForCausalLM"
 
 
-EntryClass = ParallaxKimiK2Block
+EntryClass = ParallaxDeepSeekV2Block
