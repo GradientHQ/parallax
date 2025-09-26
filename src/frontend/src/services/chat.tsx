@@ -13,6 +13,12 @@ import { API_BASE_URL } from './api';
 import { useConst, useRefCallback } from '../hooks';
 import { useCluster } from './cluster';
 
+const debugLog = (...args: any[]) => {
+  if (import.meta.env.DEV) {
+    console.log('%c chat.tsx ', 'color: white; background: orange;', ...args);
+  }
+};
+
 export type ChatMessageRole = 'user' | 'assistant';
 
 export interface ChatMessage {
@@ -56,6 +62,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
       onClose: () => setStatus('closed'),
       onError: (error) => setStatus('error'),
       onMessage: (message) => {
+        debugLog('onMessage', message);
         // const example = {
         //   id: 'd410014e-3308-450d-bbd2-0ec4e0c0a345',
         //   object: 'chat.completion.chunk',
@@ -80,10 +87,17 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
           setMessages((prev) => {
             let next = prev;
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            choices.forEach(({ delta: { role, content } }: any) => {
+            choices.forEach(({ delta: { role, content } = {} }: any) => {
+              if (typeof content !== 'string') {
+                return;
+              }
               role = role || 'assistant';
               let lastMessage = next[next.length - 1];
               if (lastMessage && lastMessage.role === role) {
+                const nextContent = lastMessage.content + content;
+                if (nextContent === lastMessage.content) {
+                  return;
+                }
                 lastMessage = {
                   ...lastMessage,
                   content: lastMessage.content + content,
@@ -93,6 +107,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
                 lastMessage = { id, role, content, createdAt: created };
                 next = [...next, lastMessage];
               }
+              debugLog('onMessage', 'update last message', lastMessage.content);
             });
             return next;
           });
@@ -122,6 +137,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
         0,
         finalMessageIndex + (finalMessage.role === 'user' ? 1 : 0),
       );
+      debugLog('generate', 'regenerate', nextMessages);
     } else {
       // Generate for new input
       const finalInput = input.trim();
@@ -134,6 +150,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
         ...nextMessages,
         { id: now.toString(), role: 'user', content: finalInput, createdAt: now },
       ];
+      debugLog('generate', 'new', nextMessages);
     }
     setMessages(nextMessages);
 
@@ -144,6 +161,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
     if (status !== 'opened') {
       return;
     }
+    debugLog('stop');
     sse.disconnect();
   });
 
@@ -152,6 +170,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
     if (status === 'opened') {
       return;
     }
+    debugLog('clear');
     setMessages([]);
   });
 
