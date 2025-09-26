@@ -4,10 +4,7 @@ from typing import List
 
 from lattica import Lattica
 
-from backend.server.constants import (
-    NODE_STATUS_AVAILABLE,
-    NODE_STATUS_WAITING,
-)
+from backend.server.constants import NODE_STATUS_AVAILABLE, NODE_STATUS_WAITING
 from backend.server.rpc_connection_handler import RPCConnectionHandler
 from backend.server.static_config import get_model_info, get_node_join_command
 from parallax_utils.logging_config import get_logger
