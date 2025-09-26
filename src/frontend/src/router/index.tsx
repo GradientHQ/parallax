@@ -1,6 +1,7 @@
 // src/router/index.tsx
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { useRoutes, Navigate, useNavigate } from 'react-router-dom';
+import { useCluster } from '../services';
 
 const PageSetup = lazy(() => import('../pages/setup'));
 const PageJoin = lazy(() => import('../pages/join'));
@@ -8,6 +9,23 @@ const PageChat = lazy(() => import('../pages/chat'));
 
 export const Router = () => {
   const navigate = useNavigate();
+
+  const [
+    {
+      clusterInfo: { status },
+    },
+  ] = useCluster();
+
+  useEffect(() => {
+    switch (status) {
+      case 'idle':
+      case 'waiting':
+        break;
+      default:
+        navigate('/chat');
+        break;
+    }
+  }, [navigate, status]);
 
   const routes = useRoutes([
     {

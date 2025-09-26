@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
   Button,
   ButtonGroup,
@@ -18,6 +18,7 @@ import {
 import { MainLayout } from '../components/common';
 import { ModelSelect, NumberInput } from '../components/inputs';
 import { useCluster } from '../services';
+import { useRefCallback } from '../hooks';
 
 const Stack = styled(MuiStack)(({ theme }) => {
   const { spacing } = theme;
@@ -29,8 +30,15 @@ const Stack = styled(MuiStack)(({ theme }) => {
 export default function PageSetup() {
   const [
     { networkType, initNodesNumber, modelName, modelInfoList },
-    { setNetworkType, setInitNodesNumber, setModelName },
+    { setNetworkType, setInitNodesNumber, setModelName, init },
   ] = useCluster();
+
+  const navigate = useNavigate();
+
+  const onContinue = useRefCallback(() => {
+    init();
+    navigate('/join');
+  });
 
   return (
     <MainLayout>
@@ -83,9 +91,7 @@ export default function PageSetup() {
       </Stack>
 
       <Stack direction='row' justifyContent='flex-end' alignItems='center' gap={2}>
-        <Button component={RouterLink} to='/join'>
-          Continue
-        </Button>
+        <Button onClick={onContinue}>Continue</Button>
       </Stack>
     </MainLayout>
   );

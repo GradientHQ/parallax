@@ -1,3 +1,12 @@
+import { Box } from '@mui/material';
+import { DrawerLayout } from '../components/common';
+import { ChatInput, ChatMessages } from '../components/inputs';
+
 export default function PageChat() {
-  return <div>Chat</div>;
+  return (
+    <DrawerLayout>
+      <ChatMessages />
+      <ChatInput />
+    </DrawerLayout>
+  );
 }

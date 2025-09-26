@@ -1,6 +1,6 @@
 import { styled } from '@mui/material';
 import { Router } from './router';
-import { ClusterProvider } from './services';
+import { ChatProvider, ClusterProvider } from './services';
 
 const AppRoot = styled('div')(({ theme }) => {
   const { palette, typography } = theme;
@@ -23,7 +23,9 @@ export const App = () => {
   return (
     <AppRoot>
       <ClusterProvider>
-        <Router />
+        <ChatProvider>
+          <Router />
+        </ChatProvider>
       </ClusterProvider>
     </AppRoot>
   );

@@ -1,6 +1,14 @@
 import type { FC, ForwardRefExoticComponent, RefAttributes } from 'react';
 import * as motion from 'motion/react-client';
-import { IconCheck, IconLoader, IconX, type Icon, type IconProps } from '@tabler/icons-react';
+import {
+  IconCheck,
+  IconCircle,
+  IconCircleFilled,
+  IconLoader,
+  IconX,
+  type Icon,
+  type IconProps,
+} from '@tabler/icons-react';
 import {
   Alert,
   List as MuiList,
@@ -14,25 +22,28 @@ import {
   Typography,
   useTheme,
   Stack,
+  Box,
+  Divider,
 } from '@mui/material';
 import { useCluster, type NodeInfo, type NodeStatus } from '../../services';
 
 const NodeListRoot = styled(Stack)(({ theme }) => {
   const { spacing } = theme;
   return {
+    position: 'relative',
     flex: 1,
     gap: spacing(1.5),
     overflow: 'hidden',
   };
 });
 
-const List = styled(MuiList)(({ theme }) => {
+const List = styled(MuiList)<{ variant: NodeListVariant }>(({ theme, variant }) => {
   const { spacing } = theme;
   return {
-    gap: spacing(1.5),
+    gap: spacing(variant === 'list' ? 1.5 : 5.5),
     overflowY: 'auto',
   };
-}) as typeof MuiList;
+});
 
 const ListItem = styled(MuiListItem)(({ theme }) => {
   const { spacing } = theme;
@@ -54,11 +65,11 @@ const ListItemIcon = styled(MuiListItemIcon)(({ theme }) => {
   };
 }) as typeof MuiListItemIcon;
 
-const ListItemStatus = styled(motion.div)(({ theme }) => {
+const ListItemStatus = styled(motion.div)<{ variant: NodeListVariant }>(({ theme, variant }) => {
   return {
-    fontSize: '1.5rem',
-    width: '1.5rem',
-    height: '1.5rem',
+    fontSize: variant === 'list' ? '1.5rem' : '1em',
+    width: '1em',
+    height: '1em',
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -90,7 +101,7 @@ const STATUS_ICON_MAP: Record<
   failed: IconX,
 };
 
-const Node: FC<{ node?: NodeInfo }> = ({ node }) => {
+const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node }) => {
   const { id, status, gpuName, gpuMemory } = node || { status: 'waiting' };
   const { palette } = useTheme();
   const { main, lighter } =
@@ -102,7 +113,11 @@ const Node: FC<{ node?: NodeInfo }> = ({ node }) => {
   const IconStatus = STATUS_ICON_MAP[status];
 
   return (
-    <ListItem component={Paper} variant='outlined' sx={{ opacity }}>
+    <ListItem
+      component={variant === 'list' ? Paper : Box}
+      variant='outlined'
+      sx={{ opacity, padding: variant === 'menu' ? 0 : undefined }}
+    >
       <ListItemIcon
         sx={{
           color: main,
@@ -119,7 +134,13 @@ const Node: FC<{ node?: NodeInfo }> = ({ node }) => {
           </Typography>
         )) || <Skeleton width='8rem' height='0.75rem' sx={{ my: 0.5 }} />}
         {(node && (
-          <Typography variant='body1' color='text.disabled'>
+          <Typography
+            variant='body1'
+            color='text.disabled'
+            overflow='hidden'
+            textOverflow='ellipsis'
+            whiteSpace='nowrap'
+          >
             {id}
           </Typography>
         )) || <Skeleton width='14rem' height='0.75rem' sx={{ my: 0.5 }} />}
@@ -136,15 +157,23 @@ const Node: FC<{ node?: NodeInfo }> = ({ node }) => {
               duration: 2,
             },
           })}
+          variant={variant}
         >
-          <IconStatus />
+          {variant === 'list' && <IconStatus />}
+          {variant === 'menu' && <IconCircleFilled />}
         </ListItemStatus>
       )}
     </ListItem>
   );
 };
 
-export const NodeList = () => {
+export type NodeListVariant = 'list' | 'menu';
+
+export interface NodeListProps {
+  variant?: NodeListVariant;
+}
+
+export const NodeList: FC<NodeListProps> = ({ variant = 'list' }) => {
   const [
     {
       clusterInfo: { initNodesNumber },
@@ -156,21 +185,29 @@ export const NodeList = () => {
 
   return (
     <NodeListRoot>
-      <Alert key='info' severity='info' variant='standard'>
+      {/* <Alert key='info' severity='info' variant='standard'>
         If your nodes cannot connect properly, retry the above join command to restart the server.
       </Alert>
       <Alert key='error' severity='error' variant='standard'>
         Your selected model requires more nodes. Please go back to the previous step to add more
         nodes, or choose a smaller model.
-      </Alert>
-      <List>
-        {nodeInfoList.map((node) => (
-          <Node key={node.id} node={node} />
+      </Alert> */}
+      {variant === 'menu' && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: '1.375rem',
+            bottom: '1.375rem',
+            left: '1.375rem',
+            borderLeft: '2px dashed',
+            borderColor: 'divider',
+          }}
+        />
+      )}
+      <List variant={variant}>
+        {[...nodeInfoList, ...nodeInfoList].map((node) => (
+          <Node key={node.id} variant={variant} node={node} />
         ))}
-        {nodesNumber < initNodesNumber
-          && Array(initNodesNumber - nodesNumber)
-            .fill(0)
-            .map((_, index) => <Node key={`${index}`} />)}
       </List>
     </NodeListRoot>
   );
