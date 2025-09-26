@@ -7,8 +7,8 @@ from typing import Optional, Tuple
 import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention
 from mlx_lm.models.deepseek_v2 import DeepseekV2Attention as MLXDeepseekV2Attention
-from mlx_lm.models.deepseek_v2 import ModelArgs
 from mlx_lm.models.deepseek_v2 import DeepseekV2DecoderLayer as MLXDeepseekV2Block
+from mlx_lm.models.deepseek_v2 import ModelArgs
 
 
 class ParallaxDeepSeekV2Attention(MLXDeepseekV2Attention):
