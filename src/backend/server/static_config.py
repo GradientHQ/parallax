@@ -1,173 +1,77 @@
+import json
+
+from huggingface_hub import hf_hub_download
 from scheduling.model_info import ModelInfo
 
-MODEL_NAME_REMAP = {
-    "Qwen/Qwen3-0.6B-MLX-bf16": "Qwen/Qwen3-0.6B",
-    "Qwen/Qwen2.5-72B-Instruct": "Qwen/Qwen2.5-72B",
-}
-
-MODEL_INFO_MAP = {
-    "Qwen/Qwen3-0.6B": ModelInfo(
-        model_name="Qwen/Qwen3-0.6B-bf16",
-        head_size=128,
-        hidden_dim=1024,
-        intermediate_dim=3072,
-        num_attention_heads=16,
-        num_kv_heads=8,
-        vocab_size=151936,
-        num_layers=28,
-        ffn_num_projections=3,
-        param_bytes_per_element=2,
-        cache_bytes_per_element=2,
-        embedding_bytes_per_element=2,
-    ),
-    "Qwen/Qwen3-8B": ModelInfo(
-        model_name="Qwen/Qwen3-8B-bf16",
-        head_size=128,
-        hidden_dim=4096,
-        intermediate_dim=12288,
-        num_attention_heads=32,
-        num_kv_heads=8,
-        vocab_size=151936,
-        num_layers=36,
-        ffn_num_projections=3,
-        param_bytes_per_element=2,
-        cache_bytes_per_element=2,
-        embedding_bytes_per_element=2,
-    ),
-    "Qwen/Qwen3-32B": ModelInfo(
-        model_name="Qwen/Qwen3-32B-bf16",
-        head_size=128,
-        hidden_dim=5120,
-        intermediate_dim=25600,
-        num_attention_heads=64,
-        num_kv_heads=8,
-        vocab_size=151936,
-        num_layers=64,
-        ffn_num_projections=3,
-        param_bytes_per_element=2,
-        cache_bytes_per_element=2,
-        embedding_bytes_per_element=2,
-    ),
-    "Qwen/Qwen3-32B-FP8": ModelInfo(
-        model_name="Qwen/Qwen3-32B-fp8",
-        head_size=128,
-        hidden_dim=5120,
-        intermediate_dim=25600,
-        num_attention_heads=64,
-        num_kv_heads=8,
-        vocab_size=151936,
-        num_layers=64,
-        ffn_num_projections=3,
-        param_bytes_per_element=1,
-        cache_bytes_per_element=2,
-        embedding_bytes_per_element=2,
-    ),
-    "Qwen/Qwen3-14B": ModelInfo(
-        model_name="Qwen/Qwen3-14B",
-        head_size=128,
-        hidden_dim=5120,
-        intermediate_dim=25600,
-        num_attention_heads=40,
-        num_kv_heads=8,
-        vocab_size=151936,
-        num_layers=40,
-        ffn_num_projections=3,
-        param_bytes_per_element=2,
-        cache_bytes_per_element=2,
-        embedding_bytes_per_element=2,
-    ),
-    "Qwen/Qwen2.5-72B": ModelInfo(
-        model_name="Qwen/Qwen2.5-72B-bf16",
-        head_size=128,
-        hidden_dim=8192,
-        intermediate_dim=29568,
-        num_attention_heads=64,
-        num_kv_heads=8,
-        vocab_size=152064,
-        num_layers=80,
-        ffn_num_projections=3,
-        param_bytes_per_element=2,
-        cache_bytes_per_element=2,
-        embedding_bytes_per_element=2,
-    ),
-    "Qwen/Qwen3-235B-A22B": ModelInfo(
-        model_name="Qwen/Qwen3-235B-A22B-bf16",
-        head_size=128,
-        hidden_dim=4096,
-        intermediate_dim=12288,
-        num_attention_heads=64,
-        num_kv_heads=4,
-        vocab_size=151936,
-        num_layers=94,
-        ffn_num_projections=3,
-        param_bytes_per_element=2,
-        cache_bytes_per_element=2,
-        embedding_bytes_per_element=2,
-        num_local_experts=128,
-        num_experts_per_tok=8,
-    ),
-    "deepseek-ai/DeepSeek-V2-Lite": ModelInfo(
-        model_name="deepseek-ai/DeepSeek-V2-Lite",
-        head_size=128,
-        hidden_dim=2048,
-        intermediate_dim=10944,
-        num_attention_heads=16,
-        num_kv_heads=16,
-        vocab_size=151936,
-        num_layers=27,
-        ffn_num_projections=3,
-        param_bytes_per_element=2,
-        cache_bytes_per_element=2,
-        embedding_bytes_per_element=2,
-        qk_nope_head_dim=128,
-        qk_rope_head_dim=64,
-    ),
-    "moonshotai/Kimi-K2-Instruct": ModelInfo(
-        model_name="moonshotai/Kimi-K2-Instruct",
-        head_size=128,
-        hidden_dim=7168,
-        intermediate_dim=18432,
-        num_attention_heads=64,
-        num_kv_heads=64,
-        vocab_size=163840,
-        num_layers=61,
-        ffn_num_projections=3,
-        param_bytes_per_element=2,
-        cache_bytes_per_element=2,
-        embedding_bytes_per_element=2,
-        qk_nope_head_dim=128,
-        qk_rope_head_dim=64,
-    ),
-}
 
 # Supported model list
 MODEL_LIST = [
     "Qwen/Qwen3-0.6B",
     "Qwen/Qwen3-8B",
+    "Qwen/Qwen3-8B-FP8",
     "Qwen/Qwen3-32B",
-    "Qwen/Qwen2.5-72B",
+    "Qwen/Qwen3-32B-FP8",
+    "Qwen/Qwen3-30B-A3B",
+    "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+    "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8",
+    "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8",
+    "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8",
+    "Qwen/Qwen3-Next-80B-A3B-Instruct",
+    "Qwen/Qwen3-Next-80B-A3B-Thinking",
+    "Qwen/Qwen2.5-3B-Instruct",
+    "Qwen/Qwen2.5-7B-Instruct",
+    "Qwen/Qwen2.5-14B-Instruct",
+    "Qwen/Qwen2.5-72B-Instruct",
+    "openai/openai/gpt-oss-20b",
+    "openai/openai/gpt-oss-120b",
+    "meta-llama/Llama-3.3-70B-Instruct",
+    "meta-llama/Llama-3.2-1B-Instruct",
+    "meta-llama/Llama-3.2-3B-Instruct",
 ]
 
-NODE_JOIN_COMMAND_LOCAL_NETWORK = """python src/parallax/launch.py \
-          --model-path {model_name} \
-          --max-num-tokens-per-batch 4096 \
-          --kv-block-size 1024 \
-          --max-batch-size 8 \
-          --scheduler-addr {scheduler_addr}"""
+NODE_JOIN_COMMAND_LOCAL_NETWORK = (
+    """bash scripts/join_local.sh -m {model_name} -s {scheduler_addr}"""
+)
 
-NODE_JOIN_COMMAND_PUBLIC_NETWORK = """python src/parallax/launch.py \
-          --model-path {model_name} \
-          --max-num-tokens-per-batch 4096 \
-          --kv-block-size 1024 \
-          --max-batch-size 8 \
-          --announce-maddrs ${{announce_maddrs}} \
-          --scheduler-addr {scheduler_addr}"""
+NODE_JOIN_COMMAND_PUBLIC_NETWORK = """bash scripts/join.sh -m {model_name} -i ${{ip-address-of-current-node}} -s {scheduler_addr}"""
 
 
 def get_model_info(model_name):
-    if model_name not in MODEL_INFO_MAP:
-        model_name = MODEL_NAME_REMAP.get(model_name, model_name)
-    return MODEL_INFO_MAP.get(model_name, None)
+    config_path = hf_hub_download(repo_id=model_name, filename="config.json")
+    with open(config_path, "r") as f:
+        config = json.load(f)
+        f.close()
+
+    # get quant method
+    quant_method = config.get("quant_method", None)
+    quantization_config = config.get("quantization_config", None)
+    if quant_method is None and quantization_config is not None:
+        quant_method = quantization_config.get("quant_method", None)
+
+    if quant_method is None:
+        param_bytes_per_element = 2
+    elif quant_method == "fp8":
+        param_bytes_per_element = 1
+    elif quant_method in ("mxfp4", "int4", "awq", "gptq"):
+        param_bytes_per_element = 0.5
+
+    model_info = ModelInfo(
+        model_name=model_name,
+        head_size=config.get("head_dim", 128),
+        hidden_dim=config.get("hidden_size", 0),
+        intermediate_dim=config.get("intermediate_size", 0),
+        num_attention_heads=config.get("num_attention_heads", 0),
+        num_kv_heads=config.get("num_key_value_heads", 0),
+        vocab_size=config.get("vocab_size", 0),
+        num_layers=config.get("num_hidden_layers", 0),
+        ffn_num_projections=3,
+        param_bytes_per_element=param_bytes_per_element,
+        cache_bytes_per_element=2,
+        embedding_bytes_per_element=2,
+        num_local_experts=config.get("num_experts", None),
+        num_experts_per_tok=config.get("num_experts_per_tok", None),
+    )
+    return model_info
 
 
 def get_model_list():

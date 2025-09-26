@@ -29,6 +29,7 @@ dependencies = [
   "pydantic",
   "protobuf==6.31.1",
   "dijkstar==2.6.0",
+  "huggingface-hub",
   "lattica @ git+https://github.com/GradientHQ/lattica.git#subdirectory=bindings/python",
 ]
 
@@ -52,7 +53,6 @@ benchmark = [
   "datasets",
   "pillow",
   "modelscope",
-  "huggingface-hub",
 ]
 
 dev = [

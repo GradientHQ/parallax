@@ -79,7 +79,7 @@ class SchedulerManage:
                 "model_name": self.model_name,
                 "init_nodes_num": self.init_nodes_num,
                 "node_join_command": get_node_join_command(
-                    self.model_name, "${scheduler_addr}", self.is_local_network
+                    self.model_name, "${scheduler-addr}", self.is_local_network
                 ),
                 "node_list": self.get_node_list(),
             },
@@ -197,7 +197,7 @@ class SchedulerManage:
         # todo rebalance status
         status = (
             NODE_STATUS_AVAILABLE
-            if self.scheduler.layer_allocator.has_full_pipeline()
+            if self.scheduler.layer_allocator.has_full_active_pipeline()
             else NODE_STATUS_WAITING
         )
         logger.info(f"SchedulerManage status queried: {status}")
