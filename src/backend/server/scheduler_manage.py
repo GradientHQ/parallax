@@ -10,8 +10,6 @@ from backend.server.static_config import get_model_info, get_node_join_command
 from parallax_utils.logging_config import get_logger
 from scheduling.node import RequestSignal
 from scheduling.scheduler import Scheduler
-from backend.server.static_config import get_node_join_command
-from backend.server.constants import NODE_STATUS_AVAILABLE, NODE_STATUS_WAITING, NODE_STATUS_FAILED
 
 logger = get_logger(__name__)
 

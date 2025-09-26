@@ -6,7 +6,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.server.constants import NODE_STATUS_AVAILABLE
 from parallax_utils.logging_config import get_logger
-from backend.server.constants import NODE_STATUS_AVAILABLE
 
 logger = get_logger(__name__)
 
