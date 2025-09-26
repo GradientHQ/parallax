@@ -546,6 +546,22 @@ class BaseLayerAllocator:
                 return False
         return True
 
+    def has_full_active_pipeline(self) -> bool:
+        """Return True if there exists at least one active pipeline covering [0, num_total_layers)."""
+        total_layers = self.num_total_layers
+        layer_count: Dict[int, int] = {}
+        for node_id, (s, e) in self.node_allocation.items():
+            if self.node_id_to_node[node_id].is_active is False:
+                continue
+            if s is None or e is None:
+                continue
+            for layer in range(s, e):
+                layer_count[layer] = layer_count.get(layer, 0) + 1
+        for layer in range(total_layers):
+            if layer not in layer_count or layer_count[layer] == 0:
+                return False
+        return True
+
     def layer_replication_stats(self) -> Tuple[int, int, float]:
         """Return (min, max, avg) number of nodes hosting each layer.
 
