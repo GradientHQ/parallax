@@ -15,14 +15,7 @@
 """Qwen3Hybrid model configuration"""
 
 import enum
-import os
 
-import numpy as np
-import torch
-from sglang.srt.distributed.utils import divide
-from sglang.srt.layers.dp_attention import get_attention_tp_size
-from transformers.configuration_utils import PretrainedConfig
-from transformers.modeling_rope_utils import rope_config_validation
 from transformers.utils import logging
 
 logger = logging.get_logger(__name__)
@@ -35,6 +28,7 @@ class HybridLayerType(enum.Enum):
     linear_attention = "linear_attention"
     mamba2 = "mamba"
 
+
 @property
 def monkey_patch_linear_layer_ids(self):
     return [
@@ -44,4 +38,3 @@ def monkey_patch_linear_layer_ids(self):
         and i >= self.start_layer
         and i < self.end_layer
     ]
-
