@@ -28,21 +28,6 @@ class RPCConnectionHandler(ConnectionHandler):
 
     @rpc_stream
     def node_join(self, message):
-        # node = {
-        #     "call_url": "http://127.0.0.1:8000",
-        #     "node_id": "lattica peer id",
-        #     "hardware": {
-        #         "node_id": "lattica peer id",
-        #         "tflops_fp16": 100,
-        #         "memory_gb": 100,
-        #         "memory_bandwidth_gbps": 100,
-        #     },
-        #     "model_name": "",
-        #     "kv_cache_ratio": 0.3,
-        #     "param_hosting_ratio": 0.5,
-        #     "max_concurrent_requests": 16,
-        #     "max_sequence_length": 1024,
-        # }
         logger.info(f"receive node_join request: {message}")
         try:
             node = self.build_node(message)
@@ -110,6 +95,7 @@ class RPCConnectionHandler(ConnectionHandler):
             param_hosting_ratio=node_json.get("param_hosting_ratio"),
             max_concurrent_requests=node_json.get("max_concurrent_requests"),
             max_sequence_length=node_json.get("max_sequence_length"),
+            is_active=node_json.get("is_active", True),
         )
         if node_json.get("start_layer", None) is not None:
             node.start_layer = node_json.get("start_layer")

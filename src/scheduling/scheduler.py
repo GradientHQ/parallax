@@ -469,6 +469,7 @@ class Scheduler:
 
     def _process_joins(self) -> None:
         """Handle pending join events, honoring bootstrap state for assignment."""
+        joined_any = False
         while True:
             try:
                 node = self._pending_joins.get_nowait()
@@ -477,6 +478,30 @@ class Scheduler:
             # During bootstrap (no full pipeline yet), only declare nodes; no dynamic assignment.
             # After bootstrap, allow dynamic light-weight joins.
             self.join(node, bootstrap=not self._bootstrapped_event.is_set())
+            joined_any = True
+
+        # If we are not bootstrapped (e.g., after a leave-triggered rebalance) and
+        # new nodes just joined, attempt a greedy bootstrap immediately when we have
+        # enough nodes. If it doesn't produce a full pipeline, we'll try again on
+        # subsequent joins.
+        if joined_any and not self._bootstrapped_event.is_set():
+            if len(self.nodes) >= self.min_nodes_bootstrapping:
+                try:
+                    ok = self.bootstrap()
+                    if not ok:
+                        logger.info(
+                            "Bootstrap attempt after join did not produce a full pipeline; will retry on future joins"
+                        )
+                except Exception as exc:
+                    logger.info(
+                        f"Bootstrap attempt after join failed: {exc}; will retry on future joins"
+                    )
+            else:
+                logger.info(
+                    "Deferring bootstrap: have %d nodes; need >= %d",
+                    len(self.nodes),
+                    self.min_nodes_bootstrapping,
+                )
 
     def _process_leaves(self) -> None:
         """Handle pending leave events safely."""
