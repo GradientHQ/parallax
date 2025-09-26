@@ -55,6 +55,10 @@ interface Props {
   content: string;
 }
 
+const preprocessThink = (input: string) => {
+  return input.replace(/<think>/, '<think>\n\n').replace(/<\/think>/, '\n\n</think>\n\n');
+};
+
 /**
  * Convert MathJax-style \(...\) and \[...\] into KaTeX-compatible $...$ and $$...$$
  */
@@ -94,7 +98,8 @@ const schema = {
 };
 
 const ChatMarkdown = ({ content }: Props) => {
-  const processedContent = preprocessMath(content);
+  content = preprocessThink(content);
+  content = preprocessMath(content);
 
   return (
     <ChatMarkdownRoot>
@@ -103,7 +108,7 @@ const ChatMarkdown = ({ content }: Props) => {
         rehypePlugins={[rehypeKatex, rehypeRaw, [remarkGfm, remarkMath, rehypeSanitize, schema]]}
         components={components}
       >
-        {processedContent}
+        {content}
       </ReactMarkdown>
     </ChatMarkdownRoot>
   );
