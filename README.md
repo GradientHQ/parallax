@@ -1,11 +1,11 @@
 
 
 # Parallax
-A fully decentralized inference engine. Parallax reimagines model inference as a global, collaborative process—one where large language models are no longer chained to centralized infrastructure, but are instead decomposed, executed, and verified across a distributed machine mesh.
+A fully decentralized inference engine developed by [Gradient Network](https://gradient.network). Parallax reimagines model inference as a global, collaborative process—one where large language models are no longer chained to centralized infrastructure, but are instead decomposed, executed, and verified across a distributed machine mesh.
 
 <h3>
 
-[Gradient Network](https://gradient.network/) | [Blog](https://gradient.network/blog/parallax-world-inference-engine) | [X(Twitter)](https://x.com/Gradient_HQ) | [Discord](https://discord.gg/gradientnetwork) | [arXiv]()
+[Gradient Network](https://gradient.network) | [Blog](https://gradient.network/blog/parallax-world-inference-engine) | [X(Twitter)](https://x.com/Gradient_HQ) | [Discord](https://discord.gg/gradientnetwork) | [arXiv]()
 
 </h3>
 
@@ -16,7 +16,7 @@ A fully decentralized inference engine. Parallax reimagines model inference as a
 * Dynamic request scheduling and routing for high performance.
 
 ## Backend Architecture
-* P2P communication powered by [Lattica](https://github.com/GradientHQ/lattica).
+* P2P communication powered by [Lattica](https://github.com/GradientHQ/lattica)
 * GPU backend powered by [SGLang](https://github.com/sgl-project/sglang)
 * MAC backend powered by [MLX LM](https://github.com/ml-explore/mlx-lm)
 
@@ -24,6 +24,7 @@ A fully decentralized inference engine. Parallax reimagines model inference as a
 
 ### Prerequisites
 - Python>=3.11.0
+- Ubuntu-24.04 for Blackwell GPUs
 
 ### From Source
 - For Linux/WSL (GPU):
@@ -90,7 +91,7 @@ python3 ./parallax/src/parallax/launch.py \
 --dht-port 5000 \
 --max-batch-size 8 \
 --start-layer 0 \
---end-layer 18
+--end-layer 14
 ```
 - Second node:
 ```sh
@@ -99,8 +100,8 @@ python3 ./parallax/src/parallax/launch.py \
 --port 3000 \
 --dht-port 5000 \
 --max-batch-size 8 \
---start-layer 18 \
---end-layer 36 \
+--start-layer 14 \
+--end-layer 28 \
 --initial-peers /ip4/192.168.1.1/tcp/5000/p2p/xxxxxxxxxxxx
 ```
 

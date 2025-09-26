@@ -8,8 +8,25 @@ from scheduling.model_info import ModelInfo
 MODEL_LIST = [
     "Qwen/Qwen3-0.6B",
     "Qwen/Qwen3-8B",
+    "Qwen/Qwen3-8B-FP8",
     "Qwen/Qwen3-32B",
-    "Qwen/Qwen2.5-72B",
+    "Qwen/Qwen3-32B-FP8",
+    "Qwen/Qwen3-30B-A3B",
+    "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+    "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8",
+    "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8",
+    "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8",
+    "Qwen/Qwen3-Next-80B-A3B-Instruct",
+    "Qwen/Qwen3-Next-80B-A3B-Thinking",
+    "Qwen/Qwen2.5-3B-Instruct",
+    "Qwen/Qwen2.5-7B-Instruct",
+    "Qwen/Qwen2.5-14B-Instruct",
+    "Qwen/Qwen2.5-72B-Instruct",
+    "openai/openai/gpt-oss-20b",
+    "openai/openai/gpt-oss-120b",
+    "meta-llama/Llama-3.3-70B-Instruct",
+    "meta-llama/Llama-3.2-1B-Instruct",
+    "meta-llama/Llama-3.2-3B-Instruct",
 ]
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """python src/parallax/launch.py \
