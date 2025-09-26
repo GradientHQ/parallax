@@ -56,7 +56,32 @@ For GPU devices, Parallax provides a docker environment for quick setup. Choose 
 
 
 ## Usage on Distributed Devices
-### Step 1: Launch scheduler
+### Use frontend
+#### Step 1: Launch scheduler
+First launch our scheduler on the main node.
+```sh
+bash scripts/start.sh
+```
+#### Step 2: Select model config
+Open http://localhost:3001
+![Model select](docs/images/model-selection.png)
+Select model config and click continue
+#### Step 3: Join each distributed nodes
+![Node join](docs/images/node-join.png)
+This page will show the join command like blow
+```sh
+bash scripts/join.sh -m {model-name} -i {ip-address-of-current-node} -s {scheduler-address}
+# example
+bash scripts/join.sh -m Qwen/Qwen3-0.6B -i 192.168.1.1 -s /ip4/192.168.1.1/tcp/5001/p2p/xxxxxxxxxxxx
+```
+Run join command on each distributed nodes
+Wait for all nodes ready
+#### Step 4: Chat
+Test chat like show blow
+![Chat](docs/images/chat.png)
+
+### Without frontend
+#### Step 1: Launch scheduler
 First launch our scheduler on the main node.
 ```sh
 bash scripts/launch.sh -m {model-name} -n {number-of-worker-nodes}
@@ -67,7 +92,7 @@ bash scripts/launch.sh -m Qwen/Qwen3-0.6B -n 2
 ```
 Please notice and record the scheduler ip4 address generated in the terminal.
 
-### Step 2: Join each distributed nodes
+#### Step 2: Join each distributed nodes
 For each distributed nodes including the main node, open a terminal and join the server with the scheduler address.
 ```sh
 bash scripts/join.sh -m {model-name} -i {ip-address-of-current-node} -s {scheduler-address}
@@ -75,9 +100,23 @@ bash scripts/join.sh -m {model-name} -i {ip-address-of-current-node} -s {schedul
 For example:
 ```sh
 # first node
-bash scripts/launch.sh -m Qwen/Qwen3-0.6B -i 192.168.1.1 -s /ip4/192.168.1.1/tcp/5001/p2p/xxxxxxxxxxxx
+bash scripts/join.sh -m Qwen/Qwen3-0.6B -i 192.168.1.1 -s /ip4/192.168.1.1/tcp/5001/p2p/xxxxxxxxxxxx
 # second node
-bash scripts/launch.sh -m Qwen/Qwen3-0.6B -i 192.168.1.2 -s /ip4/192.168.1.1/tcp/5001/p2p/xxxxxxxxxxxx
+bash scripts/join.sh -m Qwen/Qwen3-0.6B -i 192.168.1.2 -s /ip4/192.168.1.1/tcp/5001/p2p/xxxxxxxxxxxx
+```
+
+#### Step 3: Call chat api with Scheduler
+```sh
+curl --location 'http://localhost:3001/v1/chat/completions' --header 'Content-Type: application/json' --data '{
+    "max_tokens": 1024,
+    "messages": [
+      {
+        "role": "user",
+        "content": "hello"
+      }
+    ],
+    "stream": true
+}'
 ```
 
 ### Skipping Scheduler
