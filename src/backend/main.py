@@ -33,10 +33,13 @@ async def hello():
 
 @app.get("/model/list")
 async def model_list():
-    return JSONResponse(content={
-        "type": "model_list",
-        "data": get_model_list(),
-    }, status_code=200)
+    return JSONResponse(
+        content={
+            "type": "model_list",
+            "data": get_model_list(),
+        },
+        status_code=200,
+    )
 
 
 @app.post("/scheduler/init")
@@ -50,21 +53,27 @@ async def scheduler_init(raw_request: Request):
         pass
     else:
         scheduler_manage.run(model_name, init_nodes_num, is_local_network)
-    return JSONResponse(content={
-        "type": "scheduler_init",
-        "data": None,
-    }, status_code=200)
+    return JSONResponse(
+        content={
+            "type": "scheduler_init",
+            "data": None,
+        },
+        status_code=200,
+    )
 
 
 @app.get("/node/join/command")
 async def node_join_command():
     model_name = scheduler_manage.get_model_name()
     is_local_network = scheduler_manage.get_is_local_network()
-    
-    return JSONResponse(content={
-        "type": "node_join_command",
-        "data": get_node_join_command(model_name, "${scheduler_addr}", is_local_network),
-    }, status_code=200)
+
+    return JSONResponse(
+        content={
+            "type": "node_join_command",
+            "data": get_node_join_command(model_name, "${scheduler_addr}", is_local_network),
+        },
+        status_code=200,
+    )
 
 
 @app.get("/cluster/status")
@@ -80,7 +89,7 @@ async def cluster_status():
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-        }
+        },
     )
 
 
