@@ -87,9 +87,7 @@ class Scheduler:
         # Event queues for main loop orchestration (thread-safe)
         self._pending_joins: "queue.Queue[Node]" = queue.Queue()
         self._pending_leaves: "queue.Queue[str]" = queue.Queue()
-        self._pending_node_updates: (
-            "queue.Queue[Tuple[str, Optional[int], Optional[float], Optional[Dict[str, float]], Optional[bool]]]"
-        ) = queue.Queue()
+        self._pending_node_updates: "queue.Queue[Tuple[str, Optional[int], Optional[float], Optional[Dict[str, float]], Optional[bool]]]" = (queue.Queue())
 
         # Concurrency controls
         self._stop_event: threading.Event = threading.Event()
