@@ -104,7 +104,7 @@ export const MainLayout: FC<PropsWithChildren<MainLayoutProps>> = ({
   );
 };
 
-const DebugInfo = () => {
+const DebugInfo: FC = () => {
   const [{ initNodesNumber, networkType, modelName, clusterInfo }] = useCluster();
 
   const renderRecord = (title: string, record: Record<string, any>) => (
@@ -119,24 +119,27 @@ const DebugInfo = () => {
   );
 
   return (
-    <Stack gap={4} data-debug-info='true'>
-      <Typography variant='subtitle1'>Debug Info</Typography>
+    (import.meta.env.DEV && (
+      <Stack gap={4} data-debug-info='true'>
+        <Typography variant='subtitle1'>Debug Info</Typography>
 
-      {renderRecord('Init Parameters', { initNodesNumber, networkType, modelName })}
+        {renderRecord('Init Parameters', { initNodesNumber, networkType, modelName })}
 
-      {renderRecord('Status Info', clusterInfo)}
+        {renderRecord('Status Info', clusterInfo)}
 
-      <Stack>
-        <Link component={RouterLink} to='/setup'>
-          Setup
-        </Link>
-        <Link component={RouterLink} to='/join'>
-          Join
-        </Link>
-        <Link component={RouterLink} to='/chat'>
-          Chat
-        </Link>
+        <Stack>
+          <Link component={RouterLink} to='/setup'>
+            Setup
+          </Link>
+          <Link component={RouterLink} to='/join'>
+            Join
+          </Link>
+          <Link component={RouterLink} to='/chat'>
+            Chat
+          </Link>
+        </Stack>
       </Stack>
-    </Stack>
+    ))
+    || null
   );
 };
