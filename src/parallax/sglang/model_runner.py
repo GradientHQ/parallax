@@ -7,6 +7,7 @@ arguments needed by decentralized inference.
 import logging
 import os
 import random
+import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sglang
@@ -42,6 +43,8 @@ from sglang.srt.utils import (
     monkey_patch_p2p_access_check,
 )
 from torch.distributed import Backend
+
+# from parallax.sglang.monkey_patch.model_runner import ModelRunner as SGLModelRunner
 
 logger = logging.getLogger(__name__)
 
@@ -454,6 +457,19 @@ def monkey_patch_make_layers(
     return modules, start_layer, end_layer
 
 
+## TODO: Move this when sgalang supports qwen3_next pipeline parallelism
+def monkey_patch_qwen3_next():
+    from parallax.sglang.monkey_patch import (
+        qwen3_next_model as parallax_qwen3_next_model_module,
+    )
+    from parallax.sglang.monkey_patch.qwen3_next_config import (
+        monkey_patch_linear_layer_ids,
+    )
+
+    sys.modules["sglang.srt.models.qwen3_next"] = parallax_qwen3_next_model_module
+    sglang.srt.configs.qwen3_next.Qwen3NextConfig.linear_layer_ids = monkey_patch_linear_layer_ids
+
+
 def form_sgl_server_args(
     model_path: str,
     dtype: str = "bfloat16",
@@ -483,6 +499,7 @@ def apply_parallax_monkey_patch():
         monkey_patch_initialize_model_parallel
     )
     sglang.srt.utils.make_layers = monkey_patch_make_layers
+    monkey_patch_qwen3_next()
 
 
 def initialize_sgl_model_runner(
@@ -527,6 +544,11 @@ def initialize_sgl_model_runner(
     )
     # TODO: Fix me
     model_config.hf_config.tie_word_embeddings = False
+    model_config.hf_config.start_layer = start_layer
+    model_config.hf_config.end_layer = end_layer
+    print("Model config:", model_config)
+    print("model_start_layer:", model_config.hf_config.start_layer)
+    print("model_end_layer:", model_config.hf_config.end_layer)
     model_runner = ParallaxModelRunner(
         model_config=model_config,
         mem_fraction_static=kv_cache_memory_fraction,

@@ -4,8 +4,9 @@ from typing import List
 
 from lattica import Lattica
 
+from backend.server.constants import NODE_STATUS_AVAILABLE, NODE_STATUS_WAITING
 from backend.server.rpc_connection_handler import RPCConnectionHandler
-from backend.server.static_config import get_model_info
+from backend.server.static_config import get_model_info, get_node_join_command
 from parallax_utils.logging_config import get_logger
 from scheduling.node import RequestSignal
 from scheduling.scheduler import Scheduler
@@ -65,7 +66,7 @@ class SchedulerManage:
 
     def get_model_name(self):
         return self.model_name
-    
+
     def get_init_nodes_num(self):
         return self.init_nodes_num
 
@@ -79,15 +80,17 @@ class SchedulerManage:
                 "status": self.get_schedule_status(),
                 "model_name": self.model_name,
                 "init_nodes_num": self.init_nodes_num,
-                "node_join_command": get_node_join_command(self.model_name, "${scheduler_addr}", self.is_local_network),
+                "node_join_command": get_node_join_command(
+                    self.model_name, "${scheduler_addr}", self.is_local_network
+                ),
                 "node_list": self.get_node_list(),
-            }
+            },
         }
 
     def get_node_list(self):
         if self.scheduler is None:
             return []
-        
+
         return [self.build_node_info(node) for node in self.scheduler.nodes]
 
     def build_node_info(self, node):
@@ -97,7 +100,6 @@ class SchedulerManage:
             "gpu_name": node.hardware.gpu_name,
             "gpu_memory": node.hardware.memory_gb,
         }
-
 
     def _start_scheduler(self, model_name, init_nodes_num):
         """
@@ -195,7 +197,11 @@ class SchedulerManage:
             return NODE_STATUS_WAITING
 
         # todo rebalance status
-        status = NODE_STATUS_AVAILABLE if self.scheduler.layer_allocator.has_full_pipeline() else NODE_STATUS_WAITING
+        status = (
+            NODE_STATUS_AVAILABLE
+            if self.scheduler.layer_allocator.has_full_pipeline()
+            else NODE_STATUS_WAITING
+        )
         logger.info(f"SchedulerManage status queried: {status}")
         return status
 

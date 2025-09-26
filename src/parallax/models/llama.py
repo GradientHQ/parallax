@@ -100,6 +100,7 @@ class ParallaxLlamaBlock(MLXLlamaBlock):
         mask: Optional[mx.array] = None,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
         offset: int = 0,
+        lengths: Optional[mx.array] = None,
     ):
         r, (k_cache, v_cache) = self.self_attn(self.input_layernorm(x), mask, cache, offset=offset)
         h = x + r

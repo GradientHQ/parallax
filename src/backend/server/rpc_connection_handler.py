@@ -63,6 +63,7 @@ class RPCConnectionHandler(ConnectionHandler):
                 current_requests=node.current_requests,
                 layer_latency_ms=node.layer_latency_ms,
                 new_rtt_to_nodes=node.rtt_to_nodes,
+                is_active=node.is_active,
             )
             return {}
         except Exception as e:

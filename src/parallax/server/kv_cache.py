@@ -41,6 +41,12 @@ class KVCache:
         num_layers: int,
         dtype: mx.Dtype,
         block_size: int = 64,
+        conv_dim: Optional[int] = None,
+        conv_kernel_size: Optional[int] = None,
+        linear_k_dim: Optional[int] = None,
+        linear_v_dim: Optional[int] = None,
+        linear_num_k_heads: Optional[int] = None,
+        linear_num_v_heads: Optional[int] = None,
         num_initial_tokens: int = 0,
     ):
         """
@@ -56,11 +62,26 @@ class KVCache:
         self.head_dim = head_dim
         self.dtype = dtype
         self.block_size = block_size
+        self.conv_dim = conv_dim
+        self.conv_kernel_size = conv_kernel_size
+        self.linear_k_dim = linear_k_dim
+        self.linear_v_dim = linear_v_dim
+        self.linear_num_k_heads = linear_num_k_heads
+        self.linear_num_v_heads = linear_num_v_heads
 
         num_initial_tokens = self.round_up_to_step(num_initial_tokens)
         # (num_layers, num_kv_heads, seq_len, head_dim)
         self.keys = mx.zeros((num_layers, num_kv_heads, num_initial_tokens, head_dim), dtype)
         self.values = mx.zeros((num_layers, num_kv_heads, num_initial_tokens, head_dim), dtype)
+        self.state0 = (
+            mx.zeros((num_layers, conv_kernel_size - 1, conv_dim), dtype) if conv_dim else None
+        )
+
+        self.state1 = (
+            mx.zeros((num_layers, linear_num_v_heads, linear_k_dim, linear_v_dim), dtype)
+            if (linear_k_dim and linear_v_dim and linear_num_k_heads and linear_num_v_heads)
+            else None
+        )
         self.num_tokens = num_initial_tokens
         self.offset = 0
 
@@ -76,9 +97,20 @@ class KVCache:
 
     def fetch(self) -> Tuple[mx.array, mx.array]:
         """Fetches the KV cache for the request."""
-        return self.keys[..., : self.offset, :], self.values[..., : self.offset, :]
+        return (
+            self.keys[..., : self.offset, :],
+            self.values[..., : self.offset, :],
+            self.state0 if self.state0 is not None else None,
+            self.state1 if self.state1 is not None else None,
+        )
 
-    def update(self, keys: mx.array, values: mx.array) -> int:
+    def update(
+        self,
+        keys: mx.array,
+        values: mx.array,
+        state0: Optional[mx.array],
+        state1: Optional[mx.array],
+    ) -> int:
         """
         Updates the cache with new key-value pairs.
 
@@ -86,6 +118,11 @@ class KVCache:
             keys: New keys to add, shape (num_layers, num_kv_heads, target_len, head_dim)
             values: New values to add, shape (num_layers, num_kv_heads, target_len, head_dim)
         """
+        if state0 is not None and self.state0 is not None:
+            self.state0 = state0
+        if state1 is not None and self.state1 is not None:
+            self.state1 = state1
+
         prev = self.offset
         seq_len = keys.shape[2]
         prev_tokens = self.num_tokens
@@ -124,6 +161,12 @@ class KVCacheManager:
         block_size: int = 64,
         max_num_tokens: Optional[int] = None,
         cache_memory_fraction: float = 0.5,
+        conv_dim: Optional[int] = None,
+        conv_kernel_size: Optional[int] = None,
+        linear_k_dim: Optional[int] = None,
+        linear_v_dim: Optional[int] = None,
+        linear_num_k_heads: Optional[int] = None,
+        linear_num_v_heads: Optional[int] = None,
     ):
         """
         Args:
@@ -140,6 +183,12 @@ class KVCacheManager:
         self.num_layers = num_layers
         self.dtype = dtype
         self.block_size = block_size
+        self.conv_dim = conv_dim
+        self.conv_kernel_size = conv_kernel_size
+        self.linear_k_dim = linear_k_dim
+        self.linear_v_dim = linear_v_dim
+        self.linear_num_k_heads = linear_num_k_heads
+        self.linear_num_v_heads = linear_num_v_heads
 
         self.request_caches: Dict[str, KVCache] = {}
         self.tokens_in_cache = 0
@@ -220,6 +269,12 @@ class KVCacheManager:
             dtype=self.dtype,
             block_size=self.block_size,
             num_initial_tokens=num_tokens,
+            conv_dim=self.conv_dim,
+            conv_kernel_size=self.conv_kernel_size,
+            linear_k_dim=self.linear_k_dim,
+            linear_v_dim=self.linear_v_dim,
+            linear_num_k_heads=self.linear_num_k_heads,
+            linear_num_v_heads=self.linear_num_v_heads,
         )
         self.tokens_in_cache += self.request_num_tokens(request.request_id)
         return True
@@ -236,7 +291,13 @@ class KVCacheManager:
         return True
 
     def update_requests(
-        self, requests: List[Request], keys: mx.array, values: mx.array, lengths: List[int]
+        self,
+        requests: List[Request],
+        keys: mx.array,
+        values: mx.array,
+        lengths: List[int],
+        states0: Optional[mx.array],
+        states1: Optional[mx.array],
     ) -> bool:
         """
         Updates the requests in the cache.
@@ -261,7 +322,9 @@ class KVCacheManager:
         ), "key and value must have the same number of key-value heads"
         assert head_dim == self.head_dim, "key and value must have the same head dimension"
         # TODO: Use vmap for better performance
-        for request, key, value, length in zip(requests, keys, values, lengths):
+        for request, key, value, length, state0, state1 in zip(
+            requests, keys, values, lengths, states0, states1
+        ):
             length = length.item()
             assert self.has_request(request.request_id), "request not in cache"
             # TODO: fix this
@@ -274,7 +337,7 @@ class KVCacheManager:
                 )
                 return False
             self.tokens_in_cache += self.request_caches[request.request_id].update(
-                key[..., :length, :], value[..., :length, :]
+                key[..., :length, :], value[..., :length, :], state0, state1
             )
         return True
 

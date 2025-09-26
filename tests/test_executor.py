@@ -38,7 +38,10 @@ def test_decode_pipeline_multiple_steps(start_layer, end_layer, num_decode_steps
     )
 
     # 2. Setup initial requests for multiple prompts
-    prompts = ["What is the capital of France?", "What is a black hole?"]
+    prompts = [
+        "What is the capital of France?",
+        "Explain quantum computing in simple terms.",
+    ]
     initial_requests = [
         InitialRequest(request_id=f"req{i}", input_ids=executor_peer1.tokenizer.encode(p))
         for i, p in enumerate(prompts)
