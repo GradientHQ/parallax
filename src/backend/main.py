@@ -6,6 +6,8 @@ import uuid
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from backend.server.request_handler import RequestHandler
 from backend.server.scheduler_manage import SchedulerManage
@@ -27,16 +29,6 @@ logger = get_logger(__name__)
 
 scheduler_manage = None
 request_handler = RequestHandler()
-
-
-@app.get("/")
-async def get():
-    return {"message": "Hello, World!"}
-
-
-@app.get("/hello")
-async def hello():
-    return {"message": "Hello, World!"}
 
 
 @app.get("/model/list")
@@ -116,6 +108,9 @@ async def openai_v1_chat_completions(raw_request: Request):
     received_ts = time.time()
     return await request_handler.v1_chat_completions(request_data, request_id, received_ts)
 
+
+# mount the frontend
+app.mount("/", StaticFiles(directory="src/frontend/dist", html=True), name="static") 
 
 if __name__ == "__main__":
     args = parse_args()
