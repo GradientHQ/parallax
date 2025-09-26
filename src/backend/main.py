@@ -1,7 +1,7 @@
-import time
-import uuid
 import asyncio
 import json
+import time
+import uuid
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -10,8 +10,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from backend.server.request_handler import RequestHandler
 from backend.server.scheduler_manage import SchedulerManage
 from backend.server.server_args import parse_args
-from parallax_utils.logging_config import get_logger
 from backend.server.static_config import get_model_list, get_node_join_command
+from parallax_utils.logging_config import get_logger
 
 app = FastAPI()
 
