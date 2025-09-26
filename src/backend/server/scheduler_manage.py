@@ -6,7 +6,6 @@ from lattica import Lattica
 
 from backend.server.constants import (
     NODE_STATUS_AVAILABLE,
-    NODE_STATUS_FAILED,
     NODE_STATUS_WAITING,
 )
 from backend.server.rpc_connection_handler import RPCConnectionHandler
