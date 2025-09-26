@@ -80,6 +80,8 @@ class ParallaxKimiK2Attention(MLXDeepseekV3Attention):
             final_keys_for_attn = mx.concatenate([k_nope, k_pe], axis=-1)
             final_values_for_attn = values
 
+        if mask is not None:
+            mask = mx.array(mask, dtype=queries.dtype)
         output = scaled_dot_product_attention(
             queries,
             final_keys_for_attn,

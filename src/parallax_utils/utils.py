@@ -47,7 +47,8 @@ def compute_max_tokens_in_cache(
     kv_cache_memory_fraction: float,
     num_shard_layers: int,
     num_key_value_heads: int,
-    head_dim: int,
+    head_dim_k: int,
+    head_dim_v: int,
     elem_bytes: int,
     available_cache_bytes: Optional[int] = None,
 ) -> int:
@@ -65,7 +66,9 @@ def compute_max_tokens_in_cache(
         hw = HardwareInfo.detect()
         used = mx.get_active_memory() if mx is not None else 0
         available_cache_size = int((hw.total_ram_gb * 1024**3 - used) * kv_cache_memory_fraction)
-    per_token_cache_size = num_shard_layers * num_key_value_heads * head_dim * 2 * elem_bytes
+    per_token_cache_size = (
+        num_shard_layers * num_key_value_heads * (head_dim_k + head_dim_v) * elem_bytes
+    )
     return max(0, available_cache_size // per_token_cache_size)
 
 
@@ -110,12 +113,14 @@ def compute_max_batch_size(
     available_cache_bytes = None
     if memory_gb is not None:
         available_cache_bytes = int(memory_gb * 1024**3 * kv_cache_memory_fraction)
+    ## This is an Error due to kv may have different head_dim
     max_tokens = compute_max_tokens_in_cache(
         device=device or "",  # empty means non-cuda path
         kv_cache_memory_fraction=kv_cache_memory_fraction,
         num_shard_layers=num_shard_layers,
         num_key_value_heads=num_key_value_heads,
-        head_dim=head_dim,
+        head_dim_k=head_dim,
+        head_dim_v=head_dim,
         elem_bytes=eb,
         available_cache_bytes=available_cache_bytes,
     )

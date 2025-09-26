@@ -80,6 +80,8 @@ class ParallaxDeepSeekV2Attention(MLXDeepseekV2Attention):
             final_keys_for_attn = mx.concatenate([k_nope, k_pe], axis=-1)
             final_values_for_attn = values
 
+        if mask is not None:
+            mask = mx.array(mask, dtype=queries.dtype)  # Ensure mask is the same dtype as queries
         output = scaled_dot_product_attention(
             queries,
             final_keys_for_attn,
@@ -90,6 +92,9 @@ class ParallaxDeepSeekV2Attention(MLXDeepseekV2Attention):
         )
 
         output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
+
+        # print(f"Output values shape: {values.shape}")
+        # print(f"Output k_nope shape: {(mx.concatenate([k_nope, k_pe], axis=-1)).shape}")
         return self.o_proj(output), (mx.concatenate([k_nope, k_pe], axis=-1), values)
 
 
