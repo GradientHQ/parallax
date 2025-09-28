@@ -29,12 +29,12 @@ import uvicorn
 import zmq
 import zmq.asyncio
 from fastapi.responses import ORJSONResponse, StreamingResponse
-from mlx_lm.tokenizer_utils import StreamingDetokenizer, load_tokenizer
+from mlx_lm.tokenizer_utils import StreamingDetokenizer
 from mlx_lm.utils import get_model_path, load_config
 from pydantic import BaseModel
 from starlette.datastructures import State
 
-from parallax.utils.tokenizer_utils import load_detokenizer
+from parallax.utils.tokenizer_utils import load_detokenizer, load_tokenizer
 from parallax.utils.utils import get_zmq_socket
 from parallax_utils.logging_config import get_logger
 

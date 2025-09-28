@@ -4,11 +4,11 @@ Unit tests for the Executor class, using Qwen3-0.6B-bf16.
 
 import pytest
 from mlx_lm.generate import generate
-from mlx_lm.tokenizer_utils import load_tokenizer
 from mlx_lm.utils import get_model_path, load_model
 
 from parallax.server.executor import Executor
 from parallax.server.request import InitialRequest
+from parallax.utils.tokenizer_utils import load_tokenizer
 
 MODEL_REPO = "mlx-community/Qwen3-0.6B-bf16"
 
