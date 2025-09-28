@@ -1,5 +1,6 @@
 import { Button, Stack, TextField } from '@mui/material';
-import type { FC } from 'react';
+import type { FC, KeyboardEventHandler } from 'react';
+import { useRefCallback } from '../../hooks';
 import { useChat, useCluster } from '../../services';
 import {
   IconArrowBackUp,
@@ -18,6 +19,13 @@ export const ChatInput: FC = () => {
   ] = useCluster();
   const [{ input, status }, { setInput, generate, stop, clear }] = useChat();
 
+  const onKeyDown = useRefCallback<KeyboardEventHandler>((e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      generate();
+    }
+  });
+
   return (
     <Stack>
       <Stack direction='row' sx={{ gap: 1, p: 1 }}>
@@ -30,6 +38,7 @@ export const ChatInput: FC = () => {
         maxRows={4}
         placeholder='Enter your system prompt here...'
         fullWidth
+        onKeyDown={onKeyDown}
         slotProps={{
           input: {
             sx: { flexDirection: 'column' },
