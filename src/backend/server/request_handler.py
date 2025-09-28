@@ -33,7 +33,7 @@ class RequestHandler:
     async def _forward_request(
         self, endpoint: str, request_data: Dict, request_id: str, received_ts: int
     ):
-        logger.info(
+        logger.debug(
             f"Forwarding request {request_id} to endpoint {endpoint}; stream={request_data.get('stream', False)}"
         )
         if (
@@ -51,7 +51,7 @@ class RequestHandler:
         while attempts < self.MAX_ROUTING_RETRY:
             try:
                 routing_table = self.scheduler_manage.get_routing_table(request_id, received_ts)
-                logger.info(
+                logger.debug(
                     f"get_routing_table for request {request_id} return: {routing_table} (attempt {attempts+1})"
                 )
             except Exception as e:
@@ -89,7 +89,7 @@ class RequestHandler:
 
         request_data["routing_table"] = routing_table
         call_url = self.scheduler_manage.get_call_url_by_node_id(routing_table[0])
-        logger.info(
+        logger.debug(
             f"Resolved call_url for request {request_id}: node={routing_table[0]} -> {call_url}"
         )
 
@@ -101,10 +101,10 @@ class RequestHandler:
 
         url = call_url + endpoint
         is_stream = request_data.get("stream", False)
-        logger.info(f"POST upstream: url={url}, stream={is_stream}")
+        logger.debug(f"POST upstream: url={url}, stream={is_stream}")
 
         async def _process_upstream_response(response: aiohttp.ClientResponse):
-            logger.info(f"post: {request_id}, code: {response.status}, params: {request_data}")
+            logger.debug(f"post: {request_id}, code: {response.status}, params: {request_data}")
             if response.status != 200:
                 error_text = await response.text()
                 error_msg = (
@@ -132,14 +132,14 @@ class RequestHandler:
                     "Cache-Control": "no-cache",
                 },
             )
-            logger.info(f"Streaming response initiated for {request_id}")
+            logger.debug(f"Streaming response initiated for {request_id}")
             return resp
         else:
             async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
                 async with session.post(url, json=request_data) as response:
                     await _process_upstream_response(response)
                     result = await response.json()
-                    logger.info(f"Non-stream response completed for {request_id}")
+                    logger.debug(f"Non-stream response completed for {request_id}")
                     return JSONResponse(content=result)
 
     async def v1_completions(self, request_data: Dict, request_id: str, received_ts: int):

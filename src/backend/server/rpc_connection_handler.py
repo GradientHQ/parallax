@@ -28,14 +28,14 @@ class RPCConnectionHandler(ConnectionHandler):
 
     @rpc_stream
     def node_join(self, message):
-        logger.info(f"receive node_join request: {message}")
+        logger.debug(f"receive node_join request: {message}")
         try:
             node = self.build_node(message)
             self.call_url_map[node.node_id] = message.get("call_url")
             self.scheduler.enqueue_join(node)
 
             response = self.wait_layer_allocation(node.node_id, wait_seconds=300)
-            logger.info(f"node_join response: {response}")
+            logger.debug(f"node_join response: {response}")
             return response
         except Exception as e:
             logger.exception(f"node_join error: {e}")
@@ -43,7 +43,7 @@ class RPCConnectionHandler(ConnectionHandler):
 
     @rpc_method
     def node_leave(self, message):
-        logger.info(f"receive node_leave request: {message}")
+        logger.debug(f"receive node_leave request: {message}")
         try:
             node = self.build_node(message)
             self.scheduler.enqueue_leave(node.node_id)

@@ -134,7 +134,7 @@ class BaseLayerAllocator:
             layer_load = LayerLoad(layer_id=layer_id, current_kv_size=0)
             self.layer_to_load[layer_id] = layer_load
         self._update_layer_loads_heap()
-        logger.info(
+        logger.debug(
             "Initialized LayerAllocator with %d nodes for %d total layers",
             len(self.nodes),
             self.num_total_layers,
@@ -170,7 +170,7 @@ class BaseLayerAllocator:
         self.node_id_to_node[node.node_id] = node
         node.set_layer_allocation(start_layer, end_layer)
         self.node_allocation[node.node_id] = (start_layer, end_layer)
-        logger.info("Allocated node %s to layers [%d, %d)", node.node_id, start_layer, end_layer)
+        logger.debug("Allocated node %s to layers [%d, %d)", node.node_id, start_layer, end_layer)
         if start_layer == 0:
             self.embedding_node_ids.append(node.node_id)
         if end_layer == self.num_total_layers:
@@ -186,7 +186,7 @@ class BaseLayerAllocator:
         if node.start_layer is None or node.end_layer is None:
             raise ValueError("Node must have start_layer and end_layer")
         start_layer, end_layer = node.start_layer, node.end_layer
-        logger.info(
+        logger.debug(
             "Deallocating node %s from layers [%d, %d)", node.node_id, start_layer, end_layer
         )
         if node.node_id in self.node_allocation:
@@ -208,11 +208,11 @@ class BaseLayerAllocator:
             self.node_id_to_node[node.node_id] = node
         # Keep order deterministic without rebinding the list reference
         self.nodes.sort(key=lambda node: node.get_decoder_layer_capacity(), reverse=True)
-        logger.info("Declared node %s (total declared: %d)", node.node_id, len(self.nodes))
+        logger.debug("Declared node %s (total declared: %d)", node.node_id, len(self.nodes))
 
     def join(self, node: Node) -> None:
         """Dynamically assign a new node based on lightest layers."""
-        logger.info("Joining node dynamically: %s", node.node_id)
+        logger.debug("Joining node dynamically: %s", node.node_id)
         self.declare(node)
         lightest_layer = self.get_lightest_layer()
         if lightest_layer is None:
@@ -222,7 +222,7 @@ class BaseLayerAllocator:
         start_layer = lightest_layer.layer_id
         # Greedily assign layers that the node can host
         end_layer = self._adjust_end_layer_for_tail(node, start_layer)
-        logger.info(
+        logger.debug(
             "Dynamic assignment candidate for %s: start=%d end=%d",
             node.node_id,
             start_layer,
@@ -235,7 +235,7 @@ class BaseLayerAllocator:
         node = self.node_id_to_node.get(node_id)
         if node is None:
             raise ValueError(f"Node {node_id} not found in allocation")
-        logger.info("Node leaving allocator: %s", node_id)
+        logger.debug("Node leaving allocator: %s", node_id)
         self.deallocate(node)
         del self.node_id_to_node[node_id]
         # Ensure the shared nodes list is updated
@@ -252,16 +252,16 @@ class BaseLayerAllocator:
         assigns such nodes one-by-one using the same policy as dynamic `join`:
         repeatedly host the lightest layers to improve replication and balance.
         """
-        logger.info("Allocating left-over nodes (unassigned after global allocation)")
+        logger.debug("Allocating left-over nodes (unassigned after global allocation)")
         # Iterate in capacity order for determinism and better packing
         for node in sorted(self.nodes, key=lambda n: n.get_decoder_layer_capacity(), reverse=True):
             if node.node_id not in self.node_allocation:
                 try:
-                    logger.info("Attempting left-over allocation for %s", node.node_id)
+                    logger.debug("Attempting left-over allocation for %s", node.node_id)
                     self.join(node)
                 except Exception:
                     # Best-effort: if no layers can be assigned, skip
-                    logger.info(
+                    logger.debug(
                         "Left-over allocation skipped for %s (no assignable layers)", node.node_id
                     )
                     continue
@@ -304,7 +304,7 @@ class BaseLayerAllocator:
         coefficient_of_variation = std_dev / avg_load
 
         decision = coefficient_of_variation > self.rebalance_threshold
-        logger.info(
+        logger.debug(
             "Global rebalance check: cv=%.4f threshold=%.4f -> %s",
             coefficient_of_variation,
             self.rebalance_threshold,
@@ -647,7 +647,7 @@ class GreedyLayerAllocator(BaseLayerAllocator):
         Builds pipelines from the sorted nodes and uses `adjust_pipeline_layers`
         to assign contiguous layer ranges on each pipeline.
         """
-        logger.info(
+        logger.debug(
             "[Greedy] Starting global_allocation with %d nodes for %d layers",
             len(self.nodes),
             self.model_info.num_layers,
@@ -668,7 +668,7 @@ class GreedyLayerAllocator(BaseLayerAllocator):
                 node.get_decoder_layer_capacity() for node in available_nodes
             )
             if total_remaining_capacity < num_total_layers:
-                logger.info(
+                logger.debug(
                     "[Greedy] Remaining capacity %d < total layers %d; stop",
                     total_remaining_capacity,
                     num_total_layers,
@@ -723,7 +723,7 @@ class GreedyLayerAllocator(BaseLayerAllocator):
 
             if remaining_layers <= 0 and pipeline_nodes:
                 # Assign layers within this pipeline in-place
-                logger.info(
+                logger.debug(
                     "[Greedy] Built pipeline with %d nodes; adjusting layers",
                     len(pipeline_nodes),
                 )
@@ -734,17 +734,17 @@ class GreedyLayerAllocator(BaseLayerAllocator):
                 any_assigned = True
             else:
                 # Cannot form a complete pipeline with remaining nodes
-                logger.info("[Greedy] Unable to form complete pipeline; stopping")
+                logger.debug("[Greedy] Unable to form complete pipeline; stopping")
                 break
 
         if not any_assigned or not self.has_full_pipeline():
-            logger.info("[Greedy] global_allocation produced no full pipeline")
+            logger.debug("[Greedy] global_allocation produced no full pipeline")
             return False
         # Assign any nodes that were left unallocated using dynamic policy
         if self.assign_left_over_nodes:
-            logger.info("[Greedy] Assigning left-over nodes")
+            logger.debug("[Greedy] Assigning left-over nodes")
             self.allocate_left_over_nodes()
-        logger.info("[Greedy] global_allocation completed successfully")
+        logger.debug("[Greedy] global_allocation completed successfully")
         return True
 
 
@@ -804,7 +804,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
         self._path: Dict[Tuple[int, Tuple[int, ...], int], Tuple] = {}
 
     def global_allocation(self) -> bool:
-        logger.info(
+        logger.debug(
             "[DP] Starting global_allocation with %d nodes for %d layers",
             len(self.nodes),
             self.model_info.num_layers,
@@ -814,7 +814,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
         total_cap = sum(node.get_decoder_layer_capacity() for node in self.nodes)
 
         if num_layers <= 0 or num_nodes == 0 or total_cap < num_layers:
-            logger.info(
+            logger.debug(
                 "[DP] Insufficient resources: nodes=%d, layers=%d, total_cap=%d",
                 num_nodes,
                 num_layers,
@@ -923,7 +923,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
                     best_path = dict(path)
 
         if best_num_pipes is None or best_num_pipes == 0:
-            logger.info("[DP] Could not find a feasible number of pipelines")
+            logger.debug("[DP] Could not find a feasible number of pipelines")
             return False
         self._path = best_path
         pipelines = self._backtrack(best_num_pipes, num_nodes)
@@ -932,21 +932,21 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
         for pl_nodes in pipelines:
             if not pl_nodes:
                 continue
-            logger.info("[DP] Adjusting pipeline with %d nodes", len(pl_nodes))
+            logger.debug("[DP] Adjusting pipeline with %d nodes", len(pl_nodes))
             self.adjust_pipeline_layers(pl_nodes, assume_sorted=False)
         # Assign any nodes that were left unallocated using dynamic policy
         if self.assign_left_over_nodes:
-            logger.info("[DP] Assigning left-over nodes")
+            logger.debug("[DP] Assigning left-over nodes")
             self.allocate_left_over_nodes()
         if not self.has_full_pipeline():
-            logger.info("[DP] Allocation did not produce a full pipeline")
+            logger.debug("[DP] Allocation did not produce a full pipeline")
             return False
-        logger.info("[DP] global_allocation completed successfully")
+        logger.debug("[DP] global_allocation completed successfully")
         return True
 
     def _backtrack(self, best_num_pipes: int, num_nodes: int) -> List[List[Node]]:
         # Reconstruct pipelines
-        logger.info("[DP] Backtracking to construct %d pipelines", best_num_pipes)
+        logger.debug("[DP] Backtracking to construct %d pipelines", best_num_pipes)
         pipelines: List[List[Node]] = [[] for _ in range(best_num_pipes)]
         # (residual, nodes list)
         open_list: List[Tuple[int, List[Node]]] = []

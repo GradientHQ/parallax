@@ -29,15 +29,15 @@ if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)
     try:
         args = parse_args()
-        logger.info(f"args: {args}")
+        logger.debug(f"args: {args}")
 
         args.recv_from_peer_addr = f"ipc://{tempfile.NamedTemporaryFile().name}"
         args.send_to_peer_addr = f"ipc://{tempfile.NamedTemporaryFile().name}"
         args.executor_input_ipc = f"ipc://{tempfile.NamedTemporaryFile().name}"
         args.executor_output_ipc = f"ipc://{tempfile.NamedTemporaryFile().name}"
 
-        logger.info(f"executor_input_addr: {args.executor_input_ipc}")
-        logger.info(f"executor_output_addr: {args.executor_output_ipc}")
+        logger.debug(f"executor_input_addr: {args.executor_input_ipc}")
+        logger.debug(f"executor_output_addr: {args.executor_output_ipc}")
         gradient_server = None
         if args.scheduler_addr is None:
             executor = Executor.create_from_args(args)
@@ -82,7 +82,7 @@ if __name__ == "__main__":
             )
             args.start_layer = gradient_server.block_start_index
             args.end_layer = gradient_server.block_end_index
-            logger.info(
+            logger.debug(
                 f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}"
             )
             gradient_server.status = ServerState.INITIALIZING
@@ -97,7 +97,7 @@ if __name__ == "__main__":
                 gradient_server.status = ServerState.READY
             executor.run_loop()
         except KeyboardInterrupt:
-            logger.info("Received interrupt signal, shutting down...")
+            logger.debug("Received interrupt signal, shutting down...")
         finally:
             if gradient_server is not None:
                 gradient_server.shutdown()
