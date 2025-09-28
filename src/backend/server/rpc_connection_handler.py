@@ -46,7 +46,12 @@ class RPCConnectionHandler(ConnectionHandler):
         logger.info(f"receive node_join request: {message}")
         try:
             node = self.build_node(message)
-            node_ip = self.lattica_instance.get_ip(node.node_id)
+            
+            try:
+                node_ip = self.lattica_instance.get_ip(node.node_id)
+            except Exception as e:
+                logger.warning(f"Failed to get ip for {node.node_id}: {e}, using 127.0.0.1")
+                node_ip = "127.0.0.1"
             self.call_url_map[node.node_id] = f"http://{node_ip}:{message.get('http_port')}"
             self.scheduler.enqueue_join(node)
 
