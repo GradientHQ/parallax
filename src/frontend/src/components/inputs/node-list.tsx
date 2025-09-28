@@ -117,7 +117,7 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
     <ListItem
       component={variant === 'list' ? Paper : Box}
       variant='outlined'
-      sx={{ opacity, padding: variant === 'menu' ? 0 : undefined }}
+      sx={{ opacity, padding: variant === 'menu' ? 0 : undefined, backgroundColor: 'transparent' }}
     >
       <ListItemIcon
         sx={{

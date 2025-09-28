@@ -10,7 +10,7 @@ export interface MainLayoutProps {
 }
 
 const MainLayoutRoot = styled(Stack)(({ theme }) => {
-  const { spacing } = theme;
+  const { palette, spacing } = theme;
   return {
     width: '100%',
     height: '100%',
@@ -19,6 +19,7 @@ const MainLayoutRoot = styled(Stack)(({ theme }) => {
     gap: spacing(3),
     padding: spacing(3),
     overflow: 'hidden',
+    backgroundColor: palette.grey[100],
   };
 });
 
