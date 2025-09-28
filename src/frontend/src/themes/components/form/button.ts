@@ -51,7 +51,7 @@ const SIZES: readonly NonNullable<ButtonProps['size']>[] = ['small', 'medium', '
 
 const SIZE_REM_MAP: Record<NonNullable<ButtonProps['size']>, number> = INPUT_SIZE_REM_MAP;
 
-const MIN_WIDTH_MULTIPLY = 2;
+const MIN_WIDTH_MULTIPLY = 3 / 2.25;
 
 const SIZE_PADDING_INLINE_REM_MAP: Record<NonNullable<ButtonProps['size']>, number> = {
   small: 0.875,
