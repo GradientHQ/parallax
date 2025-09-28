@@ -107,9 +107,9 @@ parallax join bash scripts/join.sh -m {model-name} -s {scheduler-address}
 parallax join bash scripts/join.sh -m Qwen/Qwen3-0.6B -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
 ```
 Run join command on each distributed nodes.
-Wait for all nodes ready.
+Wait until all nodes are ready.
 #### Step 4: Chat
-Test chat like show blow
+Test chat as shown below
 ![Chat](docs/images/chat.png)
 
 ### Without frontend
