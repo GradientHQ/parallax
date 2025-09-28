@@ -48,7 +48,8 @@ class RPCConnectionHandler(ConnectionHandler):
             node = self.build_node(message)
 
             try:
-                node_ip = self.lattica_instance.get_ip(node.node_id)
+                node_ip = self.lattica_instance.get_peer_addresses(node.node_id)[0].split("/")[2]
+                logger.info(f"get ip for {node.node_id}: {node_ip}")
             except Exception as e:
                 logger.warning(f"Failed to get ip for {node.node_id}: {e}, using 127.0.0.1")
                 node_ip = "127.0.0.1"
