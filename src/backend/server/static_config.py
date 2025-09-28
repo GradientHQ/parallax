@@ -29,20 +29,16 @@ MODEL_LIST = [
     "meta-llama/Llama-3.2-3B-Instruct",
 ]
 
-NODE_JOIN_COMMAND_LOCAL_NETWORK_LINUX_MAC = (
-    """bash scripts/join.sh -m {model_name} -s {scheduler_addr}"""
-)
+NODE_JOIN_COMMAND_LOCAL_NETWORK_LINUX_MAC = """bash scripts/join.sh -s {scheduler_addr}"""
 
-NODE_JOIN_COMMAND_PUBLIC_NETWORK_LINUX_MAC = (
-    """bash scripts/join.sh -m {model_name} -s {scheduler_addr}"""
-)
+NODE_JOIN_COMMAND_PUBLIC_NETWORK_LINUX_MAC = """bash scripts/join.sh -s {scheduler_addr}"""
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK_WINDOWS = (
-    """parallax join bash scripts/join.sh -m {model_name} -s {scheduler_addr}"""
+    """parallax join bash scripts/join.sh -s {scheduler_addr}"""
 )
 
 NODE_JOIN_COMMAND_PUBLIC_NETWORK_WINDOWS = (
-    """parallax join bash scripts/join.sh -m {model_name} -s {scheduler_addr}"""
+    """parallax join bash scripts/join.sh -s {scheduler_addr}"""
 )
 
 
@@ -88,24 +84,24 @@ def get_model_list():
     return MODEL_LIST
 
 
-def get_node_join_command(model_name, scheduler_addr, is_local_network):
-    if model_name and scheduler_addr:
+def get_node_join_command(scheduler_addr, is_local_network):
+    if scheduler_addr:
         if is_local_network:
             return {
                 "linux/mac": NODE_JOIN_COMMAND_LOCAL_NETWORK_LINUX_MAC.format(
-                    model_name=model_name, scheduler_addr=scheduler_addr
+                    scheduler_addr=scheduler_addr
                 ),
                 "windows": NODE_JOIN_COMMAND_LOCAL_NETWORK_WINDOWS.format(
-                    model_name=model_name, scheduler_addr=scheduler_addr
+                    scheduler_addr=scheduler_addr
                 ),
             }
         else:
             return {
                 "linux/mac": NODE_JOIN_COMMAND_PUBLIC_NETWORK_LINUX_MAC.format(
-                    model_name=model_name, scheduler_addr=scheduler_addr
+                    scheduler_addr=scheduler_addr
                 ),
                 "windows": NODE_JOIN_COMMAND_PUBLIC_NETWORK_WINDOWS.format(
-                    model_name=model_name, scheduler_addr=scheduler_addr
+                    scheduler_addr=scheduler_addr
                 ),
             }
     else:

@@ -64,13 +64,12 @@ async def scheduler_init(raw_request: Request):
 
 @app.get("/node/join/command")
 async def node_join_command():
-    model_name = scheduler_manage.get_model_name()
     is_local_network = scheduler_manage.get_is_local_network()
 
     return JSONResponse(
         content={
             "type": "node_join_command",
-            "data": get_node_join_command(model_name, "${scheduler-addr}", is_local_network),
+            "data": get_node_join_command("${scheduler-addr}", is_local_network),
         },
         status_code=200,
     )

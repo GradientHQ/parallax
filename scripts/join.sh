@@ -1,11 +1,15 @@
 #!/bin/bash
+source scripts/check.sh
+
+if [ $? -ne 0 ]; then
+    exit 1
+fi
 
 helpFunction()
 {
    echo ""
-   echo "Usage: $0 -s SCHEDULER_ADDR -m MODEL_NAME"
+   echo "Usage: $0 -s SCHEDULER_ADDR"
    echo -e "\t-s Description of what is SCHEDULER_ADDR"
-   echo -e "\t-m Description of what is MODEL_NAME"
    exit 1 # Exit script after printing help
 }
 
@@ -13,13 +17,12 @@ while getopts "s:m:i:" opt
 do
    case "$opt" in
       s ) SCHEDULER_ADDR="$OPTARG" ;;
-      m ) MODEL_NAME="$OPTARG" ;;
       ? ) helpFunction ;; # Print helpFunction in case parameter is non-existent
    esac
 done
 
 # Print helpFunction in case parameters are empty
-if [ -z "$SCHEDULER_ADDR" ] || [ -z "$MODEL_NAME" ]
+if [ -z "$SCHEDULER_ADDR" ]
 then
    echo "Some or all of the parameters are empty";
    helpFunction
@@ -27,12 +30,10 @@ fi
 
 # Begin script in case all parameters are correct
 echo "$SCHEDULER_ADDR"
-echo "$MODEL_NAME"
 
 export SGL_ENABLE_JIT_DEEPGEMM=0
 
 python3 src/parallax/launch.py \
-          --model-path $MODEL_NAME \
           --max-num-tokens-per-batch 4096 \
           --max-sequence-length 2048 \
           --max-batch-size 8 \
