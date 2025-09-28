@@ -80,7 +80,7 @@ const ChatMessage: FC<{ message: ChatMessage }> = memo(({ message }) => {
 
   return (
     <Stack direction='row' sx={{ width: '100%', justifyContent }}>
-      <Stack sx={{ width: '35rem', gap: 1 }}>
+      <Stack sx={{ maxWidth: '100%', gap: 1 }}>
         {nodeContent}
 
         <Stack key='actions' direction='row' sx={{ justifyContent, gap: 2, color: 'grey.600' }}>
