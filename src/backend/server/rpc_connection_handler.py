@@ -2,7 +2,6 @@ import time
 
 from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream
 
-from backend.server.static_config import get_model_info
 from parallax_utils.logging_config import get_logger
 from scheduling.node import Node, NodeHardwareInfo
 from scheduling.scheduler import Scheduler
@@ -37,7 +36,6 @@ class RPCConnectionHandler(ConnectionHandler):
         #         "memory_gb": 100,
         #         "memory_bandwidth_gbps": 100,
         #     },
-        #     "model_name": "",
         #     "kv_cache_ratio": 0.3,
         #     "param_hosting_ratio": 0.5,
         #     "max_concurrent_requests": 16,
