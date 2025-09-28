@@ -265,7 +265,9 @@ class Scheduler:
         if node_id not in self.layer_allocator.node_id_to_node:
             raise ValueError(f"Node {node_id} not found in nodes")
         node = self.node_id_to_node[node_id]
-        logger.debug("Leaving node %s (start=%s, end=%s)", node_id, node.start_layer, node.end_layer)
+        logger.debug(
+            "Leaving node %s (start=%s, end=%s)", node_id, node.start_layer, node.end_layer
+        )
         self.layer_allocator.leave(node_id)
         if self.layer_allocator.should_global_rebalance():
             logger.debug("Global rebalance triggered due to node leave")
