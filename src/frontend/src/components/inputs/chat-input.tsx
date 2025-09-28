@@ -36,7 +36,7 @@ export const ChatInput: FC = () => {
         onChange={(event) => setInput(event.target.value)}
         multiline
         maxRows={4}
-        placeholder='Enter your system prompt here...'
+        placeholder='How can Gradient help?'
         fullWidth
         onKeyDown={onKeyDown}
         slotProps={{
