@@ -28,9 +28,9 @@ export const ChatInput: FC = () => {
 
   return (
     <Stack data-status={status}>
-      <Stack direction='row' sx={{ gap: 1, p: 1 }}>
+      {/* <Stack direction='row' sx={{ gap: 1, p: 1 }}>
         {modelName}
-      </Stack>
+      </Stack> */}
       <TextField
         value={input}
         onChange={(event) => setInput(event.target.value)}
