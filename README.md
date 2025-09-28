@@ -31,7 +31,7 @@ Below are installation methods for different operating systems.
 
 |  Operating System  |  Windows App  |  From Source | Docker |
 |:-------------|:----------------------------:|:----------------------------:|:----------------------------:|
-|Windows       | ✅️ | Not recommended | Not recommended |
+|Windows       | ✅️ | Not recommended | Not Recommended |
 |Linux | ❌️ | ✅️ | ✅️ |
 |macOS | ❌️ | ✅️ | ❌️ |
 
@@ -56,7 +56,7 @@ pip install -e '.[dev]'
 ```
 
 ### Windows Application
-[Click here](https://github.com/GradientHQ/parallax/windows/Gradient_Parallax_PC_Setup_v1.0.0.0) to download latest Windows installer.
+[Click here]() to download latest Windows application.
 
 After installing .exe, right click Windows start button and click ```Windows Terminal(Admin)``` to start a Powershell console as administrator.
 
@@ -103,15 +103,15 @@ Select model config and click continue.
 This page will show the join command like blow.
 - For Linux/macOS:
 ```sh
-bash scripts/join.sh -m {model-name} -s {scheduler-address}
+bash scripts/join.sh -s {scheduler-address}
 # example
-bash scripts/join.sh -m Qwen/Qwen3-0.6B -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
+bash scripts/join.sh -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
 ```
 - For Windows:
 ```sh
-parallax join bash scripts/join.sh -m {model-name} -s {scheduler-address}
+parallax join bash scripts/join.sh -s {scheduler-address}
 # example
-parallax join bash scripts/join.sh -m Qwen/Qwen3-0.6B -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
+parallax join bash scripts/join.sh -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
 ```
 Run join command on each distributed nodes.
 Wait until all nodes are ready.
@@ -123,25 +123,25 @@ Test chat as shown below
 #### Step 1: Launch scheduler
 First launch our scheduler on the main node.
 ```sh
-bash scripts/launch.sh -m {model-name} -n {number-of-worker-nodes}
+bash scripts/start.sh -m {model-name} -n {number-of-worker-nodes}
 ```
 For example:
 ```sh
-bash scripts/launch.sh -m Qwen/Qwen3-0.6B -n 2
+bash scripts/start.sh -m Qwen/Qwen3-0.6B -n 2
 ```
 Please notice and record the scheduler ip4 address generated in the terminal.
 
 #### Step 2: Join each distributed nodes
 For each distributed nodes including the main node, open a terminal and join the server with the scheduler address.
 ```sh
-bash scripts/join.sh -m {model-name} -s {scheduler-address}
+bash scripts/join.sh -s {scheduler-address}
 ```
 For example:
 ```sh
 # first node
-bash scripts/join.sh -m Qwen/Qwen3-0.6B -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
+bash scripts/join.sh -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
 # second node
-bash scripts/join.sh -m Qwen/Qwen3-0.6B -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
+bash scripts/join.sh -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
 ```
 
 #### Step 3: Call chat api with Scheduler
