@@ -33,6 +33,9 @@ dependencies = [
   "lattica @ git+https://github.com/GradientHQ/lattica.git#subdirectory=bindings/python",
 ]
 
+[project.scripts]
+parallax = "parallax.cli:main"
+
 [project.optional-dependencies]
 
 mac = [

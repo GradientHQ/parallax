@@ -86,12 +86,12 @@ For GPU devices, Parallax provides a docker environment for quick setup. Choose 
 First launch our scheduler on the main node.
 - For Linux/macOS:
 ```sh
-bash scripts/start.sh
+parallax run
 ```
 
 - For Windows, start Powershell console as administrator and run:
 ```sh
-parallx run
+parallax run
 ```
 
 #### Step 2: Select model config
@@ -103,15 +103,15 @@ Select model config and click continue.
 This page will show the join command like blow.
 - For Linux/macOS:
 ```sh
-bash scripts/join.sh -s {scheduler-address}
+parallax join -s {scheduler-address}
 # example
-bash scripts/join.sh -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
+parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
 ```
 - For Windows:
 ```sh
-parallax join bash scripts/join.sh -s {scheduler-address}
+parallax join -s {scheduler-address}
 # example
-parallax join bash scripts/join.sh -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
+parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
 ```
 Run join command on each distributed nodes.
 Wait until all nodes are ready.
@@ -123,25 +123,25 @@ Test chat as shown below
 #### Step 1: Launch scheduler
 First launch our scheduler on the main node.
 ```sh
-bash scripts/start.sh -m {model-name} -n {number-of-worker-nodes}
+parallax run -m {model-name} -n {number-of-worker-nodes}
 ```
 For example:
 ```sh
-bash scripts/start.sh -m Qwen/Qwen3-0.6B -n 2
+parallax run -m Qwen/Qwen3-0.6B -n 2
 ```
 Please notice and record the scheduler ip4 address generated in the terminal.
 
 #### Step 2: Join each distributed nodes
 For each distributed nodes including the main node, open a terminal and join the server with the scheduler address.
 ```sh
-bash scripts/join.sh -s {scheduler-address}
+parallax join -s {scheduler-address}
 ```
 For example:
 ```sh
 # first node
-bash scripts/join.sh -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
+parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
 # second node
-bash scripts/join.sh -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
+parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
 ```
 
 #### Step 3: Call chat api with Scheduler

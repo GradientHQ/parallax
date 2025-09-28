@@ -29,9 +29,9 @@ MODEL_LIST = [
     "meta-llama/Llama-3.2-3B-Instruct",
 ]
 
-NODE_JOIN_COMMAND_LOCAL_NETWORK_LINUX_MAC = """bash scripts/join.sh -s {scheduler_addr}"""
+NODE_JOIN_COMMAND_LOCAL_NETWORK_LINUX_MAC = """parallax join -s {scheduler_addr}"""
 
-NODE_JOIN_COMMAND_PUBLIC_NETWORK_LINUX_MAC = """bash scripts/join.sh -s {scheduler_addr}"""
+NODE_JOIN_COMMAND_PUBLIC_NETWORK_LINUX_MAC = """parallax join -s {scheduler_addr}"""
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK_WINDOWS = (
     """parallax join bash scripts/join.sh -s {scheduler_addr}"""
