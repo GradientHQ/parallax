@@ -144,7 +144,11 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
             gpuName: gpu_name,
             gpuMemory: gpu_memory,
           }));
-          return next;
+          if (JSON.stringify(next) !== JSON.stringify(prev)) {
+            debugLog('setNodeInfoList', next);
+            return next;
+          }
+          return prev;
         });
       }
     };
