@@ -56,7 +56,7 @@ pip install -e '.[dev]'
 ```
 
 ### Windows Application
-[Click here](https://github.com/GradientHQ/parallax/windows/Gradient_Parallax_PC_Setup_v1.0.0.0) to download latest Windows installer.
+[Click here](https://github.com/GradientHQ/parallax/blob/main/windows/Gradient_Parallax_PC_Setup_v1.0.0.0.exe) to download latest Windows installer.
 
 After installing .exe, right click Windows start button and click ```Windows Terminal(Admin)``` to start a Powershell console as administrator.
 
