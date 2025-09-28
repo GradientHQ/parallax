@@ -31,7 +31,7 @@ Below are installation methods for different operating systems.
 
 |  Operating System  |  Windows App  |  From Source | Docker |
 |:-------------|:----------------------------:|:----------------------------:|:----------------------------:|
-|Windows       | ✅️ | Not recommended | Not Recommended |
+|Windows       | ✅️ | Not recommended | Not recommended |
 |Linux | ❌️ | ✅️ | ✅️ |
 |macOS | ❌️ | ✅️ | ❌️ |
 
@@ -56,7 +56,7 @@ pip install -e '.[dev]'
 ```
 
 ### Windows Application
-[Click here]() to download latest Windows application.
+[Click here](https://github.com/GradientHQ/parallax/windows/Gradient_Parallax_PC_Setup_v1.0.0.0) to download latest Windows installer.
 
 After installing .exe, right click Windows start button and click ```Windows Terminal(Admin)``` to start a Powershell console as administrator.
 
