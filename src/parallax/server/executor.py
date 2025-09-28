@@ -100,7 +100,7 @@ class Executor:
     ):
         # Backend
         self.device = get_current_device()
-        logger.info(f"Executor initializing on device: {self.device}")
+        logger.debug(f"Executor initializing on device: {self.device}")
 
         # Sharded Model
         if self.device == "cuda":
@@ -108,7 +108,7 @@ class Executor:
 
             from parallax.sglang.model_runner import initialize_sgl_model_runner
 
-            logger.info(
+            logger.debug(
                 f"Initializing CUDA model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
             )
             self.model_runner, self.config, self.tokenizer = initialize_sgl_model_runner(
@@ -120,7 +120,7 @@ class Executor:
                 kv_block_size,
                 moe_runner_backend,
             )
-            logger.info(
+            logger.debug(
                 f"CUDA model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
             )
             # SGL KV Cache Manager is already initialized in ScheduleBatch
@@ -128,7 +128,7 @@ class Executor:
             self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
             self.cur_batch = None
         else:
-            logger.info(
+            logger.debug(
                 f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer})"
             )
             self.shard_loader = MLXModelLoader(
@@ -136,7 +136,7 @@ class Executor:
             )
             t0 = time.time()
             self.model_shard, self.config, self.tokenizer = self.shard_loader.load()
-            logger.info(
+            logger.debug(
                 f"MLX sharded model loaded in {(time.time() - t0) * 1000:.1f} ms; num_layers={self.config.get('num_hidden_layers')}"
             )
 
@@ -153,7 +153,7 @@ class Executor:
         self._decode_steps_since_metric = self.layer_latency_update_every
 
         self.dtype = get_device_dtype(dtype, self.device)
-        logger.info(
+        logger.debug(
             f"Executor dtype set to {dtype} (resolved={self.dtype}); shard_layers={self.num_shard_layers}"
         )
         self.num_key_value_heads = self.config.get("num_key_value_heads")
@@ -191,7 +191,7 @@ class Executor:
 
         if self.device == "mlx":
             # Other setup for MAC
-            logger.info(
+            logger.debug(
                 "Initializing KVCacheManager (mlx) with block_size=%d, layers=%d",
                 kv_block_size,
                 self.num_shard_layers,
@@ -238,7 +238,7 @@ class Executor:
             is_first_peer=self.is_first_peer,
             tokenizer=self.tokenizer,
         )
-        logger.info(
+        logger.debug(
             f"Scheduler initialized (max_batch_size={max_batch_size}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"
         )
 
@@ -284,7 +284,7 @@ class Executor:
 
                 # Check if this is an abort request
                 if isinstance(raw_request, dict) and raw_request.get("type") == "abort":
-                    logger.info(
+                    logger.debug(
                         f"Received abort request from HTTP for request ID: {raw_request.get('rid')}"
                     )
                     self.scheduler.cancel_request(raw_request.get("rid"))
@@ -387,7 +387,7 @@ class Executor:
             "lengths": torch.tensor(lengths, device=self.device),
             "requests": batched_requests,
         }
-        logger.info(f"Prepared CUDA prefill batch (size={batch_size})")
+        logger.debug(f"Prepared CUDA prefill batch (size={batch_size})")
         return ret
 
     def _prepare_cuda_decode_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
@@ -441,7 +441,7 @@ class Executor:
             "lengths": torch.tensor(lengths, device=self.device),
             "requests": batched_requests,
         }
-        logger.info(f"Prepared CUDA decode batch (size={batch_size})")
+        logger.debug(f"Prepared CUDA decode batch (size={batch_size})")
         return ret
 
     def _prepare_mlx_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
@@ -642,9 +642,9 @@ class Executor:
         if prefill_batch is None and decode_batch is None:
             return None
         if prefill_batch is not None:
-            logger.info(f"Prepared prefill batch with {len(prefill_batch['requests'])} requests.")
+            logger.debug(f"Prepared prefill batch with {len(prefill_batch['requests'])} requests.")
         if decode_batch is not None:
-            logger.info(f"Prepared decode batch with {len(decode_batch['requests'])} requests.")
+            logger.debug(f"Prepared decode batch with {len(decode_batch['requests'])} requests.")
         return {
             "prefill_batch": prefill_batch,
             "decode_batch": decode_batch,
@@ -732,7 +732,7 @@ class Executor:
 
                     # Check for termination.
                     if self.scheduler.check_and_update_request_status(original_req):
-                        logger.info(f"Releasing resources for finished request {req.request_id}")
+                        logger.debug(f"Releasing resources for finished request {req.request_id}")
                         release_cuda_request(self.running_batch, req.request_id)
                         if not self.is_last_peer:
                             self.finished_batch.append(req)
@@ -770,7 +770,7 @@ class Executor:
     def _handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
         if len(requests) > 0:
-            logger.info(f"Handling {len(requests)} requests.")
+            logger.debug(f"Handling {len(requests)} requests.")
         if not requests:
             return
 
@@ -811,7 +811,7 @@ class Executor:
                     # Check for termination.
                     if self.scheduler.check_and_update_request_status(original_req):
                         self.kv_cache_manager.release_request(original_req.request_id)
-                        logger.info(
+                        logger.debug(
                             f"Released resources for finished request {req.request_id}, "
                             f"kv cache manager has {self.kv_cache_manager.tokens_in_cache} tokens, "
                             f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
@@ -848,7 +848,7 @@ class Executor:
                         self.prefix_cache.evict_request(req.request_id)
 
                     self.kv_cache_manager.release_request(req.request_id)
-                    logger.info(
+                    logger.debug(
                         f"Released resources for finished request {req.request_id}, "
                         f"kv cache manager has {self.kv_cache_manager.tokens_in_cache} tokens, "
                         f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
@@ -1087,7 +1087,7 @@ class Executor:
 
     def run_loop(self):
         """The main loop of the executor."""
-        logger.info(
+        logger.debug(
             f"Executor for layers [{self.start_layer}, {self.end_layer}) starting run loop..."
         )
         while True:
@@ -1116,7 +1116,7 @@ class Executor:
             batch_to_process = self.scheduler.form_batch()
             if not batch_to_process:
                 continue
-            logger.info(f"Formed batch with {len(batch_to_process)} requests.")
+            logger.debug(f"Formed batch with {len(batch_to_process)} requests.")
 
             # 6. Process the batch
             try:
@@ -1165,7 +1165,7 @@ class Executor:
                                     request_to_proto(next_batch, self.device).SerializeToString(),
                                 ]
                             )
-                            logger.info(
+                            logger.debug(
                                 f"Processed batch of type {batch_type} with {len(next_batch)} requests "
                                 f"in {(time.time() - start_time) * 1000:.3f} ms"
                             )
@@ -1187,13 +1187,13 @@ class Executor:
 
     def shutdown(self):
         """Shuts down the executor."""
-        logger.info("Executor shutting down...")
+        logger.debug("Executor shutting down...")
         self.recv_from_peer_socket.close()
         self.send_to_peer_socket.close()
         self.recv_from_ipc_socket.close()
         self.send_to_ipc_socket.close()
         self.zmq_context.term()
-        logger.info("Executor shutdown complete.")
+        logger.debug("Executor shutdown complete.")
 
 
 def create_executor_config(args: argparse.Namespace):

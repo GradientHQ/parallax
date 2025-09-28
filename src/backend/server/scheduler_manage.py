@@ -49,7 +49,7 @@ class SchedulerManage:
         """
         Start the scheduler and the P2P service for RPC handling.
         """
-        logger.info(
+        logger.debug(
             f"SchedulerManage starting: model_name={model_name}, init_nodes_num={init_nodes_num}"
         )
         self.is_local_network = is_local_network
@@ -104,7 +104,7 @@ class SchedulerManage:
         Create the scheduler and start its background run loop if needed.
         """
         if self.scheduler is not None:
-            logger.info("Scheduler already started; skipping re-initialization")
+            logger.debug("Scheduler already started; skipping re-initialization")
             return
 
         self.model_name = model_name
@@ -121,13 +121,13 @@ class SchedulerManage:
             name="SchedulerMain",
             daemon=True,
         ).start()
-        logger.info("Scheduler background thread started (poll_interval=0.05)")
+        logger.debug("Scheduler background thread started (poll_interval=0.05)")
 
     def _start_lattica(self):
         """
         Initialize and start the Lattica P2P node used for RPCs.
         """
-        logger.info(
+        logger.debug(
             f"Starting Lattica with host_maddrs={self.host_maddrs}, mdns=False, dht_prefix={self.dht_prefix}"
         )
         self.lattica = (
@@ -150,13 +150,13 @@ class SchedulerManage:
             self.lattica.with_bootstraps(self.initial_peers)
 
         self.lattica.build()
-        logger.info("Lattica node built")
+        logger.debug("Lattica node built")
 
         self.connection_handler = RPCConnectionHandler(
             lattica=self.lattica,
             scheduler=self.scheduler,
         )
-        logger.info("RPCConnectionHandler initialized")
+        logger.debug("RPCConnectionHandler initialized")
 
     def get_routing_table(self, request_id, received_ts):
         """Block briefly until the scheduler assigns a routing path for the request.
@@ -166,7 +166,7 @@ class SchedulerManage:
         - []: decided but no capacity (pipelines full), return immediately
         - [..]: valid routing path, return immediately
         """
-        logger.info(f"Routing table requested for request_id={request_id}")
+        logger.debug(f"Routing table requested for request_id={request_id}")
         request = RequestSignal(request_id, received_ts)
         self.scheduler.receive_request(request)
 
@@ -177,11 +177,11 @@ class SchedulerManage:
 
         # Return the routing_table
         if request.routing_table is None:
-            logger.info(
+            logger.debug(
                 f"Routing table not ready after {(time.time() - start_time):.2f}s for request_id={request_id}"
             )
         else:
-            logger.info(
+            logger.debug(
                 f"Routing table resolved for request_id={request_id}: {request.routing_table}"
             )
         return request.routing_table
@@ -191,7 +191,7 @@ class SchedulerManage:
         Return whether a full pipeline has been allocated across joined nodes.
         """
         if self.scheduler is None:
-            logger.info("SchedulerManage status queried: waiting (scheduler not initialized)")
+            logger.debug("SchedulerManage status queried: waiting (scheduler not initialized)")
             return NODE_STATUS_WAITING
 
         # todo rebalance status
@@ -200,7 +200,7 @@ class SchedulerManage:
             if self.scheduler.layer_allocator.has_full_active_pipeline()
             else NODE_STATUS_WAITING
         )
-        logger.info(f"SchedulerManage status queried: {status}")
+        logger.debug(f"SchedulerManage status queried: {status}")
         return status
 
     def get_call_url_by_node_id(self, node_id):
@@ -208,5 +208,5 @@ class SchedulerManage:
         Lookup the HTTP endpoint for a given node id managed by the RPC layer.
         """
         url = self.connection_handler.get_call_url_by_node_id(node_id)
-        logger.info(f"Lookup call_url for node_id={node_id} -> {url}")
+        logger.debug(f"Lookup call_url for node_id={node_id} -> {url}")
         return url
