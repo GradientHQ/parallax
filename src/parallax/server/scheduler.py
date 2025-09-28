@@ -67,7 +67,7 @@ class Scheduler:
         self._last_dispatch_ts = time.time()
         # Track last reported running requests to avoid redundant metric updates
         self._last_reported_running_requests: int = 0
-        logger.info(
+        logger.debug(
             f"Scheduler initialized: max_batch_size={self.max_batch_size}, "
             f"max_num_tokens_per_batch={self.max_num_tokens_per_batch}"
         )
@@ -122,7 +122,7 @@ class Scheduler:
         _ = status  # status is used by the first peer's logic but not here.
         if request_id in self._running_requests:
             self._running_requests.pop(request_id)
-            logger.info(f"Evicted request {request_id} from scheduler.")
+            logger.debug(f"Evicted request {request_id} from scheduler.")
             # Update metrics only if running count changed since last report
             try:
                 curr = self.num_running_requests
@@ -139,7 +139,7 @@ class Scheduler:
         if request_id in self._running_requests:
             req = self._running_requests[request_id]
             req.abort = True
-            logger.info(f"Cancelled request {request_id} from scheduler.")
+            logger.debug(f"Cancelled request {request_id} from scheduler.")
         else:
             raise ValueError(f"Attempted to cancel non-existent request {request_id}.")
 
@@ -167,7 +167,7 @@ class Scheduler:
             finished = True
 
         if finished:
-            logger.info(f"Request {request.request_id} finished with status {request.status}.")
+            logger.debug(f"Request {request.request_id} finished with status {request.status}.")
             # Remove from running requests. The executor will handle KV cache release.
             self.evict_request(request.request_id)
 

@@ -1,15 +1,29 @@
+import asyncio
+import json
 import time
 import uuid
 
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from backend.server.request_handler import RequestHandler
 from backend.server.scheduler_manage import SchedulerManage
 from backend.server.server_args import parse_args
+from backend.server.static_config import get_model_list, get_node_join_command
 from parallax_utils.logging_config import get_logger
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 logger = get_logger(__name__)
 
@@ -17,14 +31,66 @@ scheduler_manage = None
 request_handler = RequestHandler()
 
 
-@app.get("/")
-async def get():
-    return {"message": "Hello, World!"}
+@app.get("/model/list")
+async def model_list():
+    return JSONResponse(
+        content={
+            "type": "model_list",
+            "data": get_model_list(),
+        },
+        status_code=200,
+    )
 
 
-@app.get("/hello")
-async def hello():
-    return {"message": "Hello, World!"}
+@app.post("/scheduler/init")
+async def scheduler_init(raw_request: Request):
+    request_data = await raw_request.json()
+    model_name = request_data.get("model_name")
+    init_nodes_num = request_data.get("init_nodes_num")
+    is_local_network = request_data.get("is_local_network")
+    if scheduler_manage.is_running():
+        # todo reinit
+        pass
+    else:
+        scheduler_manage.run(model_name, init_nodes_num, is_local_network)
+    return JSONResponse(
+        content={
+            "type": "scheduler_init",
+            "data": None,
+        },
+        status_code=200,
+    )
+
+
+@app.get("/node/join/command")
+async def node_join_command():
+    model_name = scheduler_manage.get_model_name()
+    is_local_network = scheduler_manage.get_is_local_network()
+
+    return JSONResponse(
+        content={
+            "type": "node_join_command",
+            "data": get_node_join_command(model_name, "${scheduler-addr}", is_local_network),
+        },
+        status_code=200,
+    )
+
+
+@app.get("/cluster/status")
+async def cluster_status():
+    async def stream_cluster_status():
+        while True:
+            yield json.dumps(scheduler_manage.get_cluster_status(), ensure_ascii=False) + "\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        stream_cluster_status(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.post("/v1/completions")
@@ -42,6 +108,9 @@ async def openai_v1_chat_completions(raw_request: Request):
     received_ts = time.time()
     return await request_handler.v1_chat_completions(request_data, request_id, received_ts)
 
+
+# mount the frontend
+app.mount("/", StaticFiles(directory="src/frontend/dist", html=True), name="static")
 
 if __name__ == "__main__":
     args = parse_args()
@@ -70,9 +139,6 @@ if __name__ == "__main__":
     init_nodes_num = args.init_nodes_num
     if model_name is not None and init_nodes_num is not None:
         scheduler_manage.run(model_name, init_nodes_num)
-    else:
-        logger.error("model_name and init_nodes_num are not set")
-        exit(1)
 
     port = args.port
 

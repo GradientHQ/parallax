@@ -100,7 +100,7 @@ class Executor:
     ):
         # Backend
         self.device = get_current_device()
-        logger.info(f"Executor initializing on device: {self.device}")
+        logger.debug(f"Executor initializing on device: {self.device}")
 
         # Sharded Model
         if self.device == "cuda":
@@ -108,7 +108,7 @@ class Executor:
 
             from parallax.sglang.model_runner import initialize_sgl_model_runner
 
-            logger.info(
+            logger.debug(
                 f"Initializing CUDA model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
             )
             self.model_runner, self.config, self.tokenizer = initialize_sgl_model_runner(
@@ -120,7 +120,7 @@ class Executor:
                 kv_block_size,
                 moe_runner_backend,
             )
-            logger.info(
+            logger.debug(
                 f"CUDA model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
             )
             # SGL KV Cache Manager is already initialized in ScheduleBatch
@@ -128,7 +128,7 @@ class Executor:
             self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
             self.cur_batch = None
         else:
-            logger.info(
+            logger.debug(
                 f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer})"
             )
             self.shard_loader = MLXModelLoader(
@@ -136,7 +136,7 @@ class Executor:
             )
             t0 = time.time()
             self.model_shard, self.config, self.tokenizer = self.shard_loader.load()
-            logger.info(
+            logger.debug(
                 f"MLX sharded model loaded in {(time.time() - t0) * 1000:.1f} ms; num_layers={self.config.get('num_hidden_layers')}"
             )
 
@@ -153,7 +153,7 @@ class Executor:
         self._decode_steps_since_metric = self.layer_latency_update_every
 
         self.dtype = get_device_dtype(dtype, self.device)
-        logger.info(
+        logger.debug(
             f"Executor dtype set to {dtype} (resolved={self.dtype}); shard_layers={self.num_shard_layers}"
         )
         self.num_key_value_heads = self.config.get("num_key_value_heads")
@@ -161,9 +161,24 @@ class Executor:
             "hidden_size"
         ) // self.config.get("num_attention_heads")
         self.enable_prefix_cache = enable_prefix_cache
-        logger.debug(
-            f"Model config: n_kv_heads={self.num_key_value_heads}, head_dim={self.head_dim}, tokenizer_pad={self.tokenizer.pad_token_id}"
+        self.linear_key_head_dim = self.config.get("linear_key_head_dim", None)
+        self.linear_value_head_dim = self.config.get("linear_value_head_dim", None)
+        self.linear_conv_kernel_dim = self.config.get("linear_conv_kernel_dim", None)
+        self.linear_num_key_heads = self.config.get("linear_num_key_heads", None)
+        self.linear_num_value_heads = self.config.get("linear_num_value_heads", None)
+        self.key_dim, self.value_dim, self.conv_dim = None, None, None
+        if self.linear_key_head_dim is not None and self.linear_num_key_heads is not None:
+            self.key_dim = self.linear_key_head_dim * self.linear_num_key_heads
+        if self.linear_value_head_dim is not None and self.linear_num_value_heads is not None:
+            self.value_dim = self.linear_value_head_dim * self.linear_num_value_heads
+        if self.key_dim is not None and self.value_dim is not None:
+            self.conv_dim = self.key_dim * 2 + self.value_dim
+        self.using_state_cache = (
+            self.linear_conv_kernel_dim is not None and self.conv_dim is not None
         )
+        # logger.debug(
+        #     f"Model config: n_kv_heads={self.num_key_value_heads}, head_dim={self.head_dim}, tokenizer_pad={self.tokenizer.pad_token_id}"
+        # )
 
         if self.tokenizer.pad_token_id is None:
             self.pad_token_id = self.tokenizer.eos_token_id
@@ -176,7 +191,7 @@ class Executor:
 
         if self.device == "mlx":
             # Other setup for MAC
-            logger.info(
+            logger.debug(
                 "Initializing KVCacheManager (mlx) with block_size=%d, layers=%d",
                 kv_block_size,
                 self.num_shard_layers,
@@ -188,6 +203,12 @@ class Executor:
                 num_layers=self.num_shard_layers,
                 dtype=self.dtype,
                 cache_memory_fraction=kv_cache_memory_fraction,
+                conv_dim=self.conv_dim if self.conv_dim and self.conv_dim > 0 else None,
+                conv_kernel_size=self.linear_conv_kernel_dim,
+                linear_k_dim=self.linear_key_head_dim,
+                linear_v_dim=self.linear_value_head_dim,
+                linear_num_k_heads=self.linear_num_key_heads,
+                linear_num_v_heads=self.linear_num_value_heads,
                 max_num_tokens=max_tokens_in_kv_pool,
             )
             mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
@@ -217,7 +238,7 @@ class Executor:
             is_first_peer=self.is_first_peer,
             tokenizer=self.tokenizer,
         )
-        logger.info(
+        logger.debug(
             f"Scheduler initialized (max_batch_size={max_batch_size}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"
         )
 
@@ -263,7 +284,7 @@ class Executor:
 
                 # Check if this is an abort request
                 if isinstance(raw_request, dict) and raw_request.get("type") == "abort":
-                    logger.info(
+                    logger.debug(
                         f"Received abort request from HTTP for request ID: {raw_request.get('rid')}"
                     )
                     self.scheduler.cancel_request(raw_request.get("rid"))
@@ -366,7 +387,7 @@ class Executor:
             "lengths": torch.tensor(lengths, device=self.device),
             "requests": batched_requests,
         }
-        logger.info(f"Prepared CUDA prefill batch (size={batch_size})")
+        logger.debug(f"Prepared CUDA prefill batch (size={batch_size})")
         return ret
 
     def _prepare_cuda_decode_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
@@ -420,7 +441,7 @@ class Executor:
             "lengths": torch.tensor(lengths, device=self.device),
             "requests": batched_requests,
         }
-        logger.info(f"Prepared CUDA decode batch (size={batch_size})")
+        logger.debug(f"Prepared CUDA decode batch (size={batch_size})")
         return ret
 
     def _prepare_mlx_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
@@ -512,6 +533,7 @@ class Executor:
             "lengths": mx.array(actual_lengths) if matched_prefix else mx.array(lengths),
             "mask": mask,
             "requests": batched_requests,
+            "state_cache": None,
         }
         logger.debug(
             f"Prepared MLX prefill batch (size={batch_size}, matched_prefix={matched_prefix})"
@@ -556,6 +578,8 @@ class Executor:
 
         k_caches = [kv[0] for kv in kv_cache_list]
         v_caches = [kv[1] for kv in kv_cache_list]
+        states0 = [kv[2] for kv in kv_cache_list]
+        states1 = [kv[3] for kv in kv_cache_list]
 
         k_batched, k_padding_mask = pad_inputs(0, k_caches, self.dtype)
         v_batched, _ = pad_inputs(0, v_caches, self.dtype)
@@ -570,12 +594,17 @@ class Executor:
 
         model_lengths = mx.array([kv[0].shape[2] for kv in kv_cache_list])
 
+        if self.using_state_cache:
+            states0 = mx.stack(states0, 0)
+            states1 = mx.stack(states1, 0)
+
         ret = {
             "h_or_tokens": padded_inputs,
             "cache": (k_batched, v_batched),
             "lengths": model_lengths,
             "mask": attention_mask,
             "requests": batched_requests,
+            "state_cache": (states0, states1),
         }
         logger.debug(f"Prepared MLX decode batch (size={batch_size})")
         return ret
@@ -613,9 +642,9 @@ class Executor:
         if prefill_batch is None and decode_batch is None:
             return None
         if prefill_batch is not None:
-            logger.info(f"Prepared prefill batch with {len(prefill_batch['requests'])} requests.")
+            logger.debug(f"Prepared prefill batch with {len(prefill_batch['requests'])} requests.")
         if decode_batch is not None:
-            logger.info(f"Prepared decode batch with {len(decode_batch['requests'])} requests.")
+            logger.debug(f"Prepared decode batch with {len(decode_batch['requests'])} requests.")
         return {
             "prefill_batch": prefill_batch,
             "decode_batch": decode_batch,
@@ -703,7 +732,7 @@ class Executor:
 
                     # Check for termination.
                     if self.scheduler.check_and_update_request_status(original_req):
-                        logger.info(f"Releasing resources for finished request {req.request_id}")
+                        logger.debug(f"Releasing resources for finished request {req.request_id}")
                         release_cuda_request(self.running_batch, req.request_id)
                         if not self.is_last_peer:
                             self.finished_batch.append(req)
@@ -741,7 +770,7 @@ class Executor:
     def _handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
         if len(requests) > 0:
-            logger.info(f"Handling {len(requests)} requests.")
+            logger.debug(f"Handling {len(requests)} requests.")
         if not requests:
             return
 
@@ -782,7 +811,7 @@ class Executor:
                     # Check for termination.
                     if self.scheduler.check_and_update_request_status(original_req):
                         self.kv_cache_manager.release_request(original_req.request_id)
-                        logger.info(
+                        logger.debug(
                             f"Released resources for finished request {req.request_id}, "
                             f"kv cache manager has {self.kv_cache_manager.tokens_in_cache} tokens, "
                             f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
@@ -819,7 +848,7 @@ class Executor:
                         self.prefix_cache.evict_request(req.request_id)
 
                     self.kv_cache_manager.release_request(req.request_id)
-                    logger.info(
+                    logger.debug(
                         f"Released resources for finished request {req.request_id}, "
                         f"kv cache manager has {self.kv_cache_manager.tokens_in_cache} tokens, "
                         f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
@@ -975,12 +1004,26 @@ class Executor:
         Process a batch of requests in MLX.
         """
         # Run model and get updated cache
-        hidden_states, (k_caches, v_caches) = self.model_shard(
-            h_or_tokens=prepared_inputs["h_or_tokens"],
-            cache=prepared_inputs["cache"],
-            lengths=prepared_inputs["lengths"],
-            mask=prepared_inputs["mask"],
-        )
+        if self.using_state_cache:
+            hidden_states, (k_caches, v_caches, states0, states1) = self.model_shard(
+                h_or_tokens=prepared_inputs["h_or_tokens"],
+                cache=prepared_inputs["cache"],
+                lengths=prepared_inputs["lengths"],
+                mask=prepared_inputs["mask"],
+                state_cache=prepared_inputs["state_cache"],
+                using_state_cache=self.using_state_cache,
+            )
+        else:
+            hidden_states, (k_caches, v_caches) = self.model_shard(
+                h_or_tokens=prepared_inputs["h_or_tokens"],
+                cache=prepared_inputs["cache"],
+                lengths=prepared_inputs["lengths"],
+                mask=prepared_inputs["mask"],
+                using_state_cache=self.using_state_cache,
+            )
+            states0, states1 = [None for _ in range(len(k_caches))], [
+                None for _ in range(len(k_caches))
+            ]
         # k_caches shape: (num_layers, B, num_kv_heads, L_padded, head_dim)
         logger.debug(
             f"Processed batch with {len(prepared_inputs['requests'])} requests, "
@@ -999,7 +1042,9 @@ class Executor:
                 lengths[i] = 1
             else:
                 continue
-        self.kv_cache_manager.update_requests(requests, k_caches, v_caches, lengths)
+        self.kv_cache_manager.update_requests(
+            requests, k_caches, v_caches, lengths, states0, states1
+        )
 
         # Update prefix cache.
         if self.enable_prefix_cache:
@@ -1042,7 +1087,7 @@ class Executor:
 
     def run_loop(self):
         """The main loop of the executor."""
-        logger.info(
+        logger.debug(
             f"Executor for layers [{self.start_layer}, {self.end_layer}) starting run loop..."
         )
         while True:
@@ -1071,7 +1116,7 @@ class Executor:
             batch_to_process = self.scheduler.form_batch()
             if not batch_to_process:
                 continue
-            logger.info(f"Formed batch with {len(batch_to_process)} requests.")
+            logger.debug(f"Formed batch with {len(batch_to_process)} requests.")
 
             # 6. Process the batch
             try:
@@ -1120,7 +1165,7 @@ class Executor:
                                     request_to_proto(next_batch, self.device).SerializeToString(),
                                 ]
                             )
-                            logger.info(
+                            logger.debug(
                                 f"Processed batch of type {batch_type} with {len(next_batch)} requests "
                                 f"in {(time.time() - start_time) * 1000:.3f} ms"
                             )
@@ -1142,13 +1187,13 @@ class Executor:
 
     def shutdown(self):
         """Shuts down the executor."""
-        logger.info("Executor shutting down...")
+        logger.debug("Executor shutting down...")
         self.recv_from_peer_socket.close()
         self.send_to_peer_socket.close()
         self.recv_from_ipc_socket.close()
         self.send_to_ipc_socket.close()
         self.zmq_context.term()
-        logger.info("Executor shutdown complete.")
+        logger.debug("Executor shutdown complete.")
 
 
 def create_executor_config(args: argparse.Namespace):

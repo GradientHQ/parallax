@@ -6,6 +6,7 @@ from typing import List, Tuple
 
 import mlx.core as mx
 import pytest
+from mlx_lm.models.base import create_attention_mask
 from mlx_lm.tokenizer_utils import load_tokenizer
 from mlx_lm.utils import get_model_path, load_model
 
@@ -64,7 +65,25 @@ def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
         ref_pad_token_id = ref_tokenizer.eos_token_id
     ref_ids, ref_mask = pad_inputs(ref_pad_token_id, ref_ids)
 
-    # Forward pass through the reference model
+    def _call_with_mask(self, inputs, cache=None, mask=None):
+        h = self.model.embed_tokens(inputs)
+        if cache is None:
+            cache = [None] * len(self.layers)
+        if mask is None:
+            mask_inner = create_attention_mask(h, cache[0])
+        else:
+            mask_inner = mask
+        for layer, c in zip(self.layers, cache):
+            h = layer(h, mask_inner, c)
+        h = self.model.norm(h)
+        if self.args.tie_word_embeddings:
+            h = self.model.embed_tokens.as_linear(h)
+        else:
+            h = self.lm_head(h)
+        return h
+
+    type(ref_model).__call__ = _call_with_mask
+
     ref_out = ref_model(ref_ids, mask=ref_mask)
 
     mask = None

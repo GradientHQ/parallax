@@ -146,7 +146,7 @@ class DynamicProgrammingRouting(RequestRoutingStrategy):
         starts: Dict[int, List[int]] = {}
         ends: Dict[int, List[int]] = {}
         for idx, n in enumerate(nodes):
-            if n.start_layer is None or n.end_layer is None:
+            if n.start_layer is None or n.end_layer is None or n.is_active is False:
                 continue
             starts.setdefault(n.start_layer, []).append(idx)
             ends.setdefault(n.end_layer, []).append(idx)
@@ -281,8 +281,8 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
             path_ids: List[str] = [head.node_id]
             dfs(int(head.end_layer), path_ids)  # type: ignore[arg-type]
 
-        logger.info(f"Discovered {len(pipelines)} pipelines")
-        logger.info(f"Pipelines: {pipelines}")
+        logger.debug(f"Discovered {len(pipelines)} pipelines")
+        logger.debug(f"Pipelines: {pipelines}")
         return pipelines
 
     def find_turning_points(self, nodes: List[Node], num_layers: int) -> List[Tuple[str, int, str]]:

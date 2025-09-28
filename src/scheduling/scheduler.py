@@ -87,9 +87,7 @@ class Scheduler:
         # Event queues for main loop orchestration (thread-safe)
         self._pending_joins: "queue.Queue[Node]" = queue.Queue()
         self._pending_leaves: "queue.Queue[str]" = queue.Queue()
-        self._pending_node_updates: (
-            "queue.Queue[Tuple[str, Optional[int], Optional[float], Optional[Dict[str, float]]]]"
-        ) = queue.Queue()
+        self._pending_node_updates: "queue.Queue[Tuple[str, Optional[int], Optional[float], Optional[Dict[str, float]], Optional[bool]]]" = (queue.Queue())
 
         # Concurrency controls
         self._stop_event: threading.Event = threading.Event()
@@ -101,7 +99,7 @@ class Scheduler:
         # Thread-safe bootstrap state
         self._bootstrapped: bool = False
         self._bootstrapped_event: threading.Event = threading.Event()
-        logger.info(
+        logger.debug(
             f"Scheduler initialized, min_nodes_bootstrapping {self.min_nodes_bootstrapping}, "
             f"strategy {strategy}, rebalance threshold {rebalance_threshold}"
         )
@@ -110,7 +108,7 @@ class Scheduler:
         # Eager bootstrap for initial allocation if enough nodes are present
         try:
             if len(self.nodes) >= self.min_nodes_bootstrapping:
-                logger.info(
+                logger.debug(
                     f"Eager allocation attempt with {len(self.nodes)} nodes (min required: {self.min_nodes_bootstrapping})"
                 )
                 self.layer_allocator.global_allocation()
@@ -124,29 +122,29 @@ class Scheduler:
         Returns True if a full pipeline was established; False otherwise.
         """
         if len(self.nodes) < self.min_nodes_bootstrapping:
-            logger.info(
+            logger.debug(
                 f"Bootstrapping deferred: have {len(self.nodes)} nodes; need >= {self.min_nodes_bootstrapping}"
             )
             return False
-        logger.info("Bootstrapping layer allocator")
+        logger.debug("Bootstrapping layer allocator")
         success = self.layer_allocator.global_allocation()
         if not success:
             logger.warning("Bootstrapping failed to produce a full pipeline")
             return False
         assignments = self.list_node_allocations()
-        logger.info(f"Layer allocator assignments: {assignments}")
+        logger.debug(f"Layer allocator assignments: {assignments}")
         # Optional warm-up to find turning points and truncate node ranges
         if self.request_warm_up_for_reshard > 0:
             self._run_warmup_and_truncate()
             assignments = self.list_node_allocations()
-            logger.info(f"Layer allocator assignments after turn-point warm-up: {assignments}")
+            logger.debug(f"Layer allocator assignments after turn-point warm-up: {assignments}")
 
         if not self.layer_allocator.has_full_pipeline():
             logger.warning("Bootstrapping failed to produce a full pipeline")
             return False
         self._bootstrapped = True
         self._bootstrapped_event.set()
-        logger.info("Bootstrapping completed successfully; full pipeline established")
+        logger.debug("Bootstrapping completed successfully; full pipeline established")
         return True
 
     def list_node_allocations(self) -> List[Tuple[str, int, int]]:
@@ -192,6 +190,7 @@ class Scheduler:
         current_requests: Optional[int] = None,
         layer_latency_ms: Optional[float] = None,
         new_rtt_to_nodes: Optional[Dict[str, float]] = None,
+        is_active: Optional[bool] = None,
     ) -> None:
         """Update the info of a node."""
         if current_requests is not None:
@@ -200,6 +199,8 @@ class Scheduler:
             node.set_layer_latency_ms(layer_latency_ms)
         if new_rtt_to_nodes is not None:
             node.rtt_to_nodes.update(new_rtt_to_nodes)
+        if is_active is not None:
+            node.is_active = is_active
         node.last_heartbeat = time.time()
         # logger.debug(
         #     "Node updated: %s (requests=%s, latency_ms=%s, rtt_updates=%s)",
@@ -212,7 +213,7 @@ class Scheduler:
     # Async-style event enqueuers for main loop
     def enqueue_join(self, node: Node) -> None:
         """Enqueue a join event."""
-        logger.info(f"Enqueueing join event for node {node.node_id}")
+        logger.debug(f"Enqueueing join event for node {node.node_id}")
         self._pending_joins.put(node)
         self._wake_event.set()
 
@@ -228,31 +229,25 @@ class Scheduler:
         current_requests: Optional[int] = None,
         layer_latency_ms: Optional[float] = None,
         new_rtt_to_nodes: Optional[Dict[str, float]] = None,
+        is_active: Optional[bool] = None,
     ) -> None:
         """Enqueue a node update event."""
         self._pending_node_updates.put(
-            (node_id, current_requests, layer_latency_ms, new_rtt_to_nodes)
+            (node_id, current_requests, layer_latency_ms, new_rtt_to_nodes, is_active)
         )
         self._wake_event.set()
-        # logger.debug(
-        #     "Enqueued node update: %s (requests=%s, latency_ms=%s, rtt_updates=%s)",
-        #     node_id,
-        #     current_requests,
-        #     layer_latency_ms,
-        #     0 if new_rtt_to_nodes is None else len(new_rtt_to_nodes),
-        # )
 
     def checking_node_heartbeat(self) -> None:
         """Check the heartbeat of all nodes."""
         for node in self.nodes:
             if time.time() - node.last_heartbeat > self.heartbeat_timeout:
-                logger.info(f"Node {node.node_id} heartbeat timeout")
+                logger.debug(f"Node {node.node_id} heartbeat timeout")
                 self.leave(node.node_id)
 
     # Dynamic node management
     def join(self, node: Node, bootstrap: bool = False) -> None:
         """Add a node to allocation and refresh plan and materialized nodes."""
-        logger.info(
+        logger.debug(
             "Joining node %s (kv_ratio=%.2f, param_ratio=%.2f)",
             node.node_id,
             node.kv_cache_ratio,
@@ -270,10 +265,12 @@ class Scheduler:
         if node_id not in self.layer_allocator.node_id_to_node:
             raise ValueError(f"Node {node_id} not found in nodes")
         node = self.node_id_to_node[node_id]
-        logger.info("Leaving node %s (start=%s, end=%s)", node_id, node.start_layer, node.end_layer)
+        logger.debug(
+            "Leaving node %s (start=%s, end=%s)", node_id, node.start_layer, node.end_layer
+        )
         self.layer_allocator.leave(node_id)
         if self.layer_allocator.should_global_rebalance():
-            logger.info("Global rebalance triggered due to node leave")
+            logger.debug("Global rebalance triggered due to node leave")
             # TODO: send a signal to the nodes to stop running requests
             #       and re-assign start/end layers so nodes can re-shard
             self._bootstrapped = False
@@ -291,7 +288,7 @@ class Scheduler:
         self._wake_event.set()
         now = time.time()
         self._arrival_ts.append(now)
-        logger.info(
+        logger.debug(
             "Received request %s (queue_size=%d)", request.request_id, self._request_queue.qsize()
         )
         # Trim old timestamps to keep arrival-rate window bounded
@@ -317,7 +314,7 @@ class Scheduler:
                     self._node_assigned_request_count.get(node_id, 0) + 1
                 )
                 n.add_request()
-        logger.info(
+        logger.debug(
             "Dispatched request %s via path %s (est_lat=%.2fms)", req.request_id, path, latency
         )
         return req.request_id, path, latency
@@ -329,7 +326,7 @@ class Scheduler:
         and request dispatching. At startup, waits until at least
         `min_nodes_bootstrapping` nodes are present, then runs `bootstrap()`.
         """
-        logger.info("Running scheduler")
+        logger.debug("Running scheduler")
         self._stop_event.clear()
 
         # Start event thread first so joins can be processed while we wait to bootstrap
@@ -359,7 +356,7 @@ class Scheduler:
                     assignments = self.list_node_allocations()
                     header = f"Current allocations ({len(assignments)} nodes)"
                     sep = "-" * len(header)
-                    logger.info("%s\n%s", header, sep)
+                    logger.debug("%s\n%s", header, sep)
                     for node_id, start_layer, end_layer in assignments:
                         node = self.node_id_to_node[node_id]
                         # Snapshot values to avoid recomputing/logging side-effects twice
@@ -370,7 +367,7 @@ class Scheduler:
                         n_hosted_requests = 0
                         if node_id in self._node_assigned_request_count:
                             n_hosted_requests = self._node_assigned_request_count[node_id]
-                        logger.info(
+                        logger.debug(
                             "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d",
                             node_id,
                             start_layer,
@@ -432,7 +429,7 @@ class Scheduler:
                             self._node_assigned_request_count.get(node_id, 0) + 1
                         )
                         n.add_request()
-                logger.info(
+                logger.debug(
                     "Dispatched request %s via path %s", getattr(req, "request_id", "?"), path
                 )
             except queue.Empty:
@@ -440,7 +437,7 @@ class Scheduler:
 
     def _wait_for_bootstrap(self, poll_interval: float) -> bool:
         """Wait until enough nodes then run bootstrap. Returns False if stopped."""
-        logger.info("Waiting for bootstrap")
+        logger.debug("Waiting for bootstrap")
         while not self._stop_event.is_set() and not self._bootstrapped_event.is_set():
             with self._node_count_cv:
                 if len(self.nodes) < self.min_nodes_bootstrapping:
@@ -457,7 +454,7 @@ class Scheduler:
         """Apply pending node stats updates from the queue."""
         while True:
             try:
-                node_id, cur, lat, rtts = self._pending_node_updates.get_nowait()
+                node_id, cur, lat, rtts, is_active = self._pending_node_updates.get_nowait()
             except queue.Empty:
                 break
             self.update_node_info(
@@ -465,10 +462,12 @@ class Scheduler:
                 current_requests=cur,
                 layer_latency_ms=lat,
                 new_rtt_to_nodes=rtts,
+                is_active=is_active,
             )
 
     def _process_joins(self) -> None:
         """Handle pending join events, honoring bootstrap state for assignment."""
+        joined_any = False
         while True:
             try:
                 node = self._pending_joins.get_nowait()
@@ -477,6 +476,30 @@ class Scheduler:
             # During bootstrap (no full pipeline yet), only declare nodes; no dynamic assignment.
             # After bootstrap, allow dynamic light-weight joins.
             self.join(node, bootstrap=not self._bootstrapped_event.is_set())
+            joined_any = True
+
+        # If we are not bootstrapped (e.g., after a leave-triggered rebalance) and
+        # new nodes just joined, attempt a greedy bootstrap immediately when we have
+        # enough nodes. If it doesn't produce a full pipeline, we'll try again on
+        # subsequent joins.
+        if joined_any and not self._bootstrapped_event.is_set():
+            if len(self.nodes) >= self.min_nodes_bootstrapping:
+                try:
+                    ok = self.bootstrap()
+                    if not ok:
+                        logger.debug(
+                            "Bootstrap attempt after join did not produce a full pipeline; will retry on future joins"
+                        )
+                except Exception as exc:
+                    logger.debug(
+                        f"Bootstrap attempt after join failed: {exc}; will retry on future joins"
+                    )
+            else:
+                logger.debug(
+                    "Deferring bootstrap: have %d nodes; need >= %d",
+                    len(self.nodes),
+                    self.min_nodes_bootstrapping,
+                )
 
     def _process_leaves(self) -> None:
         """Handle pending leave events safely."""
