@@ -127,7 +127,7 @@ Please notice and record the scheduler ip4 address generated in the terminal.
 #### Step 2: Join each distributed nodes
 For each distributed nodes including the main node, open a terminal and join the server with the scheduler address.
 ```sh
-bash scripts/join.sh -m {model-name} -i {ip-address-of-current-node} -s {scheduler-address}
+bash scripts/join.sh -m {model-name} -s {scheduler-address}
 ```
 For example:
 ```sh

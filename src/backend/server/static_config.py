@@ -7,20 +7,20 @@ from scheduling.model_info import ModelInfo
 # Supported model list
 MODEL_LIST = [
     "Qwen/Qwen3-0.6B",
-    "Qwen/Qwen3-8B",
-    "Qwen/Qwen3-8B-FP8",
+    # "Qwen/Qwen3-8B",
+    # "Qwen/Qwen3-8B-FP8",
     "Qwen/Qwen3-32B",
     "Qwen/Qwen3-32B-FP8",
-    "Qwen/Qwen3-30B-A3B",
-    "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
-    "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8",
+    # "Qwen/Qwen3-30B-A3B",
+    # "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+    # "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8",
     "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8",
     "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8",
     "Qwen/Qwen3-Next-80B-A3B-Instruct",
     "Qwen/Qwen3-Next-80B-A3B-Thinking",
-    "Qwen/Qwen2.5-3B-Instruct",
-    "Qwen/Qwen2.5-7B-Instruct",
-    "Qwen/Qwen2.5-14B-Instruct",
+    # "Qwen/Qwen2.5-3B-Instruct",
+    # "Qwen/Qwen2.5-7B-Instruct",
+    # "Qwen/Qwen2.5-14B-Instruct",
     "Qwen/Qwen2.5-72B-Instruct",
     "openai/openai/gpt-oss-20b",
     "openai/openai/gpt-oss-120b",
@@ -30,16 +30,20 @@ MODEL_LIST = [
 ]
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK_LINUX_MAC = (
-    """bash scripts/join_local.sh -m {model_name} -s {scheduler_addr}"""
+    """bash scripts/join.sh -m {model_name} -s {scheduler_addr}"""
 )
 
-NODE_JOIN_COMMAND_PUBLIC_NETWORK_LINUX_MAC = """bash scripts/join.sh -m {model_name} -i ${{ip-address-of-current-node}} -s {scheduler_addr}"""
+NODE_JOIN_COMMAND_PUBLIC_NETWORK_LINUX_MAC = (
+    """bash scripts/join.sh -m {model_name} -s {scheduler_addr}"""
+)
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK_WINDOWS = (
-    """parallax join bash scripts/join_local.sh -m {model_name} -s {scheduler_addr}"""
+    """parallax join bash scripts/join.sh -m {model_name} -s {scheduler_addr}"""
 )
 
-NODE_JOIN_COMMAND_PUBLIC_NETWORK_WINDOWS = """parallax join bash scripts/join.sh -m {model_name} -i ${{ip-address-of-current-node}} -s {scheduler_addr}"""
+NODE_JOIN_COMMAND_PUBLIC_NETWORK_WINDOWS = (
+    """parallax join bash scripts/join.sh -m {model_name} -s {scheduler_addr}"""
+)
 
 
 def get_model_info(model_name):
