@@ -29,7 +29,7 @@ class RPCConnectionHandler(ConnectionHandler):
     @rpc_stream
     def node_join(self, message):
         # node = {
-        #     "call_url": "http://127.0.0.1:8000",
+        #     "http_port": "8000",
         #     "node_id": "lattica peer id",
         #     "hardware": {
         #         "node_id": "lattica peer id",
@@ -46,7 +46,7 @@ class RPCConnectionHandler(ConnectionHandler):
         logger.info(f"receive node_join request: {message}")
         try:
             node = self.build_node(message)
-            
+
             try:
                 node_ip = self.lattica_instance.get_ip(node.node_id)
             except Exception as e:
