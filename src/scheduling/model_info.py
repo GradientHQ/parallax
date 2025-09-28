@@ -37,11 +37,19 @@ class ModelInfo:
 
     qk_nope_head_dim: Optional[int] = None
     qk_rope_head_dim: Optional[int] = None
-    if qk_nope_head_dim is not None and qk_rope_head_dim is not None:
-        head_size_k: int = qk_nope_head_dim + qk_rope_head_dim
-    else:
-        head_size_k: int = head_size
-    head_size_v: int = head_size
+    head_size_k: int = None  # 将在 __init__ 中设置
+    head_size_v: int = None  # 将在 __init__ 中设置
+
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+        # 设置 head_size_k 和 head_size_v
+        if self.qk_nope_head_dim is not None and self.qk_rope_head_dim is not None:
+            self.head_size_k = self.qk_nope_head_dim + self.qk_rope_head_dim
+        else:
+            self.head_size_k = self.head_size
+        self.head_size_v = self.head_size
 
     @property
     def v_dim(self) -> int:

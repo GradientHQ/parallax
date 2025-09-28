@@ -1,8 +1,8 @@
 import json
 
 from huggingface_hub import hf_hub_download
-from scheduling.model_info import ModelInfo
 
+from scheduling.model_info import ModelInfo
 
 # Supported model list
 MODEL_LIST = [
