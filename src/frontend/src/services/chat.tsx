@@ -229,9 +229,13 @@ const createSSE = (options: SSEOptions) => {
     fetch(`${API_BASE_URL}/v1/chat/completions`, {
       method: 'POST',
       body: JSON.stringify({
+        stream: true,
         model,
         messages,
-        stream: true,
+        max_tokens: 2048,
+        sampling_params: {
+          top_k: 3,
+        },
       }),
       signal: abortController.signal,
     })
