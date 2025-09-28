@@ -46,7 +46,8 @@ class RPCConnectionHandler(ConnectionHandler):
         logger.info(f"receive node_join request: {message}")
         try:
             node = self.build_node(message)
-            self.call_url_map[node.node_id] = message.get("call_url")
+            node_ip = self.lattica_instance.get_ip(node.node_id)
+            self.call_url_map[node.node_id] = f"http://{node_ip}:{message.get('http_port')}"
             self.scheduler.enqueue_join(node)
 
             response = self.wait_layer_allocation(node.node_id, wait_seconds=300)

@@ -40,6 +40,9 @@ if __name__ == "__main__":
         logger.info(f"executor_output_addr: {args.executor_output_ipc}")
         gradient_server = None
         if args.scheduler_addr is None:
+            # only launch http server on head node
+            if args.start_layer == 0:
+                launch_http_server(args)
             executor = Executor.create_from_args(args)
             launch_p2p_server(
                 initial_peers=args.initial_peers,
@@ -52,7 +55,7 @@ if __name__ == "__main__":
                 dht_prefix=args.dht_prefix,
                 host_maddrs=args.host_maddrs,
                 announce_maddrs=args.announce_maddrs,
-                announce_http_addr=args.announce_http_addr,
+                http_port=args.port if args.announce_http_port is None else args.announce_http_port,
                 notify_url=args.notify_url,
                 recv_from_peer_addr=args.recv_from_peer_addr,
                 send_to_peer_addr=args.send_to_peer_addr,
@@ -72,7 +75,7 @@ if __name__ == "__main__":
                 dht_prefix=args.dht_prefix,
                 host_maddrs=args.host_maddrs,
                 announce_maddrs=args.announce_maddrs,
-                announce_http_addr=args.announce_http_addr,
+                http_port=args.port if args.announce_http_port is None else args.announce_http_port,
                 notify_url=args.notify_url,
                 recv_from_peer_addr=args.recv_from_peer_addr,
                 send_to_peer_addr=args.send_to_peer_addr,
@@ -86,11 +89,10 @@ if __name__ == "__main__":
                 f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}"
             )
             gradient_server.status = ServerState.INITIALIZING
+            # only launch http server on head node
+            if args.start_layer == 0:
+                launch_http_server(args)
             executor = Executor.create_from_args(args)
-
-        # only launch http server on head node
-        if args.start_layer == 0:
-            launch_http_server(args)
 
         try:
             if gradient_server is not None:

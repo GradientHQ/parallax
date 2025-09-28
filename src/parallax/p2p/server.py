@@ -173,7 +173,7 @@ class GradientServer:
         hidden_layers: int = 128,
         dht_prefix: str = "gradient",
         host_maddrs: List[str] = [],
-        announce_http_addr: Optional[str] = None,
+        http_port: Optional[int] = None,
         announce_maddrs: List[str] = [],
         notify_url: str = None,
         model_name: Optional[str] = None,
@@ -194,7 +194,7 @@ class GradientServer:
         self.dht_prefix = dht_prefix
         self.host_maddrs = host_maddrs
         self.announce_maddrs = announce_maddrs
-        self.announce_http_addr = announce_http_addr
+        self.http_port = http_port
         self.notify_url = notify_url
         self.model_name = model_name
         self.max_batch_size = max_batch_size
@@ -505,6 +505,7 @@ class GradientServer:
         self.announcer.start()
 
     def get_node_info(self, is_update: bool = False):
+        # update rtt to nodes
         if time.time() - self.rtt_last_update > self.rtt_update_interval:
             self.rtts = {}
             all_peers = []
@@ -534,7 +535,7 @@ class GradientServer:
             self.rtt_last_update = time.time()
 
         info = {
-            "call_url": f"http://{self.announce_http_addr}",
+            "http_port": f"{self.http_port}",
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
             "model_name": self.model_name,
@@ -582,7 +583,7 @@ def launch_p2p_server(
     dht_prefix: str,
     host_maddrs: Optional[List[str]],
     announce_maddrs: List[str],
-    announce_http_addr: Optional[str],
+    http_port: Optional[int],
     notify_url: str,
     recv_from_peer_addr: str,
     send_to_peer_addr: str,
@@ -610,9 +611,7 @@ def launch_p2p_server(
         dht_prefix=dht_prefix,
         host_maddrs=host_maddrs,
         announce_maddrs=announce_maddrs,
-        announce_http_addr=(
-            announce_http_addr if announce_http_addr is not None else "127.0.0.1:3000"
-        ),
+        http_port=http_port,
         notify_url=notify_url,
         model_name=model_name,
         max_batch_size=max_batch_size,
