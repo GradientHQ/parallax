@@ -27,6 +27,14 @@ A fully decentralized inference engine developed by [Gradient Network](https://g
 - Python>=3.11.0
 - Ubuntu-24.04 for Blackwell GPUs
 
+Below are installation methods for different operating systems.
+
+|  Operating System  |  Windows App  |  From Source | Docker |
+|:-------------|:----------------------------:|:----------------------------:|:----------------------------:|
+|Windows       | ✅️ | Not recommended | Not Recommended |
+|Linux | ❌️ | ✅️ | ✅️ |
+|macOS | ❌️ | ✅️ | ❌️ |
+
 ### From Source
 - For Linux/WSL (GPU):
 ```sh
@@ -48,7 +56,7 @@ pip install -e '.[dev]'
 ```
 
 ### Windows Application
-Download Windows application from [Link]().
+[Click here]() to download latest Windows application.
 
 After installing .exe, right click Windows start button and click ```Windows Terminal(Admin)``` to start a Powershell console as administrator.
 
@@ -59,7 +67,7 @@ parallax install
 
 Installation process may take around 30 minutes.
 
-To see a description of all Parallax Windows configurations you can do::
+To see a description of all Parallax Windows configurations you can do:
 ```sh
 parallax --help
 ```
@@ -69,9 +77,8 @@ For GPU devices, Parallax provides a docker environment for quick setup. Choose 
 
 |  GPU Architecture  |  GPU Series  | Image Pull Command |
 |:-------------|:----------------------------|:----------------------------|
-|Blackwell       | RTX50 series/B100/B200... |docker pull gradientservice/parallax:latest-blackwell|
-|Ampere & Hopper | RTX30 series/RTX40 series/A100/H100... |docker pull gradientservice/parallax:latest-hopper|
-
+|Blackwell       | RTX50 series/B100/B200... |```docker pull gradientservice/parallax:latest-blackwell```|
+|Ampere & Hopper | RTX30 series/RTX40 series/A100/H100... |```docker pull gradientservice/parallax:latest-hopper```|
 
 ## Usage on Distributed Devices
 ### Use frontend
@@ -127,7 +134,7 @@ Please notice and record the scheduler ip4 address generated in the terminal.
 #### Step 2: Join each distributed nodes
 For each distributed nodes including the main node, open a terminal and join the server with the scheduler address.
 ```sh
-bash scripts/join.sh -m {model-name} -i {ip-address-of-current-node} -s {scheduler-address}
+bash scripts/join.sh -m {model-name} -s {scheduler-address}
 ```
 For example:
 ```sh
@@ -175,8 +182,7 @@ python3 ./parallax/src/parallax/launch.py \
 --end-layer 28
 ```
 
-## OpenAI Compatible API
-Parallax starts OpenAI Compatible API either w/wo scheduler. Below is an example using CURL:
+Call chat API on one of the nodes:
 ```sh
 curl --location 'http://localhost:3000/v1/chat/completions' --header 'Content-Type: application/json' --data '{
     "max_tokens": 1024,
