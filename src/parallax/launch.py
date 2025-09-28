@@ -85,6 +85,7 @@ if __name__ == "__main__":
             )
             args.start_layer = gradient_server.block_start_index
             args.end_layer = gradient_server.block_end_index
+            args.model_path = gradient_server.model_name
             logger.debug(
                 f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}"
             )

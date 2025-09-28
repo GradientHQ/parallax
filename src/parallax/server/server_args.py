@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model-path",
         type=str,
-        required=True,
+        default=None,
         help="Path to the model repository or model name (e.g., 'mlx-community/Qwen3-0.6B-bf16')",
     )
     parser.add_argument(

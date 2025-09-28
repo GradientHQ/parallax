@@ -254,6 +254,7 @@ class GradientServer:
 
                 self.block_start_index = response.get("start_layer")
                 self.block_end_index = response.get("end_layer")
+                self.model_name = response.get("model_name")
 
                 # Publish executor metrics to backend on each update
                 def _publish_metrics(_snapshot):
@@ -538,7 +539,6 @@ class GradientServer:
             "http_port": f"{self.http_port}",
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
-            "model_name": self.model_name,
             "kv_cache_ratio": 0.25,
             "param_hosting_ratio": 0.65,
             "max_concurrent_requests": self.max_batch_size,

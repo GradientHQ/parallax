@@ -118,7 +118,7 @@ class RPCConnectionHandler(ConnectionHandler):
         node = Node(
             node_id=node_json.get("node_id"),
             hardware=self.build_hardware(node_json.get("hardware")),
-            model_info=get_model_info(node_json.get("model_name")),
+            model_info=self.scheduler.model_info,
             kv_cache_ratio=node_json.get("kv_cache_ratio"),
             param_hosting_ratio=node_json.get("param_hosting_ratio"),
             max_concurrent_requests=node_json.get("max_concurrent_requests"),
