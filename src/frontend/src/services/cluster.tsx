@@ -21,7 +21,7 @@ export type ClusterStatus = 'idle' | 'waiting' | 'available' | 'rebalancing';
 export interface ClusterInfo {
   readonly id: string;
   readonly status: ClusterStatus;
-  readonly nodeJoinCommand: string;
+  readonly nodeJoinCommand: Readonly<Record<string, string>>;
   readonly initNodesNumber: number;
 }
 
@@ -91,7 +91,7 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
   const [clusterInfo, setClusterInfo] = useState<ClusterInfo>(() => ({
     id: '',
     status: 'idle',
-    nodeJoinCommand: '',
+    nodeJoinCommand: {},
     initNodesNumber: 4,
   }));
   const [nodeInfoList, setNodeInfoList] = useState<readonly NodeInfo[]>(() => [
@@ -128,7 +128,7 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
             status,
             initNodesNumber: init_nodes_num || 0,
             modelName: model_name || '',
-            nodeJoinCommand: node_join_command || '',
+            nodeJoinCommand: node_join_command || {},
           };
           if (JSON.stringify(next) !== JSON.stringify(prev)) {
             debugLog('setClusterInfo', next);

@@ -1,10 +1,10 @@
 import { useEffect, useState, type FC } from 'react';
-import { IconButton, Paper, styled, Typography } from '@mui/material';
+import { IconButton, Paper, Stack, styled, Typography } from '@mui/material';
 import { useCluster } from '../../services';
 import { IconCopy, IconCopyCheck } from '@tabler/icons-react';
 import { useRefCallback } from '../../hooks';
 
-const JoinCommandRoot = styled('div')(({ theme }) => {
+const JoinCommandItem = styled('div')(({ theme }) => {
   const { palette, spacing } = theme;
   return {
     display: 'flex',
@@ -29,29 +29,35 @@ export const JoinCommand: FC = () => {
     },
   ] = useCluster();
 
-  const [isCopied, setIsCopied] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string>();
+
   useEffect(() => {
-    if (isCopied) {
+    if (copiedKey) {
       const timeoutId = setTimeout(() => {
-        setIsCopied(false);
+        setCopiedKey(undefined);
       }, 2000);
       return () => clearTimeout(timeoutId);
     }
-  }, [isCopied]);
+  }, [copiedKey]);
 
-  const onCopy = useRefCallback(async () => {
-    await navigator.clipboard.writeText(nodeJoinCommand);
-    setIsCopied(true);
+  const copy = useRefCallback(async (key: string) => {
+    await navigator.clipboard.writeText(nodeJoinCommand[key]);
+    setCopiedKey(key);
   });
 
   return (
-    <JoinCommandRoot>
-      <Typography sx={{ flex: 1, lineHeight: '1.125rem', whiteSpace: 'wrap' }} variant='pre'>
-        {nodeJoinCommand}
-      </Typography>
-      <IconButton sx={{ flex: 'none', fontSize: '1.5rem' }} size='em' onClick={onCopy}>
-        {(isCopied && <IconCopyCheck />) || <IconCopy />}
-      </IconButton>
-    </JoinCommandRoot>
+    <Stack gap={1}>
+      {Object.entries(nodeJoinCommand).map(([key, value]) => (
+        <JoinCommandItem key={key}>
+          <Typography variant='subtitle2'>{key}:</Typography>
+          <Typography sx={{ flex: 1, lineHeight: '1.125rem', whiteSpace: 'wrap' }} variant='pre'>
+            {value}
+          </Typography>
+          <IconButton sx={{ flex: 'none', fontSize: '1.5rem' }} size='em' onClick={() => copy(key)}>
+            {(copiedKey === key && <IconCopyCheck />) || <IconCopy />}
+          </IconButton>
+        </JoinCommandItem>
+      ))}
+    </Stack>
   );
 };

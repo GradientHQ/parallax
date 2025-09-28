@@ -112,7 +112,7 @@ const DebugInfo: FC = () => {
       <Typography variant='subtitle2'>{title}</Typography>
       {Object.entries(record).map(([key, value]) => (
         <Typography variant='body2' key={key}>
-          {key}: {value}
+          {key}: {JSON.stringify(value)}
         </Typography>
       ))}
     </Stack>
