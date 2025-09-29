@@ -111,6 +111,9 @@ Select model config and click continue.
 ![Node join](docs/images/node-join.png)
 This page will show the join command like blow.
 ```sh
+# local area network env
+parallax join
+# public network env
 parallax join -s {scheduler-address}
 # example
 parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
@@ -136,6 +139,9 @@ Please notice and record the scheduler ip4 address generated in the terminal.
 #### Step 2: Join each distributed nodes
 For each distributed nodes including the main node, open a terminal and join the server with the scheduler address.
 ```sh
+# local area network env
+parallax join
+# public network env
 parallax join -s {scheduler-address}
 ```
 For example:

@@ -29,7 +29,7 @@ MODEL_LIST = [
     "nvidia/Llama-3.1-8B-Instruct-FP8",
 ]
 
-NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join -s {scheduler_addr}"""
+NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
 
 NODE_JOIN_COMMAND_PUBLIC_NETWORK = """parallax join -s {scheduler_addr}"""
 
