@@ -217,9 +217,18 @@ class GradientServer:
     def build_lattica(self):
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs)
 
+        if self.scheduler_addr is not None and self.scheduler_addr != "auto":
+            if self.scheduler_addr.startswith("/"):
+                logger.info(f"Using scheduler addr: {self.scheduler_addr}")
+                self.lattica.with_bootstraps([self.scheduler_addr])
+            self.scheduler_peer_id = self.scheduler_addr.split("/")[-1]
+
         if len(self.relay_servers) > 0:
             logger.info(f"Using relay servers: {self.relay_servers}")
             self.lattica.with_relay_servers(self.relay_servers).with_dcutr(True)
+            if self.scheduler_peer_id is not None:
+                logger.info(f"Using protocol: /{self.scheduler_peer_id}")
+                self.lattica.with_protocol("/" + self.scheduler_peer_id)
 
         if len(self.announce_maddrs) > 0:
             logger.info(f"Using announce maddrs: {self.announce_maddrs}")
@@ -228,11 +237,6 @@ class GradientServer:
         if len(self.initial_peers) > 0:
             logger.info(f"Using initial peers: {self.initial_peers}")
             self.lattica.with_bootstraps(self.initial_peers)
-
-        if self.scheduler_addr is not None and self.scheduler_addr != "auto":
-            logger.info(f"Using scheduler addr: {self.scheduler_addr}")
-            self.lattica.with_bootstraps([self.scheduler_addr])
-            self.scheduler_peer_id = self.scheduler_addr.split("/")[-1]
 
         self.lattica.build()
 

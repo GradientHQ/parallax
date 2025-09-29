@@ -134,7 +134,7 @@ class SchedulerManage:
 
         if len(self.relay_servers) > 0:
             print(f"Using relay servers: {self.relay_servers}")
-            self.lattica.with_relay_servers(self.relay_servers).with_dcutr(True)
+            self.lattica.with_relay_servers(self.relay_servers).with_dcutr(True).with_protocol("")
 
         if len(self.announce_maddrs) > 0:
             print(f"Using announce maddrs: {self.announce_maddrs}")
