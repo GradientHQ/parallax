@@ -54,7 +54,7 @@ export const JoinCommand: FC = () => {
     <Stack gap={1}>
       {Object.entries(nodeJoinCommand).map(([key, value]) => (
         <Stack key={key} gap={1}>
-          <Typography variant='subtitle2'>{LABEL_MAP[key] || key}:</Typography>
+          <Typography variant='subtitle2'>For {LABEL_MAP[key] || key}:</Typography>
           <JoinCommandItem>
             <Typography sx={{ flex: 1, lineHeight: '1.125rem', whiteSpace: 'wrap' }} variant='pre'>
               {value}
