@@ -11,6 +11,7 @@ import {
   IconLayoutSidebarRightCollapse,
   IconLayoutSidebarRightExpand,
   IconPlus,
+  IconTopologyStar3,
 } from '@tabler/icons-react';
 import { JoinCommand, NodeList } from '../inputs';
 
@@ -172,6 +173,12 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
         </Stack>
         {sidebarExpanded && (
           <Stack sx={{ gap: 4 }}>
+            <Stack direction='row' sx={{ gap: 1, color: 'text.disabled' }}>
+              <IconTopologyStar3 size='1.25rem' />
+              <Typography variant='body1' sx={{ fontWeight: 'bolder', textTransform: 'uppercase' }}>
+                Cluster topology
+              </Typography>
+            </Stack>
             <NodeList variant='menu' />
             <Button color='info' startIcon={<IconPlus />} onClick={openJoinCommand}>
               Add Nodes
