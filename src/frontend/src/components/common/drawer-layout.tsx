@@ -5,6 +5,7 @@ import { useAlertDialog } from '../mui';
 import { IconBrandGradient } from '../brand';
 import {
   IconCirclePlus,
+  IconInfoCircle,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconLayoutSidebarRightCollapse,
@@ -79,8 +80,37 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
     },
   ] = useCluster();
 
+  const [dialogWaiting, { open: openWaiting }] = useAlertDialog({
+    color: 'primary',
+    titleIcon: <IconInfoCircle />,
+    title: 'Reconnect your nodes',
+    content: (
+      <Stack sx={{ gap: 7 }}>
+        <Stack sx={{ gap: 1 }}>
+          <Typography variant='body1'>Run join command on your new Node</Typography>
+          <JoinCommand />
+        </Stack>
+        <Stack sx={{ gap: 1 }}>
+          <Typography variant='body1'>Check your live node status</Typography>
+          <Typography variant='body2' color='text.disabled'>
+            After you successfully start the server on the nodes, you should see them show up on the
+            below dashboard.
+          </Typography>
+          <NodeList />
+        </Stack>
+      </Stack>
+    ),
+    confirmLabel: 'Finish',
+  });
+  useEffect(() => {
+    openWaiting();
+    if (clusterStatus === 'waiting') {
+      openWaiting();
+    }
+  }, [clusterStatus, openWaiting]);
+
   const [dialogRebalancing, { open: openRebalancing }] = useAlertDialog({
-    color: 'error',
+    color: 'primary',
     title: '',
     content: (
       <>
@@ -147,7 +177,6 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
             <Button color='info' startIcon={<IconPlus />} onClick={openJoinCommand}>
               Add Nodes
             </Button>
-            {dialogJoinCommand}
           </Stack>
         )}
       </DrawerLayoutSide>
@@ -159,6 +188,8 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
         </DrawerLayoutHeader>
         <DrawerLayoutContent>{children}</DrawerLayoutContent>
       </DrawerLayoutContainer>
+      {dialogJoinCommand}
+      {dialogWaiting}
       {dialogRebalancing}
     </DrawerLayoutRoot>
   );
