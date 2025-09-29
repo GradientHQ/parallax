@@ -84,10 +84,13 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
     title: '',
     content: (
       <>
-        <Typography variant='subtitle1'>Cluster rebalancing</Typography>
-        <Typography variant='body1'>
-          The cluster is rebalancing. Please wait for a moment.
+        <Typography variant='body1'>Cluster rebalancing</Typography>
+        <Typography variant='body2' color='text.disabled'>
+          We have noticed one of your nodes has been disconnected. We are now rebalancing your
+          inference requests onto working nodes. Please wait a few seconds for the cluster to
+          rebalance itself.
         </Typography>
+        <NodeList variant='menu' />
       </>
     ),
     confirmLabel: 'Finish',
