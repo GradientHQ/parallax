@@ -2,8 +2,17 @@
 
 This directory implements a two-phase scheduler for distributed LLM inference:
 
-- **Phase 1 — Layer allocation**: assign contiguous decoder layer ranges to nodes and rebalance in place.
-- **Phase 2 — Request routing**: compute an end-to-end, minimum-latency path across the assigned node ranges.
+### Phase 1 — Layer allocation
+
+Assign contiguous decoder layer ranges to nodes and rebalance in place, as illustrated below:
+
+<img width="1874" height="852" alt="parallax_1" src="https://github.com/user-attachments/assets/c57cde77-0cda-48fc-b1ad-6d4aa1b1787b" />
+
+### Phase 2 — Request routing
+
+Compute an end-to-end, minimum-latency path across the assigned node ranges, as illustrated below:
+
+<img width="1828" height="705" alt="parallax_2" src="https://github.com/user-attachments/assets/8a6b4d8f-8d97-402b-ba84-3ce61e4ee313" />
 
 The main entrypoint is `scheduling.scheduler.Scheduler`, which orchestrates allocation, dynamic joins/leaves, health checks, and routing.
 
