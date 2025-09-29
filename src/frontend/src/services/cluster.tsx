@@ -160,6 +160,13 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
   }, []);
 
   const init = useRefCallback(async () => {
+    if (initNodesNumber < 1) {
+      throw new Error('initNodesNumber must be greater than 0');
+    }
+    if (!modelName) {
+      throw new Error('modelName is required');
+    }
+
     initScheduler({
       model_name: modelName,
       init_nodes_num: initNodesNumber,

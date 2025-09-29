@@ -13,6 +13,8 @@ export const MuiToggleButton = (theme: Theme): Components<Theme>['MuiToggleButto
         flex: 1,
         height: `${INPUT_SIZE_REM_MAP.small}rem`,
 
+        borderColor: 'transparent',
+
         color: palette.grey[400],
         backgroundColor: palette.grey[200],
         '&:hover': {
@@ -30,7 +32,7 @@ export const MuiToggleButton = (theme: Theme): Components<Theme>['MuiToggleButto
                 color: palette.text.primary,
                 backgroundColor: palette.background.default,
                 '&:hover': {
-                  backgroundColor: palette.background.area,
+                  backgroundColor: palette.background.default,
                   // Reset on touch devices, it doesn't add specificity
                   '@media (hover: none)': {
                     backgroundColor: palette.background.default,

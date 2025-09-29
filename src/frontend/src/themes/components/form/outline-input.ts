@@ -21,7 +21,7 @@ export const MuiOutlinedInput = (theme: Theme): Components<Theme>['MuiOutlinedIn
         },
 
         [`&.${outlinedInputClasses.focused}`]: {
-          boxShadow: overlays.buttonShadeActiveLight,
+          boxShadow: overlays.shadowInputActive,
         },
 
         [`&.${outlinedInputClasses.disabled}`]: {
@@ -34,13 +34,13 @@ export const MuiOutlinedInput = (theme: Theme): Components<Theme>['MuiOutlinedIn
           '&, &:hover': {
             [`.${outlinedInputClasses.notchedOutline}`]: {
               borderWidth: 1,
-              borderColor: divider,
+              borderColor: 'transparent',
             },
           },
         },
 
         [`&.${outlinedInputClasses.error}`]: {
-          boxShadow: overlays.buttonShadeError,
+          boxShadow: overlays.shadowInputError,
           '&, &:hover': {
             [`.${outlinedInputClasses.notchedOutline}`]: {
               borderWidth: 1,
