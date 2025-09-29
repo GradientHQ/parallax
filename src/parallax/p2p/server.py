@@ -180,9 +180,6 @@ class GradientServer:
         max_batch_size: Optional[int] = None,
         max_sequence_length: Optional[int] = None,
     ):
-        assert not (
-            scheduler_addr is not None and len(initial_peers) > 0
-        ), "scheduler_addr and initial_peers are not allowed at the same time"
         self.recv_from_peer_addr = recv_from_peer_addr
         self.send_to_peer_addr = send_to_peer_addr
         self.initial_peers = initial_peers

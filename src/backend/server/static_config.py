@@ -7,7 +7,7 @@ from scheduling.model_info import ModelInfo
 # Supported model list
 MODEL_LIST = [
     "Qwen/Qwen3-0.6B",
-    # "Qwen/Qwen3-8B",
+    "Qwen/Qwen3-8B",
     # "Qwen/Qwen3-8B-FP8",
     "Qwen/Qwen3-32B",
     "Qwen/Qwen3-32B-FP8",
