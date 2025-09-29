@@ -590,15 +590,16 @@ class GradientServer:
 
     def shutdown(self):
         self.stop_event.set()
-        if self.announcer is not None:
-            self.announcer.join()
-        if self.routing_table_updater is not None:
-            self.routing_table_updater.join()
 
         self.status = ServerState.OFFLINE
         if self.scheduler_addr is not None:
             logger.info(f"Leave scheduler: {self.lattica.peer_id()}")
             self.scheduler_stub.node_leave(self.get_node_info(is_update=True))
+
+        if self.announcer is not None:
+            self.announcer.join()
+        if self.routing_table_updater is not None:
+            self.routing_table_updater.join()
 
 
 def launch_p2p_server(
