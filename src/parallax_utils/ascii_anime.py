@@ -15,12 +15,13 @@ def display_ascii_animation(animation_data):
         return
 
     for frame_data in frames:
-        frame = frame_data.get('frame')
-        delay = frame_data.get('delay', 200) / 1000.0  # Default 200ms delay
+        content = frame_data.get('content')
+        delay = frame_data.get('duration', 50) / 1000.0  # Default 200ms delay
 
-        if frame:
+        if content:
+            res = "\n".join(content)
             clear_screen()
-            print(frame)
+            print(res)
             time.sleep(delay)
 
 def display_parallax_run():
@@ -35,3 +36,6 @@ def display_parallax_run():
         print(f"Error: The file '{file_path}' contains invalid JSON.")
         return
     display_ascii_animation(animation_data)
+
+if __name__ == "__main__":
+    display_parallax_run()
