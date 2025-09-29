@@ -151,7 +151,7 @@ Examples:
         "join", help="Join a distributed cluster (equivalent to scripts/join.sh)"
     )
     join_parser.add_argument(
-        "-s", "--scheduler-addr", type=str, help="Scheduler address (required)"
+        "-s", "--scheduler-addr", default="auto", type=str, help="Scheduler address (required)"
     )
 
     args = parser.parse_args()

@@ -8,12 +8,14 @@ fi
 helpFunction()
 {
    echo ""
-   echo "Usage: $0 -s SCHEDULER_ADDR"
-   echo -e "\t-s Description of what is SCHEDULER_ADDR"
+   echo "Usage: $0 [-s SCHEDULER_ADDR]"
+   echo -e "\t-s SCHEDULER_ADDR (default: auto)"
    exit 1 # Exit script after printing help
 }
 
-while getopts "s:m:i:" opt
+SCHEDULER_ADDR="auto"
+
+while getopts "s:" opt
 do
    case "$opt" in
       s ) SCHEDULER_ADDR="$OPTARG" ;;
@@ -24,11 +26,9 @@ done
 # Print helpFunction in case parameters are empty
 if [ -z "$SCHEDULER_ADDR" ]
 then
-   echo "Some or all of the parameters are empty";
-   helpFunction
+   SCHEDULER_ADDR="auto"
 fi
 
-# Begin script in case all parameters are correct
 echo "$SCHEDULER_ADDR"
 
 export SGL_ENABLE_JIT_DEEPGEMM=0
