@@ -153,6 +153,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
         </Stack>
       </Stack>
     ),
+    confirmLabel: 'Finish',
   });
 
   return (
