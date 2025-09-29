@@ -123,6 +123,7 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
         sx={{
           color: palette.grey[800],
           backgroundColor: palette.grey[250],
+          fontSize: '1.42rem',
         }}
       >
         <IconNode />
