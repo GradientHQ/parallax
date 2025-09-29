@@ -62,13 +62,6 @@ from parallax_utils.utils import compute_max_batch_size
 logger = get_logger(__name__)
 
 
-"""Currently hard code model name for MAC"""
-MLX_MODEL_NAME_MAP = {
-    "openai/gpt-oss-20b": "mlx-community/gpt-oss-20b-MXFP4-Q8",
-    "openai/gpt-oss-120b": "mlx-community/gpt-oss-120b-MXFP4-Q8",
-}
-
-
 class Executor:
     """High-level executor for managing model shards, scheduler, and cache pool on each Peer."""
 
@@ -135,9 +128,6 @@ class Executor:
             self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
             self.cur_batch = None
         else:
-            mlx_model_repo = MLX_MODEL_NAME_MAP.get(model_repo, None)
-            if mlx_model_repo is not None:
-                model_repo = mlx_model_repo
             logger.debug(
                 f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer})"
             )
