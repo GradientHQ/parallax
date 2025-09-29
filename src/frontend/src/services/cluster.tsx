@@ -4,7 +4,20 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useRefCallback } from '../hooks';
 import { createStreamClusterStatus, getModelList, initScheduler } from './api';
 
-import logoUrlQwen from '../assets/models/qwen.png';
+import logoUrlQwen from '../assets/models/Qwen.png';
+import logoUrlGpt from '../assets/models/OpenAI-black-monoblossom.svg';
+
+const getLogoUrl = (name: string) => {
+  name = name.toLowerCase();
+  const parts = name.split(/[-/]/);
+  if (parts[0] === 'qwen') {
+    return logoUrlQwen;
+  }
+  if (parts[0] === 'openai') {
+    return logoUrlGpt;
+  }
+  return '';
+};
 
 const debugLog = (...args: any[]) => {
   console.log('%c cluster.tsx ', 'color: white; background: darkcyan;', ...args);
@@ -76,7 +89,7 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
         modelList.map((name) => ({
           name,
           displayName: name,
-          logoUrl: logoUrlQwen,
+          logoUrl: getLogoUrl(name),
         })),
       );
     });
