@@ -127,7 +127,7 @@ def join_command(args):
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Parallax - Decentralized pipeline-parallel LLM serving",
+        description="Parallax - A fully decentralized inference engine developed by Gradient Network",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

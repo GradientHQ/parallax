@@ -5,7 +5,7 @@ A fully decentralized inference engine developed by [Gradient Network](https://g
 
 <h3>
 
-[Gradient Network](https://gradient.network) | [Blog](https://gradient.network/blog/parallax-world-inference-engine) | [X(Twitter)](https://x.com/Gradient_HQ) | [Discord](https://discord.gg/gradientnetwork) | [arXiv]()
+[Gradient Network](https://gradient.network) | [Blog](https://gradient.network/blog/parallax-world-inference-engine) | [X(Twitter)](https://x.com/Gradient_HQ) | [Discord](https://discord.gg/gradientnetwork)
 
 </h3>
 
@@ -56,7 +56,7 @@ pip install -e '.[dev]'
 ```
 
 ### Windows Application
-Click ```download raw file``` at this [Link](https://github.com/GradientHQ/parallax/blob/main/windows/Gradient_Parallax_PC_Setup_v1.0.0.0.exe) to get latest Windows installer.
+Click ```download raw file``` at this [Link](https://github.com/GradientHQ/parallax/releases/latest/download/Gradient_Parallax_PC_Setup.exe) to get latest Windows installer.
 
 After installing .exe, right click Windows start button and click ```Windows Terminal(Admin)``` to start a Powershell console as administrator.
 
