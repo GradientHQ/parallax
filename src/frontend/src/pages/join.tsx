@@ -39,7 +39,8 @@ export default function PageJoin() {
 
   const isError = useMemo(() => {
     if (
-      nodeInfoList.length >= initNodesNumber
+      initNodesNumber > 0
+      && nodeInfoList.length >= initNodesNumber
       && nodeInfoList.every((node) => node.status === 'available')
       && clusterStatus === 'waiting'
     ) {
