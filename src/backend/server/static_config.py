@@ -22,11 +22,11 @@ MODEL_LIST = [
     # "Qwen/Qwen2.5-7B-Instruct",
     # "Qwen/Qwen2.5-14B-Instruct",
     "Qwen/Qwen2.5-72B-Instruct",
-    "openai/openai/gpt-oss-20b",
-    "openai/openai/gpt-oss-120b",
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "meta-llama/Llama-3.2-1B-Instruct",
-    "meta-llama/Llama-3.2-3B-Instruct",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "nvidia/Llama-3.1-70B-Instruct-FP8",
+    "nvidia/Llama-3.1-8B-Instruct-FP8",
 ]
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join -s {scheduler_addr}"""
