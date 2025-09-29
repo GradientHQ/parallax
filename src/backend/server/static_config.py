@@ -22,24 +22,16 @@ MODEL_LIST = [
     # "Qwen/Qwen2.5-7B-Instruct",
     # "Qwen/Qwen2.5-14B-Instruct",
     "Qwen/Qwen2.5-72B-Instruct",
-    "openai/openai/gpt-oss-20b",
-    "openai/openai/gpt-oss-120b",
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "meta-llama/Llama-3.2-1B-Instruct",
-    "meta-llama/Llama-3.2-3B-Instruct",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "nvidia/Llama-3.1-70B-Instruct-FP8",
+    "nvidia/Llama-3.1-8B-Instruct-FP8",
 ]
 
-NODE_JOIN_COMMAND_LOCAL_NETWORK_LINUX_MAC = """parallax join -s {scheduler_addr}"""
+NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
 
-NODE_JOIN_COMMAND_PUBLIC_NETWORK_LINUX_MAC = """parallax join -s {scheduler_addr}"""
-
-NODE_JOIN_COMMAND_LOCAL_NETWORK_WINDOWS = (
-    """parallax join bash scripts/join.sh -s {scheduler_addr}"""
-)
-
-NODE_JOIN_COMMAND_PUBLIC_NETWORK_WINDOWS = (
-    """parallax join bash scripts/join.sh -s {scheduler_addr}"""
-)
+NODE_JOIN_COMMAND_PUBLIC_NETWORK = """parallax join -s {scheduler_addr}"""
 
 
 def get_model_info(model_name):
@@ -88,21 +80,11 @@ def get_node_join_command(scheduler_addr, is_local_network):
     if scheduler_addr:
         if is_local_network:
             return {
-                "linux/mac": NODE_JOIN_COMMAND_LOCAL_NETWORK_LINUX_MAC.format(
-                    scheduler_addr=scheduler_addr
-                ),
-                "windows": NODE_JOIN_COMMAND_LOCAL_NETWORK_WINDOWS.format(
-                    scheduler_addr=scheduler_addr
-                ),
+                "command": NODE_JOIN_COMMAND_LOCAL_NETWORK.format(scheduler_addr=scheduler_addr),
             }
         else:
             return {
-                "linux/mac": NODE_JOIN_COMMAND_PUBLIC_NETWORK_LINUX_MAC.format(
-                    scheduler_addr=scheduler_addr
-                ),
-                "windows": NODE_JOIN_COMMAND_PUBLIC_NETWORK_WINDOWS.format(
-                    scheduler_addr=scheduler_addr
-                ),
+                "command": NODE_JOIN_COMMAND_PUBLIC_NETWORK.format(scheduler_addr=scheduler_addr),
             }
     else:
         return None

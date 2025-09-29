@@ -217,7 +217,7 @@ class GradientServer:
         self.connection_handler = None
         self.stop_event = threading.Event()
 
-    def run(self):
+    def build_lattica(self):
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs)
 
         if len(self.relay_servers) > 0:
@@ -232,12 +232,40 @@ class GradientServer:
             logger.info(f"Using initial peers: {self.initial_peers}")
             self.lattica.with_bootstraps(self.initial_peers)
 
-        if self.scheduler_addr is not None:
+        if self.scheduler_addr is not None and self.scheduler_addr != "auto":
             logger.info(f"Using scheduler addr: {self.scheduler_addr}")
             self.lattica.with_bootstraps([self.scheduler_addr])
             self.scheduler_peer_id = self.scheduler_addr.split("/")[-1]
 
         self.lattica.build()
+
+        if self.scheduler_addr == "auto":
+            self.scheduler_peer_id = None
+            for _ in range(20):
+                try:
+                    time.sleep(3)
+                    self.scheduler_peer_id = self.lattica.get("scheduler_peer_id")
+                    if self.scheduler_peer_id is not None:
+                        self.scheduler_peer_id = self.scheduler_peer_id.value
+                        logger.info(f"Found scheduler peer id: {self.scheduler_peer_id}")
+                        break
+                    logger.info(
+                        f"Discovering scheduler peer id, {_ + 1} times, you can specify scheduler peer id by -s"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to get scheduler addr: {e}, waiting for 3 seconds.")
+            if self.scheduler_peer_id is None:
+                logger.error("Failed to get scheduler peer id")
+                return False
+
+        return True
+
+    def run(self):
+        if self.build_lattica():
+            logger.info("Lattica built successfully")
+        else:
+            logger.error("Failed to build lattica")
+            exit(1)
 
         if self.scheduler_addr is not None:  # central scheduler mode
             try:
@@ -268,7 +296,7 @@ class GradientServer:
             except Exception as e:
                 logger.exception(f"Error in join scheduler: {e}")
                 exit(1)
-        else:  # decentralized mode
+        else:  # no scheduler mode
             self.start_routing_table_updater()  # thread
 
         self.connection_handler = TransformerConnectionHandler(
@@ -597,7 +625,7 @@ def launch_p2p_server(
     else:
         dht_port = 0
     if host_maddrs is None:
-        host_maddrs = [f"/ip4/0.0.0.0/tcp/{dht_port}"]
+        host_maddrs = [f"/ip4/0.0.0.0/tcp/{dht_port}", f"/ip4/0.0.0.0/udp/{dht_port}/quic-v1"]
 
     # Run the server in a separate thread to keep the main thread free for event loop
     server = GradientServer(

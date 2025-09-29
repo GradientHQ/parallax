@@ -73,12 +73,21 @@ parallax --help
 ```
 
 ### Docker
-For GPU devices, Parallax provides a docker environment for quick setup. Choose the docker image according to the device's GPU architechture.
+For Linux+GPU devices, Parallax provides a docker environment for quick setup. Choose the docker image according to the device's GPU architechture.
 
 |  GPU Architecture  |  GPU Series  | Image Pull Command |
 |:-------------|:----------------------------|:----------------------------|
 |Blackwell       | RTX50 series/B100/B200... |```docker pull gradientservice/parallax:latest-blackwell```|
-|Ampere & Hopper | RTX30 series/RTX40 series/A100/H100... |```docker pull gradientservice/parallax:latest-hopper```|
+|Ampere/Hopper | RTX30 series/RTX40 series/A100/H100... |```docker pull gradientservice/parallax:latest-hopper```|
+
+Run a docker container as below. Please note that generally the argument ```--gpus all``` is necessary for the docker to run on GPUs.
+```sh
+# For Blackwell
+docker run -it --gpus all --network host gradientservice/parallax:latest-blackwell bash
+# For Ampere/Hopper
+docker run -it --gpus all --network host gradientservice/parallax:latest-hopper bash
+```
+The container starts under parallax workspace and you should be able to run parallax directly.
 
 ## Usage on Distributed Devices
 ### Use frontend
@@ -101,14 +110,10 @@ Select model config and click continue.
 #### Step 3: Join each distributed nodes
 ![Node join](docs/images/node-join.png)
 This page will show the join command like blow.
-- For Linux/macOS:
 ```sh
-parallax join -s {scheduler-address}
-# example
-parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
-```
-- For Windows:
-```sh
+# local area network env
+parallax join
+# public network env
 parallax join -s {scheduler-address}
 # example
 parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
@@ -134,6 +139,9 @@ Please notice and record the scheduler ip4 address generated in the terminal.
 #### Step 2: Join each distributed nodes
 For each distributed nodes including the main node, open a terminal and join the server with the scheduler address.
 ```sh
+# local area network env
+parallax join
+# public network env
 parallax join -s {scheduler-address}
 ```
 For example:
