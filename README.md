@@ -101,13 +101,6 @@ Select model config and click continue.
 #### Step 3: Join each distributed nodes
 ![Node join](docs/images/node-join.png)
 This page will show the join command like blow.
-- For Linux/macOS:
-```sh
-parallax join -s {scheduler-address}
-# example
-parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
-```
-- For Windows:
 ```sh
 parallax join -s {scheduler-address}
 # example

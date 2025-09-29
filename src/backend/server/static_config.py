@@ -29,17 +29,9 @@ MODEL_LIST = [
     "meta-llama/Llama-3.2-3B-Instruct",
 ]
 
-NODE_JOIN_COMMAND_LOCAL_NETWORK_LINUX_MAC = """parallax join -s {scheduler_addr}"""
+NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join -s {scheduler_addr}"""
 
-NODE_JOIN_COMMAND_PUBLIC_NETWORK_LINUX_MAC = """parallax join -s {scheduler_addr}"""
-
-NODE_JOIN_COMMAND_LOCAL_NETWORK_WINDOWS = (
-    """parallax join bash scripts/join.sh -s {scheduler_addr}"""
-)
-
-NODE_JOIN_COMMAND_PUBLIC_NETWORK_WINDOWS = (
-    """parallax join bash scripts/join.sh -s {scheduler_addr}"""
-)
+NODE_JOIN_COMMAND_PUBLIC_NETWORK = """parallax join -s {scheduler_addr}"""
 
 
 def get_model_info(model_name):
@@ -88,21 +80,11 @@ def get_node_join_command(scheduler_addr, is_local_network):
     if scheduler_addr:
         if is_local_network:
             return {
-                "linux/mac": NODE_JOIN_COMMAND_LOCAL_NETWORK_LINUX_MAC.format(
-                    scheduler_addr=scheduler_addr
-                ),
-                "windows": NODE_JOIN_COMMAND_LOCAL_NETWORK_WINDOWS.format(
-                    scheduler_addr=scheduler_addr
-                ),
+                "command": NODE_JOIN_COMMAND_LOCAL_NETWORK.format(scheduler_addr=scheduler_addr),
             }
         else:
             return {
-                "linux/mac": NODE_JOIN_COMMAND_PUBLIC_NETWORK_LINUX_MAC.format(
-                    scheduler_addr=scheduler_addr
-                ),
-                "windows": NODE_JOIN_COMMAND_PUBLIC_NETWORK_WINDOWS.format(
-                    scheduler_addr=scheduler_addr
-                ),
+                "command": NODE_JOIN_COMMAND_PUBLIC_NETWORK.format(scheduler_addr=scheduler_addr),
             }
     else:
         return None
