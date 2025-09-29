@@ -7,6 +7,10 @@ const PageSetup = lazy(() => import('../pages/setup'));
 const PageJoin = lazy(() => import('../pages/join'));
 const PageChat = lazy(() => import('../pages/chat'));
 
+const debugLog = (...args: any[]) => {
+  console.log('%c router.tsx ', 'color: white; background: purple;', ...args);
+};
+
 export const Router = () => {
   const navigate = useNavigate();
 
@@ -17,11 +21,14 @@ export const Router = () => {
   ] = useCluster();
 
   useEffect(() => {
+    debugLog('cluster status', status);
     switch (status) {
       case 'idle':
       case 'waiting':
+        debugLog('no need to navigate');
         break;
       default:
+        debugLog('navigate to /chat');
         navigate('/chat');
         break;
     }
