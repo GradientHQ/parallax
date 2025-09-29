@@ -121,8 +121,8 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
     >
       <ListItemIcon
         sx={{
-          color: main,
-          backgroundColor: lighter,
+          color: palette.grey[800],
+          backgroundColor: palette.grey[250],
         }}
       >
         <IconNode />
@@ -142,7 +142,7 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
             textOverflow='ellipsis'
             whiteSpace='nowrap'
           >
-            {id}
+            {id && id.substring(0, 4) + '...' + id.substring(id.length - 4)}
           </Typography>
         )) || <Skeleton width='14rem' height='0.75rem' sx={{ my: 0.5 }} />}
       </ListItemText>

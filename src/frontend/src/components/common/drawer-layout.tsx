@@ -4,6 +4,7 @@ import { useCluster } from '../../services';
 import { useAlertDialog } from '../mui';
 import { IconBrandGradient } from '../brand';
 import {
+  IconCirclePlus,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconLayoutSidebarRightCollapse,
@@ -80,7 +81,6 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
 
   const [dialogRebalancing, { open: openRebalancing }] = useAlertDialog({
     color: 'error',
-    titleIcon: true,
     title: '',
     content: (
       <>
@@ -101,13 +101,24 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
   const [sidebarExpanded, setMenuOpen] = useState(true);
 
   const [dialogJoinCommand, { open: openJoinCommand }] = useAlertDialog({
-    color: 'success',
+    color: 'primary',
+    titleIcon: <IconCirclePlus />,
     title: 'Add Nodes',
     content: (
-      <>
-        <Typography variant='subtitle1'>To add nodes, use the join command below.</Typography>
-        <JoinCommand />
-      </>
+      <Stack sx={{ gap: 7 }}>
+        <Stack sx={{ gap: 1 }}>
+          <Typography variant='body1'>Run join command on your new Node</Typography>
+          <JoinCommand />
+        </Stack>
+        <Stack sx={{ gap: 1 }}>
+          <Typography variant='body1'>Check your live node status</Typography>
+          <Typography variant='body2' color='text.disabled'>
+            After you successfully start the server on the nodes, you should see them show up on the
+            below dashboard.
+          </Typography>
+          <NodeList />
+        </Stack>
+      </Stack>
     ),
   });
 

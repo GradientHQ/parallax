@@ -4,6 +4,11 @@ import { useCluster } from '../../services';
 import { IconCopy, IconCopyCheck } from '@tabler/icons-react';
 import { useRefCallback } from '../../hooks';
 
+const LABEL_MAP: Record<string, string> = {
+  'linux/mac': 'Linux/MacOS',
+  windows: 'Windows',
+};
+
 const JoinCommandItem = styled('div')(({ theme }) => {
   const { palette, spacing } = theme;
   return {
@@ -48,15 +53,21 @@ export const JoinCommand: FC = () => {
   return (
     <Stack gap={1}>
       {Object.entries(nodeJoinCommand).map(([key, value]) => (
-        <JoinCommandItem key={key}>
-          <Typography variant='subtitle2'>{key}:</Typography>
-          <Typography sx={{ flex: 1, lineHeight: '1.125rem', whiteSpace: 'wrap' }} variant='pre'>
-            {value}
-          </Typography>
-          <IconButton sx={{ flex: 'none', fontSize: '1.5rem' }} size='em' onClick={() => copy(key)}>
-            {(copiedKey === key && <IconCopyCheck />) || <IconCopy />}
-          </IconButton>
-        </JoinCommandItem>
+        <Stack key={key} gap={1}>
+          <Typography variant='subtitle2'>{LABEL_MAP[key] || key}:</Typography>
+          <JoinCommandItem>
+            <Typography sx={{ flex: 1, lineHeight: '1.125rem', whiteSpace: 'wrap' }} variant='pre'>
+              {value}
+            </Typography>
+            <IconButton
+              sx={{ flex: 'none', fontSize: '1.5rem' }}
+              size='em'
+              onClick={() => copy(key)}
+            >
+              {(copiedKey === key && <IconCopyCheck />) || <IconCopy />}
+            </IconButton>
+          </JoinCommandItem>
+        </Stack>
       ))}
     </Stack>
   );
