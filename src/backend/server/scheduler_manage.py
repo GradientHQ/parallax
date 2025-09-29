@@ -133,7 +133,6 @@ class SchedulerManage:
         self.lattica = (
             Lattica.builder()
             .with_listen_addrs(self.host_maddrs)
-            .with_mdns(False)
             .with_key_path(".")
         )
 
@@ -151,6 +150,12 @@ class SchedulerManage:
 
         self.lattica.build()
         logger.debug("Lattica node built")
+
+        if self.lattica.store("scheduler_peer_id", self.lattica.peer_id(), expiration_time=time.time() + 365*24*60*60):
+            logger.info(f"Stored scheduler peer id: {self.lattica.peer_id()}")
+        else:
+            logger.error("Failed to store scheduler peer id")
+            exit(1)
 
         self.connection_handler = RPCConnectionHandler(
             lattica=self.lattica,

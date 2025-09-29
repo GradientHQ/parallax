@@ -232,12 +232,30 @@ class GradientServer:
             logger.info(f"Using initial peers: {self.initial_peers}")
             self.lattica.with_bootstraps(self.initial_peers)
 
-        if self.scheduler_addr is not None:
+        if self.scheduler_addr is not None and self.scheduler_addr != 'auto':
             logger.info(f"Using scheduler addr: {self.scheduler_addr}")
             self.lattica.with_bootstraps([self.scheduler_addr])
             self.scheduler_peer_id = self.scheduler_addr.split("/")[-1]
 
         self.lattica.build()
+
+        if self.scheduler_addr == 'auto':
+            self.scheduler_peer_id = None
+            for _ in range(30):
+                try:
+                    self.scheduler_peer_id = self.lattica.get("scheduler_peer_id")
+                    if self.scheduler_peer_id is not None:
+                        self.scheduler_peer_id = self.scheduler_peer_id.value
+                        logger.info(f"Found scheduler peer id: {self.scheduler_peer_id}")
+                        break
+                    logger.info(f"Waiting for scheduler peer id, {_ + 1} times")
+                    time.sleep(10)
+                except Exception as e:
+                    logger.warning(f"Failed to get scheduler addr: {e}, waiting for 10 second.")
+                    time.sleep(10)
+            if self.scheduler_peer_id is None:
+                logger.error("Failed to get scheduler peer id")
+                exit(1)
 
         if self.scheduler_addr is not None:  # central scheduler mode
             try:
