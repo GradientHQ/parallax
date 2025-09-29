@@ -73,12 +73,21 @@ parallax --help
 ```
 
 ### Docker
-For GPU devices, Parallax provides a docker environment for quick setup. Choose the docker image according to the device's GPU architechture.
+For Linux+GPU devices, Parallax provides a docker environment for quick setup. Choose the docker image according to the device's GPU architechture.
 
 |  GPU Architecture  |  GPU Series  | Image Pull Command |
 |:-------------|:----------------------------|:----------------------------|
 |Blackwell       | RTX50 series/B100/B200... |```docker pull gradientservice/parallax:latest-blackwell```|
-|Ampere & Hopper | RTX30 series/RTX40 series/A100/H100... |```docker pull gradientservice/parallax:latest-hopper```|
+|Ampere/Hopper | RTX30 series/RTX40 series/A100/H100... |```docker pull gradientservice/parallax:latest-hopper```|
+
+Run a docker container as below. Please note that generally the argument ```--gpus all``` is necessary for the docker to run on GPUs.
+```sh
+# For Blackwell
+docker run -it --gpus all --network host gradientservice/parallax:latest-blackwell bash
+# For Ampere/Hopper
+docker run -it --gpus all --network host gradientservice/parallax:latest-hopper bash
+```
+The container starts under parallax workspace and you should be able to run parallax directly.
 
 ## Usage on Distributed Devices
 ### Use frontend
