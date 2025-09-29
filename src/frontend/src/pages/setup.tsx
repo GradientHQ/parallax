@@ -35,9 +35,9 @@ export default function PageSetup() {
 
   const navigate = useNavigate();
 
-  const onContinue = useRefCallback(() => {
-    init();
-    navigate('/join');
+  const onContinue = useRefCallback(async () => {
+    await init();
+    await navigate('/join');
   });
 
   return (
