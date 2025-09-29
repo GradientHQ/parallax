@@ -216,7 +216,7 @@ class GradientServer:
         self.announcer = None
         self.connection_handler = None
         self.stop_event = threading.Event()
-    
+
     def build_lattica(self):
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs)
 
@@ -232,14 +232,14 @@ class GradientServer:
             logger.info(f"Using initial peers: {self.initial_peers}")
             self.lattica.with_bootstraps(self.initial_peers)
 
-        if self.scheduler_addr is not None and self.scheduler_addr != 'auto':
+        if self.scheduler_addr is not None and self.scheduler_addr != "auto":
             logger.info(f"Using scheduler addr: {self.scheduler_addr}")
             self.lattica.with_bootstraps([self.scheduler_addr])
             self.scheduler_peer_id = self.scheduler_addr.split("/")[-1]
 
         self.lattica.build()
 
-        if self.scheduler_addr == 'auto':
+        if self.scheduler_addr == "auto":
             self.scheduler_peer_id = None
             for _ in range(20):
                 try:
@@ -249,7 +249,9 @@ class GradientServer:
                         self.scheduler_peer_id = self.scheduler_peer_id.value
                         logger.info(f"Found scheduler peer id: {self.scheduler_peer_id}")
                         break
-                    logger.info(f"Discovering scheduler peer id, {_ + 1} times, you can specify scheduler peer id by -s")
+                    logger.info(
+                        f"Discovering scheduler peer id, {_ + 1} times, you can specify scheduler peer id by -s"
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to get scheduler addr: {e}, waiting for 3 seconds.")
             if self.scheduler_peer_id is None:
@@ -294,7 +296,7 @@ class GradientServer:
             except Exception as e:
                 logger.exception(f"Error in join scheduler: {e}")
                 exit(1)
-        else: # no scheduler mode
+        else:  # no scheduler mode
             self.start_routing_table_updater()  # thread
 
         self.connection_handler = TransformerConnectionHandler(

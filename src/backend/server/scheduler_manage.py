@@ -130,11 +130,7 @@ class SchedulerManage:
         logger.debug(
             f"Starting Lattica with host_maddrs={self.host_maddrs}, mdns=False, dht_prefix={self.dht_prefix}"
         )
-        self.lattica = (
-            Lattica.builder()
-            .with_listen_addrs(self.host_maddrs)
-            .with_key_path(".")
-        )
+        self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs).with_key_path(".")
 
         if len(self.relay_servers) > 0:
             print(f"Using relay servers: {self.relay_servers}")
@@ -151,7 +147,11 @@ class SchedulerManage:
         self.lattica.build()
         logger.debug("Lattica node built")
 
-        if self.lattica.store("scheduler_peer_id", self.lattica.peer_id(), expiration_time=time.time() + 365*24*60*60):
+        if self.lattica.store(
+            "scheduler_peer_id",
+            self.lattica.peer_id(),
+            expiration_time=time.time() + 365 * 24 * 60 * 60,
+        ):
             logger.info(f"Stored scheduler peer id: {self.lattica.peer_id()}")
         else:
             logger.error("Failed to store scheduler peer id")
