@@ -184,7 +184,8 @@ class BaseLayerAllocator:
     def deallocate(self, node: Node) -> None:
         """Deallocate a node from its assigned layers."""
         if node.start_layer is None or node.end_layer is None:
-            raise ValueError("Node must have start_layer and end_layer")
+            logger.info("Node must have start_layer and end_layer")
+            return
         start_layer, end_layer = node.start_layer, node.end_layer
         logger.debug(
             "Deallocating node %s from layers [%d, %d)", node.node_id, start_layer, end_layer
