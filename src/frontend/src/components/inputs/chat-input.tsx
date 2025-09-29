@@ -44,7 +44,7 @@ export const ChatInput: FC = () => {
         onChange={(event) => setInput(event.target.value)}
         multiline
         maxRows={4}
-        placeholder='Ask anything...'
+        placeholder='Ask anything'
         fullWidth
         onKeyDown={onKeyDown}
         slotProps={{
@@ -53,9 +53,11 @@ export const ChatInput: FC = () => {
               border: '1px solid',
               borderColor: 'grey.300',
               borderRadius: 2,
+              fontSize: '0.95rem',
               boxShadow: '2px 2px 4px rgba(0,0,0,0.05)',
               flexDirection: 'column',
               '& textarea': {
+                fontSize: '0.95rem',
                 scrollbarWidth: 'none', // Firefox
                 msOverflowStyle: 'none', // IE, Edge
                 '&::-webkit-scrollbar': {

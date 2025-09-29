@@ -2,8 +2,6 @@ import { memo, useEffect, useRef, useState, type FC, type UIEventHandler } from 
 import { useChat, type ChatMessage } from '../../services';
 import { Box, Button, IconButton, Paper, Stack, Tooltip, Typography } from '@mui/material';
 import {
-  IconArrowAutofitDown,
-  IconArrowBack,
   IconArrowDown,
   IconCopy,
   IconCopyCheck,
@@ -20,17 +18,45 @@ export const ChatMessages: FC = () => {
   const refBottom = useRef<HTMLDivElement>(null);
   const [isBottom, setIsBottom] = useState(true);
 
+  const userScrolledUpRef = useRef(false);
+  const autoScrollingRef = useRef(false);
+  const prevScrollTopRef = useRef(0);
+
   useEffect(() => {
+    if (userScrolledUpRef.current) return;
+    autoScrollingRef.current = true;
     refBottom.current?.scrollIntoView({ behavior: 'smooth' });
+    const t = setTimeout(() => { autoScrollingRef.current = false; }, 200);
+    return () => clearTimeout(t);
   }, [messages]);
 
-  const onScroll = useRefCallback<UIEventHandler<HTMLDivElement>>((event) => {
-    const { current: container } = refContainer;
-    if (!container) {
-      return;
+  const onScroll = useRefCallback<UIEventHandler<HTMLDivElement>>(() => {
+    const container = refContainer.current;
+    if (!container) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const bottomGap = scrollHeight - scrollTop - clientHeight;
+
+    setIsBottom(bottomGap < 10);
+
+    if (!autoScrollingRef.current) {
+      if (scrollTop < prevScrollTopRef.current - 2) {
+        userScrolledUpRef.current = true;
+      }
     }
-    setIsBottom(container.scrollHeight - container.scrollTop - container.clientHeight < 10);
+    prevScrollTopRef.current = scrollTop;
+
+    if (bottomGap < 10) {
+      userScrolledUpRef.current = false;
+    }
   });
+
+  const scrollToBottom = () => {
+    userScrolledUpRef.current = false;
+    autoScrollingRef.current = true;
+    refBottom.current?.scrollIntoView({ behavior: 'smooth' });
+    setTimeout(() => { autoScrollingRef.current = false; }, 200);
+  };
 
   return (
     <Stack
@@ -40,32 +66,29 @@ export const ChatMessages: FC = () => {
         overflowX: 'hidden',
         overflowY: 'auto',
         gap: 4,
-        '&::-webkit-scrollbar': {
-          display: 'none',
-        },
+        '&::-webkit-scrollbar': { display: 'none' },
         scrollbarWidth: 'none',
         msOverflowStyle: 'none',
       }}
       onScroll={onScroll}
+      // 额外保险：用户滚轮“向上”也算主动上滑
+      onWheel={(e) => {
+        if (e.deltaY < 0) userScrolledUpRef.current = true;
+      }}
+      onTouchMove={() => { userScrolledUpRef.current = true; }} // 移动端手势上滑
     >
       {messages.map((message, idx) => (
         <ChatMessage key={message.id} message={message} isLast={idx === messages.length - 1} />
       ))}
 
-      {status === 'opened' && <DotPulse size='large' />}
+      {status === 'opened' && <DotPulse size="large" />}
 
-      <Box
-        ref={refBottom}
-        sx={{
-          width: '100%',
-          height: 0,
-        }}
-      />
+      <Box ref={refBottom} sx={{ width: '100%', height: 0 }} />
 
       {!isBottom && (
         <IconButton
-          onClick={() => refBottom.current?.scrollIntoView({ behavior: 'smooth' })}
-          size='small'
+          onClick={scrollToBottom}
+          size="small"
           sx={{
             position: 'sticky',
             bottom: 0,
@@ -78,7 +101,7 @@ export const ChatMessages: FC = () => {
             borderColor: 'grey.300',
             '&:hover': { bgcolor: 'grey.100' },
           }}
-          aria-label='Scroll to bottom'
+          aria-label="Scroll to bottom"
         >
           <IconArrowDown />
         </IconButton>
@@ -110,58 +133,54 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
   const justifyContent = role === 'user' ? 'flex-end' : 'flex-start';
 
   const nodeContent =
-    role === 'user' ? (
+    role === 'user' ?
       <Typography
-        variant="body1"
-        sx={{ px: 2, py: 1.5, borderRadius: '0.5rem', backgroundColor: 'background.default' }}
+        variant='body1'
+        sx={{ px: 2, py: 1.5, borderRadius: '0.5rem', backgroundColor: 'background.default', fontSize: '0.95rem' }}
       >
         {content}
       </Typography>
-    ) : (
-      <ChatMarkdown content={content} />
-    );
+    : <ChatMarkdown content={content} />;
 
-  // 仅当 assistant 完成时显示操作（不是最后一条，或状态已 closed）
+
   const assistantDone = !isLast || status === 'closed';
 
-  // 是否显示各按钮
+
   const showCopy = role === 'user' || (role === 'assistant' && assistantDone);
   const showRegen = role === 'assistant' && assistantDone;
 
-  // user 消息：默认隐藏 actions，hover 父容器时显示
   const userHoverRevealSx =
-    role === 'user'
-      ? {
-          '&:hover .actions-user': {
-            opacity: 1,
-            pointerEvents: 'auto',
-          },
-        }
-      : {};
+    role === 'user' ?
+      {
+        '&:hover .actions-user': {
+          opacity: 1,
+          pointerEvents: 'auto',
+        },
+      }
+    : {};
 
   return (
-    <Stack direction="row" sx={{ width: '100%', justifyContent }}>
+    <Stack direction='row' sx={{ width: '100%', justifyContent }}>
       {/* 父容器：承载 hover */}
       <Stack sx={{ maxWidth: '100%', gap: 1, ...userHoverRevealSx }}>
         {nodeContent}
 
         {(showCopy || showRegen) && (
           <Stack
-            key="actions"
-            direction="row"
-            // 给 user 的 actions 一个 class，并默认隐藏
+            key='actions'
+            direction='row'
             className={role === 'user' ? 'actions-user' : undefined}
             sx={{
               justifyContent,
               color: 'grey.600',
               gap: 0.5,
-              ...(role === 'user'
-                ? {
-                    opacity: 0,               // 默认隐藏
-                    pointerEvents: 'none',    // 默认不响应
-                    transition: 'opacity .15s ease',
-                  }
-                : {}),
+              ...(role === 'user' ?
+                {
+                  opacity: 0, 
+                  pointerEvents: 'none', 
+                  transition: 'opacity .15s ease',
+                }
+              : {}),
             }}
           >
             {showCopy && (
@@ -174,7 +193,7 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
               >
                 <IconButton
                   onClick={onCopy}
-                  size="small"
+                  size='small'
                   sx={{
                     width: 24,
                     height: 24,
@@ -182,14 +201,16 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
                     '&:hover': { bgcolor: 'action.hover' },
                   }}
                 >
-                  {copied ? <IconCopyCheck /> : <IconCopy />}
+                  {copied ?
+                    <IconCopyCheck />
+                  : <IconCopy />}
                 </IconButton>
               </Tooltip>
             )}
 
             {showRegen && (
               <Tooltip
-                title="Regenerate"
+                title='Regenerate'
                 slotProps={{
                   tooltip: { sx: { bgcolor: 'primary.main', borderRadius: 1 } },
                   popper: { modifiers: [{ name: 'offset', options: { offset: [0, -8] } }] },
@@ -197,7 +218,7 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
               >
                 <IconButton
                   onClick={onRegenerate}
-                  size="small"
+                  size='small'
                   sx={{
                     width: 24,
                     height: 24,

@@ -1,5 +1,14 @@
 import { useEffect, useState, type FC, type PropsWithChildren } from 'react';
-import { Box, Button, IconButton, Stack, styled, Tooltip, Typography } from '@mui/material';
+import {
+  Box,
+  Button,
+  Divider,
+  IconButton,
+  Stack,
+  styled,
+  Tooltip,
+  Typography,
+} from '@mui/material';
 import { useCluster } from '../../services';
 import { useAlertDialog } from '../mui';
 import { IconBrandGradient } from '../brand';
@@ -43,8 +52,9 @@ const DrawerLayoutHeader = styled(Stack)(({ theme }) => {
   const { spacing } = theme;
   return {
     width: '100%',
-    height: '4rem',
+    height: '2.5rem',
     flex: 'none',
+    marginTop: spacing(1),
     paddingBlock: spacing(2),
     paddingInline: spacing(4),
     overflow: 'hidden',
@@ -156,9 +166,36 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
     confirmLabel: 'Finish',
   });
 
+  const IconCluster = () => (
+    <svg
+      width='1.7rem'
+      height='1.7rem'
+      viewBox='0 0 27 27'
+      fill='currentColor'
+    >
+      <g
+        fill='none'
+        stroke='currentColor'
+        stroke-linecap='round'
+        stroke-linejoin='round'
+        stroke-width='2'
+      >
+        <rect width='6' height='6' x='16' y='16' rx='1' />
+        <rect width='6' height='6' x='2' y='16' rx='1' />
+        <rect width='6' height='6' x='9' y='2' rx='1' />
+        <path d='M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3m-7-4V8' />
+      </g>
+    </svg>
+  );
+
   return (
     <DrawerLayoutRoot direction='row'>
-      <DrawerLayoutSide sx={{ width: sidebarExpanded ? '21.875rem' : '3.5rem' }}>
+      <DrawerLayoutSide
+        sx={{
+          width: sidebarExpanded ? '19.25rem' : '3.5rem',
+          paddingInline: sidebarExpanded ? 3.5 : 2,
+        }}
+      >
         <Stack direction='row' sx={{ justifyContent: 'flex-end', alignItems: 'center', gap: 2 }}>
           {sidebarExpanded ?
             <>
@@ -176,6 +213,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
                   sx={{
                     fontSize: '1.5rem',
                     borderRadius: '8px',
+                    color: '#808080FF',
                     '&:hover': { bgcolor: 'action.hover' },
                   }}
                   onClick={() => setMenuOpen((prev) => !prev)}
@@ -241,15 +279,16 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
           }
         </Stack>
         {sidebarExpanded && (
-          <Stack sx={{ gap: 4 }}>
-            <Stack direction='row' sx={{ gap: 1, color: 'text.disabled' }}>
-              <IconTopologyStar3 size='1.25rem' />
-              <Typography variant='body1' sx={{ fontWeight: 'bolder', textTransform: 'uppercase' }}>
+          <Stack>
+            <Stack direction='row' sx={{ gap: 1, color: 'text.primary' }}>
+              <IconCluster />
+              <Typography variant='body1' sx={{ fontSize: '0.875rem', color: 'text.primary', mt: '1.5px' }}>
                 Cluster topology
               </Typography>
             </Stack>
+            <Divider sx={{ width: '22rem', marginLeft: '-25px', color: '#545454FF', marginTop: '30px', marginBottom: '20px' }} />
             <NodeList variant='menu' />
-            <Button color='info' startIcon={<IconPlus />} onClick={openJoinCommand}>
+            <Button color='info' startIcon={<IconPlus />} onClick={openJoinCommand} sx={{ mt: '30px' }}>
               Add Nodes
             </Button>
           </Stack>
@@ -257,7 +296,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
       </DrawerLayoutSide>
       <DrawerLayoutContainer>
         <DrawerLayoutHeader direction='row'>
-          <Typography variant='h2' fontWeight={500}>
+          <Typography variant='h3' fontWeight={500}>
             {modelName}
           </Typography>
         </DrawerLayoutHeader>

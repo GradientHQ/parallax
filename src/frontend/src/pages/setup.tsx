@@ -88,8 +88,8 @@ export default function PageSetup() {
             value={networkType}
             onChange={(_, value) => value && setNetworkType(value)}
           >
-            <ToggleButton value='local'>Local</ToggleButton>
-            <ToggleButton value='remote'>Remote</ToggleButton>
+            <ToggleButton value='local' sx={{ textDecoration: 'none' }}>Local</ToggleButton>
+            <ToggleButton value='remote' sx={{ textDecoration: 'none' }}>Remote</ToggleButton>
           </ToggleButtonGroup>
         </Stack>
       </Stack>
