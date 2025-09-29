@@ -14,6 +14,7 @@ from backend.server.scheduler_manage import SchedulerManage
 from backend.server.server_args import parse_args
 from backend.server.static_config import get_model_list, get_node_join_command
 from parallax_utils.logging_config import get_logger
+from parallax_utils.ascii_anime import display_parallax_run
 
 app = FastAPI()
 
@@ -115,6 +116,7 @@ if __name__ == "__main__":
     args = parse_args()
     logger.info(f"args: {args}")
 
+    display_parallax_run()
     host_maddrs = args.host_maddrs
     dht_port = args.dht_port
     if args.dht_port is not None:
