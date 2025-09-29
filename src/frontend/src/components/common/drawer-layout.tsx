@@ -103,7 +103,6 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
     confirmLabel: 'Finish',
   });
   useEffect(() => {
-    openWaiting();
     if (clusterStatus === 'waiting') {
       openWaiting();
     }
