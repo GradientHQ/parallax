@@ -9,6 +9,7 @@ import {
   IconSquare,
   IconSquareFilled,
 } from '@tabler/icons-react';
+import { DotPulse } from './dot-pulse';
 
 export const ChatInput: FC = () => {
   const [
@@ -67,7 +68,7 @@ export const ChatInput: FC = () => {
                   }}
                 >
                   {status === 'opened' ?
-                    <IconLoader size='1.25rem' />
+                    <DotPulse size='medium' />
                   : status === 'generating' ?
                     <IconSquareFilled size='1.25rem' />
                   : <IconArrowUp size='1.25rem' />}

@@ -79,11 +79,13 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
         //   ],
         //   usage: null,
         // };
-        setStatus('generating');
         const {
           data: { id, object, model, created, choices, usage },
         } = message;
-        if (object === 'chat.completion.chunk') {
+        if (object === 'chat.completion.chunk' && choices?.length > 0) {
+          if (choices[0].delta.content) {
+            setStatus('generating');
+          }
           setMessages((prev) => {
             let next = prev;
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -117,7 +119,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
   );
 
   const generate = useRefCallback<ChatActions['generate']>((message) => {
-    if (clusterStatus !== 'available' || status === 'opened') {
+    if (clusterStatus !== 'available' || status === 'opened' || status === 'generating') {
       return;
     }
 
