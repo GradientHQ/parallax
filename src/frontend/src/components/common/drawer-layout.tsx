@@ -1,5 +1,5 @@
 import { useEffect, useState, type FC, type PropsWithChildren } from 'react';
-import { Box, Button, IconButton, Stack, styled, Typography } from '@mui/material';
+import { Box, Button, IconButton, Stack, styled, Tooltip, Typography } from '@mui/material';
 import { useCluster } from '../../services';
 import { useAlertDialog } from '../mui';
 import { IconBrandGradient } from '../brand';
@@ -67,7 +67,7 @@ const DrawerLayoutContent = styled(Stack)(({ theme }) => {
     width: '48.75rem',
     maxWidth: '100%',
     height: '100%',
-    gap: spacing(4),
+    gap: spacing(2),
     padding: spacing(4),
     overflow: 'hidden',
   };
@@ -160,17 +160,85 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
     <DrawerLayoutRoot direction='row'>
       <DrawerLayoutSide sx={{ width: sidebarExpanded ? '21.875rem' : '3.5rem' }}>
         <Stack direction='row' sx={{ justifyContent: 'flex-end', alignItems: 'center', gap: 2 }}>
-          {sidebarExpanded && <IconBrandGradient />}
-          <Box sx={{ flex: 1 }} />
-          <IconButton
-            size='em'
-            sx={{ fontSize: '1.5rem' }}
-            onClick={() => setMenuOpen((prev) => !prev)}
-          >
-            {sidebarExpanded ?
-              <IconLayoutSidebarLeftCollapse />
-            : <IconLayoutSidebarLeftExpand />}
-          </IconButton>
+          {sidebarExpanded ?
+            <>
+              <IconBrandGradient />
+              <Box sx={{ flex: 1 }} />
+              <Tooltip
+                title='Collapse Sidebar'
+                placement='right'
+                slotProps={{
+                  tooltip: { sx: { bgcolor: 'primary.main', color: 'common.white' } },
+                }}
+              >
+                <IconButton
+                  size='em'
+                  sx={{
+                    fontSize: '1.5rem',
+                    borderRadius: '8px',
+                    '&:hover': { bgcolor: 'action.hover' },
+                  }}
+                  onClick={() => setMenuOpen((prev) => !prev)}
+                >
+                  <IconLayoutSidebarLeftCollapse />
+                </IconButton>
+              </Tooltip>
+            </>
+          : <>
+              <Box
+                sx={{
+                  position: 'relative',
+                  width: 28,
+                  height: 28,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  '&:hover .logo': { opacity: 0 },
+                  '&:hover .toggle': { opacity: 1, pointerEvents: 'auto', transform: 'scale(1)' },
+                }}
+              >
+                <Box
+                  className='logo'
+                  sx={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'opacity .15s ease',
+                    opacity: 1,
+                  }}
+                >
+                  <IconBrandGradient />
+                </Box>
+
+                <Tooltip
+                  title='Expand Sidebar'
+                  placement='right'
+                  slotProps={{
+                    tooltip: { sx: { bgcolor: 'primary.main', color: 'common.white' } },
+                  }}
+                >
+                  <IconButton
+                    className='toggle'
+                    size='em'
+                    sx={{
+                      position: 'absolute',
+                      opacity: 0,
+                      pointerEvents: 'none',
+                      fontSize: '1.5rem',
+                      transition: 'opacity .15s ease, transform .15s ease',
+                      '&:hover': { bgcolor: 'action.hover' },
+                    }}
+                    aria-label='Expand Sidebar'
+                    onClick={() => setMenuOpen((prev) => !prev)}
+                  >
+                    <IconLayoutSidebarLeftExpand />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            </>
+          }
         </Stack>
         {sidebarExpanded && (
           <Stack sx={{ gap: 4 }}>

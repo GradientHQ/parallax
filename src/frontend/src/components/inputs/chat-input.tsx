@@ -23,7 +23,14 @@ export const ChatInput: FC = () => {
   const onKeyDown = useRefCallback<KeyboardEventHandler>((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      generate();
+      const ret = generate();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (typeof ret !== 'undefined' && ret !== null && typeof (ret as any).then === 'function') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (ret as Promise<any>).then(() => setInput(''));
+      } else {
+        setInput('');
+      }
     }
   });
 
@@ -42,7 +49,20 @@ export const ChatInput: FC = () => {
         onKeyDown={onKeyDown}
         slotProps={{
           input: {
-            sx: { flexDirection: 'column' },
+            sx: {
+              border: '1px solid',
+              borderColor: 'grey.300',
+              borderRadius: 2,
+              boxShadow: '2px 2px 4px rgba(0,0,0,0.05)',
+              flexDirection: 'column',
+              '& textarea': {
+                scrollbarWidth: 'none', // Firefox
+                msOverflowStyle: 'none', // IE, Edge
+                '&::-webkit-scrollbar': {
+                  display: 'none', // Chrome, Safari
+                },
+              },
+            },
             endAdornment: (
               <Stack direction='row' sx={{ alignSelf: 'flex-end', alignItems: 'center', gap: 2 }}>
                 <Button
@@ -64,6 +84,7 @@ export const ChatInput: FC = () => {
                       stop();
                     } else if (status === 'closed') {
                       generate();
+                      setInput('');
                     }
                   }}
                 >

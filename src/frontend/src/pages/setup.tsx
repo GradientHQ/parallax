@@ -57,7 +57,22 @@ export default function PageSetup() {
         <Stack direction='row' justifyContent='space-between' alignItems='center' gap={2}>
           <Typography color='text.secondary'>Node Number</Typography>
           <NumberInput
-            sx={{ width: '10rem' }}
+            sx={{ width: '10rem', boxShadow: 'none', bgcolor: 'transparent' }}
+            slotProps={{
+              root: {
+                sx: {
+                  bgcolor: 'transparent',
+                  '&:hover': { bgcolor: 'transparent' },
+                  '&:focus-within': { bgcolor: 'transparent' }, // 聚焦时不变灰
+                },
+              },
+              input: {
+                sx: {
+                  bgcolor: 'transparent !important', // 内部 <input> 也透明
+                  '&:focus': { outline: 'none' },
+                },
+              },
+            }}
             value={initNodesNumber}
             onChange={(e) => setInitNodesNumber(Number(e.target.value))}
           />
