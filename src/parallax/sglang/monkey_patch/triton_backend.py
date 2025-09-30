@@ -21,8 +21,6 @@ def parallax_triton_backend_init(
         extend_attention_fwd,
     )
 
-    super().__init__()
-
     self.decode_attention_fwd = torch.compiler.disable(decode_attention_fwd)
     self.extend_attention_fwd = torch.compiler.disable(extend_attention_fwd)
 
@@ -82,3 +80,4 @@ def parallax_triton_backend_init(
 
 def apply_triton_backend_init_monkey_patch():
     TritonAttnBackend.__init__ = parallax_triton_backend_init
+
