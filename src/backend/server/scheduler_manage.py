@@ -146,7 +146,7 @@ class SchedulerManage:
 
         self.lattica.build()
         logger.debug("Lattica node built")
-        
+
         store_success = False
         for _ in range(10):
             try:

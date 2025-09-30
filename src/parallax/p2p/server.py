@@ -550,12 +550,15 @@ class GradientServer:
                 all_peers = self.lattica.get_all_peers()
                 if len(all_peers) > 0 and self.scheduler_peer_id in all_peers:
                     break
-                logger.warning("No peers found or scheduler peer id not found, waiting for 1 second.")
+                logger.warning(
+                    "No peers found or scheduler peer id not found, waiting for 1 second."
+                )
                 time.sleep(1)
 
-            
             if len(all_peers) == 0 or self.scheduler_peer_id not in all_peers:
-                logger.warning("No peers found or scheduler peer id not found, return empty node info.")
+                logger.warning(
+                    "No peers found or scheduler peer id not found, return empty node info."
+                )
                 return {}
 
             for peer_id in all_peers:
