@@ -98,6 +98,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
         setStatus('closed');
       },
       onError: (error) => {
+        // Set last message to done
         setMessages((prev) => {
           const lastMessage = prev[prev.length - 1];
           const { id, raw, thinking, content } = lastMessage;
@@ -163,7 +164,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
                 lastMessage = {
                   id,
                   role,
-                  status: 'generating',
+                  status: 'thinking',
                   raw: rawDelta,
                   content: rawDelta,
                   createdAt: created,
@@ -190,6 +191,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
               }
               lastMessage = {
                 ...lastMessage,
+                status: (content && 'generating') || 'thinking',
                 thinking,
                 content,
               };
@@ -241,7 +243,10 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
     }
     setMessages(nextMessages);
 
-    sse.connect(modelName, nextMessages);
+    sse.connect(
+      modelName,
+      nextMessages.map(({ id, role, content }) => ({ id, role, content })),
+    );
   });
 
   const stop = useRefCallback<ChatActions['stop']>(() => {
@@ -304,6 +309,12 @@ interface SSEOptions {
   onMessage?: (message: { event: string; id?: string; data: any }) => void;
 }
 
+interface RequestMessage {
+  readonly id: string;
+  readonly role: ChatMessageRole;
+  readonly content: string;
+}
+
 const createSSE = (options: SSEOptions) => {
   const { onOpen, onClose, onError, onMessage } = options;
 
@@ -311,7 +322,7 @@ const createSSE = (options: SSEOptions) => {
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let abortController: AbortController | undefined;
 
-  const connect = (model: string, messages: readonly ChatMessage[]) => {
+  const connect = (model: string, messages: readonly RequestMessage[]) => {
     abortController = new AbortController();
     const url = `${API_BASE_URL}/v1/chat/completions`;
     fetch(url, {

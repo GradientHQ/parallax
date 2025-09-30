@@ -1,12 +1,7 @@
 import { memo, useEffect, useRef, useState, type FC, type UIEventHandler } from 'react';
 import { useChat, type ChatMessage } from '../../services';
 import { Box, Button, IconButton, Paper, Stack, Tooltip, Typography } from '@mui/material';
-import {
-  IconArrowDown,
-  IconCopy,
-  IconCopyCheck,
-  IconRefresh,
-} from '@tabler/icons-react';
+import { IconArrowDown, IconCopy, IconCopyCheck, IconRefresh } from '@tabler/icons-react';
 import { useRefCallback } from '../../hooks';
 import ChatMarkdown from './chat-markdown';
 import { DotPulse } from './dot-pulse';
@@ -26,7 +21,9 @@ export const ChatMessages: FC = () => {
     if (userScrolledUpRef.current) return;
     autoScrollingRef.current = true;
     refBottom.current?.scrollIntoView({ behavior: 'smooth' });
-    const t = setTimeout(() => { autoScrollingRef.current = false; }, 200);
+    const t = setTimeout(() => {
+      autoScrollingRef.current = false;
+    }, 200);
     return () => clearTimeout(t);
   }, [messages]);
 
@@ -55,7 +52,9 @@ export const ChatMessages: FC = () => {
     userScrolledUpRef.current = false;
     autoScrollingRef.current = true;
     refBottom.current?.scrollIntoView({ behavior: 'smooth' });
-    setTimeout(() => { autoScrollingRef.current = false; }, 200);
+    setTimeout(() => {
+      autoScrollingRef.current = false;
+    }, 200);
   };
 
   return (
@@ -74,20 +73,22 @@ export const ChatMessages: FC = () => {
       onWheel={(e) => {
         if (e.deltaY < 0) userScrolledUpRef.current = true;
       }}
-      onTouchMove={() => { userScrolledUpRef.current = true; }}
+      onTouchMove={() => {
+        userScrolledUpRef.current = true;
+      }}
     >
       {messages.map((message, idx) => (
         <ChatMessage key={message.id} message={message} isLast={idx === messages.length - 1} />
       ))}
 
-      {status === 'opened' && <DotPulse size="large" />}
+      {status === 'opened' && <DotPulse size='large' />}
 
       <Box ref={refBottom} sx={{ width: '100%', height: 0 }} />
 
       {!isBottom && (
         <IconButton
           onClick={scrollToBottom}
-          size="small"
+          size='small'
           sx={{
             position: 'sticky',
             bottom: 0,
@@ -100,7 +101,7 @@ export const ChatMessages: FC = () => {
             borderColor: 'grey.300',
             '&:hover': { bgcolor: 'grey.100' },
           }}
-          aria-label="Scroll to bottom"
+          aria-label='Scroll to bottom'
         >
           <IconArrowDown />
         </IconButton>
@@ -110,9 +111,9 @@ export const ChatMessages: FC = () => {
 };
 
 const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ message, isLast }) => {
-  const { role, content } = message;
+  const { role, status: messageStatus, thinking, content } = message;
 
-  const [{ status }, { generate }] = useChat();
+  const [, { generate }] = useChat();
 
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -134,19 +135,27 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
   const nodeContent =
     role === 'user' ?
       <Typography
+        key='user-message'
         variant='body1'
-        sx={{ px: 2, py: 1.5, borderRadius: '0.5rem', backgroundColor: 'background.default', fontSize: '0.95rem' }}
+        sx={{
+          px: 2,
+          py: 1.5,
+          borderRadius: '0.5rem',
+          backgroundColor: 'background.default',
+          fontSize: '0.95rem',
+        }}
       >
         {content}
       </Typography>
-    : <ChatMarkdown content={content} />;
+    : <>
+        {thinking && <ChatMarkdown key='assistant-thinking' isThinking content={thinking} />}
+        {content && <ChatMarkdown key='assistant-message' content={content} />}
+      </>;
 
-
-  const assistantDone = !isLast || status === 'closed';
-
+  const assistantDone = messageStatus === 'done';
 
   const showCopy = role === 'user' || (role === 'assistant' && assistantDone);
-  const showRegen = role === 'assistant' && assistantDone;
+  const showRegenerate = role === 'assistant' && assistantDone;
 
   const userHoverRevealSx =
     role === 'user' ?
@@ -163,7 +172,7 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
       <Stack sx={{ maxWidth: '100%', gap: 1, ...userHoverRevealSx }}>
         {nodeContent}
 
-        {(showCopy || showRegen) && (
+        {(showCopy || showRegenerate) && (
           <Stack
             key='actions'
             direction='row'
@@ -183,6 +192,7 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
           >
             {showCopy && (
               <Tooltip
+                key='copy'
                 title={copied ? 'Copied!' : 'Copy'}
                 slotProps={{
                   tooltip: { sx: { bgcolor: 'primary.main', borderRadius: 1 } },
@@ -206,8 +216,9 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
               </Tooltip>
             )}
 
-            {showRegen && (
+            {showRegenerate && (
               <Tooltip
+                key='regenerate'
                 title='Regenerate'
                 slotProps={{
                   tooltip: { sx: { bgcolor: 'primary.main', borderRadius: 1 } },
