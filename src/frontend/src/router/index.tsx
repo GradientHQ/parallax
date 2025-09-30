@@ -1,7 +1,11 @@
 // src/router/index.tsx
 import { lazy, Suspense, useEffect } from 'react';
-import { useRoutes, Navigate, useNavigate } from 'react-router-dom';
+import { useLocation, useRoutes, Navigate, useNavigate } from 'react-router-dom';
 import { useCluster } from '../services';
+
+const PATH_SETUP = '/setup';
+const PATH_JOIN = '/join';
+const PATH_CHAT = '/chat';
 
 const PageSetup = lazy(() => import('../pages/setup'));
 const PageJoin = lazy(() => import('../pages/join'));
@@ -13,6 +17,7 @@ const debugLog = (...args: any[]) => {
 
 export const Router = () => {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   const [
     {
@@ -21,26 +26,22 @@ export const Router = () => {
   ] = useCluster();
 
   useEffect(() => {
-    debugLog('cluster status', status);
-    switch (status) {
-      case 'idle':
-      case 'waiting':
-        debugLog('no need to navigate');
-        break;
-      default:
-        debugLog('navigate to /chat');
-        navigate('/chat');
-        break;
+    debugLog('pathname', pathname, 'cluster status', status);
+    if (status === 'idle' && !pathname.startsWith(PATH_SETUP)) {
+      debugLog('navigate to /setup');
+      navigate(PATH_SETUP);
+      return;
     }
-  }, [navigate, status]);
+    if (status === 'available' && !pathname.startsWith(PATH_CHAT)) {
+      debugLog('navigate to /chat');
+      navigate(PATH_CHAT);
+      return;
+    }
+  }, [navigate, pathname, status]);
 
   const routes = useRoutes([
     {
-      path: '/',
-      element: <Navigate to='/setup' replace />, // redirect to the page setup
-    },
-    {
-      path: '/setup',
+      path: PATH_SETUP,
       element: (
         <Suspense fallback={<div>Loading...</div>}>
           <PageSetup />
@@ -48,7 +49,7 @@ export const Router = () => {
       ),
     },
     {
-      path: '/join',
+      path: PATH_JOIN,
       element: (
         <Suspense fallback={<div>Loading...</div>}>
           <PageJoin />
@@ -56,7 +57,7 @@ export const Router = () => {
       ),
     },
     {
-      path: '/chat',
+      path: PATH_CHAT,
       element: (
         <Suspense fallback={<div>Loading...</div>}>
           <PageChat />

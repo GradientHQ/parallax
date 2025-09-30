@@ -6,6 +6,18 @@ export interface HttpStreamClientOptions {
   debugName?: string;
 
   /**
+   * Whether the client can re-connect automatically when close or error.
+   * @default false
+   */
+  autoReconnect?: boolean;
+
+  /**
+   * The interval time (ms) of auto-reconnect.
+   * @default 2000
+   */
+  autoReconnectInterval?: number;
+
+  /**
    * The callback function to handle the connection status change.
    * @param status The status of the client.
    */
@@ -48,6 +60,8 @@ export const createHttpStreamFactory =
     const { url: _url, method = 'GET', afterFetch = (data) => data } = commonOptions;
     const {
       debugName,
+      autoReconnect = false,
+      autoReconnectInterval = 2000,
       onStatusChange: onStatusChangeCallback,
       onMessage: onMessageCallback,
       onError: onErrorCallback,
@@ -67,6 +81,12 @@ export const createHttpStreamFactory =
 
     const onStatusChange = (status: HttpStreamClientStatus): void => {
       debugLog('onStatusChange', status);
+      if (autoReconnect && (status === 'disconnected' || status === 'error')) {
+        setTimeout(() => {
+          debugLog('auto-reconnect');
+          send(previousSendOptions);
+        }, autoReconnectInterval);
+      }
       try {
         onStatusChangeCallback?.(status);
       } catch (error) {
@@ -97,8 +117,10 @@ export const createHttpStreamFactory =
       }
     };
 
-    const send = (options: HttpStreamClientSendOptions = {}) => {
-      const { headers, body, data } = options;
+    let previousSendOptions: HttpStreamClientSendOptions | undefined;
+    const send = (options?: HttpStreamClientSendOptions) => {
+      previousSendOptions = options;
+      const { headers, body, data } = options || {};
 
       onStatusChange('connecting');
       debugLog('send', data);

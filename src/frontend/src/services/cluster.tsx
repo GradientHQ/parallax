@@ -38,6 +38,13 @@ export interface ClusterInfo {
   readonly initNodesNumber: number;
 }
 
+const INITIAL_CLUSTER_INFO: ClusterInfo = {
+  id: '',
+  status: 'idle',
+  nodeJoinCommand: {},
+  initNodesNumber: 4,
+};
+
 export type NodeStatus = 'waiting' | 'available' | 'failed';
 
 export interface NodeInfo {
@@ -101,33 +108,14 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
   }, [modelInfoList]);
 
   // Cluster and Nodes
-  const [clusterInfo, setClusterInfo] = useState<ClusterInfo>(() => ({
-    id: '',
-    status: 'idle',
-    nodeJoinCommand: {},
-    initNodesNumber: 4,
-  }));
-  const [nodeInfoList, setNodeInfoList] = useState<readonly NodeInfo[]>(() => [
-    // MOCK
-    // {
-    //   id: 'sfasge235rytdfgq35q346234wedfss',
-    //   status: 'available',
-    //   gpuName: 'NVIDIA A100',
-    //   gpuMemory: 24,
-    // },
-    // {
-    //   id: 'dfgshjldkrewi25246esfdgsh345sdf',
-    //   status: 'waiting',
-    //   gpuName: 'NVIDIA A100',
-    //   gpuMemory: 24,
-    // },
-    // {
-    //   id: 'dfgberiuiwuyhy25346tea2342sdf12',
-    //   status: 'failed',
-    //   gpuName: 'NVIDIA A100',
-    //   gpuMemory: 24,
-    // },
-  ]);
+  const [clusterInfo, setClusterInfo] = useState<ClusterInfo>(INITIAL_CLUSTER_INFO);
+  const [nodeInfoList, setNodeInfoList] = useState<readonly NodeInfo[]>([]);
+
+  const reset = useRefCallback(() => {
+    debugLog('reset');
+    setClusterInfo(INITIAL_CLUSTER_INFO);
+    setNodeInfoList([]);
+  });
 
   const streamClusterStatus = useMemo(() => {
     const onMessage = (message: any) => {
@@ -138,7 +126,7 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
         setClusterInfo((prev) => {
           const next = {
             ...prev,
-            status,
+            status: (model_name && status) || 'idle',
             initNodesNumber: init_nodes_num || 0,
             modelName: model_name || '',
             nodeJoinCommand: node_join_command || {},
@@ -183,10 +171,16 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
       }
     };
     const stream = createStreamClusterStatus({
+      debugName: 'ClusterStatus',
+      autoReconnect: true,
       onMessage,
+      onError: reset,
     });
-    stream.send();
     return stream;
+  }, []);
+
+  useEffect(() => {
+    streamClusterStatus.send();
   }, []);
 
   const init = useRefCallback(async () => {
