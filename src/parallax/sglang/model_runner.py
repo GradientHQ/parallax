@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import sglang
 import sglang.srt.distributed.parallel_state
 import torch
-from mlx_lm.tokenizer_utils import load_tokenizer
 from mlx_lm.utils import get_model_path, load_config
 from sglang.srt.configs.model_config import ModelConfig
 from sglang.srt.distributed import (
@@ -43,6 +42,8 @@ from sglang.srt.utils import (
     monkey_patch_p2p_access_check,
 )
 from torch.distributed import Backend
+
+from parallax.utils.tokenizer_utils import load_tokenizer
 
 # from parallax.sglang.monkey_patch.model_runner import ModelRunner as SGLModelRunner
 
