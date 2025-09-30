@@ -168,8 +168,8 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
 
   const IconCluster = () => (
     <svg
-      width='1.7rem'
-      height='1.7rem'
+      width='1.5rem'
+      height='1.5rem'
       viewBox='0 0 27 27'
       fill='currentColor'
     >
@@ -192,8 +192,8 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
     <DrawerLayoutRoot direction='row'>
       <DrawerLayoutSide
         sx={{
-          width: sidebarExpanded ? '19.25rem' : '3.5rem',
-          paddingInline: sidebarExpanded ? 3.5 : 2,
+          width: sidebarExpanded ? '17.25rem' : '3.5rem',
+          paddingInline: sidebarExpanded ? 3 : 2,
         }}
       >
         <Stack direction='row' sx={{ justifyContent: 'flex-end', alignItems: 'center', gap: 2 }}>
@@ -281,8 +281,8 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
         {sidebarExpanded && (
           <Stack>
             <Stack direction='row' sx={{ gap: 1, color: 'text.primary' }}>
-              <IconCluster />
-              <Typography variant='body1' sx={{ fontSize: '0.875rem', color: 'text.primary', mt: '1.5px' }}>
+              {/* <IconCluster /> */}
+              <Typography variant='body1' sx={{ mt: '1.5px', color: '#666666FF', fontWeight: 600 }}>
                 Cluster topology
               </Typography>
             </Stack>

@@ -5,8 +5,6 @@ import { useChat, useCluster } from '../../services';
 import {
   IconArrowBackUp,
   IconArrowUp,
-  IconLoader,
-  IconSquare,
   IconSquareFilled,
 } from '@tabler/icons-react';
 import { DotPulse } from './dot-pulse';
@@ -18,21 +16,7 @@ export const ChatInput: FC = () => {
       clusterInfo: { status: clusterStatus },
     },
   ] = useCluster();
-  const [{ input, status }, { setInput, generate, stop, clear }] = useChat();
-
-  const onKeyDown = useRefCallback<KeyboardEventHandler>((e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      const ret = generate();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (typeof ret !== 'undefined' && ret !== null && typeof (ret as any).then === 'function') {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (ret as Promise<any>).then(() => setInput(''));
-      } else {
-        setInput('');
-      }
-    }
-  });
+  const [{ input, status }, { setInput, generate, stop, clear, handleKeyDown }] = useChat();
 
   return (
     <Stack data-status={status}>
@@ -46,7 +30,7 @@ export const ChatInput: FC = () => {
         maxRows={4}
         placeholder='Ask anything'
         fullWidth
-        onKeyDown={onKeyDown}
+        onKeyDown={handleKeyDown}
         slotProps={{
           input: {
             sx: {
@@ -86,7 +70,6 @@ export const ChatInput: FC = () => {
                       stop();
                     } else if (status === 'closed') {
                       generate();
-                      setInput('');
                     }
                   }}
                 >

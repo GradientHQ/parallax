@@ -2,10 +2,8 @@ import type { FC, ForwardRefExoticComponent, RefAttributes } from 'react';
 import * as motion from 'motion/react-client';
 import {
   IconCheck,
-  IconCircle,
   IconCircleFilled,
-  IconDeviceDesktop,
-  IconDeviceLaptop,
+  IconDevices2,
   IconLoader,
   IconX,
   type Icon,
@@ -117,11 +115,11 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
         gap: 1,
       }}
     >
-      <IconDeviceDesktop size={'1.7rem'}/>
+      <IconDevices2 size={'1.5rem'}/>
 
       <ListItemText>
         {(node && (
-          <Typography variant='body1' sx={{ fontSize: '0.875rem' }}>
+          <Typography variant='body1' sx={{ fontWeight: 500 }}>
             {gpuName} {gpuMemory}GB
           </Typography>
         )) || <Skeleton width='8rem' height='1.25rem' />}

@@ -83,13 +83,13 @@ export default function PageSetup() {
             Are you nodes within the same local network?
           </Typography>
           <ToggleButtonGroup
-            sx={{ width: '10rem' }}
+            sx={{ width: '10rem', textTransform: 'none' }}
             exclusive
             value={networkType}
             onChange={(_, value) => value && setNetworkType(value)}
           >
-            <ToggleButton value='local' sx={{ textDecoration: 'none' }}>Local</ToggleButton>
-            <ToggleButton value='remote' sx={{ textDecoration: 'none' }}>Remote</ToggleButton>
+            <ToggleButton value='local' sx={{ textTransform: 'none' }}>Local</ToggleButton>
+            <ToggleButton value='remote' sx={{ textTransform: 'none' }}>Remote</ToggleButton>
           </ToggleButtonGroup>
         </Stack>
       </Stack>
