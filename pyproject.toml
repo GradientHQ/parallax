@@ -30,7 +30,7 @@ dependencies = [
   "protobuf==6.31.1",
   "dijkstar==2.6.0",
   "huggingface-hub",
-  "lattica @ git+https://github.com/GradientHQ/lattica.git#subdirectory=bindings/python",
+  "lattica==1.0.0",
 ]
 
 [project.scripts]
