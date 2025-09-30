@@ -37,14 +37,13 @@ class ModelInfo:
 
     qk_nope_head_dim: Optional[int] = None
     qk_rope_head_dim: Optional[int] = None
-    head_size_k: int = None  # 将在 __init__ 中设置
-    head_size_v: int = None  # 将在 __init__ 中设置
+    head_size_k: int = None
+    head_size_v: int = None
 
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-        # 设置 head_size_k 和 head_size_v
         if self.qk_nope_head_dim is not None and self.qk_rope_head_dim is not None:
             self.head_size_k = self.qk_nope_head_dim + self.qk_rope_head_dim
         else:
@@ -144,8 +143,8 @@ class ModelInfo:
             source_seq_len: Source sequence length (prompt tokens)
         """
         # Attention params
-        qo_params = self.param_bytes_per_element * self.hidden_dim * self.hidden_dim * 2
-        kv_params = self.param_bytes_per_element * self.hidden_dim * (self.k_dim + self.v_dim)
+        qo_params = self.param_bytes_per_element * self.hidden_dim * self.hidden_dim
+        kv_params = self.param_bytes_per_element * self.hidden_dim * (self.k_dim + self.v_dim) // 2
         attention_params = qo_params + kv_params
 
         # FFN params

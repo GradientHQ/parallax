@@ -111,6 +111,7 @@ class SchedulerManage:
         self.init_nodes_num = init_nodes_num
 
         model_info = get_model_info(model_name)
+        logger.info(f"Model info: {model_info}")
         self.scheduler = Scheduler(model_info, [], min_nodes_bootstrapping=init_nodes_num)
 
         # Run the scheduler's event/dispatch loops in background so the process

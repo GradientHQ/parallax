@@ -27,6 +27,8 @@ MODEL_LIST = [
     "nvidia/Llama-3.3-70B-Instruct-FP8",
     "nvidia/Llama-3.1-70B-Instruct-FP8",
     "nvidia/Llama-3.1-8B-Instruct-FP8",
+    "moonshotai/Kimi-K2-Instruct",
+    "moonshotai/Kimi-K2-Instruct-0905",
 ]
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
@@ -56,6 +58,8 @@ def get_model_info(model_name):
     model_info = ModelInfo(
         model_name=model_name,
         head_size=config.get("head_dim", 128),
+        qk_nope_head_dim=config.get("qk_nope_head_dim", None),
+        qk_rope_head_dim=config.get("qk_rope_head_dim", None),
         hidden_dim=config.get("hidden_size", 0),
         intermediate_dim=config.get("intermediate_size", 0),
         num_attention_heads=config.get("num_attention_heads", 0),
