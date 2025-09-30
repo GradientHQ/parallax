@@ -35,7 +35,6 @@ MLX_MODEL_NAME_MAP = {
 
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)
-    display_parallax_join()
     try:
         args = parse_args()
         logger.debug(f"args: {args}")
@@ -101,6 +100,7 @@ if __name__ == "__main__":
             args.start_layer = gradient_server.block_start_index
             args.end_layer = gradient_server.block_end_index
             args.model_path = gradient_server.model_name
+            display_parallax_join(args.model_path)
             # Hard code for mlx-community models
             if get_current_device() == "mlx":
                 mlx_model_repo = MLX_MODEL_NAME_MAP.get(args.model_path, None)

@@ -65,7 +65,7 @@ def handle_colors_data(raw_data):
     return color_dict
 
 
-def process_context_color(content, colors):
+def process_context_color_run(content, colors):
     res = []
     for row, row_str in enumerate(content):
         processed_row = ""
@@ -83,8 +83,40 @@ def process_context_color(content, colors):
         res.append(processed_row)
     return res
 
+def process_context_color_join(content, colors, model_name):
+    res = []
+    if len(model_name) > 20:
+        model_name = model_name[:20]
+    name_len = len(model_name)
+    for row, row_str in enumerate(content):
+        processed_row = ""
+        for column, text in enumerate(row_str):
+            if text in (" ", "#"):
+                processed_row += text
+                continue
+            if row == 5 and 12 < column < 33:
+                pos = column - 13
+                if pos < name_len:
+                    text = model_name[pos]
+                    processed_row += HexColorPrinter.RESET
+                else:
+                    position_str = str(column) + "," + str(row)
+                    hex_color = colors.get(position_str, None)
+                    if hex_color:
+                        color = HexColorPrinter.find_closest_color(hex_color)
+                        processed_row += color
+            else:
+                position_str = str(column) + "," + str(row)
+                hex_color = colors.get(position_str, None)
+                if hex_color:
+                    color = HexColorPrinter.find_closest_color(hex_color)
+                    processed_row += color
+            processed_row += text
+        processed_row += HexColorPrinter.RESET
+        res.append(processed_row)
+    return res
 
-def display_ascii_animation(animation_data):
+def display_ascii_animation_run(animation_data):
     frames = animation_data.get("frames", [])
     # loop = animation_data.get('loop', False)
 
@@ -100,25 +132,46 @@ def display_ascii_animation(animation_data):
         colors = handle_colors_data(foreground)
 
         if content:
-            res = process_context_color(content, colors)
+            res = process_context_color_run(content, colors)
             res = "\n".join(res).replace("#", " ")
             clear_screen()
             print(res)
             time.sleep(delay)
 
+def display_ascii_animation_join(animation_data, model_name):
+    frames = animation_data.get("frames", [])
+    # loop = animation_data.get('loop', False)
+
+    if not frames:
+        print("No animation frames found in the JSON data.")
+        return
+
+    for frame_data in frames:
+        content = frame_data.get("content", None)
+        delay = frame_data.get("duration", 30) / 1000.0
+        colors_data = frame_data.get("colors", None)
+        foreground = colors_data.get("foreground", None)
+        colors = handle_colors_data(foreground)
+
+        if content:
+            res = process_context_color_join(content, colors, model_name)
+            res = "\n".join(res).replace("#", " ")
+            clear_screen()
+            print(res)
+            time.sleep(delay)
 
 def display_parallax_run():
     file_path = "./src/parallax_utils/anime/parallax_run.json"
     try:
         with open(file_path, "r") as f:
-            animation_data = json.load(f)
+            animation_data = json.load(f) 
     except FileNotFoundError:
         print(f"Error: The file '{file_path}' was not found.")
         return
     except json.JSONDecodeError:
         print(f"Error: The file '{file_path}' contains invalid JSON.")
         return
-    display_ascii_animation(animation_data)
+    display_ascii_animation_run(animation_data)
 
 
 def display_parallax_join(model_name):
@@ -132,4 +185,4 @@ def display_parallax_join(model_name):
     except json.JSONDecodeError:
         print(f"Error: The file '{file_path}' contains invalid JSON.")
         return
-    display_ascii_animation(animation_data)
+    display_ascii_animation_join(animation_data, model_name)
