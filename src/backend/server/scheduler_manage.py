@@ -146,15 +146,26 @@ class SchedulerManage:
 
         self.lattica.build()
         logger.debug("Lattica node built")
+        
+        store_success = False
+        for _ in range(10):
+            try:
+                if self.lattica.store(
+                    "scheduler_peer_id",
+                    self.lattica.peer_id(),
+                    expiration_time=time.time() + 365 * 24 * 60 * 60,
+                ):
+                    logger.info(f"Stored scheduler peer id: {self.lattica.peer_id()}")
+                    store_success = True
+                    break
+                logger.warning("Failed to store scheduler peer id, waiting for 10 seconds")
+                time.sleep(10)
+            except Exception as e:
+                logger.error(f"Failed to store scheduler peer id: {e}, waiting for 10 seconds")
+                time.sleep(10)
 
-        if self.lattica.store(
-            "scheduler_peer_id",
-            self.lattica.peer_id(),
-            expiration_time=time.time() + 365 * 24 * 60 * 60,
-        ):
-            logger.info(f"Stored scheduler peer id: {self.lattica.peer_id()}")
-        else:
-            logger.error("Failed to store scheduler peer id")
+        if not store_success:
+            logger.error("Failed to store scheduler peer id, after 10 times")
             exit(1)
 
         self.connection_handler = RPCConnectionHandler(
