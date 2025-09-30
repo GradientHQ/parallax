@@ -370,7 +370,7 @@ export const AlertDialog: FC<AlertDialogProps> = (props) => {
 
       {actionButtonPropsList.length > 0 && (
         <DialogActions>
-          <Box mr={'auto'}>{secondaryAction}</Box>
+          {secondaryAction}
           {actionButtonPropsList.map((props) => (
             <Button
               {...props}

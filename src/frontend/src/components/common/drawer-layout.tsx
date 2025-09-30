@@ -22,7 +22,7 @@ import {
   IconPlus,
   IconTopologyStar3,
 } from '@tabler/icons-react';
-import { JoinCommand, NodeList } from '../inputs';
+import { JoinCommand, ModelSelect, NodeList } from '../inputs';
 
 const DrawerLayoutRoot = styled(Stack)(({ theme }) => {
   const { spacing } = theme;
@@ -167,12 +167,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
   });
 
   const IconCluster = () => (
-    <svg
-      width='1.5rem'
-      height='1.5rem'
-      viewBox='0 0 27 27'
-      fill='currentColor'
-    >
+    <svg width='1.5rem' height='1.5rem' viewBox='0 0 27 27' fill='currentColor'>
       <g
         fill='none'
         stroke='currentColor'
@@ -286,9 +281,22 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
                 Cluster topology
               </Typography>
             </Stack>
-            <Divider sx={{ width: '22rem', marginLeft: '-25px', color: '#545454FF', marginTop: '30px', marginBottom: '20px' }} />
+            <Divider
+              sx={{
+                width: '22rem',
+                marginLeft: '-25px',
+                color: '#545454FF',
+                marginTop: '30px',
+                marginBottom: '20px',
+              }}
+            />
             <NodeList variant='menu' />
-            <Button color='info' startIcon={<IconPlus />} onClick={openJoinCommand} sx={{ mt: '30px' }}>
+            <Button
+              color='info'
+              startIcon={<IconPlus />}
+              onClick={openJoinCommand}
+              sx={{ mt: '30px' }}
+            >
               Add Nodes
             </Button>
           </Stack>
@@ -296,9 +304,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
       </DrawerLayoutSide>
       <DrawerLayoutContainer>
         <DrawerLayoutHeader direction='row'>
-          <Typography variant='h3' fontWeight={500}>
-            {modelName}
-          </Typography>
+          <ModelSelect variant='text' />
         </DrawerLayoutHeader>
         <DrawerLayoutContent>{children}</DrawerLayoutContent>
       </DrawerLayoutContainer>

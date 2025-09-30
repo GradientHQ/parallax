@@ -1,12 +1,37 @@
-import type { ReactNode } from 'react';
-import { MenuItem, Select, Stack, styled, Typography } from '@mui/material';
+import type { FC, ReactNode } from 'react';
+import {
+  InputBase,
+  MenuItem,
+  OutlinedInput,
+  Select,
+  selectClasses,
+  Stack,
+  styled,
+  Typography,
+} from '@mui/material';
 
 import { useCluster, type ModelInfo } from '../../services';
+import { useRefCallback } from '../../hooks';
+import { useAlertDialog } from '../mui';
+import { IconRestore } from '@tabler/icons-react';
 
-const ModelSelectRoot = styled(Select)(({ theme }) => {
-  const { spacing } = theme;
+const ModelSelectRoot = styled(Select)<{ ownerState: ModelSelectProps }>(({
+  theme,
+  ownerState: { variant },
+}) => {
+  const { spacing, typography } = theme;
   return {
-    height: '4rem',
+    height: (variant === 'outlined' && '4rem') || '1lh',
+    ...(variant === 'text' && {
+      ...typography.h3,
+      fontWeight: typography.fontWeightMedium,
+
+      [`& .${selectClasses.select}`]: {
+        fontSize: 'inherit',
+        fontWeight: 'inherit',
+        lineHeight: 'inherit',
+      },
+    }),
   };
 });
 
@@ -57,19 +82,63 @@ const renderOption = (model: ModelInfo, selected?: boolean): ReactNode => (
   </ModelSelectOption>
 );
 
-export const ModelSelect = () => {
-  const [{ modelName, modelInfoList }, { setModelName }] = useCluster();
+export interface ModelSelectProps {
+  /**
+   * The variant style of the select component.
+   * @default 'outlined'
+   */
+  variant?: 'outlined' | 'text';
+}
+
+export const ModelSelect: FC<ModelSelectProps> = ({ variant = 'outlined' }) => {
+  const [
+    {
+      modelName,
+      modelInfoList,
+      clusterInfo: { status: clusterStatus },
+    },
+    { setModelName },
+  ] = useCluster();
+
+  const [nodeDialog, { open: openDialog }] = useAlertDialog({
+    titleIcon: <IconRestore />,
+    title: 'Switch model',
+    content: (
+      <Typography variant='body2' color='text.secondary'>
+        The current version of parallax only support hosting one model at once, so switching model
+        will terminate your existing chat service. You may restart your current scheduler by going
+        to your terminal, terminate and start the server by running parallax run. We will add node
+        rebalancing and dynamic model allocation in the coming updates!
+      </Typography>
+    ),
+    confirmLabel: 'Continue',
+  });
+
+  const onChange = useRefCallback((e) => {
+    if (clusterStatus !== 'idle') {
+      openDialog();
+      return;
+    }
+    setModelName(String(e.target.value));
+  });
 
   return (
-    <ModelSelectRoot
-      value={modelName}
-      onChange={(e) => setModelName(String(e.target.value))}
-      renderValue={(value) => {
-        const model = modelInfoList.find((model) => model.name === value);
-        return (model && renderOption(model)) || undefined;
-      }}
-    >
-      {modelInfoList.map((model) => renderOption(model, model.name === modelName))}
-    </ModelSelectRoot>
+    <>
+      <ModelSelectRoot
+        ownerState={{ variant }}
+        input={variant === 'outlined' ? <OutlinedInput /> : <InputBase />}
+        value={modelName}
+        onChange={onChange}
+        renderValue={(value) => {
+          const model = modelInfoList.find((model) => model.name === value);
+          return (
+            (model && ((variant === 'outlined' && renderOption(model)) || model.name)) || undefined
+          );
+        }}
+      >
+        {modelInfoList.map((model) => renderOption(model, model.name === modelName))}
+      </ModelSelectRoot>
+      {nodeDialog}
+    </>
   );
 };
