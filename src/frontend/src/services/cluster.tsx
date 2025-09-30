@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useRefCallback } from '../hooks';
 import { createStreamClusterStatus, getModelList, initScheduler } from './api';
 
-import logoUrlQwen from '../assets/models/Qwen.png';
+import logoUrlQwen from '../assets/models/Qwen3.png';
 import logoUrlGpt from '../assets/models/OpenAI-black-monoblossom.svg';
 
 const getLogoUrl = (name: string) => {
