@@ -133,15 +133,15 @@ class SchedulerManage:
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs).with_key_path(".")
 
         if len(self.relay_servers) > 0:
-            print(f"Using relay servers: {self.relay_servers}")
+            logger.info(f"Using relay servers: {self.relay_servers}")
             self.lattica.with_relay_servers(self.relay_servers).with_dcutr(True).with_protocol("")
 
         if len(self.announce_maddrs) > 0:
-            print(f"Using announce maddrs: {self.announce_maddrs}")
+            logger.info(f"Using announce maddrs: {self.announce_maddrs}")
             self.lattica.with_external_addrs(self.announce_maddrs)
 
         if len(self.initial_peers) > 0:
-            print(f"Using initial peers: {self.initial_peers}")
+            logger.info(f"Using initial peers: {self.initial_peers}")
             self.lattica.with_bootstraps(self.initial_peers)
 
         self.lattica.build()
