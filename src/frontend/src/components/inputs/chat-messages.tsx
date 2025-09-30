@@ -159,7 +159,7 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
     : {};
 
   return (
-    <Stack direction='row' sx={{ width: '100%', justifyContent }}>      
+    <Stack direction='row' sx={{ width: '100%', justifyContent }}>
       <Stack sx={{ maxWidth: '100%', gap: 1, ...userHoverRevealSx }}>
         {nodeContent}
 
@@ -174,8 +174,8 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
               gap: 0.5,
               ...(role === 'user' ?
                 {
-                  opacity: 0, 
-                  pointerEvents: 'none', 
+                  opacity: 0,
+                  pointerEvents: 'none',
                   transition: 'opacity .15s ease',
                 }
               : {}),
