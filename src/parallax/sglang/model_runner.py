@@ -477,6 +477,15 @@ def monkey_patch_gpt_oss():
     apply_gpt_oss_monkey_patch()
 
 
+## TODO: Move this when sgalang supports triton backend pipeline parallelism
+def monkey_patch_triton_backend_init():
+    from parallax.sglang.monkey_patch.triton_backend import (
+        apply_triton_backend_init_monkey_patch,
+    )
+
+    apply_triton_backend_init_monkey_patch()
+
+
 def form_sgl_server_args(
     model_path: str,
     dtype: str = "bfloat16",
@@ -508,6 +517,7 @@ def apply_parallax_monkey_patch():
     sglang.srt.utils.make_layers = monkey_patch_make_layers
     monkey_patch_qwen3_next()
     monkey_patch_gpt_oss()
+    monkey_patch_triton_backend_init()
 
 
 def initialize_sgl_model_runner(
