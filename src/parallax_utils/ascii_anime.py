@@ -100,6 +100,7 @@ def process_context_color_join(content, colors, model_name):
                     text = model_name[pos]
                     processed_row += HexColorPrinter.RESET
                 else:
+                    text = " "
                     position_str = str(column) + "," + str(row)
                     hex_color = colors.get(position_str, None)
                     if hex_color:
