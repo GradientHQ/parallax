@@ -45,11 +45,10 @@ export default function PageSetup() {
 
       <Stack gap={2.5}>
         <Stack gap={0.5}>
-          <Typography variant='body1'>
-            Step 1 - Specify the initial number of worker nodes to join
-          </Typography>
+          <Typography variant='body1'>Step 1 - Specify the initial number of nodes</Typography>
           <Typography variant='body2' color='text.secondary' fontWeight='regular'>
-            XXX Explainations here
+            Parallax runs and hosts model distributedly on your everyday hardware. Select the number
+            of nodes you would like to add to your cluster with their connection types.{' '}
           </Typography>
         </Stack>
 
@@ -101,7 +100,9 @@ export default function PageSetup() {
         <Stack gap={0.5}>
           <Typography variant='body1'>Step 2 - Select the model you would like to host</Typography>
           <Typography variant='body2' color='text.secondary' fontWeight='regular'>
-            XXX Explainations here
+            Currently we support a handful of state-of-the-art open source models. Do keep in mind
+            that larger models require more nodes to host, so If this is your first time trying
+            Parallax, we suggest you to start with smaller models.
           </Typography>
         </Stack>
 

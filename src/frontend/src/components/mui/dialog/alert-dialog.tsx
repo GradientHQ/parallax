@@ -337,6 +337,13 @@ export const AlertDialog: FC<AlertDialogProps> = (props) => {
       {...rest}
       component={(formProps && 'form') || undefined}
       {...(formProps as any)}
+      slotProps={{
+      paper: {
+        sx: {
+          p: 1.5, 
+        },
+      },
+    }}
     >
       <DialogTitle id={(!SlotIcon && titleId) || undefined}>
         {(titleIcon === 'form' && <TitleIconForm />)
@@ -360,7 +367,7 @@ export const AlertDialog: FC<AlertDialogProps> = (props) => {
 
       <DialogContent>
         {titleIcon && (
-          <Typography variant='subtitle1' id={titleId}>
+          <Typography variant='subtitle1' id={titleId} sx={{ fontSize: '1.125rem', fontWeight: 600, mr: 'auto' }}>
             {title}
           </Typography>
         )}

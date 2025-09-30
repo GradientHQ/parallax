@@ -13,7 +13,7 @@ export const MuiDialogActions = (theme: Theme): Components<Theme>['MuiDialogActi
           {
             props: ({ ownerState }) => !ownerState.disableSpacing,
             style: {
-              gap: '0.75rem',
+              // gap: '0.75rem',
               '& > :not(style) ~ :not(style)': {
                 marginLeft: 0,
               },

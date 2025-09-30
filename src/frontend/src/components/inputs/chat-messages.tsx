@@ -49,18 +49,21 @@ export const ChatMessages: FC = () => {
   });
 
   const scrollToBottom = () => {
+    const el = refContainer.current;
+    if (!el) return;
     userScrolledUpRef.current = false;
     autoScrollingRef.current = true;
-    refBottom.current?.scrollIntoView({ behavior: 'smooth' });
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     setTimeout(() => {
       autoScrollingRef.current = false;
-    }, 200);
+    }, 250);
   };
 
   return (
     <Stack
       ref={refContainer}
       sx={{
+        position: 'relative',
         flex: 1,
         overflowX: 'hidden',
         overflowY: 'auto',
@@ -85,27 +88,27 @@ export const ChatMessages: FC = () => {
 
       <Box ref={refBottom} sx={{ width: '100%', height: 0 }} />
 
-      {!isBottom && (
-        <IconButton
-          onClick={scrollToBottom}
-          size='small'
-          sx={{
-            position: 'sticky',
-            bottom: 0,
-            alignSelf: 'flex-end',
-            mr: 1.5,
-            width: 28,
-            height: 28,
-            bgcolor: 'white',
-            border: '1px solid',
-            borderColor: 'grey.300',
-            '&:hover': { bgcolor: 'grey.100' },
-          }}
-          aria-label='Scroll to bottom'
-        >
-          <IconArrowDown />
-        </IconButton>
-      )}
+      <IconButton
+        onClick={scrollToBottom}
+        size='small'
+        aria-label='Scroll to bottom'
+        sx={{
+          position: 'absolute',
+          right: 12,
+          bottom: 8,
+          width: 28,
+          height: 28,
+          bgcolor: 'white',
+          border: '1px solid',
+          borderColor: 'grey.300',
+          '&:hover': { bgcolor: 'grey.100' },
+          opacity: isBottom ? 0 : 1,
+          pointerEvents: isBottom ? 'none' : 'auto',
+          transition: 'opacity .15s ease',
+        }}
+      >
+        <IconArrowDown />
+      </IconButton>
     </Stack>
   );
 };
@@ -142,7 +145,7 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
           py: 1.5,
           borderRadius: '0.5rem',
           backgroundColor: 'background.default',
-          fontSize: '0.95rem',
+          fontSize: '0.875rem',
         }}
       >
         {content}
@@ -153,7 +156,6 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
       </>;
 
   const assistantDone = messageStatus === 'done';
-
   const showCopy = role === 'user' || (role === 'assistant' && assistantDone);
   const showRegenerate = role === 'assistant' && assistantDone;
 
@@ -169,7 +171,14 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
 
   return (
     <Stack direction='row' sx={{ width: '100%', justifyContent }}>
-      <Stack sx={{ maxWidth: '100%', gap: 1, ...userHoverRevealSx }}>
+      <Stack
+        sx={{
+          maxWidth: role === 'user' ? { xs: '100%', md: '80%' } : '100%',
+          alignSelf: role === 'user' ? 'flex-end' : 'flex-start',
+          gap: 1,
+          ...userHoverRevealSx,
+        }}
+      >
         {nodeContent}
 
         {(showCopy || showRegenerate) && (
