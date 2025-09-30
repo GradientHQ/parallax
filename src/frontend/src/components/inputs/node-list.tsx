@@ -149,8 +149,8 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
           })}
           variant={variant}
         >
-          {variant === 'list' && <IconStatus />}
-          {variant === 'menu' && <IconCircleFilled />}
+          {variant === 'list' && <IconStatus size={18} />}
+          {variant === 'menu' && <IconCircleFilled size={10}/>}
         </ListItemStatus>
       )}
     </ListItem>
@@ -182,9 +182,9 @@ export const NodeList: FC<NodeListProps> = ({ variant = 'list' }) => {
             position: 'absolute',
             top: '1.375rem',
             bottom: '1.375rem',
-            left: '1.375rem',
-            borderLeft: '2px dashed',
-            borderColor: 'divider',
+            left: '0.75rem',
+            borderLeft: '1px dashed',
+            borderColor: '#9B9B9BFF',
           }}
         />
       )}

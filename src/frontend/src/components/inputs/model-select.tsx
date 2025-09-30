@@ -7,6 +7,7 @@ const ModelSelectRoot = styled(Select)(({ theme }) => {
   const { spacing } = theme;
   return {
     height: '4rem',
+    paddingInline: spacing(0.5),
   };
 });
 

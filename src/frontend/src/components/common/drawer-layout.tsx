@@ -78,7 +78,8 @@ const DrawerLayoutContent = styled(Stack)(({ theme }) => {
     maxWidth: '100%',
     height: '100%',
     gap: spacing(2),
-    padding: spacing(4),
+    paddingBlock: spacing(1),   // 上下内边距
+    paddingInline: spacing(4),  // 左右内边距
     overflow: 'hidden',
   };
 });
@@ -148,7 +149,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
     titleIcon: <IconCirclePlus />,
     title: 'Add Nodes',
     content: (
-      <Stack sx={{ gap: 7 }}>
+      <Stack sx={{ gap: 5 }}>
         <Stack sx={{ gap: 1 }}>
           <Typography variant='body1'>Run join command on your new Node</Typography>
           <JoinCommand />
@@ -282,11 +283,10 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
           <Stack>
             <Stack direction='row' sx={{ gap: 1, color: 'text.primary' }}>
               {/* <IconCluster /> */}
-              <Typography variant='body1' sx={{ mt: '1.5px', color: '#666666FF', fontWeight: 600 }}>
+              <Typography variant='body1' sx={{ mt: '1.5px', mb: '20px', color: '#A7A7A7FF', fontWeight: 600}}>
                 Cluster topology
               </Typography>
             </Stack>
-            <Divider sx={{ width: '22rem', marginLeft: '-25px', color: '#545454FF', marginTop: '30px', marginBottom: '20px' }} />
             <NodeList variant='menu' />
             <Button color='info' startIcon={<IconPlus />} onClick={openJoinCommand} sx={{ mt: '30px' }}>
               Add Nodes

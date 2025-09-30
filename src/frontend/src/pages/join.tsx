@@ -68,19 +68,18 @@ export default function PageJoin() {
       <Stack gap={6} sx={{ overflow: 'hidden' }}>
         <Stack gap={2}>
           <Stack gap={1}>
-            <Typography variant='body1'>
-              Step 1 - On all worker nodes, run command line join
-            </Typography>
+            <Typography variant='body1'>Step 1 - Run join command on all nodes</Typography>
           </Stack>
           <JoinCommand />
         </Stack>
 
         <Stack gap={2} flex={1}>
           <Stack gap={1}>
-            <Typography variant='body1'>Step 2 - Check your live node status</Typography>
+            <Typography variant='body1'>Step 2 - Check your node status</Typography>
             <Typography variant='body2' color='text.secondary' fontWeight='regular'>
-              After you successfully start the server on each nodes, you should see them show up on
-              the below dashboard.
+              After you successfully start your nodes, you should see them start to show up below
+              with their status. Once all nodes are connected, you will automatically be directed to
+              the chat interface.
             </Typography>
           </Stack>
 

@@ -52,15 +52,19 @@ export const JoinCommand: FC = () => {
 
   return (
     <Stack gap={1}>
-      {Object.entries(nodeJoinCommand).map(([key, value]) => (
+      {Object.entries(nodeJoinCommand).map(([key, value], index, entries) => (
         <Stack key={key} gap={1}>
-          <Typography variant='subtitle2'>For {LABEL_MAP[key] || key}:</Typography>
-          <JoinCommandItem>
+          {entries.length > 1 && (
+            <Typography key='label' variant='subtitle2'>
+              For {LABEL_MAP[key] || key}:
+            </Typography>
+          )}
+          <JoinCommandItem key='command'>
             <Typography sx={{ flex: 1, lineHeight: '1.125rem', whiteSpace: 'wrap' }} variant='pre'>
               {value}
             </Typography>
             <IconButton
-              sx={{ flex: 'none', fontSize: '1.5rem' }}
+              sx={{ flex: 'none', fontSize: '1rem' }}
               size='em'
               onClick={() => copy(key)}
             >
