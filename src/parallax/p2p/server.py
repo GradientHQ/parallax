@@ -276,6 +276,7 @@ class GradientServer:
                 node_info = self.get_node_info()
                 if node_info == {}:
                     logger.error("Failed to get node info, try again after 10 seconds")
+                    del self.lattica
                     self.lattica = None
                     time.sleep(10)
                     return self.run()
