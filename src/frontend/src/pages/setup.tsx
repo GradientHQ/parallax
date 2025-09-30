@@ -8,7 +8,7 @@ import {
   FormLabel,
   MenuItem,
   Select,
-  Stack as MuiStack,
+  Stack,
   styled,
   TextField,
   ToggleButton,
@@ -19,13 +19,6 @@ import { MainLayout } from '../components/common';
 import { ModelSelect, NumberInput } from '../components/inputs';
 import { useCluster } from '../services';
 import { useRefCallback } from '../hooks';
-
-const Stack = styled(MuiStack)(({ theme }) => {
-  const { spacing } = theme;
-  return {
-    overflowY: 'auto',
-  };
-});
 
 export default function PageSetup() {
   const [

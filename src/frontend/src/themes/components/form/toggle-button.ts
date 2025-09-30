@@ -13,7 +13,7 @@ export const MuiToggleButton = (theme: Theme): Components<Theme>['MuiToggleButto
         flex: 1,
         height: `${INPUT_SIZE_REM_MAP.small}rem`,
 
-        borderColor: 'transparent',
+        borderColor: palette.divider,
 
         color: palette.grey[400],
         backgroundColor: palette.grey[200],
