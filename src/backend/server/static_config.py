@@ -7,6 +7,12 @@ from scheduling.model_info import ModelInfo
 # Supported model list
 MODEL_LIST = [
     "Qwen/Qwen3-0.6B",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "moonshotai/Kimi-K2-Instruct",
+    "moonshotai/Kimi-K2-Instruct-0905",
+    "Qwen/Qwen3-Next-80B-A3B-Instruct",
+    "Qwen/Qwen3-Next-80B-A3B-Thinking",
     # "Qwen/Qwen3-8B",
     # "Qwen/Qwen3-8B-FP8",
     "Qwen/Qwen3-32B",
@@ -16,19 +22,13 @@ MODEL_LIST = [
     # "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8",
     "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8",
     "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8",
-    "Qwen/Qwen3-Next-80B-A3B-Instruct",
-    "Qwen/Qwen3-Next-80B-A3B-Thinking",
     # "Qwen/Qwen2.5-3B-Instruct",
     # "Qwen/Qwen2.5-7B-Instruct",
     # "Qwen/Qwen2.5-14B-Instruct",
     "Qwen/Qwen2.5-72B-Instruct",
-    "openai/gpt-oss-20b",
-    "openai/gpt-oss-120b",
     "nvidia/Llama-3.3-70B-Instruct-FP8",
     "nvidia/Llama-3.1-70B-Instruct-FP8",
     "nvidia/Llama-3.1-8B-Instruct-FP8",
-    "moonshotai/Kimi-K2-Instruct",
-    "moonshotai/Kimi-K2-Instruct-0905",
 ]
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
