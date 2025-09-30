@@ -25,6 +25,8 @@ class HexColorPrinter:
     }
 
     RESET = "\033[0m"
+    SHOW = "\033[97m"
+    WHITE = "\033[97m"
 
     @classmethod
     def hex_to_rgb(cls, hex_color):
@@ -46,6 +48,10 @@ class HexColorPrinter:
             if distance < min_distance:
                 min_distance = distance
                 closest_color = ansi_code
+        if closest_color == "\033[37m":
+            closest_color = "\033[35m"
+        if closest_color == "\033[90m":
+            closest_color = "\033[95m"
 
         return closest_color
 
@@ -74,10 +80,14 @@ def process_context_color_run(content, colors):
                 processed_row += text
                 continue
             position_str = str(column) + "," + str(row)
-            hex_color = colors.get(position_str, None)
-            if hex_color:
-                color = HexColorPrinter.find_closest_color(hex_color)
+            if row == 11 and text not in ("▝", "#", " "):
+                color = HexColorPrinter.WHITE
                 processed_row += color
+            else:
+                hex_color = colors.get(position_str, None)
+                if hex_color:
+                    color = HexColorPrinter.find_closest_color(hex_color)
+                    processed_row += color
             processed_row += text
         processed_row += HexColorPrinter.RESET
         res.append(processed_row)
@@ -86,8 +96,8 @@ def process_context_color_run(content, colors):
 
 def process_context_color_join(content, colors, model_name):
     res = []
-    if len(model_name) > 20:
-        model_name = model_name[:20]
+    if len(model_name) > 22:
+        model_name = model_name[:22]
     name_len = len(model_name)
     for row, row_str in enumerate(content):
         processed_row = ""
@@ -95,8 +105,8 @@ def process_context_color_join(content, colors, model_name):
             if text in (" ", "#"):
                 processed_row += text
                 continue
-            if row == 5 and 12 < column < 32:
-                pos = column - 13
+            if row == 5 and 10 < column < 32:
+                pos = column - 11
                 if pos < name_len:
                     text = model_name[pos]
                     processed_row += HexColorPrinter.RESET

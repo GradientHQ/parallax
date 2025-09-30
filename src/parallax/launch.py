@@ -22,7 +22,6 @@ from parallax.server.executor import Executor
 from parallax.server.http_server import launch_http_server
 from parallax.server.server_args import parse_args
 from parallax.utils.utils import get_current_device
-from parallax_utils.ascii_anime import display_parallax_join
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger("parallax.launch")
@@ -100,7 +99,6 @@ if __name__ == "__main__":
             args.start_layer = gradient_server.block_start_index
             args.end_layer = gradient_server.block_end_index
             args.model_path = gradient_server.model_name
-            display_parallax_join(args.model_path)
             # Hard code for mlx-community models
             if get_current_device() == "mlx":
                 mlx_model_repo = MLX_MODEL_NAME_MAP.get(args.model_path, None)

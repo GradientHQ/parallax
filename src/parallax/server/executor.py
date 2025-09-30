@@ -56,6 +56,7 @@ from parallax.utils.utils import (
     pad_inputs,
     pad_prefix_caches,
 )
+from parallax_utils.ascii_anime import display_parallax_join
 from parallax_utils.logging_config import get_logger
 from parallax_utils.utils import compute_max_batch_size
 
@@ -273,6 +274,7 @@ class Executor:
             self.send_to_ipc_socket = get_zmq_socket(
                 self.zmq_context, zmq.PUSH, executor_output_ipc_addr, bind=False
             )
+        display_parallax_join(model_repo)
 
     @classmethod
     def create_from_args(cls, args: argparse.Namespace):
