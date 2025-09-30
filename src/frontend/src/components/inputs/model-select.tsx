@@ -38,7 +38,7 @@ const ModelSelectRoot = styled(Select)<{ ownerState: ModelSelectProps }>(({ them
         fontSize: 'inherit',
         fontWeight: 'inherit',
         lineHeight: 'inherit',
-        padding: 0, 
+        padding: 0,
       },
       '&:hover': { backgroundColor: 'transparent' },
     }),
@@ -57,7 +57,7 @@ const ValueRow = styled(Stack)(({ theme }) => ({
   gap: theme.spacing(1),
   padding: theme.spacing(1),
   '&:hover': { backgroundColor: 'transparent' },
-  pointerEvents: 'none', 
+  pointerEvents: 'none',
 }));
 
 const ModelLogo = styled('img')(({ theme }) => ({
@@ -139,7 +139,7 @@ export const ModelSelect: FC<ModelSelectProps> = ({ variant = 'outlined' }) => {
         renderValue={(value) => {
           const model = modelInfoList.find((m) => m.name === value);
           if (!model) return undefined;
-          
+
           return variant === 'outlined' ? (
             <ValueRow>
               <ModelLogo src={model.logoUrl} />

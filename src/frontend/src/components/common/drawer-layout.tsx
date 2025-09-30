@@ -78,8 +78,8 @@ const DrawerLayoutContent = styled(Stack)(({ theme }) => {
     maxWidth: '100%',
     height: '100%',
     gap: spacing(2),
-    paddingBlock: spacing(1), 
-    paddingInline: spacing(4), 
+    paddingBlock: spacing(1),
+    paddingInline: spacing(4),
     overflow: 'hidden',
   };
 });

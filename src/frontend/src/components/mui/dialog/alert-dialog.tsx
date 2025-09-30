@@ -340,7 +340,7 @@ export const AlertDialog: FC<AlertDialogProps> = (props) => {
       slotProps={{
       paper: {
         sx: {
-          p: 1.5, 
+          p: 1.5,
         },
       },
     }}

@@ -75,6 +75,12 @@ export const NumberInput: FC<NumberInputProps> = ({
     <OutlinedInput
       {...rest}
       type='number'
+      sx={{
+        '& input': {
+          textAlign: 'center',
+          width: '2.5rem',
+        },
+      }}
       // startAdornment={
       //   <InputAdornment position='start'>
       //     <IconButton>
