@@ -160,6 +160,8 @@ class Executor:
         self.head_dim = self.config.get("head_dim") or self.config.get(
             "hidden_size"
         ) // self.config.get("num_attention_heads")
+        self.qk_nope_head_dim = self.config.get("qk_nope_head_dim", None)
+        self.qk_rope_head_dim = self.config.get("qk_rope_head_dim", None)
         self.enable_prefix_cache = enable_prefix_cache
         self.linear_key_head_dim = self.config.get("linear_key_head_dim", None)
         self.linear_value_head_dim = self.config.get("linear_value_head_dim", None)
@@ -209,6 +211,8 @@ class Executor:
                 linear_v_dim=self.linear_value_head_dim,
                 linear_num_k_heads=self.linear_num_key_heads,
                 linear_num_v_heads=self.linear_num_value_heads,
+                qk_nope_head_dim=self.qk_nope_head_dim,
+                qk_rope_head_dim=self.qk_rope_head_dim,
                 max_num_tokens=max_tokens_in_kv_pool,
             )
             mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
@@ -948,12 +952,21 @@ class Executor:
                 hidden_state_for_req = hidden_states[i : i + 1]
             else:
                 # Other peers get a 3D array of hidden states
-                true_length = int(lengths[i])
-                if hidden_states.ndim == 3:
-                    hidden_state_for_req = hidden_states[i, :true_length, :]
+                if src_request.is_prefill:
+                    true_length = int(lengths[i])
+                    if hidden_states.ndim == 3:
+                        hidden_state_for_req = hidden_states[i, :true_length, :]
+                    else:
+                        hidden_state_for_req = hidden_states[
+                            pre_length : pre_length + true_length, :
+                        ]
+                    pre_length += true_length
                 else:
-                    hidden_state_for_req = hidden_states[pre_length : pre_length + true_length, :]
-                pre_length += true_length
+                    if hidden_states.ndim == 3:
+                        hidden_state_for_req = hidden_states[i, :, :]
+                    else:
+                        hidden_state_for_req = hidden_states[pre_length : pre_length + 1, :]
+                    pre_length += 1
 
             next_req = self._prepare_next_single_request(src_request, hidden_state_for_req)
             batched_requests.append(next_req)

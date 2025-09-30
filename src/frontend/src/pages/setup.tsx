@@ -50,7 +50,22 @@ export default function PageSetup() {
         <Stack direction='row' justifyContent='space-between' alignItems='center' gap={2}>
           <Typography color='text.secondary'>Node Number</Typography>
           <NumberInput
-            sx={{ width: '10rem' }}
+            sx={{ width: '10rem', boxShadow: 'none', bgcolor: 'transparent' }}
+            slotProps={{
+              root: {
+                sx: {
+                  bgcolor: 'transparent',
+                  '&:hover': { bgcolor: 'transparent' },
+                  '&:focus-within': { bgcolor: 'transparent' },
+                },
+              },
+              input: {
+                sx: {
+                  bgcolor: 'transparent !important',
+                  '&:focus': { outline: 'none' },
+                },
+              },
+            }}
             value={initNodesNumber}
             onChange={(e) => setInitNodesNumber(Number(e.target.value))}
           />
@@ -61,13 +76,13 @@ export default function PageSetup() {
             Are you nodes within the same local network?
           </Typography>
           <ToggleButtonGroup
-            sx={{ width: '10rem' }}
+            sx={{ width: '10rem', textTransform: 'none' }}
             exclusive
             value={networkType}
             onChange={(_, value) => value && setNetworkType(value)}
           >
-            <ToggleButton value='local'>Local</ToggleButton>
-            <ToggleButton value='remote'>Remote</ToggleButton>
+            <ToggleButton value='local' sx={{ textTransform: 'none' }}>Local</ToggleButton>
+            <ToggleButton value='remote' sx={{ textTransform: 'none' }}>Remote</ToggleButton>
           </ToggleButtonGroup>
         </Stack>
       </Stack>

@@ -14,6 +14,7 @@ from mlx_lm.tokenizer_utils import (
     _is_spm_decoder,
     _is_spm_decoder_no_space,
 )
+from mlx_lm.tokenizer_utils import load_tokenizer as _mlx_load_tokenizer
 
 
 class ParallaxNaiveStreamingDetokenizer(NaiveStreamingDetokenizer):
@@ -97,3 +98,28 @@ def load_detokenizer(model_path, tokenizer):
                 tokenmap = _get_bpe_tokenmap(tokenizer)
 
     return detokenizer_class, tokenmap
+
+
+def load_tokenizer(model_path, trust_remote_code=True, tokenizer_config_extra=None, **kwargs):
+    """
+    Wrapper function for MLX load_tokenizer that defaults trust_remote_code to True.
+    This is needed for models like Kimi-K2 that contain custom code.
+
+    Args:
+        model_path: Path to the model
+        trust_remote_code: Whether to trust remote code (defaults to True)
+        tokenizer_config_extra: Extra config to pass to AutoTokenizer.from_pretrained
+        **kwargs: Additional arguments to pass to the original load_tokenizer
+
+    Returns:
+        The loaded tokenizer
+    """
+    if tokenizer_config_extra is None:
+        tokenizer_config_extra = {}
+
+    # Add trust_remote_code to the tokenizer config
+    if trust_remote_code:
+        tokenizer_config_extra = tokenizer_config_extra.copy()
+        tokenizer_config_extra["trust_remote_code"] = True
+
+    return _mlx_load_tokenizer(model_path, tokenizer_config_extra=tokenizer_config_extra, **kwargs)
