@@ -273,8 +273,13 @@ class GradientServer:
                 self.scheduler_stub = RPCConnectionHandler(self.lattica, None).get_stub(
                     self.scheduler_peer_id
                 )
-
-                response = self.scheduler_stub.node_join(self.get_node_info())
+                node_info = self.get_node_info()
+                if node_info == {}:
+                    logger.error("Failed to get node info, try again after 10 seconds")
+                    self.lattica = None
+                    time.sleep(10)
+                    return self.run()
+                response = self.scheduler_stub.node_join(node_info)
                 response = response.result(timeout=300)
                 if response == {}:
                     logger.error("Failed to join scheduler")
@@ -547,8 +552,10 @@ class GradientServer:
                 logger.warning("No peers found or scheduler peer id not found, waiting for 1 second.")
                 time.sleep(1)
 
-            if len(all_peers) == 0:
-                logger.warning("No peers found, send empty rtt_to_nodes.")
+            
+            if len(all_peers) == 0 or self.scheduler_peer_id not in all_peers:
+                logger.warning("No peers found or scheduler peer id not found, return empty node info.")
+                return {}
 
             for peer_id in all_peers:
                 rtt = None
