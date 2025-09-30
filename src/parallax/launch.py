@@ -21,12 +21,14 @@ from parallax.p2p.server import ServerState, launch_p2p_server
 from parallax.server.executor import Executor
 from parallax.server.http_server import launch_http_server
 from parallax.server.server_args import parse_args
+from parallax_utils.ascii_anime import display_parallax_join
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger("parallax.launch")
 
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)
+    display_parallax_join()
     try:
         args = parse_args()
         logger.debug(f"args: {args}")
