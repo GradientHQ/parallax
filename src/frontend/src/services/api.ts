@@ -1,6 +1,6 @@
 import { createHttpStreamFactory } from './http-stream';
 
-export const API_BASE_URL = import.meta.env.DEV ? 'http://0.0.0.0:3001' : '';
+export const API_BASE_URL = import.meta.env.DEV ? '/proxy-api' : '';
 
 export const getModelList = async (): Promise<readonly string[]> => {
   while (true) {
