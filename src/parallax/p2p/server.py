@@ -273,6 +273,8 @@ class GradientServer:
                 self.scheduler_stub = RPCConnectionHandler(self.lattica, None).get_stub(
                     self.scheduler_peer_id
                 )
+
+                time.sleep(10)
                 response = self.scheduler_stub.node_join(self.get_node_info())
                 response = response.result(timeout=300)
                 if response == {}:
