@@ -80,4 +80,3 @@ def parallax_triton_backend_init(
 
 def apply_triton_backend_init_monkey_patch():
     TritonAttnBackend.__init__ = parallax_triton_backend_init
-
