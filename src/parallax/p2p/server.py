@@ -274,7 +274,6 @@ class GradientServer:
                     self.scheduler_peer_id
                 )
 
-                time.sleep(10)
                 response = self.scheduler_stub.node_join(self.get_node_info())
                 response = response.result(timeout=300)
                 if response == {}:
@@ -543,9 +542,9 @@ class GradientServer:
             all_peers = []
             for _ in range(1 if is_update else 30):
                 all_peers = self.lattica.get_all_peers()
-                if len(all_peers) > 0:
+                if len(all_peers) > 0 and self.scheduler_peer_id in all_peers:
                     break
-                logger.warning("No peers found, waiting for 1 second.")
+                logger.warning("No peers found or scheduler peer id not found, waiting for 1 second.")
                 time.sleep(1)
 
             if len(all_peers) == 0:
