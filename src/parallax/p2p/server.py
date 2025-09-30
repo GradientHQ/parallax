@@ -511,7 +511,7 @@ class GradientServer:
                 while not self.stop_event.is_set():
                     # Announce the range ID
                     try:
-                        if self.scheduler_addr is not None:
+                        if self.scheduler_peer_id is not None:
                             self.scheduler_stub.node_update(self.get_node_info(is_update=True))
                         else:
                             self.lattica.store(
@@ -572,7 +572,7 @@ class GradientServer:
             "hardware": detect_node_hardware(self.lattica.peer_id()),
             "kv_cache_ratio": 0.25,
             # temp change for testing
-            "param_hosting_ratio": 0.01,
+            "param_hosting_ratio": 0.012,
             "max_concurrent_requests": self.max_batch_size,
             "max_sequence_length": (
                 1024 if self.max_sequence_length is None else self.max_sequence_length
