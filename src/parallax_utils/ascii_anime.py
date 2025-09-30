@@ -94,7 +94,7 @@ def process_context_color_join(content, colors, model_name):
             if text in (" ", "#"):
                 processed_row += text
                 continue
-            if row == 5 and 12 < column < 33:
+            if row == 5 and 12 < column < 32:
                 pos = column - 13
                 if pos < name_len:
                     text = model_name[pos]
