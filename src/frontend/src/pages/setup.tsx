@@ -28,9 +28,15 @@ export default function PageSetup() {
 
   const navigate = useNavigate();
 
+  const [loading, setLoading] = useState(false);
+
   const onContinue = useRefCallback(async () => {
-    await init();
-    await navigate('/join');
+    setLoading(true);
+    Promise.resolve()
+      .then(() => init())
+      .then(() => navigate('/join'))
+      .catch((e) => console.error(e))
+      .finally(() => setLoading(false));
   });
 
   return (
@@ -104,7 +110,9 @@ export default function PageSetup() {
       </Stack>
 
       <Stack direction='row' justifyContent='flex-end' alignItems='center' gap={2}>
-        <Button onClick={onContinue}>Continue</Button>
+        <Button loading={loading} onClick={onContinue}>
+          Continue
+        </Button>
       </Stack>
     </MainLayout>
   );

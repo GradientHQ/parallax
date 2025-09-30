@@ -1,13 +1,21 @@
-
+<!-- <div align="center">
+  <p align="center">
+    <img src="https://raw.githubusercontent.com/LMCache/LMCache/dev/asset/logo.png" width="720" alt="lmcache logo">
+  </p>
+</div> -->
 
 # Parallax
-A fully decentralized inference engine developed by [Gradient Network](https://gradient.network). Parallax reimagines model inference as a global, collaborative process—one where large language models are no longer chained to centralized infrastructure, but are instead decomposed, executed, and verified across a distributed machine mesh.
+A fully decentralized inference engine developed by [Gradient](https://gradient.network). Parallax lets you build your own AI cluster for model inference onto a set of distributed nodes despite their varying configuration and physical location.
+<!-- <h3> -->
 
-<h3>
+| [**Gradient**](https://gradient.network)
+| [**Blog**](https://gradient.network/blog/parallax-world-inference-engine)
+| [**X(Twitter)**](https://x.com/Gradient_HQ)
+| [**Discord**](https://discord.gg/gradientnetwork)
 
-[Gradient Network](https://gradient.network) | [Blog](https://gradient.network/blog/parallax-world-inference-engine) | [X(Twitter)](https://x.com/Gradient_HQ) | [Discord](https://discord.gg/gradientnetwork)
+🔥 **NEW: Parallax version 0.0.1 has been released!**
 
-</h3>
+<!-- </h3> -->
 
 ## Features
 * Run LLM at home with personal devices.
@@ -89,10 +97,15 @@ docker run -it --gpus all --network host gradientservice/parallax:latest-hopper 
 ```
 The container starts under parallax workspace and you should be able to run parallax directly.
 
-## Usage on Distributed Devices
-### Use frontend
+## Getting started
+
+We will walk through you the easiest way to quickly set up your own AI cluster
+
+### With Frontend
+
 #### Step 1: Launch scheduler
-First launch our scheduler on the main node.
+
+First launch our scheduler on the main node, we recommend you to use your most convenient computer for this.
 - For Linux/macOS:
 ```sh
 parallax run
@@ -104,12 +117,17 @@ parallax run
 ```
 
 #### Step 2: Select model config
-Open http://localhost:3001
+
+Open http://localhost:3001 and you should see the setup interface.
+
 ![Model select](docs/images/model-selection.png)
-Select model config and click continue.
+
+Select your desired node and model config and click continue.
+
 #### Step 3: Join each distributed nodes
-![Node join](docs/images/node-join.png)
-This page will show the join command like blow.
+
+Copy the generated join command line to your node and run.
+
 ```sh
 # local area network env
 parallax join
@@ -118,10 +136,15 @@ parallax join -s {scheduler-address}
 # example
 parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
 ```
-Run join command on each distributed nodes.
-Wait until all nodes are ready.
+
+![Node join](docs/images/node-join.png)
+
+You should see your nodes start to show up with their status. Wait until all nodes are successfully connected, and you will automatically be directed to the chat interface.
+
 #### Step 4: Chat
-Test chat as shown below
+
+Done! You have your own AI cluster now.
+
 ![Chat](docs/images/chat.png)
 
 ### Without frontend
