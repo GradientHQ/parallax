@@ -33,7 +33,12 @@ MODEL_LIST = [
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
 
-NODE_JOIN_COMMAND_PUBLIC_NETWORK = """parallax join -s {scheduler_addr}"""
+NODE_JOIN_COMMAND_PUBLIC_NETWORK = """parallax join -r -s {scheduler_addr} """
+
+PUBLIC_RELAY_SERVERS = [
+    "/dns4/relay-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
+    "/dns4/relay-lattica.gradient.network/tcp/18080/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
+]
 
 
 def get_model_info(model_name):

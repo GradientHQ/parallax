@@ -6,7 +6,11 @@ from lattica import Lattica
 
 from backend.server.constants import NODE_STATUS_AVAILABLE, NODE_STATUS_WAITING
 from backend.server.rpc_connection_handler import RPCConnectionHandler
-from backend.server.static_config import get_model_info, get_node_join_command
+from backend.server.static_config import (
+    PUBLIC_RELAY_SERVERS,
+    get_model_info,
+    get_node_join_command,
+)
 from parallax_utils.logging_config import get_logger
 from scheduling.node import RequestSignal
 from scheduling.scheduler import Scheduler
@@ -53,6 +57,10 @@ class SchedulerManage:
             f"SchedulerManage starting: model_name={model_name}, init_nodes_num={init_nodes_num}"
         )
         self.is_local_network = is_local_network
+        if not is_local_network and not self.relay_servers:
+            logger.debug("Using public relay servers")
+            self.relay_servers = PUBLIC_RELAY_SERVERS
+
         self._start_scheduler(model_name, init_nodes_num)
         self._start_lattica()
 
@@ -71,6 +79,11 @@ class SchedulerManage:
     def get_is_local_network(self):
         return self.is_local_network
 
+    def get_peer_id(self):
+        if self.lattica is None:
+            return None
+        return self.lattica.peer_id()
+
     def get_cluster_status(self):
         return {
             "type": "cluster_status",
@@ -79,7 +92,7 @@ class SchedulerManage:
                 "model_name": self.model_name,
                 "init_nodes_num": self.init_nodes_num,
                 "node_join_command": get_node_join_command(
-                    "${scheduler-addr}", self.is_local_network
+                    self.get_peer_id(), self.is_local_network
                 ),
                 "node_list": self.get_node_list(),
             },

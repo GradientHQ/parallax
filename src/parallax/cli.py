@@ -52,13 +52,27 @@ def run_command(args):
         sys.exit(1)
 
     # Build the command to run the backend main.py
-    cmd = [sys.executable, str(backend_main), "--dht-port", "5001", "--port", "3001"]
+    cmd = [
+        sys.executable,
+        str(backend_main),
+        "--dht-port",
+        "5001",
+        "--port",
+        "3001",
+    ]
 
     # Add optional arguments if provided
     if args.model_name:
         cmd.extend(["--model-name", args.model_name])
     if args.init_nodes_num:
         cmd.extend(["--init-nodes-num", str(args.init_nodes_num)])
+    if args.use_relay:
+        cmd.extend(
+            [
+                "--relay-servers",
+                "/dns4/relay-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf /dns4/relay-lattica.gradient.network/tcp/18080/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
+            ]
+        )
 
     logger.info(f"Running command: {' '.join(cmd)}")
 
@@ -128,6 +142,19 @@ def join_command(args):
         "--scheduler-addr",
         args.scheduler_addr,
     ]
+    if args.use_relay:
+        cmd.extend(
+            [
+                "--relay-servers",
+                "/dns4/relay-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf /dns4/relay-lattica.gradient.network/tcp/18080/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
+            ]
+        )
+        cmd.extend(
+            [
+                "--initial-peers",
+                "/dns4/bootstrap-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb /dns4/bootstrap-lattica.gradient.network/tcp/18080/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb",
+            ]
+        )
 
     logger.info(f"Running command: {' '.join(cmd)}")
     logger.info(f"Scheduler address: {args.scheduler_addr}")
@@ -186,6 +213,9 @@ Examples:
     )
     run_parser.add_argument("-n", "--init-nodes-num", type=int, help="Number of initial nodes")
     run_parser.add_argument("-m", "--model-name", type=str, help="Model name")
+    run_parser.add_argument(
+        "-r", "--use-relay", action="store_true", help="Use public relay servers"
+    )
 
     # Add 'join' command parser
     join_parser = subparsers.add_parser(
@@ -193,6 +223,9 @@ Examples:
     )
     join_parser.add_argument(
         "-s", "--scheduler-addr", default="auto", type=str, help="Scheduler address (required)"
+    )
+    join_parser.add_argument(
+        "-r", "--use-relay", action="store_true", help="Use public relay servers"
     )
 
     args = parser.parse_args()
