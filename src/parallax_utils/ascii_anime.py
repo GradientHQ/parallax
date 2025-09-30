@@ -121,8 +121,8 @@ def display_parallax_run():
     display_ascii_animation(animation_data)
 
 
-def display_parallax_join():
-    file_path = "./src/parallax_utils/anime/parallax_run.json"
+def display_parallax_join(model_name):
+    file_path = "./src/parallax_utils/anime/parallax_join.json"
     try:
         with open(file_path, "r") as f:
             animation_data = json.load(f)
@@ -133,7 +133,3 @@ def display_parallax_join():
         print(f"Error: The file '{file_path}' contains invalid JSON.")
         return
     display_ascii_animation(animation_data)
-
-
-if __name__ == "__main__":
-    display_parallax_run()
