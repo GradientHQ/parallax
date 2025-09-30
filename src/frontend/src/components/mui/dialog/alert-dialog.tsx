@@ -367,7 +367,7 @@ export const AlertDialog: FC<AlertDialogProps> = (props) => {
 
       <DialogContent>
         {titleIcon && (
-          <Typography variant='subtitle1' id={titleId} sx={{ fontSize: '1rem', fontWeight: 600, mr: 'auto' }}>
+          <Typography variant='subtitle1' id={titleId} sx={{ fontSize: '1.125rem', fontWeight: 600, mr: 'auto' }}>
             {title}
           </Typography>
         )}

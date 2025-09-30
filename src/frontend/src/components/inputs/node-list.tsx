@@ -40,7 +40,7 @@ const NodeListRoot = styled(Stack)(({ theme }) => {
 const List = styled(MuiList)<{ variant: NodeListVariant }>(({ theme, variant }) => {
   const { spacing } = theme;
   return {
-    gap: spacing(variant === 'list' ? 1.5 : 5.5),
+    gap: spacing(variant === 'list' ? 1.5 : 3.5),
     overflowY: 'auto',
   };
 });

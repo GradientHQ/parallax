@@ -145,7 +145,7 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
           py: 1.5,
           borderRadius: '0.5rem',
           backgroundColor: 'background.default',
-          fontSize: '0.95rem',
+          fontSize: '0.875rem',
         }}
       >
         {content}

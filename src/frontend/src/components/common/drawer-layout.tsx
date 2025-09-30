@@ -39,7 +39,7 @@ const DrawerLayoutSide = styled(Stack)(({ theme }) => {
   const { palette, spacing } = theme;
   return {
     height: '100%',
-    paddingBlock: spacing(3),
+    paddingBlock: spacing(2),
     paddingInline: spacing(2),
     gap: spacing(3),
     overflow: 'hidden',
@@ -55,7 +55,7 @@ const DrawerLayoutHeader = styled(Stack)(({ theme }) => {
     height: '2.5rem',
     flex: 'none',
     marginTop: spacing(1),
-    paddingBlock: spacing(2),
+    paddingBlock: spacing(1),
     paddingInline: spacing(4),
     overflow: 'hidden',
   };
@@ -78,8 +78,8 @@ const DrawerLayoutContent = styled(Stack)(({ theme }) => {
     maxWidth: '100%',
     height: '100%',
     gap: spacing(2),
-    paddingBlock: spacing(1),   // 上下内边距
-    paddingInline: spacing(4),  // 左右内边距
+    paddingBlock: spacing(1), 
+    paddingInline: spacing(4), 
     overflow: 'hidden',
   };
 });
@@ -147,11 +147,11 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
   const [dialogJoinCommand, { open: openJoinCommand }] = useAlertDialog({
     color: 'primary',
     titleIcon: <IconCirclePlus />,
-    title: 'Add Nodes',
+    title: 'Add New Nodes',
     content: (
       <Stack sx={{ gap: 5 }}>
         <Stack sx={{ gap: 1 }}>
-          <Typography variant='body1'>Run join command on your new Node</Typography>
+          <Typography variant='body1'>Run join command on all nodes</Typography>
           <JoinCommand />
         </Stack>
         <Stack sx={{ gap: 1 }}>
@@ -193,8 +193,8 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
     <DrawerLayoutRoot direction='row'>
       <DrawerLayoutSide
         sx={{
-          width: sidebarExpanded ? '17.25rem' : '3.5rem',
-          paddingInline: sidebarExpanded ? 3 : 2,
+          width: sidebarExpanded ? '16.25rem' : '3.5rem',
+          paddingInline: sidebarExpanded ? 2 : 2,
         }}
       >
         <Stack direction='row' sx={{ justifyContent: 'flex-end', alignItems: 'center', gap: 2 }}>

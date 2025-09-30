@@ -31,10 +31,9 @@ const ChatMarkdownRoot = styled('article', {
   };
 
   return {
-    // ...typography.body1,
+    ...typography.body1,
     overflowWrap: 'break-word',
     maxWidth: '100%',
-    fontSize: '0.95rem',
 
     display: 'flex',
     flexFlow: 'column nowrap',

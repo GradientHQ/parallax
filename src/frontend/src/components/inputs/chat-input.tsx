@@ -44,7 +44,7 @@ export const ChatInput: FC = () => {
               boxShadow: '2px 2px 4px rgba(0,0,0,0.05)',
               flexDirection: 'column',
               '& textarea': {
-                fontSize: '0.95rem',
+                fontSize: '0.875rem',
                 scrollbarWidth: 'none', // Firefox
                 msOverflowStyle: 'none', // IE, Edge
                 '&::-webkit-scrollbar': {
