@@ -96,8 +96,8 @@ const TitleIconOutlineOuter = styled('div', {
 })<{ ownerState: TitleIconOwnerState }>(() => {
   return {
     boxSizing: 'border-box',
-    width: '2.375rem',
-    height: '2.375rem',
+    width: '2.25rem',
+    height: '2.25rem',
 
     position: 'absolute',
     top: '50%',
@@ -105,7 +105,7 @@ const TitleIconOutlineOuter = styled('div', {
     transform: 'translate(-50%, -50%)',
 
     opacity: 0.1,
-    borderWidth: '0.125rem',
+    borderWidth: '1.667px',
     borderStyle: 'solid',
     borderColor: 'currentcolor',
 
@@ -141,7 +141,7 @@ const TitleIconOutlineInner = styled('div', {
     transform: 'translate(-50%, -50%)',
 
     opacity: 0.3,
-    borderWidth: '0.125rem',
+    borderWidth: '1.667px',
     borderStyle: 'solid',
     borderColor: 'currentcolor',
 

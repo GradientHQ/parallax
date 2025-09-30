@@ -165,6 +165,6 @@ export const palette: PaletteOptions = {
   background: {
     default: white,
     paper: white,
-    area: grey[100]!,
+    area: grey[200]!,
   },
 };

@@ -1,7 +1,6 @@
 export const IconBrandGradient = () => (
-  <svg width='24' height='24' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'>
-    {/* <rect width='24' height='24' fill='white' /> */}
-    <path d='M18.8379 5.25L13.7788 18.8297H11.2112L16.2703 5.25H18.8379Z' fill='currentColor' />
-    <path d='M5.0625 18.8297V15.8246H7.97243V18.8297H5.0625Z' fill='currentColor' />
+  <svg width='26' height='28' viewBox='0 0 26 28' fill='none' xmlns='http://www.w3.org/2000/svg'>
+    <path d='M7 19H4V22H7V19Z' fill='black' />
+    <path d='M22 6V8.85011L12.9475 22H10V19.1499L19.0521 6H22Z' fill='black' />
   </svg>
 );

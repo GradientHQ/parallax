@@ -90,7 +90,7 @@ def _initialize_if_necessary():
         _default_handler.setFormatter(formatter)
 
         # root level from env or INFO
-        level_name = os.getenv("PARALLAX_LOGLEVEL", "DEBUG").upper()
+        level_name = os.getenv("PARALLAX_LOGLEVEL", "INFO").upper()
         logging.getLogger().setLevel(level_name)
 
         # Allow logs from our main packages by default

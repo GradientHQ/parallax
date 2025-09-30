@@ -51,7 +51,7 @@ const SIZES: readonly NonNullable<ButtonProps['size']>[] = ['small', 'medium', '
 
 const SIZE_REM_MAP: Record<NonNullable<ButtonProps['size']>, number> = INPUT_SIZE_REM_MAP;
 
-const MIN_WIDTH_MULTIPLY = 2;
+const MIN_WIDTH_MULTIPLY = 3 / 2.25;
 
 const SIZE_PADDING_INLINE_REM_MAP: Record<NonNullable<ButtonProps['size']>, number> = {
   small: 0.875,
@@ -137,26 +137,26 @@ export const MuiButton = (theme: Theme): Components<Theme>['MuiButton'] => {
     },
     styleOverrides: {
       root: {
-        gap: '0.5rem',
+        gap: '0.25rem',
         borderRadius: `${INPUT_RADIUS}rem`,
 
         fontWeight: 400,
         letterSpacing: 0,
         textTransform: 'none',
 
-        variants: [
-          ...containedBoxShadowVariants,
-          ...containedColorVariants,
-          {
-            props: { variant: 'text' },
-            style: {
-              background: 'transparent',
-              '&:hover': {
-                background: 'transparent',
-              },
-            },
+        variants: [...containedBoxShadowVariants, ...containedColorVariants],
+
+        [`&.${buttonClasses.text}`]: {
+          fontFamily: 'inherit',
+          fontWeight: 'inherit',
+          fontSize: 'inherit',
+          lineHeight: 'inherit',
+          color: 'inherit',
+          background: 'transparent',
+          '&:hover': {
+            background: 'transparent',
           },
-        ],
+        },
       },
 
       startIcon: {

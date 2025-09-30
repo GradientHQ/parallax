@@ -7,33 +7,31 @@ from scheduling.model_info import ModelInfo
 # Supported model list
 MODEL_LIST = [
     "Qwen/Qwen3-0.6B",
-    "Qwen/Qwen3-8B",
-    "Qwen/Qwen3-8B-FP8",
+    # "Qwen/Qwen3-8B",
+    # "Qwen/Qwen3-8B-FP8",
     "Qwen/Qwen3-32B",
     "Qwen/Qwen3-32B-FP8",
-    "Qwen/Qwen3-30B-A3B",
-    "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
-    "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8",
+    # "Qwen/Qwen3-30B-A3B",
+    # "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+    # "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8",
     "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8",
     "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8",
     "Qwen/Qwen3-Next-80B-A3B-Instruct",
     "Qwen/Qwen3-Next-80B-A3B-Thinking",
-    "Qwen/Qwen2.5-3B-Instruct",
-    "Qwen/Qwen2.5-7B-Instruct",
-    "Qwen/Qwen2.5-14B-Instruct",
+    # "Qwen/Qwen2.5-3B-Instruct",
+    # "Qwen/Qwen2.5-7B-Instruct",
+    # "Qwen/Qwen2.5-14B-Instruct",
     "Qwen/Qwen2.5-72B-Instruct",
-    "openai/openai/gpt-oss-20b",
-    "openai/openai/gpt-oss-120b",
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "meta-llama/Llama-3.2-1B-Instruct",
-    "meta-llama/Llama-3.2-3B-Instruct",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "nvidia/Llama-3.1-70B-Instruct-FP8",
+    "nvidia/Llama-3.1-8B-Instruct-FP8",
 ]
 
-NODE_JOIN_COMMAND_LOCAL_NETWORK = (
-    """bash scripts/join_local.sh -m {model_name} -s {scheduler_addr}"""
-)
+NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
 
-NODE_JOIN_COMMAND_PUBLIC_NETWORK = """bash scripts/join.sh -m {model_name} -i ${{ip-address-of-current-node}} -s {scheduler_addr}"""
+NODE_JOIN_COMMAND_PUBLIC_NETWORK = """parallax join -s {scheduler_addr}"""
 
 
 def get_model_info(model_name):
@@ -78,15 +76,15 @@ def get_model_list():
     return MODEL_LIST
 
 
-def get_node_join_command(model_name, scheduler_addr, is_local_network):
-    if model_name and scheduler_addr:
+def get_node_join_command(scheduler_addr, is_local_network):
+    if scheduler_addr:
         if is_local_network:
-            return NODE_JOIN_COMMAND_LOCAL_NETWORK.format(
-                model_name=model_name, scheduler_addr=scheduler_addr
-            )
+            return {
+                "command": NODE_JOIN_COMMAND_LOCAL_NETWORK.format(scheduler_addr=scheduler_addr),
+            }
         else:
-            return NODE_JOIN_COMMAND_PUBLIC_NETWORK.format(
-                model_name=model_name, scheduler_addr=scheduler_addr
-            )
+            return {
+                "command": NODE_JOIN_COMMAND_PUBLIC_NETWORK.format(scheduler_addr=scheduler_addr),
+            }
     else:
         return None

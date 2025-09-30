@@ -42,6 +42,8 @@ const COLOR_ICON_MAP: Record<
 
 export type AlertDialogControl = boolean | { closeDialog?: boolean };
 
+export type AlertDialogColor = 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning';
+
 export interface AlertDialogProps extends Omit<DialogProps, 'onClose' | 'title' | 'content'> {
   /**
    * Whether the dialog is open.
@@ -76,13 +78,19 @@ export interface AlertDialogProps extends Omit<DialogProps, 'onClose' | 'title' 
   /**
    * The color for title icon and confirm button.
    */
-  color?: 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning';
+  color?: AlertDialogColor;
+
+  /**
+   * The color for title icon.
+   * @default 'warning'
+   */
+  titleIconColor?: AlertDialogColor;
 
   /**
    * Whether to show the title icon.
    * If 'form', the icon will be a special form icon.
    */
-  titleIcon?: boolean | 'form';
+  titleIcon?: boolean | 'form' | ReactNode;
 
   /**
    * The content to be rendered in the cancel button.
@@ -170,7 +178,8 @@ export const AlertDialog: FC<AlertDialogProps> = (props) => {
     content,
 
     color = 'primary',
-    titleIcon,
+    titleIconColor = 'warning',
+    titleIcon = true,
 
     cancelLabel,
     onCancel = () => {},
@@ -193,7 +202,7 @@ export const AlertDialog: FC<AlertDialogProps> = (props) => {
     }
   }
 
-  const SlotIcon = titleIcon && titleIcon !== 'form' && COLOR_ICON_MAP[color];
+  const SlotIcon = COLOR_ICON_MAP[color];
 
   const [loading, setLoading] = useState(false);
 
@@ -330,13 +339,17 @@ export const AlertDialog: FC<AlertDialogProps> = (props) => {
       {...(formProps as any)}
     >
       <DialogTitle id={(!SlotIcon && titleId) || undefined}>
-        {SlotIcon && (
-          <TitleIcon variant='circle' color={color}>
-            <SlotIcon size='1em' />
-          </TitleIcon>
-        )}
-
-        {titleIcon === 'form' && <TitleIconForm />}
+        {(titleIcon === 'form' && <TitleIconForm />)
+          || (titleIcon === true && (
+            <TitleIcon variant='circle' color={titleIconColor}>
+              <SlotIcon />
+            </TitleIcon>
+          )) || (
+            <TitleIcon variant='circle' color={titleIconColor}>
+              {titleIcon}
+            </TitleIcon>
+          )
+          || undefined}
 
         {!titleIcon && title}
 

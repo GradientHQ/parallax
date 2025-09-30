@@ -21,7 +21,7 @@ export type ClusterStatus = 'idle' | 'waiting' | 'available' | 'rebalancing';
 export interface ClusterInfo {
   readonly id: string;
   readonly status: ClusterStatus;
-  readonly nodeJoinCommand: string;
+  readonly nodeJoinCommand: Readonly<Record<string, string>>;
   readonly initNodesNumber: number;
 }
 
@@ -91,7 +91,7 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
   const [clusterInfo, setClusterInfo] = useState<ClusterInfo>(() => ({
     id: '',
     status: 'idle',
-    nodeJoinCommand: '',
+    nodeJoinCommand: {},
     initNodesNumber: 4,
   }));
   const [nodeInfoList, setNodeInfoList] = useState<readonly NodeInfo[]>(() => [
@@ -128,7 +128,7 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
             status,
             initNodesNumber: init_nodes_num || 0,
             modelName: model_name || '',
-            nodeJoinCommand: node_join_command || '',
+            nodeJoinCommand: node_join_command || {},
           };
           if (JSON.stringify(next) !== JSON.stringify(prev)) {
             debugLog('setClusterInfo', next);
@@ -138,13 +138,34 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
         });
         setNodeInfoList((prev) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const next = node_list.map(({ node_id, status, gpu_name, gpu_memory }: any) => ({
-            id: node_id,
-            status,
-            gpuName: gpu_name,
-            gpuMemory: gpu_memory,
-          }));
-          return next;
+          let next = (node_list as any[]).map<NodeInfo>(
+            ({ node_id, status, gpu_name, gpu_memory }: any) => ({
+              id: node_id,
+              status,
+              gpuName: gpu_name,
+              gpuMemory: gpu_memory,
+            }),
+          );
+
+          const prevOnlineNodes = prev.filter((preNode) =>
+            next.some((nextNode) => nextNode.id === preNode.id),
+          );
+          const prevOfflineNodes = prev
+            .filter((preNode) => !next.some((nextNode) => nextNode.id === preNode.id))
+            .map<NodeInfo>((offlineNode) => ({
+              ...offlineNode,
+              status: 'failed',
+            }));
+
+          if (JSON.stringify(next) === JSON.stringify(prevOnlineNodes)) {
+            next = [...next, ...prevOfflineNodes];
+          }
+
+          if (JSON.stringify(next) !== JSON.stringify(prev)) {
+            debugLog('setNodeInfoList', next);
+            return next;
+          }
+          return prev;
         });
       }
     };
@@ -156,7 +177,14 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
   }, []);
 
   const init = useRefCallback(async () => {
-    initScheduler({
+    if (initNodesNumber < 1) {
+      throw new Error('initNodesNumber must be greater than 0');
+    }
+    if (!modelName) {
+      throw new Error('modelName is required');
+    }
+
+    await initScheduler({
       model_name: modelName,
       init_nodes_num: initNodesNumber,
       is_local_network: networkType === 'local',

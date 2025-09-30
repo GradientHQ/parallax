@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import {
   Alert,
@@ -30,9 +30,24 @@ const Stack = styled(MuiStack)(({ theme }) => {
 
 export default function PageJoin() {
   const [
-    { networkType, initNodesNumber, modelName, modelInfoList },
+    {
+      clusterInfo: { status: clusterStatus, initNodesNumber },
+      nodeInfoList,
+    },
     { setNetworkType, setInitNodesNumber, setModelName },
   ] = useCluster();
+
+  const isError = useMemo(() => {
+    if (
+      initNodesNumber > 0
+      && nodeInfoList.length >= initNodesNumber
+      && nodeInfoList.every((node) => node.status === 'available')
+      && clusterStatus === 'waiting'
+    ) {
+      return true;
+    }
+    return false;
+  }, [clusterStatus, initNodesNumber, nodeInfoList]);
 
   return (
     <MainLayout
@@ -69,10 +84,17 @@ export default function PageJoin() {
             </Typography>
           </Stack>
 
-          <Alert key='info' severity='info' variant='standard'>
-            If your nodes cannot connect properly, retry the above join command to restart the
-            server.
-          </Alert>
+          {(isError && (
+            <Alert key='error' severity='error' variant='standard'>
+              Your selected model requires more nodes. Please go back to the previous step to add
+              more nodes, or choose a smaller model.
+            </Alert>
+          )) || (
+            <Alert key='info' severity='info' variant='standard'>
+              If your nodes cannot connect properly, retry the above join command to restart the
+              server.
+            </Alert>
+          )}
 
           <NodeList key='node-list' />
         </Stack>

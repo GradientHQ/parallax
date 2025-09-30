@@ -5,12 +5,13 @@ A fully decentralized inference engine developed by [Gradient Network](https://g
 
 <h3>
 
-[Gradient Network](https://gradient.network) | [Blog](https://gradient.network/blog/parallax-world-inference-engine) | [X(Twitter)](https://x.com/Gradient_HQ) | [Discord](https://discord.gg/gradientnetwork) | [arXiv]()
+[Gradient Network](https://gradient.network) | [Blog](https://gradient.network/blog/parallax-world-inference-engine) | [X(Twitter)](https://x.com/Gradient_HQ) | [Discord](https://discord.gg/gradientnetwork)
 
 </h3>
 
 ## Features
 * Run LLM at home with personal devices.
+* Cross-platform support.
 * Pipeline parallel model sharding.
 * Dynamic KV cache management + continuous batching for MAC.
 * Dynamic request scheduling and routing for high performance.
@@ -25,6 +26,14 @@ A fully decentralized inference engine developed by [Gradient Network](https://g
 ### Prerequisites
 - Python>=3.11.0
 - Ubuntu-24.04 for Blackwell GPUs
+
+Below are installation methods for different operating systems.
+
+|  Operating System  |  Windows App  |  From Source | Docker |
+|:-------------|:----------------------------:|:----------------------------:|:----------------------------:|
+|Windows       | ✅️ | Not recommended | Not recommended |
+|Linux | ❌️ | ✅️ | ✅️ |
+|macOS | ❌️ | ✅️ | ❌️ |
 
 ### From Source
 - For Linux/WSL (GPU):
@@ -46,63 +55,101 @@ pip install -e '.[mac]'
 pip install -e '.[dev]'
 ```
 
+### Windows Application
+[Click here](https://github.com/GradientHQ/parallax/releases/latest/download/Gradient_Parallax_PC_Setup.exe) to get latest Windows installer.
+
+After installing .exe, right click Windows start button and click ```Windows Terminal(Admin)``` to start a Powershell console as administrator.
+
+Start Windows dependencies installation by simply typing this command in console:
+```sh
+parallax install
+```
+
+Installation process may take around 30 minutes.
+
+To see a description of all Parallax Windows configurations you can do:
+```sh
+parallax --help
+```
+
 ### Docker
-For GPU devices, Parallax provides a docker environment for quick setup. Choose the docker image according to the device's GPU architechture.
+For Linux+GPU devices, Parallax provides a docker environment for quick setup. Choose the docker image according to the device's GPU architechture.
 
 |  GPU Architecture  |  GPU Series  | Image Pull Command |
 |:-------------|:----------------------------|:----------------------------|
-|Blackwell       | RTX50 series/B100/B200... |docker pull gradientservice/parallax:latest-blackwell|
-|Ampere & Hopper | RTX30 series/RTX40 series/A100/H100... |docker pull gradientservice/parallax:latest-hopper|
+|Blackwell       | RTX50 series/B100/B200... |```docker pull gradientservice/parallax:latest-blackwell```|
+|Ampere/Hopper | RTX30 series/RTX40 series/A100/H100... |```docker pull gradientservice/parallax:latest-hopper```|
 
+Run a docker container as below. Please note that generally the argument ```--gpus all``` is necessary for the docker to run on GPUs.
+```sh
+# For Blackwell
+docker run -it --gpus all --network host gradientservice/parallax:latest-blackwell bash
+# For Ampere/Hopper
+docker run -it --gpus all --network host gradientservice/parallax:latest-hopper bash
+```
+The container starts under parallax workspace and you should be able to run parallax directly.
 
 ## Usage on Distributed Devices
 ### Use frontend
 #### Step 1: Launch scheduler
 First launch our scheduler on the main node.
+- For Linux/macOS:
 ```sh
-bash scripts/start.sh
+parallax run
 ```
+
+- For Windows, start Powershell console as administrator and run:
+```sh
+parallax run
+```
+
 #### Step 2: Select model config
 Open http://localhost:3001
 ![Model select](docs/images/model-selection.png)
-Select model config and click continue
+Select model config and click continue.
 #### Step 3: Join each distributed nodes
 ![Node join](docs/images/node-join.png)
-This page will show the join command like blow
+This page will show the join command like blow.
 ```sh
-bash scripts/join.sh -m {model-name} -i {ip-address-of-current-node} -s {scheduler-address}
+# local area network env
+parallax join
+# public network env
+parallax join -s {scheduler-address}
 # example
-bash scripts/join.sh -m Qwen/Qwen3-0.6B -i 192.168.1.1 -s /ip4/192.168.1.1/tcp/5001/p2p/xxxxxxxxxxxx
+parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
 ```
-Run join command on each distributed nodes
-Wait for all nodes ready
+Run join command on each distributed nodes.
+Wait until all nodes are ready.
 #### Step 4: Chat
-Test chat like show blow
+Test chat as shown below
 ![Chat](docs/images/chat.png)
 
 ### Without frontend
 #### Step 1: Launch scheduler
 First launch our scheduler on the main node.
 ```sh
-bash scripts/launch.sh -m {model-name} -n {number-of-worker-nodes}
+parallax run -m {model-name} -n {number-of-worker-nodes}
 ```
 For example:
 ```sh
-bash scripts/launch.sh -m Qwen/Qwen3-0.6B -n 2
+parallax run -m Qwen/Qwen3-0.6B -n 2
 ```
 Please notice and record the scheduler ip4 address generated in the terminal.
 
 #### Step 2: Join each distributed nodes
 For each distributed nodes including the main node, open a terminal and join the server with the scheduler address.
 ```sh
-bash scripts/join.sh -m {model-name} -i {ip-address-of-current-node} -s {scheduler-address}
+# local area network env
+parallax join
+# public network env
+parallax join -s {scheduler-address}
 ```
 For example:
 ```sh
 # first node
-bash scripts/join.sh -m Qwen/Qwen3-0.6B -i 192.168.1.1 -s /ip4/192.168.1.1/tcp/5001/p2p/xxxxxxxxxxxx
+parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
 # second node
-bash scripts/join.sh -m Qwen/Qwen3-0.6B -i 192.168.1.2 -s /ip4/192.168.1.1/tcp/5001/p2p/xxxxxxxxxxxx
+parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
 ```
 
 #### Step 3: Call chat api with Scheduler
@@ -140,12 +187,10 @@ python3 ./parallax/src/parallax/launch.py \
 --dht-port 5000 \
 --max-batch-size 8 \
 --start-layer 14 \
---end-layer 28 \
---initial-peers /ip4/192.168.1.1/tcp/5000/p2p/xxxxxxxxxxxx
+--end-layer 28
 ```
 
-## OpenAI Compatible API
-Parallax starts OpenAI Compatible API either w/wo scheduler. Below is an example using CURL:
+Call chat API on one of the nodes:
 ```sh
 curl --location 'http://localhost:3000/v1/chat/completions' --header 'Content-Type: application/json' --data '{
     "max_tokens": 1024,

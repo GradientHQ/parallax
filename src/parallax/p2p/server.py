@@ -173,7 +173,7 @@ class GradientServer:
         hidden_layers: int = 128,
         dht_prefix: str = "gradient",
         host_maddrs: List[str] = [],
-        announce_http_addr: Optional[str] = None,
+        http_port: Optional[int] = None,
         announce_maddrs: List[str] = [],
         notify_url: str = None,
         model_name: Optional[str] = None,
@@ -194,7 +194,7 @@ class GradientServer:
         self.dht_prefix = dht_prefix
         self.host_maddrs = host_maddrs
         self.announce_maddrs = announce_maddrs
-        self.announce_http_addr = announce_http_addr
+        self.http_port = http_port
         self.notify_url = notify_url
         self.model_name = model_name
         self.max_batch_size = max_batch_size
@@ -217,7 +217,7 @@ class GradientServer:
         self.connection_handler = None
         self.stop_event = threading.Event()
 
-    def run(self):
+    def build_lattica(self):
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs)
 
         if len(self.relay_servers) > 0:
@@ -232,12 +232,40 @@ class GradientServer:
             logger.info(f"Using initial peers: {self.initial_peers}")
             self.lattica.with_bootstraps(self.initial_peers)
 
-        if self.scheduler_addr is not None:
+        if self.scheduler_addr is not None and self.scheduler_addr != "auto":
             logger.info(f"Using scheduler addr: {self.scheduler_addr}")
             self.lattica.with_bootstraps([self.scheduler_addr])
             self.scheduler_peer_id = self.scheduler_addr.split("/")[-1]
 
         self.lattica.build()
+
+        if self.scheduler_addr == "auto":
+            self.scheduler_peer_id = None
+            for _ in range(20):
+                try:
+                    time.sleep(3)
+                    self.scheduler_peer_id = self.lattica.get("scheduler_peer_id")
+                    if self.scheduler_peer_id is not None:
+                        self.scheduler_peer_id = self.scheduler_peer_id.value
+                        logger.info(f"Found scheduler peer id: {self.scheduler_peer_id}")
+                        break
+                    logger.info(
+                        f"Discovering scheduler peer id, {_ + 1} times, you can specify scheduler peer id by -s"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to get scheduler addr: {e}, waiting for 3 seconds.")
+            if self.scheduler_peer_id is None:
+                logger.error("Failed to get scheduler peer id")
+                return False
+
+        return True
+
+    def run(self):
+        if self.build_lattica():
+            logger.info("Lattica built successfully")
+        else:
+            logger.error("Failed to build lattica")
+            exit(1)
 
         if self.scheduler_addr is not None:  # central scheduler mode
             try:
@@ -254,6 +282,7 @@ class GradientServer:
 
                 self.block_start_index = response.get("start_layer")
                 self.block_end_index = response.get("end_layer")
+                self.model_name = response.get("model_name")
 
                 # Publish executor metrics to backend on each update
                 def _publish_metrics(_snapshot):
@@ -267,7 +296,7 @@ class GradientServer:
             except Exception as e:
                 logger.exception(f"Error in join scheduler: {e}")
                 exit(1)
-        else:  # decentralized mode
+        else:  # no scheduler mode
             self.start_routing_table_updater()  # thread
 
         self.connection_handler = TransformerConnectionHandler(
@@ -505,6 +534,7 @@ class GradientServer:
         self.announcer.start()
 
     def get_node_info(self, is_update: bool = False):
+        # update rtt to nodes
         if time.time() - self.rtt_last_update > self.rtt_update_interval:
             self.rtts = {}
             all_peers = []
@@ -534,10 +564,9 @@ class GradientServer:
             self.rtt_last_update = time.time()
 
         info = {
-            "call_url": f"http://{self.announce_http_addr}",
+            "http_port": f"{self.http_port}",
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
-            "model_name": self.model_name,
             "kv_cache_ratio": 0.25,
             "param_hosting_ratio": 0.65,
             "max_concurrent_requests": self.max_batch_size,
@@ -561,15 +590,16 @@ class GradientServer:
 
     def shutdown(self):
         self.stop_event.set()
-        if self.announcer is not None:
-            self.announcer.join()
-        if self.routing_table_updater is not None:
-            self.routing_table_updater.join()
 
         self.status = ServerState.OFFLINE
         if self.scheduler_addr is not None:
             logger.info(f"Leave scheduler: {self.lattica.peer_id()}")
             self.scheduler_stub.node_leave(self.get_node_info(is_update=True))
+
+        if self.announcer is not None:
+            self.announcer.join()
+        if self.routing_table_updater is not None:
+            self.routing_table_updater.join()
 
 
 def launch_p2p_server(
@@ -583,7 +613,7 @@ def launch_p2p_server(
     dht_prefix: str,
     host_maddrs: Optional[List[str]],
     announce_maddrs: List[str],
-    announce_http_addr: Optional[str],
+    http_port: Optional[int],
     notify_url: str,
     recv_from_peer_addr: str,
     send_to_peer_addr: str,
@@ -596,7 +626,7 @@ def launch_p2p_server(
     else:
         dht_port = 0
     if host_maddrs is None:
-        host_maddrs = [f"/ip4/0.0.0.0/tcp/{dht_port}"]
+        host_maddrs = [f"/ip4/0.0.0.0/tcp/{dht_port}", f"/ip4/0.0.0.0/udp/{dht_port}/quic-v1"]
 
     # Run the server in a separate thread to keep the main thread free for event loop
     server = GradientServer(
@@ -611,9 +641,7 @@ def launch_p2p_server(
         dht_prefix=dht_prefix,
         host_maddrs=host_maddrs,
         announce_maddrs=announce_maddrs,
-        announce_http_addr=(
-            announce_http_addr if announce_http_addr is not None else "127.0.0.1:3000"
-        ),
+        http_port=http_port,
         notify_url=notify_url,
         model_name=model_name,
         max_batch_size=max_batch_size,

@@ -10,7 +10,7 @@ export interface MainLayoutProps {
 }
 
 const MainLayoutRoot = styled(Stack)(({ theme }) => {
-  const { spacing } = theme;
+  const { palette, spacing } = theme;
   return {
     width: '100%',
     height: '100%',
@@ -19,6 +19,7 @@ const MainLayoutRoot = styled(Stack)(({ theme }) => {
     gap: spacing(3),
     padding: spacing(3),
     overflow: 'hidden',
+    backgroundColor: palette.grey[100],
   };
 });
 
@@ -112,7 +113,7 @@ const DebugInfo: FC = () => {
       <Typography variant='subtitle2'>{title}</Typography>
       {Object.entries(record).map(([key, value]) => (
         <Typography variant='body2' key={key}>
-          {key}: {value}
+          {key}: {JSON.stringify(value)}
         </Typography>
       ))}
     </Stack>

@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=3000, help="Port of the HTTP server")
 
     parser.add_argument(
-        "--announce-http-addr", type=str, default=None, help="HTTP address to announce"
+        "--announce-http-port", type=str, default=None, help="HTTP port to announce"
     )
 
     # P2P configuration
@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model-path",
         type=str,
-        required=True,
+        default=None,
         help="Path to the model repository or model name (e.g., 'mlx-community/Qwen3-0.6B-bf16')",
     )
     parser.add_argument(

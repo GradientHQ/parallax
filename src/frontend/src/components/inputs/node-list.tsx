@@ -117,12 +117,12 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
     <ListItem
       component={variant === 'list' ? Paper : Box}
       variant='outlined'
-      sx={{ opacity, padding: variant === 'menu' ? 0 : undefined }}
+      sx={{ opacity, padding: variant === 'menu' ? 0 : undefined, backgroundColor: 'transparent' }}
     >
       <ListItemIcon
         sx={{
-          color: main,
-          backgroundColor: lighter,
+          color: palette.grey[800],
+          backgroundColor: palette.grey[250],
         }}
       >
         <IconNode />
@@ -133,7 +133,7 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
           <Typography variant='body1'>
             {gpuName} {gpuMemory}GB
           </Typography>
-        )) || <Skeleton width='8rem' height='0.75rem' sx={{ my: 0.5 }} />}
+        )) || <Skeleton width='8rem' height='1.25rem' />}
         {(node && (
           <Typography
             variant='body1'
@@ -142,9 +142,9 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
             textOverflow='ellipsis'
             whiteSpace='nowrap'
           >
-            {id}
+            {id && id.substring(0, 4) + '...' + id.substring(id.length - 4)}
           </Typography>
-        )) || <Skeleton width='14rem' height='0.75rem' sx={{ my: 0.5 }} />}
+        )) || <Skeleton width='14rem' height='1.25rem' />}
       </ListItemText>
 
       {node && (
@@ -183,6 +183,7 @@ export const NodeList: FC<NodeListProps> = ({ variant = 'list' }) => {
   ] = useCluster();
 
   const { length: nodesNumber } = nodeInfoList;
+  // const nodesNumber = 0;
 
   return (
     <NodeListRoot>
@@ -202,6 +203,10 @@ export const NodeList: FC<NodeListProps> = ({ variant = 'list' }) => {
         {nodeInfoList.map((node) => (
           <Node key={node.id} variant={variant} node={node} />
         ))}
+        {initNodesNumber > nodesNumber
+          && Array.from({ length: initNodesNumber - nodesNumber }).map((_, index) => (
+            <Node key={index} variant={variant} />
+          ))}
       </List>
     </NodeListRoot>
   );

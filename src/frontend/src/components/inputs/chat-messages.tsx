@@ -4,9 +4,10 @@ import { Box, Button, Paper, Stack, Typography } from '@mui/material';
 import { IconCopy, IconCopyCheck, IconRefresh } from '@tabler/icons-react';
 import { useRefCallback } from '../../hooks';
 import ChatMarkdown from './chat-markdown';
+import { DotPulse } from './dot-pulse';
 
 export const ChatMessages: FC = () => {
-  const [{ messages }] = useChat();
+  const [{ status, messages }] = useChat();
 
   const refContainer = useRef<HTMLDivElement>(null);
   const refBottom = useRef<HTMLDivElement>(null);
@@ -33,6 +34,8 @@ export const ChatMessages: FC = () => {
       {messages.map((message) => (
         <ChatMessage key={message.id} message={message} />
       ))}
+
+      {status === 'opened' && <DotPulse size='large' />}
 
       <Box
         ref={refBottom}
@@ -80,7 +83,7 @@ const ChatMessage: FC<{ message: ChatMessage }> = memo(({ message }) => {
 
   return (
     <Stack direction='row' sx={{ width: '100%', justifyContent }}>
-      <Stack sx={{ width: '35rem', gap: 1 }}>
+      <Stack sx={{ maxWidth: '100%', gap: 1 }}>
         {nodeContent}
 
         <Stack key='actions' direction='row' sx={{ justifyContent, gap: 2, color: 'grey.600' }}>

@@ -1,5 +1,5 @@
 import type { Components, Theme } from '@mui/material';
-import { dialogContentClasses, dialogTitleClasses } from '@mui/material';
+import { dialogContentClasses, dialogTitleClasses, Stack } from '@mui/material';
 
 export const MuiDialogActions = (theme: Theme): Components<Theme>['MuiDialogActions'] => {
   return {
@@ -86,11 +86,16 @@ export const MuiDialogContent = (theme: Theme): Components<Theme>['MuiDialogCont
 };
 
 export const MuiDialogContentText = (theme: Theme): Components<Theme>['MuiDialogContentText'] => {
-  const { palette, typography } = theme;
+  const { palette, spacing, typography } = theme;
   return {
+    defaultProps: {
+      component: Stack,
+    },
     styleOverrides: {
       root: {
-        color: palette.text.disabled,
+        gap: spacing(1),
+
+        color: palette.text.primary,
         ...typography.body2,
       },
     },

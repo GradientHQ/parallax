@@ -4,6 +4,8 @@ export interface Overlays {
   shadowMiddle: string;
 
   shadowInput: string;
+  shadowInputActive: string;
+  shadowInputError: string;
 
   buttonShadeDefault: string;
   buttonShadeActiveLight: string;
@@ -30,7 +32,10 @@ export const overlays: Overlays = {
   shadowMiddle:
     '0px 8px 8px -4px rgba(52, 51, 51, 0.03), 0px 20px 24px -4px rgba(52, 51, 51, 0.08)',
 
-  shadowInput: '0px 1px 2px 0px rgba(49, 49, 48, 0.05)',
+  // shadowInput: '0px 1px 2px 0px rgba(49, 49, 48, 0.05)',
+  shadowInput: 'none',
+  shadowInputActive: 'none',
+  shadowInputError: 'none',
 
   buttonShadeDefault: '0px 1px 2px 0px rgba(49, 49, 48, 0.05)',
   buttonShadeActiveLight:

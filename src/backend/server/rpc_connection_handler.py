@@ -2,7 +2,6 @@ import time
 
 from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream
 
-from backend.server.static_config import get_model_info
 from parallax_utils.logging_config import get_logger
 from scheduling.node import Node, NodeHardwareInfo
 from scheduling.scheduler import Scheduler
@@ -28,14 +27,35 @@ class RPCConnectionHandler(ConnectionHandler):
 
     @rpc_stream
     def node_join(self, message):
+        # node = {
+        #     "http_port": "8000",
+        #     "node_id": "lattica peer id",
+        #     "hardware": {
+        #         "node_id": "lattica peer id",
+        #         "tflops_fp16": 100,
+        #         "memory_gb": 100,
+        #         "memory_bandwidth_gbps": 100,
+        #     },
+        #     "kv_cache_ratio": 0.3,
+        #     "param_hosting_ratio": 0.5,
+        #     "max_concurrent_requests": 16,
+        #     "max_sequence_length": 1024,
+        # }
         logger.info(f"receive node_join request: {message}")
         try:
             node = self.build_node(message)
-            self.call_url_map[node.node_id] = message.get("call_url")
+
+            try:
+                node_ip = self.lattica_instance.get_peer_addresses(node.node_id)[0].split("/")[2]
+                logger.info(f"get ip for {node.node_id}: {node_ip}")
+            except Exception as e:
+                logger.warning(f"Failed to get ip for {node.node_id}: {e}, using 127.0.0.1")
+                node_ip = "127.0.0.1"
+            self.call_url_map[node.node_id] = f"http://{node_ip}:{message.get('http_port')}"
             self.scheduler.enqueue_join(node)
 
             response = self.wait_layer_allocation(node.node_id, wait_seconds=300)
-            logger.info(f"node_join response: {response}")
+            logger.debug(f"node_join response: {response}")
             return response
         except Exception as e:
             logger.exception(f"node_join error: {e}")
@@ -43,7 +63,7 @@ class RPCConnectionHandler(ConnectionHandler):
 
     @rpc_method
     def node_leave(self, message):
-        logger.info(f"receive node_leave request: {message}")
+        logger.debug(f"receive node_leave request: {message}")
         try:
             node = self.build_node(message)
             self.scheduler.enqueue_leave(node.node_id)
@@ -84,14 +104,19 @@ class RPCConnectionHandler(ConnectionHandler):
         list_node_allocations = self.scheduler.list_node_allocations()
         for node_id, start_layer, end_layer in list_node_allocations:
             if current_node_id == node_id:
-                return {"node_id": node_id, "start_layer": start_layer, "end_layer": end_layer}
+                return {
+                    "node_id": node_id,
+                    "model_name": self.scheduler.model_info.model_name,
+                    "start_layer": start_layer,
+                    "end_layer": end_layer,
+                }
         return {}
 
     def build_node(self, node_json: dict):
         node = Node(
             node_id=node_json.get("node_id"),
             hardware=self.build_hardware(node_json.get("hardware")),
-            model_info=get_model_info(node_json.get("model_name")),
+            model_info=self.scheduler.model_info,
             kv_cache_ratio=node_json.get("kv_cache_ratio"),
             param_hosting_ratio=node_json.get("param_hosting_ratio"),
             max_concurrent_requests=node_json.get("max_concurrent_requests"),

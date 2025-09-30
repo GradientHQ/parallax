@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - develop
     paths:
       - 'docker/**'
       - 'src/**'
@@ -14,15 +13,17 @@ on:
 
 
 env:
-  IMAGE_NAME: ${{ github.repository }}
-  NAMESPACE: gradient
+  IMAGE_NAME: parallax
+  NAMESPACE: gradientservice
 
 jobs:
   build:
-    runs-on: arc-runner-set-parallax
+    runs-on: arc-public-parallax
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     strategy:
       matrix:
         variant: [blackwell, hopper]
@@ -38,24 +39,24 @@ jobs:
         endpoint: tcp://buildkit-buildkit-service.arc-systems:1234
 
 
-    - name: Log in to Container Registry
+    - name: Log in to Docker Hub
       uses: docker/login-action@v3
       with:
-        registry: ${{ secrets.ALIYUN_ACR }}
-        username: ${{ secrets.ALIYUN_ACR_USERNAME }}
-        password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
 
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ secrets.ALIYUN_ACR }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}
+        images: ${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}
         tags: |
           type=ref,event=branch,suffix=-${{ matrix.variant }}
           type=ref,event=pr,suffix=-${{ matrix.variant }}
           type=raw,value=latest-${{ matrix.variant }},enable={{is_default_branch}}
 
     - name: Build and push Docker image
+      id: build
       uses: docker/build-push-action@v5
       with:
         context: .
@@ -66,10 +67,3 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
         platforms: linux/amd64
-
-    - name: Generate artifact attestation
-      uses: actions/attest-build-provenance@v1
-      with:
-        subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-        subject-digest: ${{ steps.build.outputs.digest }}
-        push-to-registry: true
