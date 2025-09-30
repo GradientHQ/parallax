@@ -34,6 +34,7 @@ export type ClusterStatus = 'idle' | 'waiting' | 'available' | 'rebalancing';
 export interface ClusterInfo {
   readonly id: string;
   readonly status: ClusterStatus;
+  readonly modelName: string;
   readonly nodeJoinCommand: Readonly<Record<string, string>>;
   readonly initNodesNumber: number;
 }
@@ -41,6 +42,7 @@ export interface ClusterInfo {
 const INITIAL_CLUSTER_INFO: ClusterInfo = {
   id: '',
   status: 'idle',
+  modelName: '',
   nodeJoinCommand: {},
   initNodesNumber: 4,
 };
@@ -123,6 +125,7 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
         const {
           data: { status, init_nodes_num, model_name, node_join_command, node_list },
         } = message;
+        setModelName((prev) => model_name || prev);
         setClusterInfo((prev) => {
           const next = {
             ...prev,

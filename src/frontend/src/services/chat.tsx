@@ -12,8 +12,9 @@ import {
 import { API_BASE_URL } from './api';
 import { useConst, useRefCallback } from '../hooks';
 import { useCluster } from './cluster';
+import { parseGenerationGpt, parseGenerationQwen } from './chat-helper';
 
-const debugLog = (...args: any[]) => {
+const debugLog = async (...args: any[]) => {
   if (import.meta.env.DEV) {
     console.log('%c chat.tsx ', 'color: white; background: orange;', ...args);
   }
@@ -21,10 +22,27 @@ const debugLog = (...args: any[]) => {
 
 export type ChatMessageRole = 'user' | 'assistant';
 
+export type ChatMessageStatus = 'waiting' | 'thinking' | 'generating' | 'done' | 'error';
+
 export interface ChatMessage {
   readonly id: string;
   readonly role: ChatMessageRole;
+  readonly status: ChatMessageStatus;
+
+  /**
+   * The content from user input or assistant generating.
+   */
   readonly content: string;
+
+  /**
+   * The raw content from model response.
+   */
+  readonly raw?: string;
+
+  /**
+   * The thinking content in assistant generating.
+   */
+  readonly thinking?: string;
   readonly createdAt: number;
 }
 
@@ -46,8 +64,7 @@ export interface ChatActions {
 export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
   const [
     {
-      modelName,
-      clusterInfo: { status: clusterStatus },
+      clusterInfo: { status: clusterStatus, modelName },
     },
   ] = useCluster();
 
@@ -58,11 +75,50 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
 
   const sse = useConst(() =>
     createSSE({
-      onOpen: () => setStatus('opened'),
-      onClose: () => setStatus('closed'),
-      onError: (error) => setStatus('error'),
+      onOpen: () => {
+        setStatus('opened');
+      },
+      onClose: () => {
+        setMessages((prev) => {
+          const lastMessage = prev[prev.length - 1];
+          const { id, raw, thinking, content } = lastMessage;
+          debugLog('GENERATING DONE', 'lastMessage:', lastMessage);
+          debugLog('GENERATING DONE', 'id:', id);
+          debugLog('GENERATING DONE', 'raw:', raw);
+          debugLog('GENERATING DONE', 'thinking:', thinking);
+          debugLog('GENERATING DONE', 'content:', content);
+          return [
+            ...prev.slice(0, -1),
+            {
+              ...lastMessage,
+              status: 'done',
+            },
+          ];
+        });
+        setStatus('closed');
+      },
+      onError: (error) => {
+        setMessages((prev) => {
+          const lastMessage = prev[prev.length - 1];
+          const { id, raw, thinking, content } = lastMessage;
+          debugLog('GENERATING ERROR', 'lastMessage:', lastMessage);
+          debugLog('GENERATING ERROR', 'id:', id);
+          debugLog('GENERATING ERROR', 'raw:', raw);
+          debugLog('GENERATING ERROR', 'thinking:', thinking);
+          debugLog('GENERATING ERROR', 'content:', content);
+          return [
+            ...prev.slice(0, -1),
+            {
+              ...lastMessage,
+              status: 'done',
+            },
+          ];
+        });
+        debugLog('SSE ERROR', error);
+        setStatus('error');
+      },
       onMessage: (message) => {
-        debugLog('onMessage', message);
+        // debugLog('onMessage', message);
         // const example = {
         //   id: 'd410014e-3308-450d-bbd2-0ec4e0c0a345',
         //   object: 'chat.completion.chunk',
@@ -89,28 +145,57 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
           setMessages((prev) => {
             let next = prev;
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            choices.forEach(({ delta: { role, content } = {} }: any) => {
-              if (typeof content !== 'string') {
+            choices.forEach(({ delta: { role, content: rawDelta } = {} }: any) => {
+              if (typeof rawDelta !== 'string' || !rawDelta) {
                 return;
               }
               role = role || 'assistant';
               let lastMessage = next[next.length - 1];
               if (lastMessage && lastMessage.role === role) {
-                const nextContent = lastMessage.content + content;
-                if (nextContent === lastMessage.content) {
-                  return;
-                }
+                const raw = lastMessage.raw + rawDelta;
                 lastMessage = {
                   ...lastMessage,
-                  content: lastMessage.content + content,
+                  raw: raw,
+                  content: raw,
                 };
                 next = [...next.slice(0, -1), lastMessage];
               } else {
-                lastMessage = { id, role, content, createdAt: created };
+                lastMessage = {
+                  id,
+                  role,
+                  status: 'generating',
+                  raw: rawDelta,
+                  content: rawDelta,
+                  createdAt: created,
+                };
                 next = [...next, lastMessage];
               }
-              debugLog('onMessage', 'update last message', lastMessage.content);
+              // debugLog('onMessage', 'update last message', lastMessage.content);
             });
+
+            // Parse generation and extract thinking and content
+            if (next !== prev && typeof model === 'string') {
+              let lastMessage = next[next.length - 1];
+              let thinking = '';
+              let content = '';
+              const modelLowerCase = model.toLowerCase();
+              if (modelLowerCase.includes('gpt')) {
+                ({ analysis: thinking, final: content } = parseGenerationGpt(
+                  lastMessage.raw || '',
+                ));
+              } else if (modelLowerCase.includes('qwen')) {
+                ({ think: thinking, content } = parseGenerationQwen(lastMessage.raw || ''));
+              } else {
+                content = lastMessage.raw || '';
+              }
+              lastMessage = {
+                ...lastMessage,
+                thinking,
+                content,
+              };
+              next = [...next.slice(0, -1), lastMessage];
+            }
+
             return next;
           });
         }
@@ -150,7 +235,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
       const now = performance.now();
       nextMessages = [
         ...nextMessages,
-        { id: now.toString(), role: 'user', content: finalInput, createdAt: now },
+        { id: now.toString(), role: 'user', status: 'done', content: finalInput, createdAt: now },
       ];
       debugLog('generate', 'new', nextMessages);
     }
@@ -228,7 +313,8 @@ const createSSE = (options: SSEOptions) => {
 
   const connect = (model: string, messages: readonly ChatMessage[]) => {
     abortController = new AbortController();
-    fetch(`${API_BASE_URL}/v1/chat/completions`, {
+    const url = `${API_BASE_URL}/v1/chat/completions`;
+    fetch(url, {
       method: 'POST',
       body: JSON.stringify({
         stream: true,
