@@ -92,17 +92,36 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
 
   // Model List
   const [modelInfoList, setModelInfoList] = useState<readonly ModelInfo[]>([]);
+
+  const updateModelList = useRefCallback(async () => {
+    let succeed = false;
+    while (!succeed) {
+      try {
+        const rawList = await getModelList();
+        setModelInfoList((prev) => {
+          const next = rawList.map((name) => ({
+            name,
+            displayName: name,
+            logoUrl: getLogoUrl(name),
+          }));
+          if (JSON.stringify(next) !== JSON.stringify(prev)) {
+            debugLog('setModelInfoList', next);
+            return next;
+          }
+          return prev;
+        });
+        succeed = true;
+      } catch (error) {
+        console.error('getModelList error', error);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+  });
+
   useEffect(() => {
-    getModelList().then((modelList) => {
-      setModelInfoList(
-        modelList.map((name) => ({
-          name,
-          displayName: name,
-          logoUrl: getLogoUrl(name),
-        })),
-      );
-    });
+    updateModelList();
   }, []);
+
   useEffect(() => {
     if (modelInfoList.length) {
       setModelName(modelInfoList[0].name);
