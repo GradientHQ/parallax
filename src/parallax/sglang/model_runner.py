@@ -480,7 +480,7 @@ def monkey_patch_gpt_oss():
 def form_sgl_server_args(
     model_path: str,
     dtype: str = "bfloat16",
-    attention_backend: str = "torch_native",
+    attention_backend: str = "flashinfer",
     kv_block_size: int = 64,
     moe_runner_backend="auto",
 ):
@@ -532,6 +532,15 @@ def initialize_sgl_model_runner(
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")
     nccl_port = random.randint(4000, 5000)
+
+    # Handling mxfp4 arguments
+    quant_method = config.get("quant_method", None)
+    quantization_config = config.get("quantization_config", None)
+    if quant_method is None and quantization_config is not None:
+        quant_method = quantization_config.get("quant_method", None)
+    if quant_method == "mxfp4":
+        attention_backend = "triton"
+        moe_runner_backend = "triton_kernel"
 
     server_args = form_sgl_server_args(
         original_model_path,
