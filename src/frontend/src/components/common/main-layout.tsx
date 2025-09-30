@@ -51,10 +51,11 @@ const MainLayoutContainer = styled(Box)(({ theme }) => {
 const MainLayoutContent = styled(Stack)(({ theme }) => {
   const { spacing } = theme;
   return {
-    width: '30rem',
+    width: '31rem',
     height: '100%',
     gap: spacing(7),
-    overflow: 'hidden',
+    paddingInline: spacing(1),
+    overflowY: 'auto',
   };
 });
 
@@ -97,7 +98,7 @@ export const MainLayout: FC<PropsWithChildren<MainLayoutProps>> = ({
         <LogoGradient />
       </MainLayoutHeader>
       <MainLayoutContainer>
-        <MainLayoutContent>{children}</MainLayoutContent>
+        <MainLayoutContent className='MainLayoutContent'>{children}</MainLayoutContent>
         {(contentStart && <MainLayoutStart>{contentStart}</MainLayoutStart>) || undefined}
         {(contentEnd && <MainLayoutEnd>{contentEnd}</MainLayoutEnd>) || undefined}
       </MainLayoutContainer>

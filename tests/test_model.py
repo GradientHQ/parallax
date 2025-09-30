@@ -7,11 +7,11 @@ from typing import List, Tuple
 import mlx.core as mx
 import pytest
 from mlx_lm.models.base import create_attention_mask
-from mlx_lm.tokenizer_utils import load_tokenizer
 from mlx_lm.utils import get_model_path, load_model
 
 from parallax.server.server_info import ShardedModelInfo
 from parallax.server.shard_loader import MLXModelLoader
+from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.utils.utils import pad_inputs
 
 REPO_ID = "mlx-community/Qwen3-0.6B-bf16"

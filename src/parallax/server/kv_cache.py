@@ -37,7 +37,8 @@ class KVCache:
     def __init__(
         self,
         num_kv_heads: int,
-        head_dim: int,
+        head_dim_k: int,
+        head_dim_v: int,
         num_layers: int,
         dtype: mx.Dtype,
         block_size: int = 64,
@@ -47,6 +48,8 @@ class KVCache:
         linear_v_dim: Optional[int] = None,
         linear_num_k_heads: Optional[int] = None,
         linear_num_v_heads: Optional[int] = None,
+        qk_nope_head_dim: Optional[int] = None,
+        qk_rope_head_dim: Optional[int] = None,
         num_initial_tokens: int = 0,
     ):
         """
@@ -59,7 +62,6 @@ class KVCache:
             num_initial_tokens: The number of tokens to initialize the cache with.
         """
         self.num_kv_heads = num_kv_heads
-        self.head_dim = head_dim
         self.dtype = dtype
         self.block_size = block_size
         self.conv_dim = conv_dim
@@ -68,11 +70,18 @@ class KVCache:
         self.linear_v_dim = linear_v_dim
         self.linear_num_k_heads = linear_num_k_heads
         self.linear_num_v_heads = linear_num_v_heads
+        self.qk_nope_head_dim = qk_nope_head_dim
+        self.qk_rope_head_dim = qk_rope_head_dim
+        self.head_dim_v = head_dim_v
+        self.head_dim_k = head_dim_k
 
         num_initial_tokens = self.round_up_to_step(num_initial_tokens)
         # (num_layers, num_kv_heads, seq_len, head_dim)
-        self.keys = mx.zeros((num_layers, num_kv_heads, num_initial_tokens, head_dim), dtype)
-        self.values = mx.zeros((num_layers, num_kv_heads, num_initial_tokens, head_dim), dtype)
+
+        self.keys = mx.zeros((num_layers, num_kv_heads, num_initial_tokens, self.head_dim_k), dtype)
+        self.values = mx.zeros(
+            (num_layers, num_kv_heads, num_initial_tokens, self.head_dim_v), dtype
+        )
         self.state0 = (
             mx.zeros((num_layers, conv_kernel_size - 1, conv_dim), dtype) if conv_dim else None
         )
@@ -115,8 +124,8 @@ class KVCache:
         Updates the cache with new key-value pairs.
 
         Args:
-            keys: New keys to add, shape (num_layers, num_kv_heads, target_len, head_dim)
-            values: New values to add, shape (num_layers, num_kv_heads, target_len, head_dim)
+            keys: New keys to add, shape (num_layers, num_kv_heads, target_len, head_dim_k)
+            values: New values to add, shape (num_layers, num_kv_heads, target_len, head_dim_v)
         """
         if state0 is not None and self.state0 is not None:
             self.state0 = state0
@@ -128,10 +137,11 @@ class KVCache:
         prev_tokens = self.num_tokens
         # Grow the cache based on the block_size size
         if self.needs_grow(seq_len):
-            num_layers, num_kv_heads, _, head_dim = keys.shape
+            num_layers, num_kv_heads, _, head_dim_k = keys.shape
+            _, _, _, head_dim_v = values.shape
             n_steps = (self.block_size + seq_len - 1) // self.block_size
-            k_shape = (num_layers, num_kv_heads, n_steps * self.block_size, head_dim)
-            v_shape = (num_layers, num_kv_heads, n_steps * self.block_size, head_dim)
+            k_shape = (num_layers, num_kv_heads, n_steps * self.block_size, head_dim_k)
+            v_shape = (num_layers, num_kv_heads, n_steps * self.block_size, head_dim_v)
             new_k = mx.zeros(k_shape, keys.dtype)
             new_v = mx.zeros(v_shape, values.dtype)
 
@@ -167,6 +177,8 @@ class KVCacheManager:
         linear_v_dim: Optional[int] = None,
         linear_num_k_heads: Optional[int] = None,
         linear_num_v_heads: Optional[int] = None,
+        qk_nope_head_dim: Optional[int] = None,
+        qk_rope_head_dim: Optional[int] = None,
     ):
         """
         Args:
@@ -179,7 +191,6 @@ class KVCacheManager:
             cache_memory_fraction: The fraction of memory to use for the cache.
         """
         self.num_kv_heads = num_kv_heads
-        self.head_dim = head_dim
         self.num_layers = num_layers
         self.dtype = dtype
         self.block_size = block_size
@@ -189,6 +200,13 @@ class KVCacheManager:
         self.linear_v_dim = linear_v_dim
         self.linear_num_k_heads = linear_num_k_heads
         self.linear_num_v_heads = linear_num_v_heads
+        self.qk_nope_head_dim = qk_nope_head_dim
+        self.qk_rope_head_dim = qk_rope_head_dim
+        if qk_nope_head_dim and qk_rope_head_dim:
+            self.head_dim_k = qk_nope_head_dim + qk_rope_head_dim
+        else:
+            self.head_dim_k = head_dim
+        self.head_dim_v = head_dim
 
         self.request_caches: Dict[str, KVCache] = {}
         self.tokens_in_cache = 0
@@ -198,7 +216,8 @@ class KVCacheManager:
             kv_cache_memory_fraction=cache_memory_fraction,
             num_shard_layers=num_layers,
             num_key_value_heads=num_kv_heads,
-            head_dim=head_dim,
+            head_dim_k=self.head_dim_k,
+            head_dim_v=self.head_dim_v,
             elem_bytes=dtype.size,
         )
         if max_num_tokens is not None:
@@ -264,7 +283,8 @@ class KVCacheManager:
 
         self.request_caches[request.request_id] = KVCache(
             num_kv_heads=self.num_kv_heads,
-            head_dim=self.head_dim,
+            head_dim_k=self.head_dim_k,
+            head_dim_v=self.head_dim_v,
             num_layers=self.num_layers,
             dtype=self.dtype,
             block_size=self.block_size,
@@ -311,16 +331,18 @@ class KVCacheManager:
         Returns:
             True if requests are updated.
         """
-        batch_size, num_layers, n_kv_heads, _, head_dim = keys.shape
+        batch_size, num_layers, n_kv_heads, _, head_dim_k = keys.shape
+        _, _, _, _, head_dim_v = values.shape
         # Validate
-        assert keys.shape == values.shape, "key and value must have the same shape"
+        # assert keys.shape == values.shape, "key and value must have the same shape"
         assert num_layers == self.num_layers, "key and value must have the same number of layers"
         assert batch_size == len(requests), "key and value must have the same batch size"
         assert len(lengths) == batch_size, "lengths must have the same batch size as requests"
         assert (
             n_kv_heads == self.num_kv_heads
         ), "key and value must have the same number of key-value heads"
-        assert head_dim == self.head_dim, "key and value must have the same head dimension"
+        assert head_dim_k == self.head_dim_k, "key and value must have the same head dimension"
+        assert head_dim_v == self.head_dim_v, "key and value must have the same head dimension"
         # TODO: Use vmap for better performance
         for request, key, value, length, state0, state1 in zip(
             requests, keys, values, lengths, states0, states1

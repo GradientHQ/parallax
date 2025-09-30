@@ -222,6 +222,8 @@ class Node:
             head_dim=self.model_info.head_size,
             elem_bytes=elem_bytes,
             memory_gb=self.hardware.memory_gb,
+            head_dim_k=self.model_info.head_size_k,
+            head_dim_v=self.model_info.head_size_v,
         )
         if derived_max <= 0:
             raise ValueError(

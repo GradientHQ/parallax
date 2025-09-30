@@ -34,7 +34,7 @@ export const MuiOutlinedInput = (theme: Theme): Components<Theme>['MuiOutlinedIn
           '&, &:hover': {
             [`.${outlinedInputClasses.notchedOutline}`]: {
               borderWidth: 1,
-              borderColor: 'transparent',
+              borderColor: divider,
             },
           },
         },

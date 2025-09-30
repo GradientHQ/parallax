@@ -4,7 +4,20 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useRefCallback } from '../hooks';
 import { createStreamClusterStatus, getModelList, initScheduler } from './api';
 
-import logoUrlQwen from '../assets/models/qwen.png';
+import logoUrlQwen from '../assets/models/Qwen3.png';
+import logoUrlGpt from '../assets/models/OpenAI-black-monoblossom.svg';
+
+const getLogoUrl = (name: string) => {
+  name = name.toLowerCase();
+  const parts = name.split(/[-/]/);
+  if (parts[0] === 'qwen') {
+    return logoUrlQwen;
+  }
+  if (parts[0] === 'openai') {
+    return logoUrlGpt;
+  }
+  return '';
+};
 
 const debugLog = (...args: any[]) => {
   console.log('%c cluster.tsx ', 'color: white; background: darkcyan;', ...args);
@@ -21,9 +34,18 @@ export type ClusterStatus = 'idle' | 'waiting' | 'available' | 'rebalancing';
 export interface ClusterInfo {
   readonly id: string;
   readonly status: ClusterStatus;
+  readonly modelName: string;
   readonly nodeJoinCommand: Readonly<Record<string, string>>;
   readonly initNodesNumber: number;
 }
+
+const INITIAL_CLUSTER_INFO: ClusterInfo = {
+  id: '',
+  status: 'idle',
+  modelName: '',
+  nodeJoinCommand: {},
+  initNodesNumber: 4,
+};
 
 export type NodeStatus = 'waiting' | 'available' | 'failed';
 
@@ -76,7 +98,7 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
         modelList.map((name) => ({
           name,
           displayName: name,
-          logoUrl: logoUrlQwen,
+          logoUrl: getLogoUrl(name),
         })),
       );
     });
@@ -88,33 +110,14 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
   }, [modelInfoList]);
 
   // Cluster and Nodes
-  const [clusterInfo, setClusterInfo] = useState<ClusterInfo>(() => ({
-    id: '',
-    status: 'idle',
-    nodeJoinCommand: {},
-    initNodesNumber: 4,
-  }));
-  const [nodeInfoList, setNodeInfoList] = useState<readonly NodeInfo[]>(() => [
-    // MOCK
-    // {
-    //   id: 'sfasge235rytdfgq35q346234wedfss',
-    //   status: 'available',
-    //   gpuName: 'NVIDIA A100',
-    //   gpuMemory: 24,
-    // },
-    // {
-    //   id: 'dfgshjldkrewi25246esfdgsh345sdf',
-    //   status: 'waiting',
-    //   gpuName: 'NVIDIA A100',
-    //   gpuMemory: 24,
-    // },
-    // {
-    //   id: 'dfgberiuiwuyhy25346tea2342sdf12',
-    //   status: 'failed',
-    //   gpuName: 'NVIDIA A100',
-    //   gpuMemory: 24,
-    // },
-  ]);
+  const [clusterInfo, setClusterInfo] = useState<ClusterInfo>(INITIAL_CLUSTER_INFO);
+  const [nodeInfoList, setNodeInfoList] = useState<readonly NodeInfo[]>([]);
+
+  const reset = useRefCallback(() => {
+    debugLog('reset');
+    setClusterInfo(INITIAL_CLUSTER_INFO);
+    setNodeInfoList([]);
+  });
 
   const streamClusterStatus = useMemo(() => {
     const onMessage = (message: any) => {
@@ -122,10 +125,11 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
         const {
           data: { status, init_nodes_num, model_name, node_join_command, node_list },
         } = message;
+        setModelName((prev) => model_name || prev);
         setClusterInfo((prev) => {
           const next = {
             ...prev,
-            status,
+            status: (model_name && status) || 'idle',
             initNodesNumber: init_nodes_num || 0,
             modelName: model_name || '',
             nodeJoinCommand: node_join_command || {},
@@ -170,10 +174,16 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
       }
     };
     const stream = createStreamClusterStatus({
+      debugName: 'ClusterStatus',
+      autoReconnect: true,
       onMessage,
+      onError: reset,
     });
-    stream.send();
     return stream;
+  }, []);
+
+  useEffect(() => {
+    streamClusterStatus.send();
   }, []);
 
   const init = useRefCallback(async () => {

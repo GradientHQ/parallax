@@ -34,8 +34,10 @@ export const overlays: Overlays = {
 
   // shadowInput: '0px 1px 2px 0px rgba(49, 49, 48, 0.05)',
   shadowInput: 'none',
-  shadowInputActive: 'none',
-  shadowInputError: 'none',
+  shadowInputActive:
+    '0px 0px 0px 4px rgba(49, 49, 48, 0.05), 0px 1px 2px 0px rgba(49, 49, 48, 0.05)',
+  shadowInputError:
+    '0px 0px 0px 4px rgba(221, 82, 76, 0.12), 0px 1px 2px 0px rgba(221, 82, 76, 0.05)',
 
   buttonShadeDefault: '0px 1px 2px 0px rgba(49, 49, 48, 0.05)',
   buttonShadeActiveLight:

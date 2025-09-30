@@ -2,13 +2,7 @@ import { Button, Stack, TextField } from '@mui/material';
 import type { FC, KeyboardEventHandler } from 'react';
 import { useRefCallback } from '../../hooks';
 import { useChat, useCluster } from '../../services';
-import {
-  IconArrowBackUp,
-  IconArrowUp,
-  IconLoader,
-  IconSquare,
-  IconSquareFilled,
-} from '@tabler/icons-react';
+import { IconArrowBackUp, IconArrowUp, IconSquareFilled } from '@tabler/icons-react';
 import { DotPulse } from './dot-pulse';
 
 export const ChatInput: FC = () => {
@@ -37,12 +31,27 @@ export const ChatInput: FC = () => {
         onChange={(event) => setInput(event.target.value)}
         multiline
         maxRows={4}
-        placeholder='Ask anything...'
+        placeholder='Ask anything'
         fullWidth
         onKeyDown={onKeyDown}
         slotProps={{
           input: {
-            sx: { flexDirection: 'column' },
+            sx: {
+              border: '1px solid',
+              borderColor: 'grey.300',
+              borderRadius: 2,
+              fontSize: '0.95rem',
+              boxShadow: '2px 2px 4px rgba(0,0,0,0.05)',
+              flexDirection: 'column',
+              '& textarea': {
+                fontSize: '0.95rem',
+                scrollbarWidth: 'none', // Firefox
+                msOverflowStyle: 'none', // IE, Edge
+                '&::-webkit-scrollbar': {
+                  display: 'none', // Chrome, Safari
+                },
+              },
+            },
             endAdornment: (
               <Stack direction='row' sx={{ alignSelf: 'flex-end', alignItems: 'center', gap: 2 }}>
                 <Button

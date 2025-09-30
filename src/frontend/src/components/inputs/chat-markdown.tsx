@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import {} from 'react';
+import { memo } from 'react';
 import { styled } from '@mui/material/styles';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,6 +9,7 @@ import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import 'katex/dist/katex.min.css';
 import {
+  Divider,
   Table,
   TableBody,
   TableCell,
@@ -21,7 +22,7 @@ import {
 const ChatMarkdownRoot = styled('article', {
   name: 'MuiMarkdownRenderer',
   slot: 'Root',
-})(({ theme }) => {
+})<{ isThinking?: boolean }>(({ theme, isThinking }) => {
   const { palette, spacing, typography } = theme;
   const preStyles = {
     '& pre': {
@@ -33,12 +34,15 @@ const ChatMarkdownRoot = styled('article', {
     ...typography.body1,
     overflowWrap: 'break-word',
     maxWidth: '100%',
+    fontSize: '0.95rem',
 
     display: 'flex',
     flexFlow: 'column nowrap',
     justifyContent: 'flex-start',
     alignItems: 'stretch',
     gap: spacing(1),
+
+    color: (isThinking && palette.text.disabled) || palette.text.primary,
 
     ...preStyles,
 
@@ -52,6 +56,7 @@ const ChatMarkdownRoot = styled('article', {
 });
 
 interface Props {
+  isThinking?: boolean;
   content: string;
 }
 
@@ -79,6 +84,7 @@ const components: Components = {
   h6: (props) => <Typography {...props} variant='h6' />,
   p: (props) => <Typography {...props} variant='body1' />,
   caption: (props) => <Typography {...props} variant='caption' />,
+  hr: (props) => <Divider {...props} />,
   table: (props) => (
     <TableContainer>
       <Table {...props} />
@@ -97,12 +103,12 @@ const schema = {
   tagNames: (defaultSchema.tagNames || []).filter((tag) => !blockList.includes(tag)),
 };
 
-const ChatMarkdown = ({ content }: Props) => {
+const ChatMarkdown = memo<Props>(({ isThinking, content }) => {
   content = preprocessThink(content);
   content = preprocessMath(content);
 
   return (
-    <ChatMarkdownRoot>
+    <ChatMarkdownRoot className='ChatMarkdown' isThinking={isThinking}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex, rehypeRaw, [remarkGfm, remarkMath, rehypeSanitize, schema]]}
@@ -112,6 +118,6 @@ const ChatMarkdown = ({ content }: Props) => {
       </ReactMarkdown>
     </ChatMarkdownRoot>
   );
-};
+});
 
 export default ChatMarkdown;

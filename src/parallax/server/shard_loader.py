@@ -10,10 +10,10 @@ from typing import Any, Dict, Optional, Tuple
 import mlx.core as mx
 import safetensors
 from mlx import nn
-from mlx_lm.tokenizer_utils import load_tokenizer
 from mlx_lm.utils import get_model_path, load_config
 
 from parallax.server.model import ShardedModel
+from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -115,6 +115,8 @@ class MLXModelLoader:
         # We need the model object to know its structure and which layers it owns.
         # This part mirrors the logic from the provided utils.py to get model_args.
         model_type = config.get("model_type")
+        if model_type == "kimi_k2":
+            model_type = "deepseek_v3"
         if not model_type:
             raise ValueError("model_type not found in config.json")
         try:

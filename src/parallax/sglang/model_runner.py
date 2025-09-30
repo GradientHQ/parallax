@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import sglang
 import sglang.srt.distributed.parallel_state
 import torch
-from mlx_lm.tokenizer_utils import load_tokenizer
 from mlx_lm.utils import get_model_path, load_config
 from sglang.srt.configs.model_config import ModelConfig
 from sglang.srt.distributed import (
@@ -43,6 +42,8 @@ from sglang.srt.utils import (
     monkey_patch_p2p_access_check,
 )
 from torch.distributed import Backend
+
+from parallax.utils.tokenizer_utils import load_tokenizer
 
 # from parallax.sglang.monkey_patch.model_runner import ModelRunner as SGLModelRunner
 
@@ -470,10 +471,26 @@ def monkey_patch_qwen3_next():
     sglang.srt.configs.qwen3_next.Qwen3NextConfig.linear_layer_ids = monkey_patch_linear_layer_ids
 
 
+## TODO: Move this when sgalang supports gpt_oss pipeline parallelism
+def monkey_patch_gpt_oss():
+    from parallax.sglang.monkey_patch.gpt_oss_model import apply_gpt_oss_monkey_patch
+
+    apply_gpt_oss_monkey_patch()
+
+
+## TODO: Move this when sgalang supports triton backend pipeline parallelism
+def monkey_patch_triton_backend_init():
+    from parallax.sglang.monkey_patch.triton_backend import (
+        apply_triton_backend_init_monkey_patch,
+    )
+
+    apply_triton_backend_init_monkey_patch()
+
+
 def form_sgl_server_args(
     model_path: str,
     dtype: str = "bfloat16",
-    attention_backend: str = "torch_native",
+    attention_backend: str = "flashinfer",
     kv_block_size: int = 64,
     moe_runner_backend="auto",
 ):
@@ -500,6 +517,8 @@ def apply_parallax_monkey_patch():
     )
     sglang.srt.utils.make_layers = monkey_patch_make_layers
     monkey_patch_qwen3_next()
+    monkey_patch_gpt_oss()
+    monkey_patch_triton_backend_init()
 
 
 def initialize_sgl_model_runner(
@@ -524,6 +543,15 @@ def initialize_sgl_model_runner(
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")
     nccl_port = random.randint(4000, 5000)
+
+    # Handling mxfp4 arguments
+    quant_method = config.get("quant_method", None)
+    quantization_config = config.get("quantization_config", None)
+    if quant_method is None and quantization_config is not None:
+        quant_method = quantization_config.get("quant_method", None)
+    if quant_method == "mxfp4":
+        attention_backend = "triton"
+        moe_runner_backend = "triton_kernel"
 
     server_args = form_sgl_server_args(
         original_model_path,
