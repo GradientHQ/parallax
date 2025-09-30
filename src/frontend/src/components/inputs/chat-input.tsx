@@ -2,11 +2,7 @@ import { Button, Stack, TextField } from '@mui/material';
 import type { FC, KeyboardEventHandler } from 'react';
 import { useRefCallback } from '../../hooks';
 import { useChat, useCluster } from '../../services';
-import {
-  IconArrowBackUp,
-  IconArrowUp,
-  IconSquareFilled,
-} from '@tabler/icons-react';
+import { IconArrowBackUp, IconArrowUp, IconSquareFilled } from '@tabler/icons-react';
 import { DotPulse } from './dot-pulse';
 
 export const ChatInput: FC = () => {
@@ -16,7 +12,14 @@ export const ChatInput: FC = () => {
       clusterInfo: { status: clusterStatus },
     },
   ] = useCluster();
-  const [{ input, status }, { setInput, generate, stop, clear, handleKeyDown }] = useChat();
+  const [{ input, status }, { setInput, generate, stop, clear }] = useChat();
+
+  const onKeyDown = useRefCallback<KeyboardEventHandler>((e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      generate();
+    }
+  });
 
   return (
     <Stack data-status={status}>
@@ -30,7 +33,7 @@ export const ChatInput: FC = () => {
         maxRows={4}
         placeholder='Ask anything'
         fullWidth
-        onKeyDown={handleKeyDown}
+        onKeyDown={onKeyDown}
         slotProps={{
           input: {
             sx: {

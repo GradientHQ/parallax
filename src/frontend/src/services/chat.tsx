@@ -6,7 +6,6 @@ import {
   useState,
   type Dispatch,
   type FC,
-  type KeyboardEventHandler,
   type PropsWithChildren,
   type SetStateAction,
 } from 'react';
@@ -42,7 +41,6 @@ export interface ChatActions {
   readonly generate: (message?: ChatMessage) => void;
   readonly stop: () => void;
   readonly clear: () => void;
-  readonly handleKeyDown: KeyboardEventHandler;
 }
 
 export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
@@ -178,26 +176,11 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
     setMessages([]);
   });
 
-  const handleKeyDown = useRefCallback<KeyboardEventHandler>((e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    const ret = generate();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if (typeof ret !== 'undefined' && ret !== null && typeof (ret as any).then === 'function') {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (ret as Promise<any>).then(() => setInput(''));
-    } else {
-      setInput('');
-    }
-  }
-});
-
   const actions = useConst<ChatActions>({
     setInput,
     generate,
     stop,
     clear,
-    handleKeyDown,
   });
 
   const value = useMemo<readonly [ChatStates, ChatActions]>(
