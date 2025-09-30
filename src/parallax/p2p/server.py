@@ -578,8 +578,7 @@ class GradientServer:
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
             "kv_cache_ratio": 0.25,
-            # temp change for testing
-            "param_hosting_ratio": 0.012,
+            "param_hosting_ratio": 0.65,
             "max_concurrent_requests": self.max_batch_size,
             "max_sequence_length": (
                 1024 if self.max_sequence_length is None else self.max_sequence_length
