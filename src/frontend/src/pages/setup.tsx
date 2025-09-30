@@ -63,12 +63,12 @@ export default function PageSetup() {
                 sx: {
                   bgcolor: 'transparent',
                   '&:hover': { bgcolor: 'transparent' },
-                  '&:focus-within': { bgcolor: 'transparent' }, // 聚焦时不变灰
+                  '&:focus-within': { bgcolor: 'transparent' },
                 },
               },
               input: {
                 sx: {
-                  bgcolor: 'transparent !important', // 内部 <input> 也透明
+                  bgcolor: 'transparent !important',
                   '&:focus': { outline: 'none' },
                 },
               },

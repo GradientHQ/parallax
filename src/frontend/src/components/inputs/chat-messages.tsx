@@ -71,11 +71,10 @@ export const ChatMessages: FC = () => {
         msOverflowStyle: 'none',
       }}
       onScroll={onScroll}
-      // 额外保险：用户滚轮“向上”也算主动上滑
       onWheel={(e) => {
         if (e.deltaY < 0) userScrolledUpRef.current = true;
       }}
-      onTouchMove={() => { userScrolledUpRef.current = true; }} // 移动端手势上滑
+      onTouchMove={() => { userScrolledUpRef.current = true; }}
     >
       {messages.map((message, idx) => (
         <ChatMessage key={message.id} message={message} isLast={idx === messages.length - 1} />
@@ -160,8 +159,7 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
     : {};
 
   return (
-    <Stack direction='row' sx={{ width: '100%', justifyContent }}>
-      {/* 父容器：承载 hover */}
+    <Stack direction='row' sx={{ width: '100%', justifyContent }}>      
       <Stack sx={{ maxWidth: '100%', gap: 1, ...userHoverRevealSx }}>
         {nodeContent}
 
