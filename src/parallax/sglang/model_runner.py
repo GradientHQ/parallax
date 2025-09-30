@@ -470,6 +470,13 @@ def monkey_patch_qwen3_next():
     sglang.srt.configs.qwen3_next.Qwen3NextConfig.linear_layer_ids = monkey_patch_linear_layer_ids
 
 
+## TODO: Move this when sgalang supports gpt_oss pipeline parallelism
+def monkey_patch_gpt_oss():
+    from parallax.sglang.monkey_patch.gpt_oss_model import apply_gpt_oss_monkey_patch
+
+    apply_gpt_oss_monkey_patch()
+
+
 def form_sgl_server_args(
     model_path: str,
     dtype: str = "bfloat16",
@@ -500,6 +507,7 @@ def apply_parallax_monkey_patch():
     )
     sglang.srt.utils.make_layers = monkey_patch_make_layers
     monkey_patch_qwen3_next()
+    monkey_patch_gpt_oss()
 
 
 def initialize_sgl_model_runner(
