@@ -83,6 +83,7 @@ def process_context_color_run(content, colors):
         res.append(processed_row)
     return res
 
+
 def process_context_color_join(content, colors, model_name):
     res = []
     if len(model_name) > 20:
@@ -117,6 +118,7 @@ def process_context_color_join(content, colors, model_name):
         res.append(processed_row)
     return res
 
+
 def display_ascii_animation_run(animation_data):
     frames = animation_data.get("frames", [])
     # loop = animation_data.get('loop', False)
@@ -138,6 +140,7 @@ def display_ascii_animation_run(animation_data):
             clear_screen()
             print(res)
             time.sleep(delay)
+
 
 def display_ascii_animation_join(animation_data, model_name):
     frames = animation_data.get("frames", [])
@@ -161,11 +164,12 @@ def display_ascii_animation_join(animation_data, model_name):
             print(res)
             time.sleep(delay)
 
+
 def display_parallax_run():
     file_path = "./src/parallax_utils/anime/parallax_run.json"
     try:
         with open(file_path, "r") as f:
-            animation_data = json.load(f) 
+            animation_data = json.load(f)
     except FileNotFoundError:
         print(f"Error: The file '{file_path}' was not found.")
         return
