@@ -24,7 +24,7 @@ const ModelSelectRoot = styled(Select)<{ ownerState: ModelSelectProps }>(({ them
     paddingInline: spacing(0.5),
     borderRadius: 12,
     '&:hover': {
-      backgroundColor: palette.action.hover,
+      backgroundColor: 'action.hover',
     },
 
     [`.${selectClasses.select}:hover`]: {
