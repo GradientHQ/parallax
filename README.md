@@ -236,3 +236,4 @@ curl --location 'http://localhost:3000/v1/chat/completions' --header 'Content-Ty
 |Qwen3         |[Link](https://huggingface.co/collections/Qwen/qwen3-67dd247413f0e2e4f653967f)|[Link](https://qwenlm.github.io/blog/qwen3/)|
 |Qwen2.5       |[Link](https://huggingface.co/collections/Qwen/qwen25-66e81a666513e518adb90d9e)|[Link](https://qwenlm.github.io/blog/qwen2.5/)|
 |Llama3        |[Link](https://huggingface.co/meta-llama/collections)|[Link](https://ai.meta.com/blog/meta-llama-3/)|
+|Kimi          |[Link](https://huggingface.co/collections/moonshotai/kimi-k2-6871243b990f2af5ba60617d)|[Link](https://platform.moonshot.ai/blog)|
