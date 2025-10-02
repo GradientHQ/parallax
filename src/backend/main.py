@@ -6,7 +6,7 @@ import uuid
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.server.request_handler import RequestHandler
@@ -65,12 +65,13 @@ async def scheduler_init(raw_request: Request):
 
 @app.get("/node/join/command")
 async def node_join_command():
+    peer_id = scheduler_manage.get_peer_id()
     is_local_network = scheduler_manage.get_is_local_network()
 
     return JSONResponse(
         content={
             "type": "node_join_command",
-            "data": get_node_join_command("${scheduler-addr}", is_local_network),
+            "data": get_node_join_command(peer_id, is_local_network),
         },
         status_code=200,
     )
@@ -107,6 +108,17 @@ async def openai_v1_chat_completions(raw_request: Request):
     request_id = uuid.uuid4()
     received_ts = time.time()
     return await request_handler.v1_chat_completions(request_data, request_id, received_ts)
+
+
+# Disable caching for index.html
+@app.get("/")
+async def serve_index():
+    response = FileResponse("src/frontend/dist/index.html")
+    # Disable cache
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 # mount the frontend

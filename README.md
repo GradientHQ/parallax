@@ -134,7 +134,7 @@ parallax join
 # public network env
 parallax join -s {scheduler-address}
 # example
-parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
+parallax join -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
 ```
 
 ![Node join](docs/images/node-join.png)
@@ -170,9 +170,9 @@ parallax join -s {scheduler-address}
 For example:
 ```sh
 # first node
-parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
+parallax join -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
 # second node
-parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx
+parallax join -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
 ```
 
 #### Step 3: Call chat api with Scheduler
@@ -236,3 +236,4 @@ curl --location 'http://localhost:3000/v1/chat/completions' --header 'Content-Ty
 |Qwen3         |[Link](https://huggingface.co/collections/Qwen/qwen3-67dd247413f0e2e4f653967f)|[Link](https://qwenlm.github.io/blog/qwen3/)|
 |Qwen2.5       |[Link](https://huggingface.co/collections/Qwen/qwen25-66e81a666513e518adb90d9e)|[Link](https://qwenlm.github.io/blog/qwen2.5/)|
 |Llama3        |[Link](https://huggingface.co/meta-llama/collections)|[Link](https://ai.meta.com/blog/meta-llama-3/)|
+|Kimi          |[Link](https://huggingface.co/collections/moonshotai/kimi-k2-6871243b990f2af5ba60617d)|[Link](https://platform.moonshot.ai/blog)|
