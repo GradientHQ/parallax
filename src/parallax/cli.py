@@ -142,7 +142,9 @@ def join_command(args):
         "--scheduler-addr",
         args.scheduler_addr,
     ]
-    if args.use_relay or not str(args.scheduler_addr).startswith("/"):
+    if args.use_relay or (
+        args.scheduler_addr != "auto" and not str(args.scheduler_addr).startswith("/")
+    ):
         cmd.extend(
             [
                 "--relay-servers",
