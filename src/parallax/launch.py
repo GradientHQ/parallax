@@ -29,7 +29,7 @@ logger = get_logger("parallax.launch")
 """Currently hard code model name for MAC"""
 MLX_MODEL_NAME_MAP = {
     "openai/gpt-oss-20b": "mlx-community/gpt-oss-20b-MXFP4-Q8",
-    "openai/gpt-oss-120b": "mlx-community/gpt-oss-120b-MXFP4-Q8",
+    "openai/gpt-oss-120b": "mlx-community/gpt-oss-120b-4bit",
 }
 
 if __name__ == "__main__":
