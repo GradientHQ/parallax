@@ -132,9 +132,9 @@ Copy the generated join command line to your node and run.
 # local area network env
 parallax join
 # public network env
-parallax join -r -s {scheduler-address}
+parallax join -s {scheduler-address}
 # example
-parallax join -r -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
+parallax join -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
 ```
 
 ![Node join](docs/images/node-join.png)
@@ -165,14 +165,14 @@ For each distributed nodes including the main node, open a terminal and join the
 # local area network env
 parallax join
 # public network env
-parallax join -r -s {scheduler-address}
+parallax join -s {scheduler-address}
 ```
 For example:
 ```sh
 # first node
-parallax join -r -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
+parallax join -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
 # second node
-parallax join -r -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
+parallax join -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
 ```
 
 #### Step 3: Call chat api with Scheduler

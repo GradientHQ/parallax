@@ -48,7 +48,7 @@ CMD="python3 src/parallax/launch.py \
           --port 3000 \
           --scheduler-addr $SCHEDULER_ADDR"
 
-if [ "$USE_RELAY" -eq 1 ]; then
+if [ "$USE_RELAY" -eq 1 ] || [[ "$SCHEDULER_ADDR" != /* ]]; then
     CMD="$CMD --relay-servers /dns4/relay-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf /dns4/relay-lattica.gradient.network/tcp/18080/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf"
     CMD="$CMD --initial-peers /dns4/bootstrap-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb /dns4/bootstrap-lattica.gradient.network/tcp/18080/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb"
 fi
