@@ -12,8 +12,7 @@ A fully decentralized inference engine developed by [Gradient](https://gradient.
 | [**Blog**](https://gradient.network/blog/parallax-world-inference-engine)
 | [**X(Twitter)**](https://x.com/Gradient_HQ)
 | [**Discord**](https://discord.gg/gradientnetwork)
-| [**Arxiv**](https://arxiv.org/pdf/2509.26182v1) 
-|
+| [**Arxiv**](https://arxiv.org/pdf/2509.26182v1)
 
 🔥 **NEW: Parallax version 0.0.1 has been released!**
 
