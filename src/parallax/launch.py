@@ -16,6 +16,7 @@ python src/parallax/launch.py \
 
 import multiprocessing
 import tempfile
+import threading
 
 from parallax.p2p.server import ServerState, launch_p2p_server
 from parallax.server.executor import Executor
@@ -34,6 +35,10 @@ MLX_MODEL_NAME_MAP = {
 
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)
+
+    gradient_server = None
+    http_server_process = None
+    executor = None
     try:
         args = parse_args()
         logger.debug(f"args: {args}")
@@ -45,7 +50,6 @@ if __name__ == "__main__":
 
         logger.debug(f"executor_input_addr: {args.executor_input_ipc}")
         logger.debug(f"executor_output_addr: {args.executor_output_ipc}")
-        gradient_server = None
         # Hard code for mlx-community models
         if get_current_device() == "mlx":
             mlx_model_repo = MLX_MODEL_NAME_MAP.get(args.model_path, None)
@@ -55,7 +59,7 @@ if __name__ == "__main__":
         if args.scheduler_addr is None:
             # only launch http server on head node
             if args.start_layer == 0:
-                launch_http_server(args)
+                http_server_process = launch_http_server(args)
             executor = Executor.create_from_args(args)
             launch_p2p_server(
                 initial_peers=args.initial_peers,
@@ -111,19 +115,36 @@ if __name__ == "__main__":
             gradient_server.status = ServerState.INITIALIZING
             # only launch http server on head node
             if args.start_layer == 0:
-                launch_http_server(args)
+                http_server_process = launch_http_server(args)
             executor = Executor.create_from_args(args)
 
-        try:
-            if gradient_server is not None:
-                gradient_server.status = ServerState.READY
-            executor.run_loop()
-        except KeyboardInterrupt:
-            logger.debug("Received interrupt signal, shutting down...")
-        finally:
-            if gradient_server is not None:
-                gradient_server.shutdown()
-            executor.shutdown()
-
+        if gradient_server is not None:
+            gradient_server.status = ServerState.READY
+        executor.run_loop()
+    except KeyboardInterrupt:
+        logger.debug("Received interrupt signal, shutting down...")
     except Exception as e:
         logger.exception(e)
+    finally:
+        t = None
+        if http_server_process is not None:
+
+            def terminate_http_server_process(process):
+                logger.debug("Terminating HTTP server process...")
+                try:
+                    process.kill()
+                    process.join()
+                except Exception as e:
+                    logger.error(f"Failed to terminate HTTP server process: {e}")
+
+            if http_server_process is not None:
+                t = threading.Thread(
+                    target=terminate_http_server_process, args=(http_server_process,)
+                )
+                t.start()
+        if gradient_server is not None:
+            gradient_server.shutdown()
+        if executor is not None:
+            executor.shutdown()
+        if t is not None:
+            t.join()

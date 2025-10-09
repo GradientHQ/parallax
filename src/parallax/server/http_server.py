@@ -455,4 +455,6 @@ def launch_http_server(args):
     It creates a sub-process for the http server.
     """
     http_server = ParallaxHttpServer(args)
-    mp.Process(target=http_server.run).start()
+    process = mp.Process(target=http_server.run)
+    process.start()
+    return process

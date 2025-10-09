@@ -9,6 +9,7 @@ bash scripts.
 
 import argparse
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -90,7 +91,7 @@ def run_command(args):
         if sub_process is not None:
             try:
                 # Gracefully terminate the subprocess
-                sub_process.terminate()
+                sub_process.send_signal(signal.SIGINT)
                 # Wait for the subprocess to exit gracefully
                 try:
                     sub_process.wait(timeout=5)
@@ -176,7 +177,7 @@ def join_command(args):
             try:
                 logger.info("Terminating subprocess...")
                 # Gracefully terminate the subprocess
-                sub_process.terminate()
+                sub_process.send_signal(signal.SIGINT)
                 logger.info("Subprocess terminated, waiting for exit...")
                 # Wait for the subprocess to exit gracefully
                 try:
