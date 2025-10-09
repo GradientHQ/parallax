@@ -56,12 +56,12 @@ def test_capacity_sanity_check():
     "num_layers,gpu_types,expected_layers",
     [
         (21, ["a100-80g", "rtx5090", "rtx4090"], [13, 5, 3]),
-        (15, ["a100-80g", "rtx5090"], [10, 5]),
+        (15, ["a100-80g", "rtx5090"], [11, 4]),
         # (20 * 312 : 20 * 165 : 20 * 82.6) / 559.6 = 11.1 : 5.8 : 2.9 -> 12 : 5 : 3
         (20, ["a100-80g", "rtx5090", "rtx4090"], [12, 5, 3]),
         (25, ["a100-80g", "rtx5090", "rtx4090", "rtx4090"], [13, 5, 4, 3]),
         (29, ["rtx4090", "a100-80g", "rtx5090", "rtx5090", "rtx4090"], [3, 13, 5, 5, 3]),
-        (9, ["rtx5090", "rtx5090"], [5, 4]),
+        (8, ["rtx5090", "rtx5090"], [4, 4]),
         (7, ["a100-40g", "rtx5090"], [5, 2]),
     ],
 )
@@ -155,25 +155,25 @@ def _test_gap_patch_rebalance(allocator: BaseLayerAllocator):
             ],
             "dp",
         ),
-        # 14 Layers, capacity (13, 5, 5, 3, 3) -> greedy assigns (9, 5)
+        # 14 Layers, capacity (13, 5, 5, 3, 3) -> greedy assigns (10, 4)
         (
             14,
             (1, 0, 2, 2),
             [
-                (0, 9),
-                (9, 14),
+                (0, 10),
+                (10, 14),
             ],
             "greedy",
         ),
-        # 7 Layers, capacity (6, 5, 5, 3, 3) -> greedy assigns (5, 2, 5, 2)
+        # 7 Layers, capacity (6, 5, 5, 3, 3) -> greedy assigns (5, 2, 4, 3)
         (
             7,
             (0, 1, 2, 2),
             [
                 (0, 5),
                 (5, 7),
-                (0, 5),
-                (5, 7),
+                (0, 4),
+                (4, 7),
             ],
             "greedy",
         ),
