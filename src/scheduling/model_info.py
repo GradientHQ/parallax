@@ -10,6 +10,10 @@ and performance estimation decisions.
 from dataclasses import dataclass
 from typing import Optional
 
+from parallax_utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class ModelInfo:
@@ -49,6 +53,11 @@ class ModelInfo:
         else:
             self.head_size_k = self.head_size
         self.head_size_v = self.head_size
+
+    @property
+    def q_dim(self) -> int:
+        """Return query head dim."""
+        return self.num_attention_heads * self.head_size
 
     @property
     def v_dim(self) -> int:
@@ -143,8 +152,8 @@ class ModelInfo:
             source_seq_len: Source sequence length (prompt tokens)
         """
         # Attention params
-        qo_params = self.param_bytes_per_element * self.hidden_dim * self.hidden_dim
-        kv_params = self.param_bytes_per_element * self.hidden_dim * (self.k_dim + self.v_dim) // 2
+        qo_params = self.param_bytes_per_element * self.hidden_dim * self.q_dim * 2
+        kv_params = self.param_bytes_per_element * self.hidden_dim * (self.k_dim + self.v_dim)
         attention_params = qo_params + kv_params
 
         # FFN params
@@ -168,6 +177,12 @@ class ModelInfo:
                 ffn_params *= self.num_local_experts
             kv_cache_size = 0
 
+        logger.debug(
+            "Model Info ffn_params=%d, kv_cache_size=%d, attention_params=%d",
+            ffn_params,
+            kv_cache_size,
+            attention_params,
+        )
         return round(ffn_params + kv_cache_size + attention_params)
 
     def lm_head_flops(self, target_seq_len: int = 1) -> int:

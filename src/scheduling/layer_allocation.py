@@ -822,6 +822,13 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
                 total_cap,
             )
             return False
+        else:
+            logger.debug(
+                "[DP] Sufficient resources: nodes=%d, layers=%d, total_cap=%d",
+                num_nodes,
+                num_layers,
+                total_cap,
+            )
         # used for pruning
         suffix_sum = [0] * (num_nodes + 1)
         for i in range(num_nodes - 1, -1, -1):

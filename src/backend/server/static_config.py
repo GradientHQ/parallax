@@ -60,6 +60,11 @@ def get_model_info(model_name):
     elif quant_method in ("mxfp4", "int4", "awq", "gptq"):
         param_bytes_per_element = 0.5
 
+    # get local experts
+    num_local_experts = config.get("num_local_experts", None)
+    if num_local_experts is None:
+        num_local_experts = num_local_experts = config.get("num_experts", None)
+
     model_info = ModelInfo(
         model_name=model_name,
         head_size=config.get("head_dim", 128),
@@ -75,7 +80,7 @@ def get_model_info(model_name):
         param_bytes_per_element=param_bytes_per_element,
         cache_bytes_per_element=2,
         embedding_bytes_per_element=2,
-        num_local_experts=config.get("num_experts", None),
+        num_local_experts=num_local_experts,
         num_experts_per_tok=config.get("num_experts_per_tok", None),
     )
     return model_info
