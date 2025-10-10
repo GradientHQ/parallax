@@ -10,14 +10,16 @@ It is used to handle the communication between the peers, and communicate with t
 import dataclasses
 import enum
 import logging
+import json
 import threading
 import time
 from typing import List, Optional
 
 import dijkstar
 import httpx
+from fastapi import HTTPException
 import zmq
-from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream
+from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream, rpc_stream_iter
 
 from backend.server.rpc_connection_handler import RPCConnectionHandler
 from parallax.p2p.proto import forward_pb2
@@ -152,6 +154,30 @@ class TransformerConnectionHandler(ConnectionHandler):
         except Exception as e:
             logger.exception(f"Error in rpc_abort: {e}")
         return forward_pb2.AbortResponse()
+
+    @rpc_stream_iter
+    def chat_completion(
+        self,
+        request,
+    ):
+        """Handle chat completion request"""
+        logger.info(f"Chat completion request: {request}, type: {type(request)}")
+        try:
+            if request.get('stream', False):
+                logger.info("Stream request")
+                with httpx.Client(timeout=20 * 60 * 60) as client:
+                    with client.stream("POST", "http://localhost:3000/v1/chat/completions", json=request) as response:
+                        for chunk in response.iter_bytes():
+                            if chunk:
+                                yield chunk
+            else:
+                logger.info("Non-stream request")
+                with httpx.Client(timeout=20 * 60 * 60) as client:
+                    response = client.post("http://localhost:3000/v1/chat/completions", json=request).json()
+                    logger.info(f"response: {response}, type: {type(response)}")
+                    yield json.dumps(response).encode()
+        except Exception as e:
+            logger.exception(f"Error in chat completion: {e}")
 
 
 class GradientServer:

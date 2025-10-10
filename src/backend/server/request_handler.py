@@ -1,4 +1,6 @@
 from typing import Dict
+import time
+import json
 
 import aiohttp
 from fastapi import HTTPException
@@ -98,8 +100,12 @@ class RequestHandler:
                 content={"error": "Call url not found of peer id: " + routing_table[0]},
                 status_code=500,
             )
-
+        
         url = call_url + endpoint
+
+        stub = self.scheduler_manage.completion_handler.get_stub(routing_table[0])
+        logger.info(f"get stub for {routing_table[0]}: {dir(stub)}")
+
         is_stream = request_data.get("stream", False)
         logger.debug(f"POST upstream: url={url}, stream={is_stream}")
 
@@ -114,15 +120,9 @@ class RequestHandler:
                 raise HTTPException(status_code=response.status, detail=error_msg)
 
         if is_stream:
-
-            async def stream_generator():
-                async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
-                    async with session.post(url, json=request_data) as response:
-                        await _process_upstream_response(response)
-
-                        async for chunk in response.content:
-                            if chunk:
-                                yield chunk
+            def stream_generator():
+                for chunk in stub.chat_completion(request_data):
+                    yield chunk
 
             resp = StreamingResponse(
                 stream_generator(),
@@ -135,12 +135,11 @@ class RequestHandler:
             logger.debug(f"Streaming response initiated for {request_id}")
             return resp
         else:
-            async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
-                async with session.post(url, json=request_data) as response:
-                    await _process_upstream_response(response)
-                    result = await response.json()
-                    logger.debug(f"Non-stream response completed for {request_id}")
-                    return JSONResponse(content=result)
+            response = stub.chat_completion(request_data)
+            response = next(response).decode()
+            logger.info(f"Non-stream response completed for {request_id}, response: {response}")
+            # response is a JSON string; parse to Python object before returning
+            return JSONResponse(content=json.loads(response))
 
     async def v1_completions(self, request_data: Dict, request_id: str, received_ts: int):
         return await self._forward_request("/v1/completions", request_data, request_id, received_ts)

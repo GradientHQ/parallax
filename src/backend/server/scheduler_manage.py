@@ -11,6 +11,7 @@ from backend.server.static_config import (
     get_model_info,
     get_node_join_command,
 )
+from parallax.p2p.server import TransformerConnectionHandler
 from parallax_utils.logging_config import get_logger
 from scheduling.node import RequestSignal
 from scheduling.scheduler import Scheduler
@@ -63,6 +64,13 @@ class SchedulerManage:
 
         self._start_scheduler(model_name, init_nodes_num)
         self._start_lattica()
+        self.completion_handler = TransformerConnectionHandler(
+            lattica=self.lattica,
+            recv_from_peer_addr="",
+            send_to_peer_addr="",
+            block_start_index=0,
+            block_end_index=1,
+        )
 
     def is_running(self):
         """
