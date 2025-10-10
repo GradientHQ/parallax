@@ -9,15 +9,14 @@ It is used to handle the communication between the peers, and communicate with t
 
 import dataclasses
 import enum
-import logging
 import json
+import logging
 import threading
 import time
 from typing import List, Optional
 
 import dijkstar
 import httpx
-from fastapi import HTTPException
 import zmq
 from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream, rpc_stream_iter
 
@@ -165,17 +164,23 @@ class TransformerConnectionHandler(ConnectionHandler):
         """Handle chat completion request"""
         logger.info(f"Chat completion request: {request}, type: {type(request)}")
         try:
-            if request.get('stream', False):
+            if request.get("stream", False):
                 logger.info("Stream request")
                 with httpx.Client(timeout=20 * 60 * 60) as client:
-                    with client.stream("POST", f"http://localhost:{self.http_port}/v1/chat/completions", json=request) as response:
+                    with client.stream(
+                        "POST",
+                        f"http://localhost:{self.http_port}/v1/chat/completions",
+                        json=request,
+                    ) as response:
                         for chunk in response.iter_bytes():
                             if chunk:
                                 yield chunk
             else:
                 logger.info("Non-stream request")
                 with httpx.Client(timeout=20 * 60 * 60) as client:
-                    response = client.post(f"http://localhost:{self.http_port}/v1/chat/completions", json=request).json()
+                    response = client.post(
+                        f"http://localhost:{self.http_port}/v1/chat/completions", json=request
+                    ).json()
                     logger.info(f"response: {response}, type: {type(response)}")
                     yield json.dumps(response).encode()
         except Exception as e:

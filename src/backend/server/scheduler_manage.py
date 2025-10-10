@@ -69,7 +69,7 @@ class SchedulerManage:
             recv_from_peer_addr="",
             send_to_peer_addr="",
             block_start_index=0,
-            block_end_index=1
+            block_end_index=1,
         )
 
     def is_running(self):

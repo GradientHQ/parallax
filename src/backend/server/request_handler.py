@@ -1,9 +1,7 @@
-from typing import Dict
-import time
 import json
+from typing import Dict
 
 import aiohttp
-from fastapi import HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.server.constants import NODE_STATUS_AVAILABLE
@@ -38,12 +36,8 @@ class RequestHandler:
             self.stubs[node_id] = self.scheduler_manage.completion_handler.get_stub(node_id)
         return self.stubs[node_id]
 
-    async def _forward_request(
-        self, request_data: Dict, request_id: str, received_ts: int
-    ):
-        logger.debug(
-            f"Forwarding request {request_id}; stream={request_data.get('stream', False)}"
-        )
+    async def _forward_request(self, request_data: Dict, request_id: str, received_ts: int):
+        logger.debug(f"Forwarding request {request_id}; stream={request_data.get('stream', False)}")
         if (
             self.scheduler_manage is None
             or not self.scheduler_manage.get_schedule_status() == NODE_STATUS_AVAILABLE
@@ -100,6 +94,7 @@ class RequestHandler:
         is_stream = request_data.get("stream", False)
 
         if is_stream:
+
             def stream_generator():
                 for chunk in stub.chat_completion(request_data):
                     yield chunk
