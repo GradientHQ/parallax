@@ -51,6 +51,7 @@ def get_relay_params():
         "/dns4/bootstrap-lattica.gradient.network/tcp/18080/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb",
     ]
 
+
 def run_command(args):
     """Run the scheduler (equivalent to scripts/start.sh)."""
     check_python_version()
@@ -243,4 +244,3 @@ Examples:
 
 if __name__ == "__main__":
     main()
-
