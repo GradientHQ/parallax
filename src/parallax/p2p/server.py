@@ -580,7 +580,7 @@ class GradientServer:
         if time.time() - self.rtt_last_update > self.rtt_update_interval:
             self.rtts = {}
             all_peers = []
-            for _ in range(1 if is_update else 30):
+            for _ in range(1 if is_update else 10):
                 all_peers = self.lattica.get_all_peers()
                 if len(all_peers) > 0 and self.scheduler_peer_id in all_peers:
                     break
@@ -614,7 +614,7 @@ class GradientServer:
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
             "kv_cache_ratio": 0.25,
-            "param_hosting_ratio": 0.65,
+            "param_hosting_ratio": 0.12,
             "max_concurrent_requests": self.max_batch_size,
             "max_sequence_length": (
                 1024 if self.max_sequence_length is None else self.max_sequence_length
