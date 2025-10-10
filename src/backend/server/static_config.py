@@ -63,7 +63,9 @@ def get_model_info(model_name):
     # get local experts
     num_local_experts = config.get("num_local_experts", None)
     if num_local_experts is None:
-        num_local_experts = num_local_experts = config.get("num_experts", None)
+        num_local_experts = config.get("num_experts", None)
+    if num_local_experts is None:
+        num_local_experts = config.get("n_routed_experts", None)
 
     model_info = ModelInfo(
         model_name=model_name,
