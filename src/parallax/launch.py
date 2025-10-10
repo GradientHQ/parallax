@@ -30,6 +30,10 @@ logger = get_logger("parallax.launch")
 MLX_MODEL_NAME_MAP = {
     "openai/gpt-oss-20b": "mlx-community/gpt-oss-20b-MXFP4-Q8",
     "openai/gpt-oss-120b": "mlx-community/gpt-oss-120b-4bit",
+    "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8": "mlx-community/Qwen3-Next-80B-A3B-Instruct-8bit",
+    "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8": "mlx-community/Qwen3-Next-80B-A3B-Thinking-8bit",
+    "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8": "mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit",
+    "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8": "mlx-community/Qwen3-235B-A22B-Thinking-2507-4bit",
 }
 
 if __name__ == "__main__":
