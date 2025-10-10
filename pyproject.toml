@@ -30,7 +30,7 @@ dependencies = [
   "protobuf==6.31.1",
   "dijkstar==2.6.0",
   "huggingface-hub",
-  "lattica==1.0.1",
+  "lattica==1.0.2",
 ]
 
 [project.scripts]
