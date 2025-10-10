@@ -94,6 +94,7 @@ class RequestHandler:
         is_stream = request_data.get("stream", False)
 
         if is_stream:
+
             def stream_generator():
                 for chunk in stub.chat_completion(request_data):
                     yield chunk
