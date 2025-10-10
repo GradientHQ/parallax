@@ -49,7 +49,7 @@ class SchedulerManage:
         self.stubs = {}
         self.is_local_network = False
 
-    def run(self, model_name, init_nodes_num, is_local_network=False):
+    def run(self, model_name, init_nodes_num, is_local_network=True):
         """
         Start the scheduler and the P2P service for RPC handling.
         """
