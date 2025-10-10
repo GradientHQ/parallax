@@ -23,6 +23,7 @@ from parallax.server.executor import Executor
 from parallax.server.http_server import launch_http_server
 from parallax.server.server_args import parse_args
 from parallax.utils.utils import get_current_device
+from parallax_utils.ascii_anime import display_parallax_join
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger("parallax.launch")
@@ -47,7 +48,6 @@ if __name__ == "__main__":
     try:
         args = parse_args()
         logger.debug(f"args: {args}")
-
         args.recv_from_peer_addr = f"ipc://{tempfile.NamedTemporaryFile().name}"
         args.send_to_peer_addr = f"ipc://{tempfile.NamedTemporaryFile().name}"
         args.executor_input_ipc = f"ipc://{tempfile.NamedTemporaryFile().name}"
@@ -62,6 +62,8 @@ if __name__ == "__main__":
                 args.model_path = mlx_model_repo
                 logger.debug(f"Replace mlx model path: {mlx_model_repo}")
         if args.scheduler_addr is None:
+            display_parallax_join(args.model_path)
+
             # only launch http server on head node
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
@@ -118,6 +120,9 @@ if __name__ == "__main__":
                 f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}"
             )
             gradient_server.status = ServerState.INITIALIZING
+
+            display_parallax_join(args.model_path)
+
             # only launch http server on head node
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
