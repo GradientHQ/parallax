@@ -162,10 +162,9 @@ class TransformerConnectionHandler(ConnectionHandler):
         request,
     ):
         """Handle chat completion request"""
-        logger.info(f"Chat completion request: {request}, type: {type(request)}")
+        logger.debug(f"Chat completion request: {request}, type: {type(request)}")
         try:
             if request.get("stream", False):
-                logger.info("Stream request")
                 with httpx.Client(timeout=20 * 60 * 60) as client:
                     with client.stream(
                         "POST",
@@ -176,12 +175,10 @@ class TransformerConnectionHandler(ConnectionHandler):
                             if chunk:
                                 yield chunk
             else:
-                logger.info("Non-stream request")
                 with httpx.Client(timeout=20 * 60 * 60) as client:
                     response = client.post(
                         f"http://localhost:{self.http_port}/v1/chat/completions", json=request
                     ).json()
-                    logger.info(f"response: {response}, type: {type(response)}")
                     yield json.dumps(response).encode()
         except Exception as e:
             logger.exception(f"Error in chat completion: {e}")

@@ -94,7 +94,6 @@ class RequestHandler:
         is_stream = request_data.get("stream", False)
 
         if is_stream:
-
             def stream_generator():
                 for chunk in stub.chat_completion(request_data):
                     yield chunk
@@ -112,7 +111,7 @@ class RequestHandler:
         else:
             response = stub.chat_completion(request_data)
             response = next(response).decode()
-            logger.info(f"Non-stream response completed for {request_id}, response: {response}")
+            logger.debug(f"Non-stream response completed for {request_id}")
             # response is a JSON string; parse to Python object before returning
             return JSONResponse(content=json.loads(response))
 
