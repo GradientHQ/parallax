@@ -226,7 +226,27 @@ curl --location 'http://localhost:3000/v1/chat/completions' --header 'Content-Ty
     ],
     "stream": true
 }'
+
 ```
+### Uninstalling Parallax
+
+For macOS or Linux, if you've installed Parallax via pip and want to uninstall it, you can use the following command:
+
+```sh
+pip uninstall parallax
+```
+
+For Docker installations, remove Parallax images and containers using standard Docker commands:
+
+```sh
+docker ps -a               # List running containers
+docker stop <container_id> # Stop running containers
+docker rm <container_id>   # Remove stopped containers
+docker images              # List Docker images
+docker rmi <image_id>      # Remove Parallax images
+```
+
+For Windows, simply go to Control Panel → Programs → Uninstall a program, find "Gradient" in the list, and uninstall it.
 
 ## Supported Models
 
