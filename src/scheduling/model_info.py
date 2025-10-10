@@ -33,6 +33,7 @@ class ModelInfo:
     ffn_num_projections: int = 3
     num_local_experts: Optional[int] = None
     num_experts_per_tok: Optional[int] = None
+    moe_intermediate_dim: Optional[int] = None
     tie_embedding: bool = False
     # Default int8
     param_bytes_per_element: float = 1
@@ -161,8 +162,12 @@ class ModelInfo:
             self.param_bytes_per_element
             * self.ffn_num_projections
             * self.hidden_dim
-            * self.intermediate_dim
         )
+        if self.moe_intermediate_dim is not None:
+            ffn_params *= self.moe_intermediate_dim
+        else:
+            ffn_params *= self.intermediate_dim
+
         if roofline:
             expected_experts = self.expected_num_activated_experts(
                 batch_size=batch_size, target_seq_len=target_seq_len

@@ -11,7 +11,9 @@ MODEL_LIST = [
     "openai/gpt-oss-120b",
     "moonshotai/Kimi-K2-Instruct",
     "moonshotai/Kimi-K2-Instruct-0905",
-    "Qwen/Qwen3-Next-80B-A3B-Instruct",
+    "
+    "
+    "",
     "Qwen/Qwen3-Next-80B-A3B-Thinking",
     # "Qwen/Qwen3-8B",
     # "Qwen/Qwen3-8B-FP8",
@@ -82,6 +84,7 @@ def get_model_info(model_name):
         embedding_bytes_per_element=2,
         num_local_experts=num_local_experts,
         num_experts_per_tok=config.get("num_experts_per_tok", None),
+        moe_intermediate_dim=config.get("moe_intermediate_size", None),
     )
     return model_info
 
