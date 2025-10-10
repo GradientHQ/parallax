@@ -158,11 +158,7 @@ class ModelInfo:
         attention_params = qo_params + kv_params
 
         # FFN params
-        ffn_params = (
-            self.param_bytes_per_element
-            * self.ffn_num_projections
-            * self.hidden_dim
-        )
+        ffn_params = self.param_bytes_per_element * self.ffn_num_projections * self.hidden_dim
         if self.moe_intermediate_dim is not None:
             ffn_params *= self.moe_intermediate_dim
         else:
