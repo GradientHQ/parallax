@@ -28,15 +28,21 @@ class RequestHandler:
 
     def __init__(self):
         self.scheduler_manage = None
+        self.stubs = {}
 
     def set_scheduler_manage(self, scheduler_manage):
         self.scheduler_manage = scheduler_manage
 
+    def get_stub(self, node_id):
+        if node_id not in self.stubs:
+            self.stubs[node_id] = self.scheduler_manage.completion_handler.get_stub(node_id)
+        return self.stubs[node_id]
+
     async def _forward_request(
-        self, endpoint: str, request_data: Dict, request_id: str, received_ts: int
+        self, request_data: Dict, request_id: str, received_ts: int
     ):
         logger.debug(
-            f"Forwarding request {request_id} to endpoint {endpoint}; stream={request_data.get('stream', False)}"
+            f"Forwarding request {request_id}; stream={request_data.get('stream', False)}"
         )
         if (
             self.scheduler_manage is None
@@ -90,34 +96,8 @@ class RequestHandler:
             )
 
         request_data["routing_table"] = routing_table
-        call_url = self.scheduler_manage.get_call_url_by_node_id(routing_table[0])
-        logger.debug(
-            f"Resolved call_url for request {request_id}: node={routing_table[0]} -> {call_url}"
-        )
-
-        if not call_url:
-            return JSONResponse(
-                content={"error": "Call url not found of peer id: " + routing_table[0]},
-                status_code=500,
-            )
-        
-        url = call_url + endpoint
-
-        stub = self.scheduler_manage.completion_handler.get_stub(routing_table[0])
-        logger.info(f"get stub for {routing_table[0]}: {dir(stub)}")
-
+        stub = self.get_stub(routing_table[0])
         is_stream = request_data.get("stream", False)
-        logger.debug(f"POST upstream: url={url}, stream={is_stream}")
-
-        async def _process_upstream_response(response: aiohttp.ClientResponse):
-            logger.debug(f"post: {request_id}, code: {response.status}, params: {request_data}")
-            if response.status != 200:
-                error_text = await response.text()
-                error_msg = (
-                    f"Upstream service returned status {response.status}, response: {error_text}"
-                )
-                logger.error(f"completions error: {error_msg}, request_id: {request_id}")
-                raise HTTPException(status_code=response.status, detail=error_msg)
 
         if is_stream:
             def stream_generator():
@@ -141,10 +121,5 @@ class RequestHandler:
             # response is a JSON string; parse to Python object before returning
             return JSONResponse(content=json.loads(response))
 
-    async def v1_completions(self, request_data: Dict, request_id: str, received_ts: int):
-        return await self._forward_request("/v1/completions", request_data, request_id, received_ts)
-
     async def v1_chat_completions(self, request_data: Dict, request_id: str, received_ts: int):
-        return await self._forward_request(
-            "/v1/chat/completions", request_data, request_id, received_ts
-        )
+        return await self._forward_request(request_data, request_id, received_ts)

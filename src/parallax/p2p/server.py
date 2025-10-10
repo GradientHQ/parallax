@@ -107,6 +107,7 @@ class TransformerConnectionHandler(ConnectionHandler):
         send_to_peer_addr: str,
         block_start_index: int,
         block_end_index: int,
+        http_port: Optional[int] = None,
         notify_url: Optional[str] = None,
     ):
         # Initialize the base class
@@ -115,6 +116,7 @@ class TransformerConnectionHandler(ConnectionHandler):
         self.send_to_peer_addr = send_to_peer_addr
         self.block_start_index = block_start_index
         self.block_end_index = block_end_index
+        self.http_port = http_port
         self.notify_url = notify_url
         self._recv_from_peer = None
         self._recv_from_peer_lock = threading.Lock()
@@ -166,14 +168,14 @@ class TransformerConnectionHandler(ConnectionHandler):
             if request.get('stream', False):
                 logger.info("Stream request")
                 with httpx.Client(timeout=20 * 60 * 60) as client:
-                    with client.stream("POST", "http://localhost:3000/v1/chat/completions", json=request) as response:
+                    with client.stream("POST", f"http://localhost:{self.http_port}/v1/chat/completions", json=request) as response:
                         for chunk in response.iter_bytes():
                             if chunk:
                                 yield chunk
             else:
                 logger.info("Non-stream request")
                 with httpx.Client(timeout=20 * 60 * 60) as client:
-                    response = client.post("http://localhost:3000/v1/chat/completions", json=request).json()
+                    response = client.post(f"http://localhost:{self.http_port}/v1/chat/completions", json=request).json()
                     logger.info(f"response: {response}, type: {type(response)}")
                     yield json.dumps(response).encode()
         except Exception as e:
@@ -339,6 +341,7 @@ class GradientServer:
             send_to_peer_addr=self.send_to_peer_addr,
             block_start_index=self.block_start_index,
             block_end_index=self.block_end_index,
+            http_port=self.http_port,
             notify_url=self.notify_url,
         )  # thread
 
@@ -603,7 +606,6 @@ class GradientServer:
             self.rtt_last_update = time.time()
 
         info = {
-            "http_port": f"{self.http_port}",
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
             "kv_cache_ratio": 0.25,

@@ -23,12 +23,10 @@ class RPCConnectionHandler(ConnectionHandler):
         # Initialize the base class
         super().__init__(lattica)
         self.scheduler = scheduler
-        self.call_url_map = {}
 
     @rpc_stream
     def node_join(self, message):
         # node = {
-        #     "http_port": "8000",
         #     "node_id": "lattica peer id",
         #     "hardware": {
         #         "node_id": "lattica peer id",
@@ -44,14 +42,6 @@ class RPCConnectionHandler(ConnectionHandler):
         logger.info(f"receive node_join request: {message}")
         try:
             node = self.build_node(message)
-
-            try:
-                node_ip = self.lattica_instance.get_peer_addresses(node.node_id)[0].split("/")[2]
-                logger.info(f"get ip for {node.node_id}: {node_ip}")
-            except Exception as e:
-                logger.warning(f"Failed to get ip for {node.node_id}: {e}, using 127.0.0.1")
-                node_ip = "127.0.0.1"
-            self.call_url_map[node.node_id] = f"http://{node_ip}:{message.get('http_port')}"
             self.scheduler.enqueue_join(node)
 
             response = self.wait_layer_allocation(node.node_id, wait_seconds=300)
@@ -67,7 +57,6 @@ class RPCConnectionHandler(ConnectionHandler):
         try:
             node = self.build_node(message)
             self.scheduler.enqueue_leave(node.node_id)
-            self.call_url_map.pop(node.node_id)
             return {}
         except Exception as e:
             logger.exception(f"node_leave error: {e}")
@@ -148,6 +137,3 @@ class RPCConnectionHandler(ConnectionHandler):
             memory_gb=memory_gb,
             memory_bandwidth_gbps=memory_bandwidth_gbps,
         )
-
-    def get_call_url_by_node_id(self, node_id):
-        return self.call_url_map.get(node_id, None)
