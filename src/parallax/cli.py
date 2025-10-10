@@ -71,15 +71,19 @@ def run_command(args):
         cmd.extend(
             [
                 "--relay-servers",
-                "/ip4/3.1.132.169/udp/18080/quic-v1/p2p/12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu /ip4/3.1.132.169/tcp/18080/p2p/12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu",
-                # "/dns4/relay-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf /dns4/relay-lattica.gradient.network/tcp/18080/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
+                # "/ip4/3.1.132.169/udp/18080/quic-v1/p2p/12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu",
+                # "/ip4/3.1.132.169/tcp/18080/p2p/12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu",
+                "/dns4/relay-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
+                "/dns4/relay-lattica.gradient.network/tcp/18080/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
             ]
         )
         cmd.extend(
             [
                 "--initial-peers",
-                "/ip4/3.1.132.169/udp/19090/quic-v1/p2p/12D3KooWABDc2ksv41TG2Yj6N3gEsQepyUNitqaGgEkD9Gu5Kcwb /ip4/3.1.132.169/tcp/19090/p2p/12D3KooWABDc2ksv41TG2Yj6N3gEsQepyUNitqaGgEkD9Gu5Kcwb",
-                # "/dns4/bootstrap-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb /dns4/bootstrap-lattica.gradient.network/tcp/18080/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb",
+                # "/ip4/3.1.132.169/udp/19090/quic-v1/p2p/12D3KooWABDc2ksv41TG2Yj6N3gEsQepyUNitqaGgEkD9Gu5Kcwb",
+                # "/ip4/3.1.132.169/tcp/19090/p2p/12D3KooWABDc2ksv41TG2Yj6N3gEsQepyUNitqaGgEkD9Gu5Kcwb",
+                "/dns4/bootstrap-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb",
+                "/dns4/bootstrap-lattica.gradient.network/tcp/18080/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb",
             ]
         )
 
@@ -158,15 +162,19 @@ def join_command(args):
         cmd.extend(
             [
                 "--relay-servers",
-                "/ip4/3.1.132.169/udp/18080/quic-v1/p2p/12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu /ip4/3.1.132.169/tcp/18080/p2p/12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu",
-                # "/dns4/relay-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf /dns4/relay-lattica.gradient.network/tcp/18080/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
+                # "/ip4/3.1.132.169/udp/18080/quic-v1/p2p/12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu",
+                # "/ip4/3.1.132.169/tcp/18080/p2p/12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu",
+                "/dns4/relay-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
+                "/dns4/relay-lattica.gradient.network/tcp/18080/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
             ]
         )
         cmd.extend(
             [
                 "--initial-peers",
-                "/ip4/3.1.132.169/udp/19090/quic-v1/p2p/12D3KooWABDc2ksv41TG2Yj6N3gEsQepyUNitqaGgEkD9Gu5Kcwb /ip4/3.1.132.169/tcp/19090/p2p/12D3KooWABDc2ksv41TG2Yj6N3gEsQepyUNitqaGgEkD9Gu5Kcwb",
-                # "/dns4/bootstrap-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb /dns4/bootstrap-lattica.gradient.network/tcp/18080/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb",
+                # "/ip4/3.1.132.169/udp/19090/quic-v1/p2p/12D3KooWABDc2ksv41TG2Yj6N3gEsQepyUNitqaGgEkD9Gu5Kcwb",
+                # "/ip4/3.1.132.169/tcp/19090/p2p/12D3KooWABDc2ksv41TG2Yj6N3gEsQepyUNitqaGgEkD9Gu5Kcwb",
+                "/dns4/bootstrap-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb",
+                "/dns4/bootstrap-lattica.gradient.network/tcp/18080/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb",
             ]
         )
 
