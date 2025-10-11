@@ -1,6 +1,4 @@
-import json
-
-from huggingface_hub import hf_hub_download
+from mlx_lm.utils import get_model_path, load_config
 
 from scheduling.model_info import ModelInfo
 
@@ -42,10 +40,8 @@ PUBLIC_RELAY_SERVERS = [
 
 
 def get_model_info(model_name):
-    config_path = hf_hub_download(repo_id=model_name, filename="config.json")
-    with open(config_path, "r") as f:
-        config = json.load(f)
-        f.close()
+    model_path = get_model_path(model_name)[0]
+    config = load_config(model_path)
 
     # get quant method
     quant_method = config.get("quant_method", None)
