@@ -198,9 +198,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  parallax run                           # Start scheduler with frontend
-  parallax run -m Qwen/Qwen3-0.6B -n 2  # Start scheduler without frontend
-  parallax join -s /ip4/192.168.1.2/tcp/5001/p2p/xxxxxxxxxxxx  # Join cluster
+  parallax run                                                          # Start scheduler with frontend
+  parallax run -m {model-name} -n {number-of-worker-nodes}              # Start scheduler without frontend
+  parallax run -m Qwen/Qwen3-0.6B -n 2                                  # example
+  parallax join                                                         # Join cluster in local network
+  parallax join -s {scheduler-address}                                  # Join cluster in public network
+  parallax join -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu # example
         """,
     )
 
@@ -221,7 +224,11 @@ Examples:
         "join", help="Join a distributed cluster (equivalent to scripts/join.sh)"
     )
     join_parser.add_argument(
-        "-s", "--scheduler-addr", default="auto", type=str, help="Scheduler address (required)"
+        "-s",
+        "--scheduler-addr",
+        default="auto",
+        type=str,
+        help="Scheduler address (required)",
     )
     join_parser.add_argument(
         "-r", "--use-relay", action="store_true", help="Use public relay servers"

@@ -6,9 +6,9 @@ build-backend = "poetry.core.masonry.api"
 [project]
 name = "parallax"
 version = "0.0.1"
-description = "Decentralised pipeline-parallel LLM serving with MLX-LM + Hivemind"
+description = "Decentralised pipeline-parallel LLM serving with Sglang + MLX-LM + Lattica"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 packages = [
   { include = "parallax", from = "src" },
   { include = "scheduling", from = "src" },
