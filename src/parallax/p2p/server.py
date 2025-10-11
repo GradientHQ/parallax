@@ -165,7 +165,7 @@ class TransformerConnectionHandler(ConnectionHandler):
         logger.debug(f"Chat completion request: {request}, type: {type(request)}")
         try:
             if request.get("stream", False):
-                with httpx.Client(timeout=20 * 60 * 60) as client:
+                with httpx.Client(timeout=10 * 60, proxy={}) as client:
                     with client.stream(
                         "POST",
                         f"http://localhost:{self.http_port}/v1/chat/completions",
@@ -175,7 +175,7 @@ class TransformerConnectionHandler(ConnectionHandler):
                             if chunk:
                                 yield chunk
             else:
-                with httpx.Client(timeout=20 * 60 * 60) as client:
+                with httpx.Client(timeout=10 * 60, proxy={}) as client:
                     response = client.post(
                         f"http://localhost:{self.http_port}/v1/chat/completions", json=request
                     ).json()
@@ -611,7 +611,7 @@ class GradientServer:
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
             "kv_cache_ratio": 0.25,
-            "param_hosting_ratio": 0.65,
+            "param_hosting_ratio": 0.01,
             "max_concurrent_requests": self.max_batch_size,
             "max_sequence_length": (
                 1024 if self.max_sequence_length is None else self.max_sequence_length
