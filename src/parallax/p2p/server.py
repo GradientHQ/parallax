@@ -182,6 +182,7 @@ class TransformerConnectionHandler(ConnectionHandler):
                     yield json.dumps(response).encode()
         except Exception as e:
             logger.exception(f"Error in chat completion: {e}")
+            yield b"internal server error"
 
 
 class GradientServer:
