@@ -1,4 +1,5 @@
-from mlx_lm.utils import get_model_path, load_config
+import json
+from pathlib import Path
 
 from scheduling.model_info import ModelInfo
 
@@ -20,6 +21,7 @@ MODEL_LIST = [
     # "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8",
     "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8",
     "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8",
+    "Qwen/Qwen3-235B-A22B-GPTQ-Int4",
     # "Qwen/Qwen2.5-3B-Instruct",
     # "Qwen/Qwen2.5-7B-Instruct",
     # "Qwen/Qwen2.5-14B-Instruct",
@@ -35,8 +37,21 @@ NODE_JOIN_COMMAND_PUBLIC_NETWORK = """parallax join -s {scheduler_addr} """
 
 
 def get_model_info(model_name):
-    model_path = get_model_path(model_name)[0]
-    config = load_config(model_path)
+    def _load_config_only(name: str) -> dict:
+        local_path = Path(name)
+        if local_path.exists():
+            config_path = local_path / "config.json"
+            with open(config_path, "r") as f:
+                return json.load(f)
+
+        # Hugging Face only – download just config.json
+        from huggingface_hub import hf_hub_download  # type: ignore
+
+        config_file = hf_hub_download(repo_id=name, filename="config.json")
+        with open(config_file, "r") as f:
+            return json.load(f)
+
+    config = _load_config_only(model_name)
 
     # get quant method
     quant_method = config.get("quant_method", None)

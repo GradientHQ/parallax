@@ -815,7 +815,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
         total_cap = sum(node.get_decoder_layer_capacity() for node in self.nodes)
 
         if num_layers <= 0 or num_nodes == 0 or total_cap < num_layers:
-            logger.debug(
+            logger.warning(
                 "[DP] Insufficient resources: nodes=%d, layers=%d, total_cap=%d",
                 num_nodes,
                 num_layers,
