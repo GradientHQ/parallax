@@ -14,6 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from common.static_config import get_relay_params
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger("parallax.cli")
@@ -39,17 +40,6 @@ def get_project_root():
 
     # If not found, fallback to current working directory
     return Path.cwd()
-
-
-def get_relay_params():
-    return [
-        "--relay-servers",
-        "/dns4/relay-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
-        "/dns4/relay-lattica.gradient.network/tcp/18080/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
-        "--initial-peers",
-        "/dns4/bootstrap-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb",
-        "/dns4/bootstrap-lattica.gradient.network/tcp/18080/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb",
-    ]
 
 
 def run_command(args):

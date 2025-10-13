@@ -21,7 +21,7 @@ dependencies = [
   "numpy>=1.26",
   "pyzmq>=25.0",
   "psutil>=5.9.5",
-  "httpx",
+  "httpx[socks]>=0.26.0",
   "aiohttp",
   "uvicorn",
   "uvloop",
