@@ -29,7 +29,7 @@ dependencies = [
   "pydantic",
   "protobuf==6.31.1",
   "dijkstar==2.6.0",
-  "lattica==1.0.3",
+  "lattica==1.0.4",
 ]
 
 [project.scripts]
