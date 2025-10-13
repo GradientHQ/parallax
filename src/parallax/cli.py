@@ -71,12 +71,17 @@ def run_command(args):
     if args.use_relay:
         cmd.extend(get_relay_params())
 
+    # Append any passthrough args (unrecognized by this CLI) directly to the command
+    if passthrough_args:
+        cmd.extend(passthrough_args)
+
     logger.info(f"Running command: {' '.join(cmd)}")
 
     # Use Popen instead of run to control the subprocess
     sub_process = None
     try:
-        sub_process = subprocess.Popen(cmd)
+        # Start in a new session so we can signal the entire process group
+        sub_process = subprocess.Popen(cmd, start_new_session=True)
         # Wait for the subprocess to finish
         return_code = sub_process.wait()
         if return_code != 0:
@@ -84,24 +89,53 @@ def run_command(args):
             sys.exit(return_code)
     except KeyboardInterrupt:
         logger.info("Received interrupt signal, shutting down...")
+        # If another Ctrl-C arrives during cleanup, force-kill the whole group immediately
+        def _force_kill_handler(signum, frame):
+            try:
+                os.killpg(sub_process.pid, signal.SIGKILL)
+            except Exception:
+                try:
+                    sub_process.kill()
+                except Exception:
+                    pass
+            os._exit(130)
+        try:
+            signal.signal(signal.SIGINT, _force_kill_handler)
+        except Exception:
+            pass
         if sub_process is not None:
             try:
-                # Gracefully terminate the subprocess
-                sub_process.send_signal(signal.SIGINT)
+                # Gracefully terminate the entire process group
+                try:
+                    os.killpg(sub_process.pid, signal.SIGINT)
+                except Exception:
+                    # Fall back to signaling just the child process
+                    sub_process.send_signal(signal.SIGINT)
+
                 # Wait for the subprocess to exit gracefully
                 try:
                     sub_process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    # If the process does not exit in 5 seconds, force kill
-                    logger.info("Process didn't terminate gracefully, forcing kill...")
-                    sub_process.kill()
-                    sub_process.wait()
+                    logger.info("SIGINT timeout; sending SIGTERM to process group...")
+                    try:
+                        os.killpg(sub_process.pid, signal.SIGTERM)
+                    except Exception:
+                        sub_process.terminate()
+                    try:
+                        sub_process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        logger.info("SIGTERM timeout; forcing SIGKILL on process group...")
+                        try:
+                            os.killpg(sub_process.pid, signal.SIGKILL)
+                        except Exception:
+                            sub_process.kill()
+                        sub_process.wait()
             except Exception as e:
                 logger.error(f"Failed to terminate subprocess: {e}")
         sys.exit(0)
 
 
-def join_command(args):
+def join_command(args, passthrough_args: list[str] | None = None):
     """Join a distributed cluster (equivalent to scripts/join.sh)."""
     check_python_version()
 
@@ -145,13 +179,18 @@ def join_command(args):
         logger.info("Using public relay servers")
         cmd.extend(get_relay_params())
 
+    # Append any passthrough args (unrecognized by this CLI) directly to the command
+    if passthrough_args:
+        cmd.extend(passthrough_args)
+
     logger.info(f"Running command: {' '.join(cmd)}")
     logger.info(f"Scheduler address: {args.scheduler_addr}")
 
     # Use Popen instead of run to control the subprocess
     sub_process = None
     try:
-        sub_process = subprocess.Popen(cmd, env=env)
+        # Start in a new session so we can signal the entire process group
+        sub_process = subprocess.Popen(cmd, env=env, start_new_session=True)
         # Wait for the subprocess to finish
         return_code = sub_process.wait()
         if return_code != 0:
@@ -159,21 +198,50 @@ def join_command(args):
             sys.exit(return_code)
     except KeyboardInterrupt:
         logger.info("Received interrupt signal, shutting down...")
+        # If another Ctrl-C arrives during cleanup, force-kill the whole group immediately
+        def _force_kill_handler(signum, frame):
+            try:
+                os.killpg(sub_process.pid, signal.SIGKILL)
+            except Exception:
+                try:
+                    sub_process.kill()
+                except Exception:
+                    pass
+            os._exit(130)
+        try:
+            signal.signal(signal.SIGINT, _force_kill_handler)
+        except Exception:
+            pass
         if sub_process is not None:
             try:
-                logger.info("Terminating subprocess...")
-                # Gracefully terminate the subprocess
-                sub_process.send_signal(signal.SIGINT)
-                logger.info("Subprocess terminated, waiting for exit...")
+                logger.info("Terminating subprocess group...")
+                # Gracefully terminate the entire process group
+                try:
+                    os.killpg(sub_process.pid, signal.SIGINT)
+                except Exception:
+                    # Fall back to signaling just the child process
+                    sub_process.send_signal(signal.SIGINT)
+
+                logger.info("Waiting for subprocess to exit...")
                 # Wait for the subprocess to exit gracefully
                 try:
                     sub_process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    # If the process does not exit in 5 seconds, force kill
-                    logger.info("Process didn't terminate gracefully, forcing kill...")
-                    sub_process.kill()
-                    sub_process.wait()
-                logger.info("Subprocess exited gracefully.")
+                    logger.info("SIGINT timeout; sending SIGTERM to process group...")
+                    try:
+                        os.killpg(sub_process.pid, signal.SIGTERM)
+                    except Exception:
+                        sub_process.terminate()
+                    try:
+                        sub_process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        logger.info("SIGTERM timeout; forcing SIGKILL on process group...")
+                        try:
+                            os.killpg(sub_process.pid, signal.SIGKILL)
+                        except Exception:
+                            sub_process.kill()
+                        sub_process.wait()
+                logger.info("Subprocess exited.")
             except Exception as e:
                 logger.error(f"Failed to terminate subprocess: {e}")
         else:
@@ -224,16 +292,17 @@ Examples:
         "-r", "--use-relay", action="store_true", help="Use public relay servers"
     )
 
-    args = parser.parse_args()
+    # Accept unknown args and pass them through to the underlying python command
+    args, passthrough_args = parser.parse_known_args()
 
     if not args.command:
         parser.print_help()
         sys.exit(1)
 
     if args.command == "run":
-        run_command(args)
+        run_command(args, passthrough_args)
     elif args.command == "join":
-        join_command(args)
+        join_command(args, passthrough_args)
     else:
         parser.print_help()
         sys.exit(1)
