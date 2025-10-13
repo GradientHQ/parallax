@@ -66,12 +66,12 @@ export const ChatInput: FC = () => {
                 <Button
                   size='small'
                   color='primary'
-                  disabled={clusterStatus !== 'available'}
-                  loading={status === 'opened'}
+                  disabled={clusterStatus !== 'available' || status === 'opened'}
+                  // loading={status === 'opened'}
                   onClick={() => {
-                    if (status === 'opened') {
+                    if (status === 'generating') {
                       stop();
-                    } else if (status === 'closed') {
+                    } else if (status === 'closed' || status === 'error') {
                       generate();
                     }
                   }}

@@ -70,15 +70,27 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
 
   const [input, setInput] = useState<string>('');
 
-  const [status, setStatus] = useState<ChatStatus>('closed');
+  const [status, _setStatus] = useState<ChatStatus>('closed');
+  const setStatus = useRefCallback<typeof _setStatus>((value) => {
+    _setStatus((prev) => {
+      const next = typeof value === 'function' ? value(prev) : value;
+      if (next !== prev) {
+        debugLog('setStatus', 'status', next);
+      }
+      return next;
+    });
+  });
+
   const [messages, setMessages] = useState<readonly ChatMessage[]>([]);
 
   const sse = useConst(() =>
     createSSE({
       onOpen: () => {
+        debugLog('SSE OPEN');
         setStatus('opened');
       },
       onClose: () => {
+        debugLog('SSE CLOSE');
         setMessages((prev) => {
           const lastMessage = prev[prev.length - 1];
           const { id, raw, thinking, content } = lastMessage;
@@ -98,6 +110,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
         setStatus('closed');
       },
       onError: (error) => {
+        debugLog('SSE ERROR', error);
         // Set last message to done
         setMessages((prev) => {
           const lastMessage = prev[prev.length - 1];
@@ -250,19 +263,19 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
   });
 
   const stop = useRefCallback<ChatActions['stop']>(() => {
-    if (status !== 'opened') {
+    debugLog('stop', 'status', status);
+    if (status === 'closed' || status === 'error') {
       return;
     }
-    debugLog('stop');
     sse.disconnect();
   });
 
   const clear = useRefCallback<ChatActions['clear']>(() => {
+    debugLog('clear', 'status', status);
     stop();
-    if (status === 'opened') {
+    if (status === 'opened' || status === 'generating') {
       return;
     }
-    debugLog('clear');
     setMessages([]);
   });
 
@@ -325,6 +338,9 @@ const createSSE = (options: SSEOptions) => {
   const connect = (model: string, messages: readonly RequestMessage[]) => {
     abortController = new AbortController();
     const url = `${API_BASE_URL}/v1/chat/completions`;
+
+    onOpen?.();
+
     fetch(url, {
       method: 'POST',
       body: JSON.stringify({
@@ -355,8 +371,6 @@ const createSSE = (options: SSEOptions) => {
           onError?.(new Error(`[SSE] Failed to get reader`));
           return;
         }
-
-        onOpen?.();
 
         let buffer = '';
 
