@@ -180,7 +180,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
               let thinking = '';
               let content = '';
               const modelLowerCase = model.toLowerCase();
-              if (modelLowerCase.includes('gpt')) {
+              if (modelLowerCase.includes('gpt-oss')) {
                 ({ analysis: thinking, final: content } = parseGenerationGpt(
                   lastMessage.raw || '',
                 ));
