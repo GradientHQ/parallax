@@ -160,9 +160,14 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
 
       <ListItemText>
         {(node && (
+          <Stack>
             <Typography variant='body1' sx={{ fontWeight: 500 }}>
               {gpuName} {gpuMemory}GB
             </Typography>
+            <Typography variant='caption' color='text.disabled'>
+              Rancho Cordova, United States
+            </Typography>
+          </Stack>
         )) || <Skeleton width='8rem' height='1.25rem' />}
         {/* {(node && (
           <Typography
