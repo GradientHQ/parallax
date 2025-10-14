@@ -14,7 +14,7 @@ import {
   List as MuiList,
   ListItem as MuiListItem,
   ListItemIcon as MuiListItemIcon,
-  ListItemText,
+  ListItemText as MuiListItemText,
   MenuList,
   Paper,
   Skeleton,
@@ -24,6 +24,8 @@ import {
   Stack,
   Box,
   Divider,
+  type ListProps,
+  type StackProps,
 } from '@mui/material';
 import { useChat, useCluster, type NodeInfo, type NodeStatus } from '../../services';
 
@@ -33,7 +35,8 @@ const NodeListRoot = styled(Stack)(({ theme }) => {
     position: 'relative',
     flex: 1,
     gap: spacing(1.5),
-    overflow: 'hidden',
+    overflowX: 'hidden',
+    overflowY: 'auto',
   };
 });
 
@@ -42,7 +45,6 @@ const List = styled(MuiList)<{ variant: NodeListVariant }>(({ theme, variant }) 
   return {
     // menu no need gap, use dash line to separate nodes
     gap: spacing(variant === 'list' ? 1.5 : 0),
-    overflowY: 'auto',
   };
 });
 
@@ -53,7 +55,7 @@ const ListItem = styled(MuiListItem)(({ theme }) => {
     gap: spacing(1),
     backgroundColor: 'transparent',
     padding: spacing(2),
-    overflow: 'hidden',
+    overflow: 'visible',
   };
 }) as typeof MuiListItem;
 
@@ -68,6 +70,14 @@ const ListItemIcon = styled(MuiListItemIcon)(({ theme }) => {
     justifyContent: 'center',
   };
 }) as typeof MuiListItemIcon;
+
+const ListItemText = styled(MuiListItemText)(({ theme }) => {
+  return {
+    position: 'relative',
+    display: 'block',
+    height: '100%',
+  };
+}) as typeof MuiListItemText;
 
 const ListItemStatus = styled(motion.div)<{ variant: NodeListVariant }>(({ theme, variant }) => {
   return {
@@ -101,7 +111,7 @@ const DashRoot = styled(Box)(({ theme }) => {
   return {
     position: 'relative',
     width: '1.5rem',
-    height: '2.75rem', // For dash array last position, must to be minus 0.25rem(4px)
+    height: '3.25rem', // For dash array last position, must to be minus 0.25rem(4px)
     overflow: 'hidden',
   };
 });
@@ -152,6 +162,7 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
       sx={{
         opacity,
         padding: variant === 'menu' ? 0 : undefined,
+        height: variant === 'menu' ? '2.5rem' : undefined,
       }}
     >
       <ListItemIcon>
@@ -160,7 +171,19 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
 
       <ListItemText>
         {(node && (
-          <Stack>
+          <Stack
+            sx={
+              variant === 'menu' ?
+                {
+                  position: 'absolute',
+                  top: '50%',
+                  left: 0,
+                  right: 0,
+                  transform: 'translateY(-50%)',
+                }
+              : undefined
+            }
+          >
             <Typography variant='body1' sx={{ fontWeight: 500 }}>
               {gpuName} {gpuMemory}GB
             </Typography>
@@ -209,7 +232,7 @@ export interface NodeListProps {
   variant?: NodeListVariant;
 }
 
-export const NodeList: FC<NodeListProps> = ({ variant = 'list' }) => {
+export const NodeList: FC<NodeListProps & StackProps> = ({ variant = 'list', ...rest }) => {
   const [
     {
       clusterInfo: { initNodesNumber },
@@ -222,13 +245,22 @@ export const NodeList: FC<NodeListProps> = ({ variant = 'list' }) => {
   // const nodesNumber = 0;
 
   return (
-    <NodeListRoot>
+    <NodeListRoot {...rest}>
       <List variant={variant}>
         {nodeInfoList.map((node, index) => [
           variant === 'menu' && index > 0 && (
             <Dash key={`${node.id}-dash`} animate={chatStatus === 'generating'} />
           ),
           <Node key={node.id} variant={variant} node={node} />,
+
+          // <Dash key={`${node.id}-dash-mock-0`} animate={chatStatus === 'generating'} />,
+          // <Node key={`${node.id}-mock-0`} variant={variant} node={node} />,
+
+          // <Dash key={`${node.id}-dash-mock-1`} animate={chatStatus === 'generating'} />,
+          // <Node key={`${node.id}-mock-1`} variant={variant} node={node} />,
+
+          // <Dash key={`${node.id}-dash-mock-2`} animate={chatStatus === 'generating'} />,
+          // <Node key={`${node.id}-mock-2`} variant={variant} node={node} />,
         ])}
         {initNodesNumber > nodesNumber
           && Array.from({ length: initNodesNumber - nodesNumber }).map((_, index) => (
