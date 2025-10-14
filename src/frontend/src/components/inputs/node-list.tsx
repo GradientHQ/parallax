@@ -50,6 +50,8 @@ const ListItem = styled(MuiListItem)(({ theme }) => {
   const { spacing } = theme;
   return {
     flex: 'none',
+    gap: spacing(1),
+    backgroundColor: 'transparent',
     padding: spacing(2),
     overflow: 'hidden',
   };
@@ -57,10 +59,10 @@ const ListItem = styled(MuiListItem)(({ theme }) => {
 
 const ListItemIcon = styled(MuiListItemIcon)(({ theme }) => {
   return {
+    color: 'inherit',
     fontSize: '1.5rem',
-    width: '2.75rem',
-    height: '2.75rem',
-    borderRadius: '50%',
+    width: '1em',
+    height: '1em',
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -99,36 +101,30 @@ const DashRoot = styled(Box)(({ theme }) => {
   return {
     position: 'relative',
     width: '1.5rem',
-    height: '1.75rem',
+    height: '2.75rem', // For dash array last position, must to be minus 0.25rem(4px)
     overflow: 'hidden',
   };
 });
 
 const Dash: FC<{ animate?: boolean }> = ({ animate }) => {
+  const width = 2;
+  const height = 256;
   return (
     <DashRoot>
       <svg
         style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)' }}
-        width='1'
-        height='64'
-        viewBox='0 0 1 64'
+        width={width}
+        height={height}
+        viewBox={`0 0 2 ${height}`}
         fill='none'
       >
-        <line
-          x1='0.5'
-          y1='0'
-          x2='0.5'
-          y2='64'
-          stroke='#9B9B9B'
-          stroke-width='1'
-          stroke-dasharray='4 4'
-        >
+        <line x1='1' y1='0' x2='1' y2={height} stroke='#9B9B9B' strokeWidth='2' strokeDasharray='4'>
           {animate && (
             <animate
               attributeName='stroke-dashoffset'
-              from='100'
+              from={height}
               to='0'
-              dur='3s'
+              dur={`${height / 32}s`}
               repeatCount='indefinite'
             ></animate>
           )}
@@ -156,17 +152,17 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
       sx={{
         opacity,
         padding: variant === 'menu' ? 0 : undefined,
-        backgroundColor: 'transparent',
-        gap: 1,
       }}
     >
-      <IconDevices2 size={'1.5rem'} />
+      <ListItemIcon>
+        <IconDevices2 />
+      </ListItemIcon>
 
       <ListItemText>
         {(node && (
-          <Typography variant='body1' sx={{ fontWeight: 500 }}>
-            {gpuName} {gpuMemory}GB
-          </Typography>
+            <Typography variant='body1' sx={{ fontWeight: 500 }}>
+              {gpuName} {gpuMemory}GB
+            </Typography>
         )) || <Skeleton width='8rem' height='1.25rem' />}
         {/* {(node && (
           <Typography
@@ -228,6 +224,12 @@ export const NodeList: FC<NodeListProps> = ({ variant = 'list' }) => {
             <Dash key={`${node.id}-dash`} animate={chatStatus === 'generating'} />
           ),
           <Node key={node.id} variant={variant} node={node} />,
+          <Dash key={`${node.id}-dash-mock-0`} animate={chatStatus === 'generating'} />,
+          <Node key={`${node.id}-mock-0`} variant={variant} node={node} />,
+          <Dash key={`${node.id}-dash-mock-1`} animate={chatStatus === 'generating'} />,
+          <Node key={`${node.id}-mock-1`} variant={variant} node={node} />,
+          <Dash key={`${node.id}-dash-mock-2`} animate={chatStatus === 'generating'} />,
+          <Node key={`${node.id}-mock-2`} variant={variant} node={node} />,
         ])}
         {initNodesNumber > nodesNumber
           && Array.from({ length: initNodesNumber - nodesNumber }).map((_, index) => (
