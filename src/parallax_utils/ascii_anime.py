@@ -1,7 +1,6 @@
 import json
 import math
 import os
-import time
 
 
 class HexColorPrinter:
@@ -79,7 +78,7 @@ def process_context_color_run(content, colors):
             position_str = str(column) + "," + str(row)
             hex_color = colors.get(position_str, None)
             if text in ("▝", "#", ".") and hex_color == "#000000":
-                    text = " "
+                text = " "
             elif row == 11 and text not in ("▝", "#", " "):
                 color = HexColorPrinter.WHITE
                 processed_row += color
@@ -133,7 +132,7 @@ def display_ascii_animation_run(animation_data):
     if not frames:
         print("No animation frames found in the JSON data.")
         return
-    
+
     if len(frames) > 0:
         last_frame = frames[-1]
         content = last_frame.get("content", None)
