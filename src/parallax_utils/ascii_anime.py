@@ -76,15 +76,14 @@ def process_context_color_run(content, colors):
     for row, row_str in enumerate(content):
         processed_row = ""
         for column, text in enumerate(row_str):
-            if text in (" ", "#"):
-                processed_row += text
-                continue
             position_str = str(column) + "," + str(row)
-            if row == 11 and text not in ("▝", "#", " "):
+            hex_color = colors.get(position_str, None)
+            if text in ("▝", "#", ".") and hex_color == "#000000":
+                    text = " "
+            elif row == 11 and text not in ("▝", "#", " "):
                 color = HexColorPrinter.WHITE
                 processed_row += color
             else:
-                hex_color = colors.get(position_str, None)
                 if hex_color:
                     color = HexColorPrinter.find_closest_color(hex_color)
                     processed_row += color
@@ -96,30 +95,28 @@ def process_context_color_run(content, colors):
 
 def process_context_color_join(content, colors, model_name):
     res = []
-    if len(model_name) > 22:
-        model_name = model_name[:22]
+    if len(model_name) > 30:
+        model_name = model_name[:30]
     name_len = len(model_name)
     for row, row_str in enumerate(content):
         processed_row = ""
         for column, text in enumerate(row_str):
-            if text in (" ", "#"):
-                processed_row += text
-                continue
-            if row == 5 and 10 < column < 32:
-                pos = column - 11
+            position_str = str(column) + "," + str(row)
+            hex_color = colors.get(position_str, None)
+            if text in ("▝", "#", ".") and hex_color == "#000000":
+                if hex_color == "#000000":
+                    text = " "
+            elif row == 7 and 9 <= column <= 38:
+                pos = column - 9
                 if pos < name_len:
                     text = model_name[pos]
                     processed_row += HexColorPrinter.RESET
                 else:
                     text = " "
-                    position_str = str(column) + "," + str(row)
-                    hex_color = colors.get(position_str, None)
                     if hex_color:
                         color = HexColorPrinter.find_closest_color(hex_color)
                         processed_row += color
             else:
-                position_str = str(column) + "," + str(row)
-                hex_color = colors.get(position_str, None)
                 if hex_color:
                     color = HexColorPrinter.find_closest_color(hex_color)
                     processed_row += color
@@ -136,20 +133,33 @@ def display_ascii_animation_run(animation_data):
     if not frames:
         print("No animation frames found in the JSON data.")
         return
-
-    for frame_data in frames:
-        content = frame_data.get("content", None)
-        delay = frame_data.get("duration", 30) / 1000.0
-        colors_data = frame_data.get("colors", None)
+    
+    if len(frames) > 0:
+        last_frame = frames[-1]
+        content = last_frame.get("content", None)
+        colors_data = last_frame.get("colors", None)
         foreground = colors_data.get("foreground", None)
         colors = handle_colors_data(foreground)
 
         if content:
             res = process_context_color_run(content, colors)
-            res = "\n".join(res).replace("#", " ")
+            res = "\n".join(res)
             clear_screen()
             print(res)
-            time.sleep(delay)
+
+    # for frame_data in frames:
+    #     content = frame_data.get("content", None)
+    #     delay = frame_data.get("duration", 30) / 1000.0
+    #     colors_data = frame_data.get("colors", None)
+    #     foreground = colors_data.get("foreground", None)
+    #     colors = handle_colors_data(foreground)
+
+    #     if content:
+    #         res = process_context_color_run(content, colors)
+    #         res = "\n".join(res)
+    #         clear_screen()
+    #         print(res)
+    #         time.sleep(delay)
 
 
 def display_ascii_animation_join(animation_data, model_name):
@@ -160,19 +170,32 @@ def display_ascii_animation_join(animation_data, model_name):
         print("No animation frames found in the JSON data.")
         return
 
-    for frame_data in frames:
-        content = frame_data.get("content", None)
-        delay = frame_data.get("duration", 30) / 1000.0
-        colors_data = frame_data.get("colors", None)
+    if len(frames) > 0:
+        last_frame = frames[-1]
+        content = last_frame.get("content", None)
+        colors_data = last_frame.get("colors", None)
         foreground = colors_data.get("foreground", None)
         colors = handle_colors_data(foreground)
 
         if content:
             res = process_context_color_join(content, colors, model_name)
-            res = "\n".join(res).replace("#", " ")
+            res = "\n".join(res)
             clear_screen()
             print(res)
-            time.sleep(delay)
+
+    # for frame_data in frames:
+    #     content = frame_data.get("content", None)
+    #     delay = frame_data.get("duration", 30) / 1000.0
+    #     colors_data = frame_data.get("colors", None)
+    #     foreground = colors_data.get("foreground", None)
+    #     colors = handle_colors_data(foreground)
+
+    #     if content:
+    #         res = process_context_color_join(content, colors, model_name)
+    #         res = "\n".join(res)
+    #         clear_screen()
+    #         print(res)
+    #         time.sleep(delay)
 
 
 def display_parallax_run():
