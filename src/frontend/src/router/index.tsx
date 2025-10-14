@@ -2,6 +2,7 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { useLocation, useRoutes, Navigate, useNavigate } from 'react-router-dom';
 import { useCluster } from '../services';
+import { useConstCallback, useRefCallback } from '../hooks';
 
 const PATH_SETUP = '/setup';
 const PATH_JOIN = '/join';
@@ -26,20 +27,23 @@ export const Router = () => {
   ] = useCluster();
 
   useEffect(() => {
+    const lazyNavigate = (path: string) => {
+      const timer = setTimeout(() => {
+        debugLog('navigate to', path);
+        navigate(path);
+      }, 300);
+      return () => clearTimeout(timer);
+    };
+
     if (pathname === '/') {
-      navigate(PATH_SETUP);
-      return;
+      return lazyNavigate(PATH_SETUP);
     }
     debugLog('pathname', pathname, 'cluster status', status);
     if (status === 'idle' && pathname.startsWith(PATH_CHAT)) {
-      debugLog('navigate to /setup');
-      navigate(PATH_SETUP);
-      return;
+      return lazyNavigate(PATH_SETUP);
     }
     if (status === 'available' && !pathname.startsWith(PATH_CHAT)) {
-      debugLog('navigate to /chat');
-      navigate(PATH_CHAT);
-      return;
+      return lazyNavigate(PATH_CHAT);
     }
   }, [navigate, pathname, status]);
 
