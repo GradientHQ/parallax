@@ -222,16 +222,17 @@ class Executor:
             self.kv_cache_manager.max_num_tokens
 
         # Scheduler: derive final max_batch_size with KV constraints
-        max_batch_size = compute_max_batch_size(
-            requested_max_batch_size=max_batch_size,
-            max_sequence_len=max_sequence_length,
-            device=self.device,
-            kv_cache_memory_fraction=kv_cache_memory_fraction,
-            num_shard_layers=self.num_shard_layers,
-            num_key_value_heads=self.num_key_value_heads,
-            head_dim=self.head_dim,
-            dtype=self.dtype,
-        )
+        # Remove this for now as it's not working on gpu devices
+        # max_batch_size = compute_max_batch_size(
+        #     requested_max_batch_size=max_batch_size,
+        #     max_sequence_len=max_sequence_length,
+        #     device=self.device,
+        #     kv_cache_memory_fraction=kv_cache_memory_fraction,
+        #     num_shard_layers=self.num_shard_layers,
+        #     num_key_value_heads=self.num_key_value_heads,
+        #     head_dim=self.head_dim,
+        #     dtype=self.dtype,
+        # )
 
         self.scheduler = Scheduler(
             max_batch_size=max_batch_size,
