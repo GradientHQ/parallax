@@ -59,15 +59,16 @@ export const ChatMessages: FC = () => {
     }, 250);
   };
 
-  return (
+  const nodeStream = (
     <Stack
+      key='stream'
       ref={refContainer}
       sx={{
-        position: 'relative',
-        flex: 1,
+        width: '100%',
+        height: '100%',
+
         overflowX: 'hidden',
         overflowY: 'auto',
-        gap: 4,
         '&::-webkit-scrollbar': { display: 'none' },
         scrollbarWidth: 'none',
         msOverflowStyle: 'none',
@@ -87,8 +88,21 @@ export const ChatMessages: FC = () => {
       {status === 'opened' && <DotPulse size='large' />}
 
       <Box ref={refBottom} sx={{ width: '100%', height: 0 }} />
+    </Stack>
+  );
 
+  return (
+    <Box
+      sx={{
+        position: 'relative',
+        gap: 4,
+        flex: 1,
+        overflow: 'hidden',
+      }}
+    >
+      {nodeStream}
       <IconButton
+        key='scroll-to-bottom'
         onClick={scrollToBottom}
         size='small'
         aria-label='Scroll to bottom'
@@ -109,7 +123,7 @@ export const ChatMessages: FC = () => {
       >
         <IconArrowDown />
       </IconButton>
-    </Stack>
+    </Box>
   );
 };
 
