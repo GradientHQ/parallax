@@ -229,12 +229,6 @@ export const NodeList: FC<NodeListProps> = ({ variant = 'list' }) => {
             <Dash key={`${node.id}-dash`} animate={chatStatus === 'generating'} />
           ),
           <Node key={node.id} variant={variant} node={node} />,
-          <Dash key={`${node.id}-dash-mock-0`} animate={chatStatus === 'generating'} />,
-          <Node key={`${node.id}-mock-0`} variant={variant} node={node} />,
-          <Dash key={`${node.id}-dash-mock-1`} animate={chatStatus === 'generating'} />,
-          <Node key={`${node.id}-mock-1`} variant={variant} node={node} />,
-          <Dash key={`${node.id}-dash-mock-2`} animate={chatStatus === 'generating'} />,
-          <Node key={`${node.id}-mock-2`} variant={variant} node={node} />,
         ])}
         {initNodesNumber > nodesNumber
           && Array.from({ length: initNodesNumber - nodesNumber }).map((_, index) => (
