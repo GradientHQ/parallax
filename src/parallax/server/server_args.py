@@ -103,7 +103,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-batch-size",
         type=int,
-        default=None,
+        default=8,
         help="Maximum batch size for processing requests",
     )
 

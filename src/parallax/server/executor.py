@@ -57,7 +57,6 @@ from parallax.utils.utils import (
     pad_prefix_caches,
 )
 from parallax_utils.logging_config import get_logger
-from parallax_utils.utils import compute_max_batch_size
 
 logger = get_logger(__name__)
 
@@ -73,7 +72,7 @@ class Executor:
         end_layer: int,
         dtype: str = "float16",
         # Scheduler Configs
-        max_batch_size: Optional[int] = None,
+        max_batch_size: Optional[int] = 8,
         max_sequence_length: Optional[int] = None,
         max_tokens_in_kv_pool: Optional[int] = None,
         # Controlling perfill / decode ratio
