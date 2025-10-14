@@ -25,7 +25,7 @@ import {
   Box,
   Divider,
 } from '@mui/material';
-import { useCluster, type NodeInfo, type NodeStatus } from '../../services';
+import { useChat, useCluster, type NodeInfo, type NodeStatus } from '../../services';
 
 const NodeListRoot = styled(Stack)(({ theme }) => {
   const { spacing } = theme;
@@ -40,7 +40,8 @@ const NodeListRoot = styled(Stack)(({ theme }) => {
 const List = styled(MuiList)<{ variant: NodeListVariant }>(({ theme, variant }) => {
   const { spacing } = theme;
   return {
-    gap: spacing(variant === 'list' ? 1.5 : 3.5),
+    // menu no need gap, use dash line to separate nodes
+    gap: spacing(variant === 'list' ? 1.5 : 0),
     overflowY: 'auto',
   };
 });
@@ -93,6 +94,50 @@ const STATUS_ICON_MAP: Record<
   failed: IconX,
 };
 
+const DashRoot = styled(Box)(({ theme }) => {
+  const { spacing } = theme;
+  return {
+    position: 'relative',
+    width: '1.5rem',
+    height: '1.75rem',
+    overflow: 'hidden',
+  };
+});
+
+const Dash: FC<{ animate?: boolean }> = ({ animate }) => {
+  return (
+    <DashRoot>
+      <svg
+        style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)' }}
+        width='1'
+        height='64'
+        viewBox='0 0 1 64'
+        fill='none'
+      >
+        <line
+          x1='0.5'
+          y1='0'
+          x2='0.5'
+          y2='64'
+          stroke='#9B9B9B'
+          stroke-width='1'
+          stroke-dasharray='4 4'
+        >
+          {animate && (
+            <animate
+              attributeName='stroke-dashoffset'
+              from='100'
+              to='0'
+              dur='3s'
+              repeatCount='indefinite'
+            ></animate>
+          )}
+        </line>
+      </svg>
+    </DashRoot>
+  );
+};
+
 const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node }) => {
   const { id, status, gpuName, gpuMemory } = node || { status: 'waiting' };
   const { palette } = useTheme();
@@ -115,7 +160,7 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
         gap: 1,
       }}
     >
-      <IconDevices2 size={'1.5rem'}/>
+      <IconDevices2 size={'1.5rem'} />
 
       <ListItemText>
         {(node && (
@@ -150,7 +195,7 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
           variant={variant}
         >
           {variant === 'list' && <IconStatus size={18} />}
-          {variant === 'menu' && <IconCircleFilled size={10}/>}
+          {variant === 'menu' && <IconCircleFilled size={10} />}
         </ListItemStatus>
       )}
     </ListItem>
@@ -170,28 +215,20 @@ export const NodeList: FC<NodeListProps> = ({ variant = 'list' }) => {
       nodeInfoList,
     },
   ] = useCluster();
+  const [{ status: chatStatus }] = useChat();
 
   const { length: nodesNumber } = nodeInfoList;
   // const nodesNumber = 0;
 
   return (
     <NodeListRoot>
-      {variant === 'menu' && (
-        <Box
-          sx={{
-            position: 'absolute',
-            top: '1.375rem',
-            bottom: '1.375rem',
-            left: '0.75rem',
-            borderLeft: '1px dashed',
-            borderColor: '#9B9B9BFF',
-          }}
-        />
-      )}
       <List variant={variant}>
-        {nodeInfoList.map((node) => (
-          <Node key={node.id} variant={variant} node={node} />
-        ))}
+        {nodeInfoList.map((node, index) => [
+          variant === 'menu' && index > 0 && (
+            <Dash key={`${node.id}-dash`} animate={chatStatus === 'generating'} />
+          ),
+          <Node key={node.id} variant={variant} node={node} />,
+        ])}
         {initNodesNumber > nodesNumber
           && Array.from({ length: initNodesNumber - nodesNumber }).map((_, index) => (
             <Node key={index} variant={variant} />
