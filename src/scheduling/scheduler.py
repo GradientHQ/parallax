@@ -129,10 +129,15 @@ class Scheduler:
         logger.debug("Bootstrapping layer allocator")
         success = self.layer_allocator.global_allocation()
         if not success:
-            logger.warning("Bootstrapping failed to produce a full pipeline")
+            logger.warning(
+                f"Bootstrapping failed to produce a full pipeline during global_allocation(). "
+                f"Available nodes: {len(self.nodes)}, Required layers: {self.num_layers}. "
+                f"Node resources: {[(n.node_id, f'{n.hardware.memory_gb:.1f}GB', n.hardware.gpu_name) for n in self.nodes]}"
+            )
             return False
         assignments = self.list_node_allocations()
-        logger.debug(f"Layer allocator assignments: {assignments}")
+        # logger.debug(f"Layer allocator assignments: {assignments}")
+        logger.info(f"Layer allocator assignments: {assignments}")
         # Optional warm-up to find turning points and truncate node ranges
         if self.request_warm_up_for_reshard > 0:
             self._run_warmup_and_truncate()
@@ -140,7 +145,19 @@ class Scheduler:
             logger.debug(f"Layer allocator assignments after turn-point warm-up: {assignments}")
 
         if not self.layer_allocator.has_full_pipeline():
-            logger.warning("Bootstrapping failed to produce a full pipeline")
+            assignments = self.list_node_allocations()
+            # Identify which layers are missing coverage
+            covered_layers = set()
+            for node_id, start, end in assignments:
+                covered_layers.update(range(start, end))
+            missing_layers = sorted(set(range(self.num_layers)) - covered_layers)
+
+            logger.warning(
+                f"Bootstrapping failed to produce a full pipeline after warm-up truncation. "
+                f"Total layers required: {self.num_layers}, Covered layers: {len(covered_layers)}, "
+                f"Missing layers: {missing_layers if missing_layers else 'none (gap in coverage)'}. "
+                f"Current assignments: {assignments}"
+            )
             return False
         self._bootstrapped = True
         self._bootstrapped_event.set()
