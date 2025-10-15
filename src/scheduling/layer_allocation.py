@@ -823,7 +823,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
             )
             return False
         else:
-            logger.info(
+            logger.debug(
                 "[DP] Sufficient resources: nodes=%d, layers=%d, total_cap=%d",
                 num_nodes,
                 num_layers,
