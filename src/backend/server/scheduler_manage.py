@@ -116,6 +116,7 @@ class SchedulerManage:
             "status": NODE_STATUS_AVAILABLE if node.is_active else NODE_STATUS_WAITING,
             "gpu_name": node.hardware.gpu_name,
             "gpu_memory": node.hardware.memory_gb,
+            "location": node.hardware.location,
         }
 
     def _start_scheduler(self, model_name, init_nodes_num):
