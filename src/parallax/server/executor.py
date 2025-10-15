@@ -316,6 +316,26 @@ class Executor:
                     forward_request = forward_pb2.ForwardRequest()
                     forward_request.ParseFromString(recv_req[1])
                     recv_req = proto_to_request(forward_request, self.device)
+
+                    # Convert hidden_states dtype if necessary
+                    if recv_req is not None and len(recv_req) > 0:
+                        for req in recv_req:
+                            if req.hidden_states is not None:
+                                if self.device == "cuda":
+                                    # For CUDA (PyTorch tensors)
+                                    if req.hidden_states.dtype != self.dtype:
+                                        logger.debug(
+                                            f"Converting hidden_states dtype from {req.hidden_states.dtype} to {self.dtype} for request {req.request_id}"
+                                        )
+                                        req.hidden_states = req.hidden_states.to(self.dtype)
+                                elif self.device == "mlx":
+                                    # For MLX tensors
+                                    if req.hidden_states.dtype != self.dtype:
+                                        logger.debug(
+                                            f"Converting hidden_states dtype from {req.hidden_states.dtype} to {self.dtype} for request {req.request_id}"
+                                        )
+                                        req.hidden_states = req.hidden_states.astype(self.dtype)
+
                     # Move current position for first peer
                     if self.is_first_peer:
                         for req in recv_req:
