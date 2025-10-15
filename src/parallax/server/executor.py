@@ -144,6 +144,10 @@ class Executor:
         self.start_layer = start_layer
         self.end_layer = end_layer
 
+        logger.info(
+            f"\n===========================\nExecutor layers: {self.start_layer} to {self.end_layer}\n======================="
+        )
+
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
         self.num_shard_layers = end_layer - start_layer
