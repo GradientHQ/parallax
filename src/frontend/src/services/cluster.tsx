@@ -54,6 +54,10 @@ export interface NodeInfo {
   readonly status: NodeStatus;
   readonly gpuName: string;
   readonly gpuMemory: number;
+
+  // GEO Info
+  readonly ip: string;
+  readonly location: string;
 }
 
 // Interface
@@ -162,11 +166,13 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
         setNodeInfoList((prev) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           let next = (node_list as any[]).map<NodeInfo>(
-            ({ node_id, status, gpu_name, gpu_memory }: any) => ({
+            ({ node_id, status, gpu_name, gpu_memory, location }: any) => ({
               id: node_id,
               status,
               gpuName: gpu_name,
               gpuMemory: gpu_memory,
+              ip: '0.0.0.0',
+              location: location || '',
             }),
           );
 

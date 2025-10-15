@@ -145,7 +145,7 @@ const Dash: FC<{ animate?: boolean }> = ({ animate }) => {
 };
 
 const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node }) => {
-  const { id, status, gpuName, gpuMemory } = node || { status: 'waiting' };
+  const { id, status, gpuName, gpuMemory, location } = node || { status: 'waiting' };
   const { palette } = useTheme();
   const { main, lighter } =
     status === 'waiting' ?
@@ -187,9 +187,18 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
             <Typography variant='body1' sx={{ fontWeight: 500 }}>
               {gpuName} {gpuMemory}GB
             </Typography>
-            {/* <Typography variant='caption' color='text.disabled'>
-              Rancho Cordova, United States
-            </Typography> */}
+            {location && (
+              <Typography
+                component='p'
+                variant='caption'
+                color='text.disabled'
+                overflow='hidden'
+                textOverflow='ellipsis'
+                whiteSpace='nowrap'
+              >
+                {location}
+              </Typography>
+            )}
           </Stack>
         )) || <Skeleton width='8rem' height='1.25rem' />}
         {/* {(node && (
