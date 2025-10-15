@@ -143,6 +143,7 @@ class Executor:
         self.finished_batch = []
         self.start_layer = start_layer
         self.end_layer = end_layer
+
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
         self.num_shard_layers = end_layer - start_layer
@@ -324,14 +325,14 @@ class Executor:
                                 if self.device == "cuda":
                                     # For CUDA (PyTorch tensors)
                                     if req.hidden_states.dtype != self.dtype:
-                                        logger.debug(
+                                        logger.info(
                                             f"Converting hidden_states dtype from {req.hidden_states.dtype} to {self.dtype} for request {req.request_id}"
                                         )
                                         req.hidden_states = req.hidden_states.to(self.dtype)
                                 elif self.device == "mlx":
                                     # For MLX tensors
                                     if req.hidden_states.dtype != self.dtype:
-                                        logger.debug(
+                                        logger.info(
                                             f"Converting hidden_states dtype from {req.hidden_states.dtype} to {self.dtype} for request {req.request_id}"
                                         )
                                         req.hidden_states = req.hidden_states.astype(self.dtype)
