@@ -166,14 +166,17 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
         setNodeInfoList((prev) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           let next = (node_list as any[]).map<NodeInfo>(
-            ({ node_id, status, gpu_name, gpu_memory, location }: any) => ({
-              id: node_id,
-              status,
-              gpuName: gpu_name,
-              gpuMemory: gpu_memory,
-              ip: '0.0.0.0',
-              location: location || '',
-            }),
+            ({ node_id, status, gpu_name, gpu_memory }: any) => {
+              const [gpuName, location] = gpu_name.split('-');
+              return {
+                id: node_id,
+                status,
+                gpuName,
+                gpuMemory: gpu_memory,
+                ip: '0.0.0.0',
+                location: location || '',
+              };
+            },
           );
 
           const prevOnlineNodes = prev.filter((preNode) =>
