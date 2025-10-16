@@ -102,12 +102,9 @@ class RequestHandler:
                     try:
                         iterator = iterate_in_threadpool(response)
                         async for chunk in iterator:
-                            logger.warning(
-                                f"request id: {request_id}, scheduler got chunk from node: {chunk}"
-                            )
                             yield chunk
                     finally:
-                        logger.warning(f"client disconnected for {request_id}")
+                        logger.debug(f"client disconnected for {request_id}")
                         response.cancel()
 
                 resp = StreamingResponse(
