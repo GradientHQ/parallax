@@ -1,6 +1,5 @@
 import json
 from typing import Dict
-import asyncio
 
 import aiohttp
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -123,7 +122,7 @@ class RequestHandler:
                 logger.debug(f"Non-stream response completed for {request_id}")
                 # response is a JSON string; parse to Python object before returning
                 return JSONResponse(content=json.loads(response))
-        except Exception as e:  
+        except Exception as e:
             logger.exception(f"Error in _forward_request: {e}")
             return JSONResponse(
                 content={"error": "Internal server error"},
