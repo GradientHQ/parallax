@@ -344,7 +344,7 @@ class Executor:
                     recv_req = proto_to_abort_request(abort_request)
                     recv_reqs.extend(recv_req)
                 elif recv_req[0] == b"refit":
-                    refit_weight_path = recv_req[1].get("refit_weight_path", "")
+                    refit_weight_path = recv_req[1].decode("ascii")
                 else:
                     raise ValueError(f"Unknown request type: {recv_req[0]}")
                 # First peer is responsible for tokenization
@@ -1130,7 +1130,8 @@ class Executor:
 
             # 2. Ingest new requests from the RPC server
             incoming_requests, refit_weight_path = self.recv_requests_from_peer()
-            self.check_and_refit_weight(refit_weight_path)
+            if self.enable_weight_refit:
+                self.check_and_refit_weight(refit_weight_path)
             self._handle_input_requests(incoming_requests)
 
             # 3. Send finished batch to next peer
