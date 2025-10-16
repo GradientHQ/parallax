@@ -157,16 +157,17 @@ class TransformerConnectionHandler(ConnectionHandler):
             logger.exception(f"Error in rpc_abort: {e}")
         return forward_pb2.AbortResponse()
 
-    @rpc_method
-    def rpc_weight_refit(
+    def ipc_weight_refit(
         self,
         refit_weight_path: str,
     ):
         try:
             with self._recv_from_peer_lock:
-                self.recv_from_peer.send_pyobj({"refit_weight_path": refit_weight_path})
+                self.recv_from_peer.send_multipart(
+                    [b"refit", {"refit_weight_path": refit_weight_path}]
+                )
         except Exception as e:
-            logger.exception(f"Error in rpc_weight_refit: {e}")
+            logger.exception(f"Error in ipc_weight_refit: {e}")
 
     @rpc_stream_iter
     def chat_completion(
@@ -619,7 +620,7 @@ class GradientServer:
                 f.write_file(raw_data)
 
         # step4. send ipc message to update weight
-        self.rpc_weight_refit(weight_dir)
+        self.connection_handler.ipc_weight_refit(weight_dir)
         self.last_refit_time = time_stamp
 
     def start_node_announcer(self):

@@ -288,22 +288,19 @@ class Executor:
         if self.device == "cuda":
             from parallax.sglang.model_runner import refit_sgl_model
 
-            refit_sgl_model(refit_weight_path)
+            refit_sgl_model(self.model_runner, refit_weight_path)
         else:
             self.shard_loader.update_weight_from_disk(refit_weight_path)
 
-    def recv_requests_from_ipc(self) -> Tuple[List[Request], str]:
+    def recv_requests_from_http(self) -> List[Request]:
         """
         Receives requests from http frontend.
         Also receives refit requests for weight update.
         """
         recv_reqs = []
-        refit_weight_path = None
         while True:
             try:
                 raw_request = self.recv_from_ipc_socket.recv_pyobj(zmq.NOBLOCK)
-                # Check if this is a weight refit request
-                refit_weight_path = raw_request.get("weight_path", None)
 
                 # Check if this is an abort request
                 if isinstance(raw_request, dict) and raw_request.get("type") == "abort":
@@ -321,11 +318,12 @@ class Executor:
                 logger.exception(f"Error receiving http request: {e}")
         if recv_reqs:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
-        return recv_reqs, refit_weight_path
+        return recv_reqs
 
-    def recv_requests_from_peer(self) -> List[Request]:
+    def recv_requests_from_peer(self) -> Tuple[List[Request], str]:
         """Receives requests from the RPC server."""
         recv_reqs = []
+        refit_weight_path = ""
         while True:
             try:
                 recv_req = self.recv_from_peer_socket.recv_multipart(zmq.NOBLOCK)
@@ -345,6 +343,8 @@ class Executor:
                     abort_request.ParseFromString(recv_req[1])
                     recv_req = proto_to_abort_request(abort_request)
                     recv_reqs.extend(recv_req)
+                elif recv_req[0] == b"refit":
+                    refit_weight_path = recv_req[1].get("refit_weight_path", "")
                 else:
                     raise ValueError(f"Unknown request type: {recv_req[0]}")
                 # First peer is responsible for tokenization
@@ -361,7 +361,7 @@ class Executor:
                 logger.exception(f"Error receiving or deserializing request: {e}")
         if recv_reqs:
             logger.debug(f"Received {len(recv_reqs)} peer requests")
-        return recv_reqs
+        return recv_reqs, refit_weight_path
 
     def _prepare_cuda_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """
@@ -1125,12 +1125,12 @@ class Executor:
         while True:
             # 1. Ingest new requests from the http frontend
             if self.is_first_peer or self.enable_weight_refit:
-                http_requests, refit_weight_path = self.recv_requests_from_ipc()
-                self.check_and_refit_weight(refit_weight_path)
+                http_requests = self.recv_requests_from_http()
                 self._handle_input_requests(http_requests)
 
             # 2. Ingest new requests from the RPC server
-            incoming_requests = self.recv_requests_from_peer()
+            incoming_requests, refit_weight_path = self.recv_requests_from_peer()
+            self.check_and_refit_weight(refit_weight_path)
             self._handle_input_requests(incoming_requests)
 
             # 3. Send finished batch to next peer
