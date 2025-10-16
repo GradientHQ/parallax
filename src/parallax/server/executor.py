@@ -281,12 +281,13 @@ class Executor:
     def create_from_args(cls, args: argparse.Namespace):
         """Create executor from command line arguments."""
         return cls(**create_executor_config(args))
-    
+
     def check_and_refit_weight(self, refit_weight_path: str):
         if refit_weight_path is None:
             return
         if self.device == "cuda":
             from parallax.sglang.model_runner import refit_sgl_model
+
             refit_sgl_model(refit_weight_path)
         else:
             self.shard_loader.update_weight_from_disk(refit_weight_path)

@@ -156,7 +156,7 @@ class TransformerConnectionHandler(ConnectionHandler):
         except Exception as e:
             logger.exception(f"Error in rpc_abort: {e}")
         return forward_pb2.AbortResponse()
-    
+
     @rpc_method
     def rpc_weight_refit(
         self,
@@ -238,6 +238,7 @@ class GradientServer:
         self.notify_url = notify_url
         self.model_name = model_name
         self.enable_weight_refit = enable_weight_refit
+        self.last_refit_time = 0
         self.max_batch_size = max_batch_size
         self.max_sequence_length = max_sequence_length
         self.prefix_id = f"{dht_prefix}_announce"
@@ -567,7 +568,7 @@ class GradientServer:
         index_map = message.get("index_map", None)
         if time_stamp is None or cid is None:
             return
-        if self.last_refit_time is not None and self.last_refit_time >= time_stamp:
+        if self.last_refit_time >= time_stamp:
             # Weight already updated
             return
 
@@ -598,13 +599,13 @@ class GradientServer:
                 download_cid_set.add(index_map.get(key))
 
         # step3. save weight to disk
-        weight_dir = os.path.join("/tmp", time_stamp)
+        weight_dir = os.path.join("/tmp", str(time_stamp))
         while download_cid_set:
             cid = download_cid_set.pop()
             try:
                 logger.info(f"Start downloading refit weight {cid}")
                 raw_data = self.lattica.get_block(cid)
-            except Exception as e:
+            except Exception:
                 try:
                     providers = self.lattica.get_providers(cid)
                     self.lattica.with_bootstraps(providers)
@@ -630,7 +631,9 @@ class GradientServer:
                     # Announce the range ID
                     try:
                         if self.scheduler_peer_id is not None:
-                            response = self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                            response = self.scheduler_stub.node_update(
+                                self.get_node_info(is_update=True)
+                            )
                             if self.enable_weight_refit:
                                 self.check_and_run_weight_refit(response)
                         else:

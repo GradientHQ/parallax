@@ -256,4 +256,3 @@ class MLXModelLoader:
     def update_weight_from_disk(self, refit_weight_path: str):
         """Runtime weight refit from disk"""
         logger.info(f"Begin refit weight from path: {refit_weight_path}")
-        pass

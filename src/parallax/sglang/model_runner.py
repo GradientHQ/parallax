@@ -594,13 +594,11 @@ def initialize_sgl_model_runner(
     )
     return model_runner, config, tokenizer
 
+
 def refit_sgl_model(
     model_runner: ParallaxModelRunner,
     refit_weight_path: str,
 ):
     """Runtime weight refit from disk"""
     logger.info(f"Begin refit weight from path: {refit_weight_path}")
-    model_runner.update_weights_from_disk(
-        model_path=refit_weight_path,
-        load_format="auto"
-    )
+    model_runner.update_weights_from_disk(model_path=refit_weight_path, load_format="auto")
