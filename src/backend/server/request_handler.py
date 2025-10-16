@@ -108,7 +108,7 @@ class RequestHandler:
                             yield chunk
                     finally:
                         logger.warning(f"client disconnected for {request_id}")
-                        # response.cancel()
+                        response.cancel()
 
                 resp = StreamingResponse(
                     stream_generator(),
