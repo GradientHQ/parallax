@@ -496,7 +496,7 @@ def form_sgl_server_args(
 ):
     """Creates a SGL ServerArgs object"""
     sgl_server_args = ServerArgs(
-        model_path=model_path
+        model_path=model_path,
         dtype=dtype,
         attention_backend=attention_backend,
         page_size=kv_block_size,

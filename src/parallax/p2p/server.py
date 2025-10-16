@@ -173,7 +173,6 @@ class TransformerConnectionHandler(ConnectionHandler):
                     ) as response:
                         for chunk in response.iter_bytes():
                             if chunk:
-                                logger.warning(f"node got chunk from inference: {chunk}")
                                 yield chunk
                 else:
                     response = client.post(
