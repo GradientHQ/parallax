@@ -192,10 +192,6 @@ def join_command(args, passthrough_args: list[str] | None = None):
     """Join a distributed cluster (equivalent to scripts/join.sh)."""
     check_python_version()
 
-    if not args.scheduler_addr:
-        print("Error: Scheduler address is required. Use -s or --scheduler-addr")
-        sys.exit(1)
-
     project_root = get_project_root()
     launch_script = project_root / "src" / "parallax" / "launch.py"
 
@@ -210,13 +206,6 @@ def join_command(args, passthrough_args: list[str] | None = None):
     # Build the command to run the launch.py script
     passthrough_args = passthrough_args or []
 
-    # Determine effective scheduler address (prefer passthrough if provided)
-    effective_scheduler_addr = _find_flag_value(
-        passthrough_args, ["--scheduler-addr", "-s"]
-    )
-    if effective_scheduler_addr is None:
-        effective_scheduler_addr = args.scheduler_addr
-
     cmd = [sys.executable, str(launch_script)]
     if not _flag_present(passthrough_args, ["--max-num-tokens-per-batch"]):
         cmd.extend(["--max-num-tokens-per-batch", "4096"])
@@ -226,16 +215,12 @@ def join_command(args, passthrough_args: list[str] | None = None):
         cmd.extend(["--max-batch-size", "8"])
     if not _flag_present(passthrough_args, ["--kv-block-size"]):
         cmd.extend(["--kv-block-size", "1024"])
-    if not _flag_present(passthrough_args, ["--host"]):
-        cmd.extend(["--host", "0.0.0.0"])
-    if not _flag_present(passthrough_args, ["--port"]):
-        cmd.extend(["--port", "3000"])
-    if not _flag_present(passthrough_args, ["--scheduler-addr", "-s"]):
-        cmd.extend(["--scheduler-addr", effective_scheduler_addr])
+    # The scheduler address is now taken directly from the parsed arguments.
+    cmd.extend(["--scheduler-addr", args.scheduler_addr])
 
     # Relay logic based on effective scheduler address
     if args.use_relay or (
-        effective_scheduler_addr != "auto" and not str(effective_scheduler_addr).startswith("/")
+        args.scheduler_addr != "auto" and not str(args.scheduler_addr).startswith("/")
     ):
         logger.info("Using public relay servers")
         cmd.extend(get_relay_params())
@@ -244,7 +229,7 @@ def join_command(args, passthrough_args: list[str] | None = None):
     if passthrough_args:
         cmd.extend(passthrough_args)
 
-    logger.info(f"Scheduler address: {effective_scheduler_addr}")
+    logger.info(f"Scheduler address: {args.scheduler_addr}")
     _execute_with_graceful_shutdown(cmd, env=env)
 
 

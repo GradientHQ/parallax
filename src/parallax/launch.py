@@ -63,7 +63,8 @@ if __name__ == "__main__":
                 args.model_path = mlx_model_repo
                 logger.debug(f"Replace mlx model path: {mlx_model_repo}")
         if args.scheduler_addr is None:
-            display_parallax_join(args.model_path)
+            if args.log_level != "DEBUG":
+                display_parallax_join(args.model_path)
 
             # only launch http server on head node
             if args.start_layer == 0:
@@ -122,7 +123,8 @@ if __name__ == "__main__":
             )
             gradient_server.status = ServerState.INITIALIZING
 
-            display_parallax_join(args.model_path)
+            if args.log_level != "DEBUG":
+               display_parallax_join(args.model_path)
 
             # only launch http server on head node
             if args.start_layer == 0:
