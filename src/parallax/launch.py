@@ -85,6 +85,7 @@ if __name__ == "__main__":
                 recv_from_peer_addr=args.recv_from_peer_addr,
                 send_to_peer_addr=args.send_to_peer_addr,
                 model_name=args.model_path,
+                enable_weight_refit=args.enable_weight_refit,
                 max_batch_size=args.max_batch_size,
                 max_sequence_length=args.max_sequence_length,
             )

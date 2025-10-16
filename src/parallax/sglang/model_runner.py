@@ -574,9 +574,9 @@ def initialize_sgl_model_runner(
     model_config.hf_config.tie_word_embeddings = False
     model_config.hf_config.start_layer = start_layer
     model_config.hf_config.end_layer = end_layer
-    print("Model config:", model_config)
-    print("model_start_layer:", model_config.hf_config.start_layer)
-    print("model_end_layer:", model_config.hf_config.end_layer)
+    logger.debug(f"SGLang Model config: {model_config}")
+    logger.debug(f"SGLang model_start_layer: {model_config.hf_config.start_layer}")
+    logger.debug(f"SGLang model_end_layer: {model_config.hf_config.end_layer}")
     model_runner = ParallaxModelRunner(
         model_config=model_config,
         mem_fraction_static=kv_cache_memory_fraction,
@@ -593,3 +593,14 @@ def initialize_sgl_model_runner(
         pp_end_layer=end_layer,
     )
     return model_runner, config, tokenizer
+
+def refit_sgl_model(
+    model_runner: ParallaxModelRunner,
+    refit_weight_path: str,
+):
+    """Runtime weight refit from disk"""
+    logger.info(f"Begin refit weight from path: {refit_weight_path}")
+    model_runner.update_weights_from_disk(
+        model_path=refit_weight_path,
+        load_format="auto"
+    )

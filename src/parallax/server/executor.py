@@ -19,7 +19,7 @@ Executor handles
 
 import argparse
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import mlx.core as mx
 import torch
@@ -86,6 +86,8 @@ class Executor:
         kv_block_size: int = 64,
         kv_cache_memory_fraction: float = 0.8,
         enable_prefix_cache: Optional[bool] = False,
+        # Weight Refit
+        enable_weight_refit: Optional[bool] = False,
         # Communication Configs
         # P2P Communication Configs
         send_to_peer_addr: Optional[str] = None,
@@ -162,6 +164,7 @@ class Executor:
         self.qk_nope_head_dim = self.config.get("qk_nope_head_dim", None)
         self.qk_rope_head_dim = self.config.get("qk_rope_head_dim", None)
         self.enable_prefix_cache = enable_prefix_cache
+        self.enable_weight_refit = enable_weight_refit
         self.linear_key_head_dim = self.config.get("linear_key_head_dim", None)
         self.linear_value_head_dim = self.config.get("linear_value_head_dim", None)
         self.linear_conv_kernel_dim = self.config.get("linear_conv_kernel_dim", None)
@@ -278,13 +281,28 @@ class Executor:
     def create_from_args(cls, args: argparse.Namespace):
         """Create executor from command line arguments."""
         return cls(**create_executor_config(args))
+    
+    def check_and_refit_weight(self, refit_weight_path: str):
+        if refit_weight_path is None:
+            return
+        if self.device == "cuda":
+            from parallax.sglang.model_runner import refit_sgl_model
+            refit_sgl_model(refit_weight_path)
+        else:
+            self.shard_loader.update_weight_from_disk(refit_weight_path)
 
-    def recv_requests_from_http(self) -> List[Request]:
-        """Receives requests from http frontend"""
+    def recv_requests_from_ipc(self) -> Tuple[List[Request], str]:
+        """
+        Receives requests from http frontend.
+        Also receives refit requests for weight update.
+        """
         recv_reqs = []
+        refit_weight_path = None
         while True:
             try:
                 raw_request = self.recv_from_ipc_socket.recv_pyobj(zmq.NOBLOCK)
+                # Check if this is a weight refit request
+                refit_weight_path = raw_request.get("weight_path", None)
 
                 # Check if this is an abort request
                 if isinstance(raw_request, dict) and raw_request.get("type") == "abort":
@@ -302,7 +320,7 @@ class Executor:
                 logger.exception(f"Error receiving http request: {e}")
         if recv_reqs:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
-        return recv_reqs
+        return recv_reqs, refit_weight_path
 
     def recv_requests_from_peer(self) -> List[Request]:
         """Receives requests from the RPC server."""
@@ -1105,8 +1123,9 @@ class Executor:
         )
         while True:
             # 1. Ingest new requests from the http frontend
-            if self.is_first_peer:
-                http_requests = self.recv_requests_from_http()
+            if self.is_first_peer or self.enable_weight_refit:
+                http_requests, refit_weight_path = self.recv_requests_from_ipc()
+                self.check_and_refit_weight(refit_weight_path)
                 self._handle_input_requests(http_requests)
 
             # 2. Ingest new requests from the RPC server
@@ -1232,5 +1251,6 @@ def create_executor_config(args: argparse.Namespace):
         "executor_output_ipc_addr": args.executor_output_ipc,
         "attention_backend": args.attention_backend,
         "moe_runner_backend": args.moe_runner_backend,
+        "enable_weight_refit": args.enable_weight_refit,
     }
     return config

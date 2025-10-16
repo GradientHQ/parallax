@@ -519,3 +519,6 @@ class Scheduler:
         self._wake_event.set()
         with self._node_count_cv:
             self._node_count_cv.notify_all()
+
+    def trigger_weight_refit(self):
+        """Trigger weight refit event for all nodes"""

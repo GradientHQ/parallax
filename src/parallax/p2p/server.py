@@ -11,6 +11,7 @@ import dataclasses
 import enum
 import json
 import logging
+import os
 import threading
 import time
 from typing import List, Optional
@@ -155,6 +156,17 @@ class TransformerConnectionHandler(ConnectionHandler):
         except Exception as e:
             logger.exception(f"Error in rpc_abort: {e}")
         return forward_pb2.AbortResponse()
+    
+    @rpc_method
+    def rpc_weight_refit(
+        self,
+        refit_weight_path: str,
+    ):
+        try:
+            with self._recv_from_peer_lock:
+                self.recv_from_peer.send_pyobj({"refit_weight_path": refit_weight_path})
+        except Exception as e:
+            logger.exception(f"Error in rpc_weight_refit: {e}")
 
     @rpc_stream_iter
     def chat_completion(
@@ -207,6 +219,7 @@ class GradientServer:
         announce_maddrs: List[str] = [],
         notify_url: str = None,
         model_name: Optional[str] = None,
+        enable_weight_refit: Optional[bool] = False,
         max_batch_size: Optional[int] = None,
         max_sequence_length: Optional[int] = None,
     ):
@@ -224,6 +237,7 @@ class GradientServer:
         self.http_port = http_port
         self.notify_url = notify_url
         self.model_name = model_name
+        self.enable_weight_refit = enable_weight_refit
         self.max_batch_size = max_batch_size
         self.max_sequence_length = max_sequence_length
         self.prefix_id = f"{dht_prefix}_announce"
@@ -539,6 +553,74 @@ class GradientServer:
                 logger.exception(f"Error in handle_request: {e}")
                 time.sleep(1)
 
+    def check_and_run_weight_refit(self, message):
+        """
+        Check and trigger weight refit process.
+        Received message is a Dict which at least contains:
+            time_stamp: float,      indicating weight refit trigger time.
+            cid:        List[str],  cid list.
+            index_map:  Dict[str],  key(weight_name): value(cid)
+        """
+        # step1. Check weight refit trigger message
+        time_stamp = message.get("time_stamp", None)
+        cid = message.get("cid", None)
+        index_map = message.get("index_map", None)
+        if time_stamp is None or cid is None:
+            return
+        if self.last_refit_time is not None and self.last_refit_time >= time_stamp:
+            # Weight already updated
+            return
+
+        # step2. Download needed weight files from lattica
+        download_cid_set = set()
+        layer_key_prefix = "model.layers"
+        for key in index_map:
+            is_needed = False
+            if self.block_start_index == 0:
+                if "embed_tokens" in key:
+                    is_needed = True
+            elif self.block_end_index == self.hidden_layers:
+                if "embed_tokens" in key:
+                    is_needed = True
+                if "model.norm" in key:
+                    is_needed = True
+                if "lm_head" in key:
+                    is_needed = True
+            if layer_key_prefix in key:
+                try:
+                    parts = key.split(".")
+                    layer_idx = int(parts[2])
+                    if self.block_start_index <= layer_idx < self.block_end_index:
+                        is_needed = True
+                except (ValueError, IndexError):
+                    continue
+            if is_needed:
+                download_cid_set.add(index_map.get(key))
+
+        # step3. save weight to disk
+        weight_dir = os.path.join("/tmp", time_stamp)
+        while download_cid_set:
+            cid = download_cid_set.pop()
+            try:
+                logger.info(f"Start downloading refit weight {cid}")
+                raw_data = self.lattica.get_block(cid)
+            except Exception as e:
+                try:
+                    providers = self.lattica.get_providers(cid)
+                    self.lattica.with_bootstraps(providers)
+                    download_cid_set.add(cid)
+                    continue
+                except Exception as e:
+                    raise RuntimeError(f"Failed to get block: {e}")
+            file_name = cid + ".safetensors"
+            file_name = os.path.join(weight_dir, file_name)
+            with open(file_name, "wb") as f:
+                f.write_file(raw_data)
+
+        # step4. send ipc message to update weight
+        self.rpc_weight_refit(weight_dir)
+        self.last_refit_time = time_stamp
+
     def start_node_announcer(self):
         """Start a thread that regularly announces this module's presence on DHT"""
 
@@ -548,7 +630,9 @@ class GradientServer:
                     # Announce the range ID
                     try:
                         if self.scheduler_peer_id is not None:
-                            self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                            response = self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                            if self.enable_weight_refit:
+                                self.check_and_run_weight_refit(response)
                         else:
                             self.lattica.store(
                                 key=self.prefix_id,
@@ -661,6 +745,7 @@ def launch_p2p_server(
     recv_from_peer_addr: str,
     send_to_peer_addr: str,
     model_name: Optional[str],
+    enable_weight_refit: Optional[bool] = False,
     max_batch_size: Optional[int] = None,
     max_sequence_length: Optional[int] = None,
 ):
@@ -687,6 +772,7 @@ def launch_p2p_server(
         http_port=http_port,
         notify_url=notify_url,
         model_name=model_name,
+        enable_weight_refit=enable_weight_refit,
         max_batch_size=max_batch_size,
         max_sequence_length=max_sequence_length,
     )
