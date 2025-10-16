@@ -18,6 +18,7 @@ import multiprocessing
 import tempfile
 import threading
 
+from common.version_check import check_latest_release
 from parallax.p2p.server import ServerState, launch_p2p_server
 from parallax.server.executor import Executor
 from parallax.server.http_server import launch_http_server
@@ -65,6 +66,7 @@ if __name__ == "__main__":
         if args.scheduler_addr is None:
             if args.log_level != "DEBUG":
                 display_parallax_join(args.model_path)
+            check_latest_release()
 
             # only launch http server on head node
             if args.start_layer == 0:
@@ -125,6 +127,7 @@ if __name__ == "__main__":
 
             if args.log_level != "DEBUG":
                 display_parallax_join(args.model_path)
+            check_latest_release()
 
             # only launch http server on head node
             if args.start_layer == 0:

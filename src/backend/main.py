@@ -13,6 +13,7 @@ from backend.server.request_handler import RequestHandler
 from backend.server.scheduler_manage import SchedulerManage
 from backend.server.server_args import parse_args
 from backend.server.static_config import get_model_list, get_node_join_command
+from common.version_check import check_latest_release
 from parallax_utils.ascii_anime import display_parallax_run
 from parallax_utils.logging_config import get_logger
 
@@ -94,14 +95,6 @@ async def cluster_status():
     )
 
 
-@app.post("/v1/completions")
-async def openai_v1_completions(raw_request: Request):
-    request_data = await raw_request.json()
-    request_id = uuid.uuid4()
-    received_ts = time.time()
-    return await request_handler.v1_completions(request_data, request_id, received_ts)
-
-
 @app.post("/v1/chat/completions")
 async def openai_v1_chat_completions(raw_request: Request):
     request_data = await raw_request.json()
@@ -129,6 +122,7 @@ if __name__ == "__main__":
     logger.info(f"args: {args}")
     if args.log_level != "DEBUG":
         display_parallax_run()
+    check_latest_release()
     host_maddrs = args.host_maddrs
     dht_port = args.dht_port
     if args.dht_port is not None:
