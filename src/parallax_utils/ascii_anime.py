@@ -161,7 +161,7 @@ def display_ascii_animation_run(animation_data):
     #         time.sleep(delay)
 
 
-def display_ascii_animation_join(animation_data, model_name):
+def display_ascii_animation_join(animation_data, model_name, clean=True):
     frames = animation_data.get("frames", [])
     # loop = animation_data.get('loop', False)
 
@@ -178,8 +178,9 @@ def display_ascii_animation_join(animation_data, model_name):
 
         if content:
             res = process_context_color_join(content, colors, model_name)
-            res = "\n".join(res)
-            clear_screen()
+            res = "\n".join(res).replace("#", " ")
+            if clean:
+                clear_screen()
             print(res)
 
     # for frame_data in frames:
@@ -211,7 +212,7 @@ def display_parallax_run():
     display_ascii_animation_run(animation_data)
 
 
-def display_parallax_join(model_name):
+def display_parallax_join(model_name, clean=True):
     file_path = "./src/parallax_utils/anime/parallax_join.json"
     try:
         with open(file_path, "r") as f:
@@ -222,4 +223,4 @@ def display_parallax_join(model_name):
     except json.JSONDecodeError:
         print(f"Error: The file '{file_path}' contains invalid JSON.")
         return
-    display_ascii_animation_join(animation_data, model_name)
+    display_ascii_animation_join(animation_data, model_name, clean)
