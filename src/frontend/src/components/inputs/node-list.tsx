@@ -170,39 +170,34 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
       </ListItemIcon>
 
       <ListItemText>
-        {(node && (
-          <Stack
-            sx={
-              variant === 'menu' ?
-                {
-                  position: 'absolute',
-                  top: '50%',
-                  left: 0,
-                  right: 0,
-                  transform: 'translateY(-50%)',
-                }
-              : undefined
-            }
-          >
-            <Typography variant='body1' sx={{ fontWeight: 500 }}>
-              {gpuName} {gpuMemory}GB
-            </Typography>
-            {/* <Typography variant='caption' color='text.disabled'>
-              Rancho Cordova, United States
-            </Typography> */}
-          </Stack>
-        )) || <Skeleton width='8rem' height='1.25rem' />}
-        {/* {(node && (
-          <Typography
-            variant='body2'
-            color='text.disabled'
-            overflow='hidden'
-            textOverflow='ellipsis'
-            whiteSpace='nowrap'
-          >
-            {id && id.substring(0, 4) + '...' + id.substring(id.length - 4)}
-          </Typography>
-        )) || <Skeleton width='14rem' height='1.25rem' />} */}
+        <Stack
+          sx={
+            variant === 'menu' ?
+              {
+                position: 'absolute',
+                top: '50%',
+                left: 0,
+                right: 0,
+                transform: 'translateY(-50%)',
+              }
+            : undefined
+          }
+        >
+          {(node && (
+            <>
+              <Typography variant='body1' sx={{ fontWeight: 500 }}>
+                {gpuName} {gpuMemory}GB
+              </Typography>
+              {/* <Typography variant='caption' color='text.disabled'>
+                Rancho Cordova, United States
+              </Typography> */}
+            </>
+          )) || (
+            <>
+              <Skeleton height='1lh' />
+            </>
+          )}
+        </Stack>
       </ListItemText>
 
       {node && (
@@ -235,7 +230,7 @@ export interface NodeListProps {
 export const NodeList: FC<NodeListProps & StackProps> = ({ variant = 'list', ...rest }) => {
   const [
     {
-      clusterInfo: { initNodesNumber },
+      clusterInfo: { status: clusterStatus, initNodesNumber },
       nodeInfoList,
     },
   ] = useCluster();
@@ -244,28 +239,38 @@ export const NodeList: FC<NodeListProps & StackProps> = ({ variant = 'list', ...
   const { length: nodesNumber } = nodeInfoList;
   // const nodesNumber = 0;
 
+  const generating = chatStatus === 'generating';
+  let dashIndex = 0;
+  const renderDash =
+    variant === 'menu' ?
+      (key: string) => {
+        return dashIndex++ > 0 && <Dash key={key} animate={generating} />;
+      }
+    : () => undefined;
+
   return (
     <NodeListRoot {...rest}>
       <List variant={variant}>
         {nodeInfoList.map((node, index) => [
-          variant === 'menu' && index > 0 && (
-            <Dash key={`${node.id}-dash`} animate={chatStatus === 'generating'} />
-          ),
+          renderDash(`${node.id}-dash`),
           <Node key={node.id} variant={variant} node={node} />,
 
-          // <Dash key={`${node.id}-dash-mock-0`} animate={chatStatus === 'generating'} />,
+          // renderDash(`${node.id}-dash-mock-0`),
           // <Node key={`${node.id}-mock-0`} variant={variant} node={node} />,
 
-          // <Dash key={`${node.id}-dash-mock-1`} animate={chatStatus === 'generating'} />,
+          // renderDash(`${node.id}-dash-mock-1`),
           // <Node key={`${node.id}-mock-1`} variant={variant} node={node} />,
 
-          // <Dash key={`${node.id}-dash-mock-2`} animate={chatStatus === 'generating'} />,
+          // renderDash(`${node.id}-dash-mock-2`),
           // <Node key={`${node.id}-mock-2`} variant={variant} node={node} />,
         ])}
-        {initNodesNumber > nodesNumber
-          && Array.from({ length: initNodesNumber - nodesNumber }).map((_, index) => (
-            <Node key={index} variant={variant} />
-          ))}
+
+        {clusterStatus !== 'idle'
+          && initNodesNumber > nodesNumber
+          && Array.from({ length: initNodesNumber - nodesNumber }).map((_, index) => [
+            renderDash(`${index}-dash`),
+            <Node key={index} variant={variant} />,
+          ])}
       </List>
     </NodeListRoot>
   );

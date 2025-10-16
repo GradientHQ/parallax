@@ -1,5 +1,11 @@
 import { Button, Stack, TextField } from '@mui/material';
-import type { FC, KeyboardEventHandler } from 'react';
+import {
+  useRef,
+  type CompositionEventHandler,
+  type FC,
+  type KeyboardEventHandler,
+  type MouseEventHandler,
+} from 'react';
 import { useRefCallback } from '../../hooks';
 import { useChat, useCluster } from '../../services';
 import { IconArrowBackUp, IconArrowUp, IconSquareFilled } from '@tabler/icons-react';
@@ -14,11 +20,33 @@ export const ChatInput: FC = () => {
   ] = useCluster();
   const [{ input, status }, { setInput, generate, stop, clear }] = useChat();
 
+  const compositionRef = useRef(false);
+
+  const onCompositionStart = useRefCallback<CompositionEventHandler>((e) => {
+    compositionRef.current = true;
+  });
+
+  const onCompositionEnd = useRefCallback<CompositionEventHandler>((e) => {
+    compositionRef.current = false;
+  });
+
   const onKeyDown = useRefCallback<KeyboardEventHandler>((e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !compositionRef.current) {
       e.preventDefault();
       generate();
     }
+  });
+
+  const onClickMainButton = useRefCallback<MouseEventHandler>((e) => {
+    if (status === 'opened' || status === 'generating') {
+      stop();
+    } else if (status === 'closed' || status === 'error') {
+      generate();
+    }
+  });
+
+  const onClickClearButton = useRefCallback<MouseEventHandler>((e) => {
+    clear();
   });
 
   return (
@@ -33,6 +61,8 @@ export const ChatInput: FC = () => {
         maxRows={4}
         placeholder='Ask anything'
         fullWidth
+        onCompositionStart={onCompositionStart}
+        onCompositionEnd={onCompositionEnd}
         onKeyDown={onKeyDown}
         slotProps={{
           input: {
@@ -59,7 +89,7 @@ export const ChatInput: FC = () => {
                   sx={{ color: 'text.secondary' }}
                   startIcon={<IconArrowBackUp />}
                   disabled={status === 'opened' || status === 'generating'}
-                  onClick={clear}
+                  onClick={onClickClearButton}
                 >
                   Clear
                 </Button>
@@ -68,13 +98,7 @@ export const ChatInput: FC = () => {
                   color='primary'
                   disabled={clusterStatus !== 'available' || status === 'opened'}
                   // loading={status === 'opened'}
-                  onClick={() => {
-                    if (status === 'generating') {
-                      stop();
-                    } else if (status === 'closed' || status === 'error') {
-                      generate();
-                    }
-                  }}
+                  onClick={onClickMainButton}
                 >
                   {status === 'opened' ?
                     <DotPulse size='medium' />
