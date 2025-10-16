@@ -276,10 +276,6 @@ def update_package_info():
             and package_info["gpu"] == usage_info["gpu"]
         ):
             return
-        else:
-            logger.info(
-                f"Package info mismatch, saving new package info: {usage_info}, old package_info: {package_info}"
-            )
 
         save_package_info(usage_info)
     except Exception:
@@ -309,8 +305,7 @@ def save_package_info(usage_info: dict):
 
 
 def upload_package_info(usage_info: dict):
-    post_url = "http://localhost:8080/api/v1/parallax/upload"
-    # post_url = "https://chatbe-dev.gradient.network/api/v1/parallax/upload"
+    post_url = "https://chatbe-dev.gradient.network/api/v1/parallax/upload"
     headers = {
         "Content-Type": "application/json",
     }
