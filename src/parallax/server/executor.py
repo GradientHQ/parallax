@@ -283,7 +283,7 @@ class Executor:
         return cls(**create_executor_config(args))
 
     def check_and_refit_weight(self, refit_weight_path: str):
-        if refit_weight_path is None:
+        if refit_weight_path == "":
             return
         if self.device == "cuda":
             from parallax.sglang.model_runner import refit_sgl_model
