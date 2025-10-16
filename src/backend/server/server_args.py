@@ -29,7 +29,13 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--port", type=int, default=5000, help="Port to listen on")
 
-    parser.add_argument("--log-level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Log level")
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Log level",
+    )
 
     parser.add_argument("--model-name", type=str, default=None, help="Model name")
 
