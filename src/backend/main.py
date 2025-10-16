@@ -127,8 +127,8 @@ app.mount("/", StaticFiles(directory="src/frontend/dist", html=True), name="stat
 if __name__ == "__main__":
     args = parse_args()
     logger.info(f"args: {args}")
-
-    display_parallax_run()
+    if args.log_level != "DEBUG":
+        display_parallax_run()
     host_maddrs = args.host_maddrs
     dht_port = args.dht_port
     if args.dht_port is not None:
