@@ -24,7 +24,7 @@ from parallax.server.http_server import launch_http_server
 from parallax.server.server_args import parse_args
 from parallax.utils.utils import get_current_device
 from parallax_utils.ascii_anime import display_parallax_join
-from parallax_utils.logging_config import get_logger
+from parallax_utils.logging_config import get_logger, set_log_level
 
 logger = get_logger("parallax.launch")
 
@@ -48,6 +48,7 @@ if __name__ == "__main__":
     executor = None
     try:
         args = parse_args()
+        set_log_level(args.log_level)
         logger.debug(f"args: {args}")
         args.recv_from_peer_addr = f"ipc://{tempfile.NamedTemporaryFile().name}"
         args.send_to_peer_addr = f"ipc://{tempfile.NamedTemporaryFile().name}"
