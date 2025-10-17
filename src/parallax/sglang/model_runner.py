@@ -589,7 +589,7 @@ def initialize_sgl_model_runner(
     # Monkey patch to align the token pool size
     from sglang.srt.model_executor.model_runner import ModelRunner as SGLModelRunner
 
-    original_init_mem_pool = SGLModelRunner.initialize_memory_pool
+    original_init_mem_pool = SGLModelRunner.init_memory_pool
 
     def patched_initialize_memory_pool(self, avail_mem_bytes):
         # Replicate the logic from SGLang to calculate bytes_per_token
@@ -620,7 +620,7 @@ def initialize_sgl_model_runner(
         # Call the original function with the aligned memory size
         return original_init_mem_pool(self, aligned_avail_mem_bytes)
 
-    SGLModelRunner.initialize_memory_pool = patched_initialize_memory_pool
+    SGLModelRunner.init_memory_pool = patched_initialize_memory_pool
 
     model_runner = ParallaxModelRunner(
         model_config=model_config,
@@ -639,6 +639,6 @@ def initialize_sgl_model_runner(
     )
 
     # Restore the original method after creating the model_runner
-    SGLModelRunner.initialize_memory_pool = original_init_mem_pool
+    SGLModelRunner.init_memory_pool = original_init_mem_pool
 
     return model_runner, config, tokenizer
