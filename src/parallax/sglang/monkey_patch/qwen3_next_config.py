@@ -30,16 +30,29 @@ class HybridLayerType(enum.Enum):
 
 
 @property
-def monkey_patch_layers_block_type(self):
-    layer_type_list = []
+def monkey_patch_linear_layer_ids(self):
+    return [
+        i
+        for i, type_value in enumerate(self.layers_block_type)
+        if type_value == HybridLayerType.linear_attention.value
+        and i >= self.start_layer
+        and i < self.end_layer
+    ]
 
-    for l in range(self.num_hidden_layers):
-        if l + 1 < self.start_layer or l + 1 >= self.end_layer:
-            continue
 
-        if (l + 1) % self.full_attention_interval == 0:
-            layer_type_list.append(HybridLayerType.full_attention.value)
-        else:
-            layer_type_list.append(HybridLayerType.linear_attention.value)
+@property
+def monkey_patch_full_attention_layer_ids(self):
+    return [
+        i
+        for i, type_value in enumerate(self.layers_block_type)
+        if type_value == HybridLayerType.full_attention.value
+        and i >= self.start_layer
+        and i < self.end_layer
+    ]
 
-    return layer_type_list
+
+def apply_qwen3_next_config_monkey_patch():
+    from sglang.srt.configs.qwen3_next import Qwen3NextConfig
+
+    Qwen3NextConfig.linear_layer_ids = monkey_patch_linear_layer_ids
+    Qwen3NextConfig.full_attention_layer_ids = monkey_patch_full_attention_layer_ids
