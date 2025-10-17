@@ -585,6 +585,43 @@ def initialize_sgl_model_runner(
     print("Model config:", model_config)
     print("model_start_layer:", model_config.hf_config.start_layer)
     print("model_end_layer:", model_config.hf_config.end_layer)
+
+    # Monkey patch to align the token pool size
+    from sglang.srt.model_executor.model_runner import ModelRunner as SGLModelRunner
+    from sglang.srt.utils import DTYPE_SIZE
+
+    original_init_mem_pool = SGLModelRunner.initialize_memory_pool
+
+    def patched_initialize_memory_pool(self, avail_mem_bytes):
+        # Replicate the logic from SGLang to calculate bytes_per_token
+        # This is brittle but necessary without changing SGLang directly.
+        bytes_per_token = (
+            self.model_config.get_num_kv_heads(self.tp_size)
+            * self.model_config.head_dim
+            * 2
+            * DTYPE_SIZE[self.dtype]
+            * (
+                len(getattr(self.model_config.hf_config, "linear_layer_ids", []))
+                or self.model_config.num_hidden_layers // self.pp_size
+            )
+        )
+
+        num_total_tokens = int(avail_mem_bytes / bytes_per_token)
+
+        # Align the number of tokens to a multiple of 1024
+        alignment = 1024
+        aligned_num_total_tokens = (num_total_tokens // alignment) * alignment
+
+        # Recalculate the memory needed for the aligned number of tokens
+        aligned_avail_mem_bytes = aligned_num_total_tokens * bytes_per_token
+
+        print(f"Aligning token pool size from {num_total_tokens} to {aligned_num_total_tokens}")
+
+        # Call the original function with the aligned memory size
+        return original_init_mem_pool(self, aligned_avail_mem_bytes)
+
+    SGLModelRunner.initialize_memory_pool = patched_initialize_memory_pool
+
     model_runner = ParallaxModelRunner(
         model_config=model_config,
         mem_fraction_static=kv_cache_memory_fraction,
@@ -600,4 +637,8 @@ def initialize_sgl_model_runner(
         pp_start_layer=start_layer,
         pp_end_layer=end_layer,
     )
+
+    # Restore the original method after creating the model_runner
+    SGLModelRunner.initialize_memory_pool = original_init_mem_pool
+
     return model_runner, config, tokenizer
