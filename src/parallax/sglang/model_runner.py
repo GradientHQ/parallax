@@ -471,11 +471,11 @@ def monkey_patch_qwen3_next():
         qwen3_next_model as parallax_qwen3_next_model_module,
     )
     from parallax.sglang.monkey_patch.qwen3_next_config import (
-        monkey_patch_linear_layer_ids,
+        apply_qwen3_next_config_monkey_patch,
     )
 
     sys.modules["sglang.srt.models.qwen3_next"] = parallax_qwen3_next_model_module
-    sglang.srt.configs.qwen3_next.Qwen3NextConfig.linear_layer_ids = monkey_patch_linear_layer_ids
+    apply_qwen3_next_config_monkey_patch()
 
 
 ## TODO: Move this when sgalang supports gpt_oss pipeline parallelism
@@ -584,9 +584,7 @@ def initialize_sgl_model_runner(
     model_config.hf_config.attn_output_gate = False
 
     # Monkey patch the model config to make SGLang allocate KV cache only for the layers on this node.
-    # We achieve this by modifying layers_block_type, which is the source for the read-only
-    # linear_layer_ids property. We re-classify all "attention" layers that are not on the
-    # current shard as "linear_attention" so SGLang's memory allocator ignores them.
+    # We achieve this by setting an override attribute that our patched property will use.
     hf_config = model_config.hf_config
     original_layers_block_type = list(hf_config.layers_block_type)
     new_layers_block_type = []
@@ -599,7 +597,8 @@ def initialize_sgl_model_runner(
         else:
             new_layers_block_type.append(layer_type)
 
-    hf_config.layers_block_type = new_layers_block_type
+    # Set the override attribute that our patched property will pick up.
+    hf_config._layers_block_type_override = new_layers_block_type
     attention_layers_on_this_shard = sum(1 for t in new_layers_block_type if t == "attention")
     logger.info(f"Pipeline parallel stage: layers {start_layer}-{end_layer}.")
     logger.info(

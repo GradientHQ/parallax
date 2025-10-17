@@ -1,18 +1,4 @@
-# coding=utf-8
-# Copyright 2024 The Qwen team, Alibaba Group and the HuggingFace Inc. team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""Qwen3Hybrid model configuration"""
+"""Qwen3Hybrid model configuration monkey patch"""
 
 import enum
 
@@ -21,7 +7,6 @@ from transformers.utils import logging
 logger = logging.get_logger(__name__)
 
 
-# NOTE: HybridLayerType
 class HybridLayerType(enum.Enum):
     full_attention = "attention"
     swa_attention = "swa_attention"
@@ -29,12 +14,42 @@ class HybridLayerType(enum.Enum):
     mamba2 = "mamba"
 
 
-@property
-def monkey_patch_linear_layer_ids(self):
-    return [
-        i
-        for i, type_value in enumerate(self.layers_block_type)
-        if type_value == HybridLayerType.linear_attention.value
-        and i >= self.start_layer
-        and i < self.end_layer
-    ]
+def apply_qwen3_next_config_monkey_patch():
+    """
+    Applies a monkey patch to the Qwen3NextConfig class to correctly handle the `layers_block_type` property.
+    This makes it aware of pipeline parallelism overrides and fixes a bug where the property ignores
+    the `layers_block_type` list loaded from the model's config.json.
+    """
+    from sglang.srt.configs.qwen3_next import Qwen3NextConfig
+
+    # Store the original property's getter function
+    original_layers_block_type_property = Qwen3NextConfig.layers_block_type
+
+    @property
+    def patched_layers_block_type(self):
+        """
+        A patched property that correctly determines the layer block types.
+        1. Checks for a `_layers_block_type_override` attribute for pipeline parallelism.
+        2. Checks for the `layers_block_type` attribute set by HuggingFace from config.json.
+        3. Falls back to the original sglang logic if neither is found.
+        """
+        # 1. Our override for pipeline parallelism takes highest priority.
+        if hasattr(self, "_layers_block_type_override"):
+            return self._layers_block_type_override
+
+        # 2. Respect the 'layers_block_type' from the original config.json if it exists.
+        # The original @property on the class hides the instance attribute, so we check __dict__.
+        if "layers_block_type" in self.__dict__:
+            return self.__dict__["layers_block_type"]
+
+        # 3. Fallback to the original sglang logic (periodic attention).
+        if original_layers_block_type_property and hasattr(
+            original_layers_block_type_property, "fget"
+        ):
+            return original_layers_block_type_property.fget(self)
+
+        # Fallback in case the property is somehow not a property object
+        return []
+
+    Qwen3NextConfig.layers_block_type = patched_layers_block_type
+    logger.debug("Applied monkey patch to Qwen3NextConfig.layers_block_type")
