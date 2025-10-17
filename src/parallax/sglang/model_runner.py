@@ -475,7 +475,9 @@ def monkey_patch_qwen3_next():
     )
 
     sys.modules["sglang.srt.models.qwen3_next"] = parallax_qwen3_next_model_module
-    monkey_patch_layers_block_type()
+    sglang.srt.configs.qwen3_next.Qwen3NextConfig.layers_block_type = (
+        monkey_patch_layers_block_type()
+    )
 
 
 ## TODO: Move this when sgalang supports gpt_oss pipeline parallelism
