@@ -252,8 +252,14 @@ class ParallaxModelRunner(SGLModelRunner):
         )
 
         # This is a hack for initializing CudaGraphRunner
-        # self.server_args.pp_size = 2
-        self.server_args.pp_size = self.pp_size
+        # If running a partial layer shard with a single PP process, force pp_size=2 during
+        # CUDA graph capture so that SGLang provides pp_proxy_tensors in forward.
+        if self.pp_size == 1 and (
+            self.pp_start_layer > 0 or self.pp_end_layer < self.model_config.num_hidden_layers
+        ):
+            self.server_args.pp_size = 2
+        else:
+            self.server_args.pp_size = self.pp_size
 
         return min_per_gpu_memory
 
