@@ -252,7 +252,8 @@ class ParallaxModelRunner(SGLModelRunner):
         )
 
         # This is a hack for initializing CudaGraphRunner
-        self.server_args.pp_size = 2
+        # self.server_args.pp_size = 2
+        self.server_args.pp_size = self.pp_size
 
         return min_per_gpu_memory
 
