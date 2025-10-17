@@ -115,16 +115,16 @@ class RPCConnectionHandler(ConnectionHandler):
     def cluster_status(self):
         try:
             with httpx.Client(timeout=10 * 60, proxy=None, trust_env=False) as client:
-            with client.stream(
-                "GET",
-                f"http://localhost:{self.http_port}/cluster/status"
-            ) as response:
-                for chunk in response.iter_bytes():
-                    if chunk:
-                        yield chunk
+                with client.stream(
+                    "GET",
+                    f"http://localhost:{self.http_port}/cluster/status"
+                ) as response:
+                    for chunk in response.iter_bytes():
+                        if chunk:
+                            yield chunk
         except Exception as e:
             logger.exception(f"Error in cluster status: {e}")
-            yield b"internal server error"
+            yield json.dumps({"error": "internal server error"}).encode()
 
     def wait_layer_allocation(self, current_node_id, wait_seconds):
         start_time = time.time()
