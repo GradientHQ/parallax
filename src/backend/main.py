@@ -135,7 +135,10 @@ if __name__ == "__main__":
         initial_peers=args.initial_peers,
         relay_servers=args.relay_servers,
         dht_prefix=args.dht_prefix,
-        host_maddrs=[f"/ip4/0.0.0.0/tcp/{args.tcp_port}", f"/ip4/0.0.0.0/udp/{args.udp_port}/quic-v1"],
+        host_maddrs=[
+            f"/ip4/0.0.0.0/tcp/{args.tcp_port}",
+            f"/ip4/0.0.0.0/udp/{args.udp_port}/quic-v1",
+        ],
         announce_maddrs=args.announce_maddrs,
     )
 
