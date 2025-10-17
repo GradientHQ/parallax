@@ -582,57 +582,47 @@ def initialize_sgl_model_runner(
     model_config.hf_config.start_layer = start_layer
     model_config.hf_config.end_layer = end_layer
     model_config.hf_config.attn_output_gate = False
+
+    # Monkey patch the model config to make SGLang allocate KV cache only for the layers on this node.
+    hf_config = model_config.hf_config
+    attention_layers_on_this_shard = {
+        i
+        for i, layer_type in enumerate(hf_config.layers_block_type)
+        if start_layer <= i < end_layer and layer_type == "attention"
+    }
+    all_layer_indices = set(range(hf_config.num_hidden_layers))
+    new_linear_layer_ids = sorted(list(all_layer_indices - attention_layers_on_this_shard))
+    hf_config.linear_layer_ids = new_linear_layer_ids
+    logger.info(f"Pipeline parallel stage: layers {start_layer}-{end_layer}.")
+    logger.info(
+        f"Adjusted KV cache allocation for {len(attention_layers_on_this_shard)} attention layers on this shard."
+    )
+
     print("Model config:", model_config)
     print("model_start_layer:", model_config.hf_config.start_layer)
     print("model_end_layer:", model_config.hf_config.end_layer)
 
-    # Monkey patch to align the token pool size
-    from sglang.srt.model_executor.model_runner import ModelRunner as SGLModelRunner
+    # Monkey patch to align the token pool size in the MHATokenToKVPool
+    from sglang.srt.mem_cache.memory_pool import MHATokenToKVPool
 
-    original_init_mem_pool = SGLModelRunner.init_memory_pool
+    original_mha_pool_init = MHATokenToKVPool.__init__
 
-    def patched_initialize_memory_pool(self, avail_mem_bytes, *args, **kwargs):
-        # Replicate the logic from SGLang to calculate bytes_per_token
-        # This is brittle but necessary without changing SGLang directly.
-        dtype_size = torch.tensor([], dtype=self.dtype).element_size()
-        num_layers = (
-            len(getattr(self.model_config.hf_config, "linear_layer_ids", []))
-            or self.model_config.num_hidden_layers // self.pp_size
-        )
-        bytes_per_token = (
-            self.model_config.get_num_kv_heads(self.tp_size)
-            * self.model_config.head_dim
-            * 2
-            * dtype_size
-            * num_layers
-        )
-        if self.server_args.attention_backend == "flashinfer":
-            # Add extra memory for flashinfer backend with MoE
-            bytes_per_token += (
-                self.model_config.get_num_kv_heads(self.tp_size)
-                * 2
-                * dtype_size
-                * num_layers
-                * self.model_config.hf_config.get("num_experts", 0)
-            )
+    def patched_mha_pool_init(self, *args, **kwargs):
+        original_mha_pool_init(self, *args, **kwargs)
 
-        num_total_tokens = int(avail_mem_bytes / bytes_per_token)
-
-        # Align the number of tokens to a multiple of 1024
         alignment = 1024
-        aligned_num_total_tokens = (num_total_tokens // alignment) * alignment
+        original_tokens = self.num_total_tokens
+        aligned_tokens = (original_tokens // alignment) * alignment
 
-        # Recalculate the memory needed for the aligned number of tokens
-        aligned_avail_mem_bytes = aligned_num_total_tokens * bytes_per_token
+        if original_tokens != aligned_tokens:
+            logger.debug(
+                f"Aligning MHATokenToKVPool token pool size from {original_tokens} to {aligned_tokens}"
+            )
+            self.num_total_tokens = aligned_tokens
+            # Re-create buffers with the new aligned size
+            self._create_buffers()
 
-        logger.debug(
-            f"Aligning token pool size from {num_total_tokens} to {aligned_num_total_tokens}"
-        )
-
-        # Call the original function with the aligned memory size
-        return original_init_mem_pool(self, aligned_avail_mem_bytes, *args, **kwargs)
-
-    SGLModelRunner.init_memory_pool = patched_initialize_memory_pool
+    MHATokenToKVPool.__init__ = patched_mha_pool_init
 
     model_runner = ParallaxModelRunner(
         model_config=model_config,
@@ -650,7 +640,7 @@ def initialize_sgl_model_runner(
         pp_end_layer=end_layer,
     )
 
-    # Restore the original method after creating the model_runner
-    SGLModelRunner.init_memory_pool = original_init_mem_pool
+    # Restore the original method after the model_runner is created
+    MHATokenToKVPool.__init__ = original_mha_pool_init
 
     return model_runner, config, tokenizer
