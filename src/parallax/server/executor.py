@@ -290,7 +290,7 @@ class Executor:
 
             refit_sgl_model(self.model_runner, refit_weight_path)
         else:
-            self.shard_loader.update_weight_from_disk(refit_weight_path)
+            self.shard_loader.update_weight_from_disk(self.model_shard, refit_weight_path)
 
     def recv_requests_from_http(self) -> List[Request]:
         """
