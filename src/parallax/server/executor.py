@@ -19,7 +19,7 @@ Executor handles
 
 import argparse
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import mlx.core as mx
 import torch
@@ -86,6 +86,8 @@ class Executor:
         kv_block_size: int = 64,
         kv_cache_memory_fraction: float = 0.8,
         enable_prefix_cache: Optional[bool] = False,
+        # Weight Refit
+        enable_weight_refit: Optional[bool] = False,
         # Communication Configs
         # P2P Communication Configs
         send_to_peer_addr: Optional[str] = None,
@@ -163,6 +165,7 @@ class Executor:
         self.qk_nope_head_dim = self.config.get("qk_nope_head_dim", None)
         self.qk_rope_head_dim = self.config.get("qk_rope_head_dim", None)
         self.enable_prefix_cache = enable_prefix_cache
+        self.enable_weight_refit = enable_weight_refit
         self.linear_key_head_dim = self.config.get("linear_key_head_dim", None)
         self.linear_value_head_dim = self.config.get("linear_value_head_dim", None)
         self.linear_conv_kernel_dim = self.config.get("linear_conv_kernel_dim", None)
@@ -280,8 +283,21 @@ class Executor:
         """Create executor from command line arguments."""
         return cls(**create_executor_config(args))
 
+    def check_and_refit_weight(self, refit_weight_path: str):
+        if refit_weight_path == "":
+            return
+        if self.device == "cuda":
+            from parallax.sglang.model_runner import refit_sgl_model
+
+            refit_sgl_model(self.model_runner, refit_weight_path)
+        else:
+            self.shard_loader.update_weight_from_disk(self.model_shard, refit_weight_path)
+
     def recv_requests_from_http(self) -> List[Request]:
-        """Receives requests from http frontend"""
+        """
+        Receives requests from http frontend.
+        Also receives refit requests for weight update.
+        """
         recv_reqs = []
         while True:
             try:
@@ -305,9 +321,10 @@ class Executor:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
         return recv_reqs
 
-    def recv_requests_from_peer(self) -> List[Request]:
+    def recv_requests_from_peer(self) -> Tuple[List[Request], str]:
         """Receives requests from the RPC server."""
         recv_reqs = []
+        refit_weight_path = ""
         while True:
             try:
                 recv_req = self.recv_from_peer_socket.recv_multipart(zmq.NOBLOCK)
@@ -327,6 +344,8 @@ class Executor:
                     abort_request.ParseFromString(recv_req[1])
                     recv_req = proto_to_abort_request(abort_request)
                     recv_reqs.extend(recv_req)
+                elif recv_req[0] == b"refit":
+                    refit_weight_path = recv_req[1].decode("ascii")
                 else:
                     raise ValueError(f"Unknown request type: {recv_req[0]}")
                 # First peer is responsible for tokenization
@@ -343,7 +362,7 @@ class Executor:
                 logger.exception(f"Error receiving or deserializing request: {e}")
         if recv_reqs:
             logger.debug(f"Received {len(recv_reqs)} peer requests")
-        return recv_reqs
+        return recv_reqs, refit_weight_path
 
     def _prepare_cuda_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """
@@ -1106,12 +1125,14 @@ class Executor:
         )
         while True:
             # 1. Ingest new requests from the http frontend
-            if self.is_first_peer:
+            if self.is_first_peer or self.enable_weight_refit:
                 http_requests = self.recv_requests_from_http()
                 self._handle_input_requests(http_requests)
 
             # 2. Ingest new requests from the RPC server
-            incoming_requests = self.recv_requests_from_peer()
+            incoming_requests, refit_weight_path = self.recv_requests_from_peer()
+            if self.enable_weight_refit:
+                self.check_and_refit_weight(refit_weight_path)
             self._handle_input_requests(incoming_requests)
 
             # 3. Send finished batch to next peer
@@ -1233,5 +1254,6 @@ def create_executor_config(args: argparse.Namespace):
         "executor_output_ipc_addr": args.executor_output_ipc,
         "attention_backend": args.attention_backend,
         "moe_runner_backend": args.moe_runner_backend,
+        "enable_weight_refit": args.enable_weight_refit,
     }
     return config

@@ -84,6 +84,7 @@ class TestCreateExecutorConfig:
             micro_batch_ratio=2,
             scheduler_wait_ms=500,
             enable_prefix_cache=True,
+            enable_weight_refit=True,
             executor_input_ipc="///ipc/1",
             executor_output_ipc="///ipc/2",
             attention_backend="torch_native",

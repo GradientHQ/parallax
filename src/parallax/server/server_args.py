@@ -99,6 +99,11 @@ def parse_args() -> argparse.Namespace:
         "--enable-prefix-cache", action="store_true", help="Enable prefix cache reuse"
     )
 
+    # Weight refit configuration
+    parser.add_argument(
+        "--enable-weight-refit", action="store_true", help="Enable runtime weight refit"
+    )
+
     # Scheduler configuration
     parser.add_argument(
         "--max-batch-size",
