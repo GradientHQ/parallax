@@ -591,7 +591,7 @@ def initialize_sgl_model_runner(
 
     original_init_mem_pool = SGLModelRunner.init_memory_pool
 
-    def patched_initialize_memory_pool(self, avail_mem_bytes):
+    def patched_initialize_memory_pool(self, avail_mem_bytes, *args, **kwargs):
         # Replicate the logic from SGLang to calculate bytes_per_token
         # This is brittle but necessary without changing SGLang directly.
         dtype_size = torch.tensor([], dtype=getattr(torch, self.dtype)).element_size()
@@ -615,10 +615,12 @@ def initialize_sgl_model_runner(
         # Recalculate the memory needed for the aligned number of tokens
         aligned_avail_mem_bytes = aligned_num_total_tokens * bytes_per_token
 
-        print(f"Aligning token pool size from {num_total_tokens} to {aligned_num_total_tokens}")
+        logger.debug(
+            f"Aligning token pool size from {num_total_tokens} to {aligned_num_total_tokens}"
+        )
 
         # Call the original function with the aligned memory size
-        return original_init_mem_pool(self, aligned_avail_mem_bytes)
+        return original_init_mem_pool(self, aligned_avail_mem_bytes, *args, **kwargs)
 
     SGLModelRunner.init_memory_pool = patched_initialize_memory_pool
 
