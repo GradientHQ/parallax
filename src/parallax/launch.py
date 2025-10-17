@@ -15,6 +15,7 @@ python src/parallax/launch.py \
 """
 
 import multiprocessing
+import os
 import tempfile
 import threading
 
@@ -54,6 +55,9 @@ if __name__ == "__main__":
         args.send_to_peer_addr = f"ipc://{tempfile.NamedTemporaryFile().name}"
         args.executor_input_ipc = f"ipc://{tempfile.NamedTemporaryFile().name}"
         args.executor_output_ipc = f"ipc://{tempfile.NamedTemporaryFile().name}"
+
+        # Silence tokenizer warnings
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
         logger.debug(f"executor_input_addr: {args.executor_input_ipc}")
         logger.debug(f"executor_output_addr: {args.executor_output_ipc}")
