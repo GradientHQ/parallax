@@ -1,12 +1,15 @@
 import time
 
-from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream
+from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream, rpc_stream_iter
 
 from parallax_utils.logging_config import get_logger
 from scheduling.node import Node, NodeHardwareInfo
 from scheduling.scheduler import Scheduler
 
 logger = get_logger(__name__)
+
+import httpx
+import json
 
 
 class RPCConnectionHandler(ConnectionHandler):
@@ -19,10 +22,12 @@ class RPCConnectionHandler(ConnectionHandler):
         self,
         lattica: Lattica,
         scheduler: Scheduler,
+        http_port: int,
     ):
         # Initialize the base class
         super().__init__(lattica)
         self.scheduler = scheduler
+        self.http_port = http_port
 
     @rpc_stream
     def node_join(self, message):
@@ -78,6 +83,48 @@ class RPCConnectionHandler(ConnectionHandler):
         except Exception as e:
             logger.exception(f"node_update error: {e}")
             return {}
+    
+    @rpc_stream_iter
+    def chat_completion(
+        self,
+        request,
+    ):
+        """Handle chat completion request"""
+        logger.debug(f"Chat completion request: {request}, type: {type(request)}")
+        try:
+            with httpx.Client(timeout=10 * 60, proxy=None, trust_env=False) as client:
+                if request.get("stream", False):
+                    with client.stream(
+                        "POST",
+                        f"http://localhost:{self.http_port}/v1/chat/completions",
+                        json=request,
+                    ) as response:
+                        for chunk in response.iter_bytes():
+                            if chunk:
+                                yield chunk
+                else:
+                    response = client.post(
+                        f"http://localhost:{self.http_port}/v1/chat/completions", json=request
+                    ).json()
+                    yield json.dumps(response).encode()
+        except Exception as e:
+            logger.exception(f"Error in chat completion: {e}")
+            yield b"internal server error"
+    
+    @rpc_stream_iter
+    def cluster_status(self):
+        try:
+            with httpx.Client(timeout=10 * 60, proxy=None, trust_env=False) as client:
+            with client.stream(
+                "GET",
+                f"http://localhost:{self.http_port}/cluster/status"
+            ) as response:
+                for chunk in response.iter_bytes():
+                    if chunk:
+                        yield chunk
+        except Exception as e:
+            logger.exception(f"Error in cluster status: {e}")
+            yield b"internal server error"
 
     def wait_layer_allocation(self, current_node_id, wait_seconds):
         start_time = time.time()
