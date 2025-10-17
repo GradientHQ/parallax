@@ -588,18 +588,18 @@ def initialize_sgl_model_runner(
 
     # Monkey patch to align the token pool size
     from sglang.srt.model_executor.model_runner import ModelRunner as SGLModelRunner
-    from sglang.srt.utils import DTYPE_SIZE
 
     original_init_mem_pool = SGLModelRunner.initialize_memory_pool
 
     def patched_initialize_memory_pool(self, avail_mem_bytes):
         # Replicate the logic from SGLang to calculate bytes_per_token
         # This is brittle but necessary without changing SGLang directly.
+        dtype_size = torch.tensor([], dtype=getattr(torch, self.dtype)).element_size()
         bytes_per_token = (
             self.model_config.get_num_kv_heads(self.tp_size)
             * self.model_config.head_dim
             * 2
-            * DTYPE_SIZE[self.dtype]
+            * dtype_size
             * (
                 len(getattr(self.model_config.hf_config, "linear_layer_ids", []))
                 or self.model_config.num_hidden_layers // self.pp_size
