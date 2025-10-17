@@ -5,7 +5,6 @@ hidden_dimefines the Qwen3 model.
 from typing import Optional, Tuple
 
 import mlx.core as mx
-
 from mlx_lm.models.base import scaled_dot_product_attention
 from mlx_lm.models.deepseek_v3 import DeepseekV3Attention as MLXDeepseekV3Attention
 from mlx_lm.models.deepseek_v3 import DeepseekV3DecoderLayer as MLXDeepseekV3Block
