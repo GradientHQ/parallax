@@ -583,53 +583,20 @@ def initialize_sgl_model_runner(
     model_config.hf_config.end_layer = end_layer
     model_config.hf_config.attn_output_gate = False
 
-    # Monkey patch the model config to make SGLang allocate KV cache only for the layers on this node.
-    # We achieve this by setting an override attribute that our patched property will use.
-    hf_config = model_config.hf_config
-    original_layers_block_type = list(hf_config.layers_block_type)
-    new_layers_block_type = []
-    for i, layer_type in enumerate(original_layers_block_type):
-        is_attention_on_another_shard = layer_type == "attention" and not (
-            start_layer <= i < end_layer
+    # For Qwen3-Next, reduce the memory fraction for KV cache if running a small number of layers
+    # to avoid the CUDA graph capture reshape error, as a workaround for the token pool alignment issue.
+    if (
+        "qwen3_next" in model_config.model_path.lower()
+        and (end_layer - start_layer) < model_config.num_hidden_layers
+    ):
+        kv_cache_memory_fraction *= 0.5
+        logger.info(
+            f"Reduced kv_cache_memory_fraction to {kv_cache_memory_fraction} for Qwen3-Next partial sharding."
         )
-        if is_attention_on_another_shard:
-            new_layers_block_type.append("linear_attention")
-        else:
-            new_layers_block_type.append(layer_type)
-
-    # Set the override attribute that our patched property will pick up.
-    hf_config._layers_block_type_override = new_layers_block_type
-    attention_layers_on_this_shard = sum(1 for t in new_layers_block_type if t == "attention")
-    logger.info(f"Pipeline parallel stage: layers {start_layer}-{end_layer}.")
-    logger.info(
-        f"Adjusted KV cache allocation for {attention_layers_on_this_shard} attention layers on this shard."
-    )
 
     print("Model config:", model_config)
     print("model_start_layer:", model_config.hf_config.start_layer)
     print("model_end_layer:", model_config.hf_config.end_layer)
-
-    # Monkey patch to align the token pool size in the MHATokenToKVPool
-    from sglang.srt.mem_cache.memory_pool import MHATokenToKVPool
-
-    original_mha_pool_init = MHATokenToKVPool.__init__
-
-    def patched_mha_pool_init(self, *args, **kwargs):
-        original_mha_pool_init(self, *args, **kwargs)
-
-        alignment = 1024
-        original_tokens = self.size
-        aligned_tokens = (original_tokens // alignment) * alignment
-
-        if original_tokens != aligned_tokens:
-            logger.debug(
-                f"Aligning MHATokenToKVPool token pool size from {original_tokens} to {aligned_tokens}"
-            )
-            self.size = aligned_tokens
-            # Re-create buffers with the new aligned size
-            self._create_buffers()
-
-    MHATokenToKVPool.__init__ = patched_mha_pool_init
 
     model_runner = ParallaxModelRunner(
         model_config=model_config,
@@ -646,8 +613,5 @@ def initialize_sgl_model_runner(
         pp_start_layer=start_layer,
         pp_end_layer=end_layer,
     )
-
-    # Restore the original method after the model_runner is created
-    MHATokenToKVPool.__init__ = original_mha_pool_init
 
     return model_runner, config, tokenizer
