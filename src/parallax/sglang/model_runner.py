@@ -618,14 +618,14 @@ def initialize_sgl_model_runner(
         original_mha_pool_init(self, *args, **kwargs)
 
         alignment = 1024
-        original_tokens = self.num_total_tokens
+        original_tokens = self.num_tokens
         aligned_tokens = (original_tokens // alignment) * alignment
 
         if original_tokens != aligned_tokens:
             logger.debug(
                 f"Aligning MHATokenToKVPool token pool size from {original_tokens} to {aligned_tokens}"
             )
-            self.num_total_tokens = aligned_tokens
+            self.num_tokens = aligned_tokens
             # Re-create buffers with the new aligned size
             self._create_buffers()
 
