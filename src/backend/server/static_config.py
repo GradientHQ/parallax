@@ -29,7 +29,6 @@ MODEL_LIST = [
     "nvidia/Llama-3.3-70B-Instruct-FP8",
     "nvidia/Llama-3.1-70B-Instruct-FP8",
     "nvidia/Llama-3.1-8B-Instruct-FP8",
-    "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
 ]
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
