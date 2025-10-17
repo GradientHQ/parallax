@@ -584,18 +584,26 @@ def initialize_sgl_model_runner(
     model_config.hf_config.attn_output_gate = False
 
     # Monkey patch the model config to make SGLang allocate KV cache only for the layers on this node.
+    # We achieve this by modifying layers_block_type, which is the source for the read-only
+    # linear_layer_ids property. We re-classify all "attention" layers that are not on the
+    # current shard as "linear_attention" so SGLang's memory allocator ignores them.
     hf_config = model_config.hf_config
-    attention_layers_on_this_shard = {
-        i
-        for i, layer_type in enumerate(hf_config.layers_block_type)
-        if start_layer <= i < end_layer and layer_type == "attention"
-    }
-    all_layer_indices = set(range(hf_config.num_hidden_layers))
-    new_linear_layer_ids = sorted(list(all_layer_indices - attention_layers_on_this_shard))
-    hf_config.linear_layer_ids = new_linear_layer_ids
+    original_layers_block_type = list(hf_config.layers_block_type)
+    new_layers_block_type = []
+    for i, layer_type in enumerate(original_layers_block_type):
+        is_attention_on_another_shard = layer_type == "attention" and not (
+            start_layer <= i < end_layer
+        )
+        if is_attention_on_another_shard:
+            new_layers_block_type.append("linear_attention")
+        else:
+            new_layers_block_type.append(layer_type)
+
+    hf_config.layers_block_type = new_layers_block_type
+    attention_layers_on_this_shard = sum(1 for t in new_layers_block_type if t == "attention")
     logger.info(f"Pipeline parallel stage: layers {start_layer}-{end_layer}.")
     logger.info(
-        f"Adjusted KV cache allocation for {len(attention_layers_on_this_shard)} attention layers on this shard."
+        f"Adjusted KV cache allocation for {attention_layers_on_this_shard} attention layers on this shard."
     )
 
     print("Model config:", model_config)
