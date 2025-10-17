@@ -6,12 +6,11 @@ It will start the P2P server and the executor.
 
 Example command:
 python src/parallax/launch.py \
-    --model-path Qwen/Qwen3-0.6B-MLX-bf16 \
+    --model-path Qwen/Qwen3-0.6B \
     --max-num-tokens-per-batch 16384 \
     --max-batch-size 128 \
-    --start-layer 14 \
-    --end-layer 28 \
-    --initial-peers {peer of GPU which hold the first half model}
+    --start-layer 0 \
+    --end-layer 28
 """
 
 import multiprocessing
@@ -82,9 +81,9 @@ if __name__ == "__main__":
                 pp_start_layer=args.start_layer,
                 pp_end_layer=args.end_layer,
                 hidden_layers=executor.config.get("num_hidden_layers"),
-                dht_port=args.dht_port,
+                tcp_port=args.tcp_port,
+                udp_port=args.udp_port,
                 dht_prefix=args.dht_prefix,
-                host_maddrs=args.host_maddrs,
                 announce_maddrs=args.announce_maddrs,
                 http_port=args.port,
                 notify_url=args.notify_url,
@@ -102,9 +101,9 @@ if __name__ == "__main__":
                 pp_start_layer=None,
                 pp_end_layer=None,
                 hidden_layers=None,
-                dht_port=args.dht_port,
+                tcp_port=args.tcp_port,
+                udp_port=args.udp_port,
                 dht_prefix=args.dht_prefix,
-                host_maddrs=args.host_maddrs,
                 announce_maddrs=args.announce_maddrs,
                 http_port=args.port,
                 notify_url=args.notify_url,

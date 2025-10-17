@@ -29,23 +29,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", type=str, default="localhost", help="Host of the HTTP server.")
     parser.add_argument("--port", type=int, default=3000, help="Port of the HTTP server")
 
-    # P2P configuration
+    # Lattica configuration
     parser.add_argument("--initial-peers", nargs="+", default=[], help="List of initial DHT peers")
-
     parser.add_argument("--scheduler-addr", type=str, default=None, help="Scheduler address")
-
     parser.add_argument("--relay-servers", nargs="+", default=[], help="List of relay DHT peers")
-
-    parser.add_argument("--dht-port", type=int, default=None, help="Port for DHT communication")
-
-    parser.add_argument("--host-maddrs", type=str, default=None, help="Multiaddress to host")
-
+    parser.add_argument("--tcp-port", type=int, default=0, help="Port for Lattica TCP listening")
+    parser.add_argument("--udp-port", type=int, default=0, help="Port for Lattica UDP listening")
     parser.add_argument(
         "--announce-maddrs", nargs="+", default=[], help="List of multiaddresses to announce"
     )
-
     parser.add_argument("--dht-prefix", type=str, default="gradient", help="Prefix for DHT keys")
-
     parser.add_argument(
         "--notify-url", type=str, default=None, help="URL to notify when a request is finished"
     )

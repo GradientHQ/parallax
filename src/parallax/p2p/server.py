@@ -354,8 +354,7 @@ class GradientServer:
         """Find available servers in the DHT network"""
         # Find all announced blocks
         server_blocks = []
-        block_announced_key = f"{self.dht_prefix}_announce"
-        block_servers = self.lattica.get(block_announced_key)
+        block_servers = self.lattica.get(self.prefix_id)
         if block_servers is None:
             return []
         for peer_id, value in block_servers.value.items():
@@ -652,9 +651,9 @@ def launch_p2p_server(
     pp_start_layer: int,
     pp_end_layer: int,
     hidden_layers: int,
-    dht_port: Optional[int],
+    tcp_port: int,
+    udp_port: int,
     dht_prefix: str,
-    host_maddrs: Optional[List[str]],
     announce_maddrs: List[str],
     http_port: Optional[int],
     notify_url: str,
@@ -664,14 +663,6 @@ def launch_p2p_server(
     max_batch_size: Optional[int] = None,
     max_sequence_length: Optional[int] = None,
 ):
-    if dht_port is not None:
-        assert host_maddrs is None, "You can't use --dht-port and --host-maddrs at the same time"
-    else:
-        dht_port = 0
-    if host_maddrs is None:
-        host_maddrs = [f"/ip4/0.0.0.0/tcp/{dht_port}", f"/ip4/0.0.0.0/udp/{dht_port}/quic-v1"]
-
-    # Run the server in a separate thread to keep the main thread free for event loop
     server = GradientServer(
         recv_from_peer_addr=recv_from_peer_addr,
         send_to_peer_addr=send_to_peer_addr,
@@ -682,7 +673,7 @@ def launch_p2p_server(
         block_end_index=pp_end_layer,
         hidden_layers=hidden_layers,
         dht_prefix=dht_prefix,
-        host_maddrs=host_maddrs,
+        host_maddrs=[f"/ip4/0.0.0.0/tcp/{tcp_port}", f"/ip4/0.0.0.0/udp/{udp_port}/quic-v1"],
         announce_maddrs=announce_maddrs,
         http_port=http_port,
         notify_url=notify_url,

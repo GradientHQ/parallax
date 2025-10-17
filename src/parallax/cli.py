@@ -168,8 +168,6 @@ def run_command(args, passthrough_args: list[str] | None = None):
     # Build the command to run the backend main.py
     passthrough_args = passthrough_args or []
     cmd = [sys.executable, str(backend_main)]
-    if not _flag_present(passthrough_args, ["--dht-port"]):
-        cmd.extend(["--dht-port", "5001"])
     if not _flag_present(passthrough_args, ["--port"]):
         cmd.extend(["--port", "3001"])
 

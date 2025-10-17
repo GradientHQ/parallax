@@ -208,7 +208,6 @@ An example of serving Qwen3-0.6B with 2-nodes:
 python3 ./parallax/src/parallax/launch.py \
 --model-path Qwen/Qwen3-0.6B \
 --port 3000 \
---dht-port 5000 \
 --max-batch-size 8 \
 --start-layer 0 \
 --end-layer 14
@@ -218,7 +217,6 @@ python3 ./parallax/src/parallax/launch.py \
 python3 ./parallax/src/parallax/launch.py \
 --model-path Qwen/Qwen3-0.6B \
 --port 3000 \
---dht-port 5000 \
 --max-batch-size 8 \
 --start-layer 14 \
 --end-layer 28
