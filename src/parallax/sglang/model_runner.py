@@ -595,16 +595,26 @@ def initialize_sgl_model_runner(
         # Replicate the logic from SGLang to calculate bytes_per_token
         # This is brittle but necessary without changing SGLang directly.
         dtype_size = torch.tensor([], dtype=self.dtype).element_size()
+        num_layers = (
+            len(getattr(self.model_config.hf_config, "linear_layer_ids", []))
+            or self.model_config.num_hidden_layers // self.pp_size
+        )
         bytes_per_token = (
             self.model_config.get_num_kv_heads(self.tp_size)
             * self.model_config.head_dim
             * 2
             * dtype_size
-            * (
-                len(getattr(self.model_config.hf_config, "linear_layer_ids", []))
-                or self.model_config.num_hidden_layers // self.pp_size
-            )
+            * num_layers
         )
+        if self.server_args.attention_backend == "flashinfer":
+            # Add extra memory for flashinfer backend with MoE
+            bytes_per_token += (
+                self.model_config.get_num_kv_heads(self.tp_size)
+                * 2
+                * dtype_size
+                * num_layers
+                * self.model_config.hf_config.get("num_experts", 0)
+            )
 
         num_total_tokens = int(avail_mem_bytes / bytes_per_token)
 
