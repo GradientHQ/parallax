@@ -581,6 +581,7 @@ def initialize_sgl_model_runner(
     model_config.hf_config.tie_word_embeddings = False
     model_config.hf_config.start_layer = start_layer
     model_config.hf_config.end_layer = end_layer
+    model_config.hf_config.attn_output_gate = False
     print("Model config:", model_config)
     print("model_start_layer:", model_config.hf_config.start_layer)
     print("model_end_layer:", model_config.hf_config.end_layer)
