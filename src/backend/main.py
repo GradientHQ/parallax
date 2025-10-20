@@ -13,6 +13,7 @@ from backend.server.request_handler import RequestHandler
 from backend.server.scheduler_manage import SchedulerManage
 from backend.server.server_args import parse_args
 from backend.server.static_config import get_model_list, get_node_join_command
+from common.file_util import get_project_root
 from parallax_utils.ascii_anime import display_parallax_run
 from parallax_utils.logging_config import get_logger, set_log_level
 
@@ -113,7 +114,7 @@ async def openai_v1_chat_completions(raw_request: Request):
 # Disable caching for index.html
 @app.get("/")
 async def serve_index():
-    response = FileResponse("src/frontend/dist/index.html")
+    response = FileResponse(str(get_project_root()) + "/src/frontend/dist/index.html")
     # Disable cache
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
@@ -122,7 +123,11 @@ async def serve_index():
 
 
 # mount the frontend
-app.mount("/", StaticFiles(directory="src/frontend/dist", html=True), name="static")
+app.mount(
+    "/",
+    StaticFiles(directory=str(get_project_root() / "src" / "frontend" / "dist"), html=True),
+    name="static",
+)
 
 if __name__ == "__main__":
     args = parse_args()

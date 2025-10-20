@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dht-prefix", type=str, default="gradient", help="Prefix for DHT keys")
 
     # Scheduler configuration
-    parser.add_argument("--port", type=int, default=5000, help="Port to listen on")
+    parser.add_argument("--port", type=int, default=3001, help="Port to listen on")
     parser.add_argument(
         "--log-level",
         type=str,
