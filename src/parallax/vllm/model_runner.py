@@ -23,7 +23,7 @@ from vllm.config import (
 )
 from vllm.executor.ray_gpu_executor import RayGPUExecutor
 from vllm.model_executor.layers.sampler import Sampler
-from vllm.sequence import SamplerOutput, SequenceGroupMetadata
+from vllm.sequence import SamplerOutput, IntermediateTensors
 from vllm.utils import get_distributed_init_method, get_ip, get_open_port
 
 from parallax.utils.tokenizer_utils import load_tokenizer
@@ -118,6 +118,72 @@ class ParallaxVLLMEngine:
 
         self.model_runner = worker.model_runner
         logger.info("vLLM model loaded successfully")
+
+    def forward(
+        self,
+        *,
+        input_ids: Optional[torch.Tensor],
+        lengths: Optional[torch.Tensor],
+        pp_proxy_tensors: Optional[Dict[str, torch.Tensor]],
+        return_logits: bool,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        进行一次前向：
+        - 首个 peer 传 input_ids/lengths；
+        - 其它 peer 传 pp_proxy_tensors={hidden_states,residual}；
+        - 最后一个 peer 设置 return_logits=True 以便采样。
+        """
+        assert self.model_runner is not None, "Model not initialized"
+
+        # positions（简单从长度构建，形状 [B, L] -> 递增序列）；非首个 peer 不需要
+        positions = None
+        if input_ids is not None and lengths is not None:
+            batch_size, max_len = input_ids.shape
+            positions = torch.arange(max_len, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
+
+        inter_tensors = None
+        if pp_proxy_tensors is not None:
+            inter_tensors = IntermediateTensors(
+                tensors={
+                    "hidden_states": pp_proxy_tensors["hidden_states"],
+                    "residual": pp_proxy_tensors["residual"],
+                }
+            )
+
+        # 直接调用底层模型
+        outputs = self.model_runner.model(
+            input_ids=input_ids,
+            positions=positions,
+            intermediate_tensors=inter_tensors,
+            inputs_embeds=None,
+        )
+
+        # 约定：模型返回包含 hidden_states/residual 或 logits
+        ret: Dict[str, torch.Tensor] = {}
+        if isinstance(outputs, dict):
+            if "hidden_states" in outputs:
+                ret["hidden_states"] = outputs["hidden_states"]
+            if "residual" in outputs:
+                ret["residual"] = outputs["residual"]
+            if return_logits and "logits" in outputs:
+                ret["logits"] = outputs["logits"]
+        elif isinstance(outputs, tuple):
+            # 兜底：假设 (hidden_states, residual) 或 (logits,)
+            if return_logits and len(outputs) == 1:
+                ret["logits"] = outputs[0]
+            elif len(outputs) >= 2:
+                ret["hidden_states"] = outputs[0]
+                ret["residual"] = outputs[1]
+        else:
+            # 可能直接返回 logits
+            if return_logits:
+                ret["logits"] = outputs
+        return ret
+
+    @staticmethod
+    def sample_argmax(logits: torch.Tensor) -> torch.Tensor:
+        """简单贪心采样。logits: [B, V] -> token_ids: [B]"""
+        return torch.argmax(logits, dim=-1)
 
     def execute_model(
         self,

@@ -373,13 +373,50 @@ class Executor:
         Prepares inputs for SGLang model runner from a batch of prefill requests.
         Returns: SGLang ScheduleBatch
         """
-        from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
-
-        from parallax.sglang.batch_info import form_sgl_batch_prefill
-
         batch_size = len(batched_requests)
         if batch_size == 0:
             return None
+
+        if self.gpu_backend == "vllm":
+            from parallax.vllm.batch_info import form_vllm_batch_prefill
+
+            pp_proxy_tensors = None
+            if not self.is_first_peer:
+                hidden_states = torch.cat(
+                    [
+                        (
+                            req.hidden_states
+                            if req.hidden_states.ndim == 2
+                            else req.hidden_states.unsqueeze(0)
+                        )
+                        for req in batched_requests
+                    ],
+                    dim=0,
+                )
+                residual = torch.zeros(
+                    hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
+                )
+                pp_proxy_tensors = {
+                    "hidden_states": hidden_states,
+                    "residual": residual,
+                }
+                logger.debug(f"PP Proxy: hidden_states shape: {hidden_states.shape}")
+
+            fb = None
+            if self.is_first_peer:
+                fb = form_vllm_batch_prefill(batched_requests, self.pad_token_id)
+            lengths = [req.total_length for req in batched_requests]
+            return {
+                "input_ids": fb["input_ids"] if fb else None,
+                "pp_proxy_tensors": pp_proxy_tensors,
+                "lengths": torch.tensor(lengths, device=self.device),
+                "requests": batched_requests,
+            }
+
+        # sglang 路径
+        from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
+        from parallax.sglang.batch_info import form_sgl_batch_prefill
+
         schedule_batch, forward_batch = form_sgl_batch_prefill(batched_requests, self.model_runner)
         self.cur_batch = schedule_batch
 
@@ -423,13 +460,47 @@ class Executor:
         Prepares inputs for SGLang model runner from a batch of decode requests.
         Returns: SGLang ScheduleBatch
         """
-        from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
-
-        from parallax.sglang.batch_info import form_sgl_batch_decode
-
         batch_size = len(batched_requests)
         if batch_size == 0:
             return None
+
+        if self.gpu_backend == "vllm":
+            from parallax.vllm.batch_info import form_vllm_batch_decode
+
+            pp_proxy_tensors = None
+            if not self.is_first_peer:
+                hidden_states = torch.cat(
+                    [
+                        (
+                            req.hidden_states
+                            if req.hidden_states.ndim == 2
+                            else req.hidden_states.unsqueeze(0)
+                        )
+                        for req in batched_requests
+                    ],
+                    dim=0,
+                )
+                residual = torch.zeros(
+                    hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
+                )
+                pp_proxy_tensors = {
+                    "hidden_states": hidden_states,
+                    "residual": residual,
+                }
+                logger.debug(f"PP Proxy: hidden_states shape: {hidden_states.shape}")
+
+            fb = form_vllm_batch_decode(batched_requests, self.is_first_peer)
+            lengths = [req.total_length for req in batched_requests]
+            return {
+                "input_ids": fb["input_ids"] if fb else None,
+                "pp_proxy_tensors": pp_proxy_tensors,
+                "lengths": torch.tensor(lengths, device=self.device),
+                "requests": batched_requests,
+            }
+
+        # sglang 路径
+        from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
+        from parallax.sglang.batch_info import form_sgl_batch_decode
 
         lengths = []
         for req in batched_requests:
@@ -1003,6 +1074,30 @@ class Executor:
         """
         Process a batch of requests in CUDA.
         """
+        if self.gpu_backend == "vllm":
+            # vLLM 自定义前向
+            input_ids = prepared_inputs.get("input_ids")
+            pp_proxy_tensors = prepared_inputs.get("pp_proxy_tensors")
+            ret = self.model_runner.forward(
+                input_ids=input_ids,
+                lengths=prepared_inputs.get("lengths"),
+                pp_proxy_tensors=pp_proxy_tensors,
+                return_logits=(self.is_last_peer and return_decoded_tokens),
+            )
+
+            if self.is_last_peer and return_decoded_tokens:
+                logits = ret.get("logits")
+                assert logits is not None, "vLLM last peer must return logits"
+                next_token_ids = self.model_runner.sample_argmax(logits)
+                return next_token_ids
+
+            # 其它 peer：返回 hidden_states + residual
+            hidden_states = ret.get("hidden_states")
+            residual = ret.get("residual")
+            assert hidden_states is not None and residual is not None
+            return hidden_states + residual
+
+        # sglang 路径
         assert "forward_batch" in prepared_inputs, "forward_batch should be in cuda prepared inputs"
         assert (
             "pp_proxy_tensors" in prepared_inputs
