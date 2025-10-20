@@ -45,6 +45,14 @@ def parse_args() -> argparse.Namespace:
         "--is-local-network", type=bool, default=True, help="Whether to use local network"
     )
 
+    parser.add_argument(
+        "--gpu_backend",
+        type=str,
+        default="sglang",
+        choices=["sglang", "vllm"],
+        help="GPU backend to use",
+    )
+
     args = parser.parse_args()
 
     return args

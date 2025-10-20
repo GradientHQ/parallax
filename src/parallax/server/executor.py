@@ -93,39 +93,63 @@ class Executor:
         # IPC Communication Configs
         executor_input_ipc_addr: Optional[str] = None,
         executor_output_ipc_addr: Optional[str] = None,
-        # GPU/SGLang Specialized Configs
+        # GPU Backend Configs
+        gpu_backend: Optional[str] = "sglang",  # "sglang" or "vllm"
         attention_backend: Optional[str] = "torch_native",
         moe_runner_backend: Optional[str] = "auto",
     ):
         # Backend
         self.device = get_current_device()
-        logger.debug(f"Executor initializing on device: {self.device}")
+        self.gpu_backend = gpu_backend
+        logger.debug(f"Executor initializing on device: {self.device}, gpu_backend: {gpu_backend}")
 
         # Sharded Model
         if self.device == "cuda":
-            from sglang.srt.managers.schedule_batch import ScheduleBatch
+            if gpu_backend == "vllm":
+                from parallax.vllm.model_runner import initialize_vllm_model_runner
 
-            from parallax.sglang.model_runner import initialize_sgl_model_runner
+                logger.debug(
+                    f"Initializing vLLM model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
+                )
+                self.model_runner, self.config, self.tokenizer = initialize_vllm_model_runner(
+                    model_repo,
+                    start_layer,
+                    end_layer,
+                    kv_cache_memory_fraction,
+                    kv_block_size,
+                    max_num_seqs=max_batch_size,
+                    max_model_len=max_sequence_length,
+                )
+                logger.debug(
+                    f"vLLM model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
+                )
+                # vLLM manages its own KV cache and batching
+                self.running_batch = None
+                self.cur_batch = None
+            else:  # sglang backend
+                from sglang.srt.managers.schedule_batch import ScheduleBatch
 
-            logger.debug(
-                f"Initializing CUDA model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
-            )
-            self.model_runner, self.config, self.tokenizer = initialize_sgl_model_runner(
-                model_repo,
-                start_layer,
-                end_layer,
-                kv_cache_memory_fraction,
-                attention_backend,
-                kv_block_size,
-                moe_runner_backend,
-            )
-            logger.debug(
-                f"CUDA model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
-            )
-            # SGL KV Cache Manager is already initialized in ScheduleBatch
-            # TODO: Replace ScheduleBatch to Parallax inflight batch
-            self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
-            self.cur_batch = None
+                from parallax.sglang.model_runner import initialize_sgl_model_runner
+
+                logger.debug(
+                    f"Initializing SGLang model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
+                )
+                self.model_runner, self.config, self.tokenizer = initialize_sgl_model_runner(
+                    model_repo,
+                    start_layer,
+                    end_layer,
+                    kv_cache_memory_fraction,
+                    attention_backend,
+                    kv_block_size,
+                    moe_runner_backend,
+                )
+                logger.debug(
+                    f"SGLang model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
+                )
+                # SGL KV Cache Manager is already initialized in ScheduleBatch
+                # TODO: Replace ScheduleBatch to Parallax inflight batch
+                self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
+                self.cur_batch = None
         else:
             logger.debug(
                 f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer})"
@@ -1230,6 +1254,7 @@ def create_executor_config(args: argparse.Namespace):
         "recv_from_peer_addr": args.recv_from_peer_addr if "recv_from_peer_addr" in args else None,
         "executor_input_ipc_addr": args.executor_input_ipc,
         "executor_output_ipc_addr": args.executor_output_ipc,
+        "gpu_backend": args.gpu_backend if hasattr(args, "gpu_backend") else "sglang",
         "attention_backend": args.attention_backend,
         "moe_runner_backend": args.moe_runner_backend,
     }
