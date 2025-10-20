@@ -19,6 +19,7 @@ import multiprocessing as mp
 import sys
 import time
 import traceback
+import uuid
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from typing import Dict, Optional
@@ -341,7 +342,12 @@ async def v1_chat_completions(raw_request: fastapi.Request):
     except Exception as e:
         return create_error_response("Invalid request body, error: ", str(e))
 
+    # Check if request_json has "rid", otherwise generate new one
     request_id = request_json.get("rid")
+    if request_id is None:
+        request_id = uuid.uuid4()
+        request_json["rid"] = str(request_id)
+
     app.state.http_handler.create_request(request_json)
     app.state.http_handler.send_request(request_json)
     req = app.state.http_handler.processing_requests.get(request_id)
