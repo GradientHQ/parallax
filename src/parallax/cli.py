@@ -22,9 +22,9 @@ logger = get_logger("parallax.cli")
 
 def check_python_version():
     """Check if Python version is 3.11 or higher."""
-    if sys.version_info < (3, 11):
+    if sys.version_info < (3, 11) or sys.version_info >= (3, 14):
         print(
-            f"Error: Python 3.11 or higher is required. Current version is {sys.version_info.major}.{sys.version_info.minor}."
+            f"Error: Python 3.11 or higher and less than 3.14 is required. Current version is {sys.version_info.major}.{sys.version_info.minor}."
         )
         sys.exit(1)
 

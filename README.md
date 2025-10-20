@@ -33,7 +33,7 @@ A fully decentralized inference engine developed by [Gradient](https://gradient.
 ## Installation
 
 ### Prerequisites
-- Python>=3.11.0
+- Python>=3.11.0,<3.14.0
 - Ubuntu-24.04 for Blackwell GPUs
 
 Below are installation methods for different operating systems.
