@@ -71,6 +71,8 @@ class Executor:
         start_layer: int,
         end_layer: int,
         dtype: str = "float16",
+        # Backend selection
+        gpu_backend: str = "sglang",
         # Scheduler Configs
         max_batch_size: Optional[int] = 8,
         max_sequence_length: Optional[int] = None,
@@ -100,32 +102,43 @@ class Executor:
         # Backend
         self.device = get_current_device()
         logger.debug(f"Executor initializing on device: {self.device}")
+        self.backend_type = gpu_backend
 
         # Sharded Model
         if self.device == "cuda":
-            from sglang.srt.managers.schedule_batch import ScheduleBatch
+            if self.backend_type == "vllm":
+                from parallax.vllm.model_runner import (
+                    initialize_vllm_model_runner as initialize_cuda_model_runner,
+                )
 
-            from parallax.sglang.model_runner import initialize_sgl_model_runner
+                logger.debug(
+                    f"Initializing vLLM model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
+                )
+            elif self.backend_type == "sglang":
+                from sglang.srt.managers.schedule_batch import ScheduleBatch as CudaScheduleBatch
+                from parallax.sglang.model_runner import (
+                    initialize_sgl_model_runner as initialize_cuda_model_runner,
+                )
 
-            logger.debug(
-                f"Initializing CUDA model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
-            )
-            self.model_runner, self.config, self.tokenizer = initialize_sgl_model_runner(
+                logger.debug(
+                    f"Initializing SGLang model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
+                )
+            else:
+                raise ValueError(f"Unsupported GPU backend type: {self.backend_type}")
+
+            self.model_runner, self.config, self.tokenizer = initialize_cuda_model_runner(
                 model_repo,
                 start_layer,
                 end_layer,
                 kv_cache_memory_fraction,
                 attention_backend,
                 kv_block_size,
-                moe_runner_backend,
             )
-            logger.debug(
-                f"CUDA model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
-            )
-            # SGL KV Cache Manager is already initialized in ScheduleBatch
-            # TODO: Replace ScheduleBatch to Parallax inflight batch
-            self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
+            self.running_batch = None
             self.cur_batch = None
+            if self == "sglang":
+                self.running_batch = CudaScheduleBatch(reqs=[], batch_is_full=False)
+
         else:
             logger.debug(
                 f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer})"
@@ -363,19 +376,16 @@ class Executor:
 
     def _prepare_cuda_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """
-        Prepares inputs for SGLang model runner from a batch of prefill requests.
-        Returns: SGLang ScheduleBatch
+        Prepares inputs for CUDA backends from a batch of prefill requests.
+        Routes to SGLang or vLLM depending on backend_type.
         """
         from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
-
-        from parallax.sglang.batch_info import form_sgl_batch_prefill
 
         batch_size = len(batched_requests)
         if batch_size == 0:
             return None
-        schedule_batch, forward_batch = form_sgl_batch_prefill(batched_requests, self.model_runner)
-        self.cur_batch = schedule_batch
 
+        # Prepare PP proxy tensors (common for both backends when not first peer)
         pp_proxy_tensors = None
         if not self.is_first_peer:
             hidden_states = torch.cat(
@@ -399,40 +409,55 @@ class Executor:
                 }
             )
             logger.debug(f"PP Proxy: hidden_states shape: {hidden_states.shape}")
+
+        # Prepare lengths (common for both backends)
         lengths = []
         for req in batched_requests:
             lengths.append(req.total_length)
-        ret = {
-            "forward_batch": forward_batch,
-            "pp_proxy_tensors": pp_proxy_tensors,
-            "lengths": torch.tensor(lengths, device=self.device),
-            "requests": batched_requests,
-        }
-        logger.debug(f"Prepared CUDA prefill batch (size={batch_size})")
-        return ret
+        lengths_tensor = torch.tensor(lengths, device=self.device)
+
+        if self.backend_type == "vllm":
+            from parallax.vllm.batch_info import form_vllm_batch_prefill
+
+            schedule_outputs_prefill = form_vllm_batch_prefill(batched_requests, self.model_runner)
+
+            ret = {
+                "scheduler_output": schedule_outputs_prefill,
+                "pp_proxy_tensors": pp_proxy_tensors,
+                "lengths": lengths_tensor,
+                "requests": batched_requests,
+            }
+            logger.debug(f"Prepared CUDA prefill batch (vllm, size={batch_size})")
+            return ret
+        else:
+            from parallax.sglang.batch_info import form_sgl_batch_prefill
+
+            schedule_batch, forward_batch = form_sgl_batch_prefill(
+                batched_requests, self.model_runner
+            )
+            self.cur_batch = schedule_batch
+
+            ret = {
+                "forward_batch": forward_batch,
+                "pp_proxy_tensors": pp_proxy_tensors,
+                "lengths": lengths_tensor,
+                "requests": batched_requests,
+            }
+            logger.debug(f"Prepared CUDA prefill batch (sglang, size={batch_size})")
+            return ret
 
     def _prepare_cuda_decode_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """
-        Prepares inputs for SGLang model runner from a batch of decode requests.
-        Returns: SGLang ScheduleBatch
+        Prepares inputs for CUDA backends from a batch of decode requests.
+        Routes to SGLang or vLLM depending on backend_type.
         """
         from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
-
-        from parallax.sglang.batch_info import form_sgl_batch_decode
 
         batch_size = len(batched_requests)
         if batch_size == 0:
             return None
 
-        lengths = []
-        for req in batched_requests:
-            lengths.append(req.total_length)
-        forward_batch = form_sgl_batch_decode(
-            batched_requests,
-            self.model_runner,
-            self.running_batch,
-            self.is_first_peer,
-        )
+        # Prepare PP proxy tensors (common for both backends when not first peer)
         pp_proxy_tensors = None
         if not self.is_first_peer:
             hidden_states = torch.cat(
@@ -456,14 +481,43 @@ class Executor:
                 }
             )
             logger.debug(f"PP Proxy: hidden_states shape: {hidden_states.shape}")
-        ret = {
-            "forward_batch": forward_batch,
-            "pp_proxy_tensors": pp_proxy_tensors,
-            "lengths": torch.tensor(lengths, device=self.device),
-            "requests": batched_requests,
-        }
-        logger.debug(f"Prepared CUDA decode batch (size={batch_size})")
-        return ret
+
+        # Prepare lengths (common for both backends)
+        lengths = []
+        for req in batched_requests:
+            lengths.append(req.total_length)
+        lengths_tensor = torch.tensor(lengths, device=self.device)
+
+        if self.backend_type == "vllm":
+            from parallax.vllm.batch_info import form_vllm_batch_decode
+
+            scheduler_outputs_decode = form_vllm_batch_decode(batched_requests, self.model_runner)
+            ret = {
+                "scheduler_output": scheduler_outputs_decode,
+                "pp_proxy_tensors": pp_proxy_tensors,
+                "lengths": lengths_tensor,
+                "requests": batched_requests,
+            }
+            logger.debug(f"Prepared CUDA decode batch (vllm, size={batch_size})")
+            return ret
+        else:
+            from parallax.sglang.batch_info import form_sgl_batch_decode
+
+            forward_batch = form_sgl_batch_decode(
+                batched_requests,
+                self.model_runner,
+                self.running_batch,
+                self.is_first_peer,
+            )
+
+            ret = {
+                "forward_batch": forward_batch,
+                "pp_proxy_tensors": pp_proxy_tensors,
+                "lengths": lengths_tensor,
+                "requests": batched_requests,
+            }
+            logger.debug(f"Prepared CUDA decode batch (sglang, size={batch_size})")
+            return ret
 
     def _prepare_mlx_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """Prepares inputs for ShardedModel from a batch of prefill requests."""
@@ -728,7 +782,7 @@ class Executor:
         Cuda specialized handle function.
         The main difference is to remove all the kv cache operations.
         """
-        from parallax.sglang.batch_info import release_cuda_request
+        from parallax.sglang.batch_info import release_sglang_request
 
         if self.is_first_peer:
             # First peer can receive InitialRequests from the client RPC,
@@ -754,7 +808,12 @@ class Executor:
                     # Check for termination.
                     if self.scheduler.check_and_update_request_status(original_req):
                         logger.debug(f"Releasing resources for finished request {req.request_id}")
-                        release_cuda_request(self.running_batch, req.request_id)
+                        if self.backend_type == "sglang":
+                            release_sglang_request(self.running_batch, req.request_id)
+                        elif self.backend_type == "vllm":
+                            from parallax.vllm.batch_info import release_vllm_request
+
+                            release_vllm_request(self.model_runner, req.request_id)
                         if not self.is_last_peer:
                             self.finished_batch.append(req)
                     else:
@@ -781,7 +840,12 @@ class Executor:
                 ), "Non-first peers must receive IntermediateRequests."
                 if req.is_finished or req.hidden_states is None:
                     self.scheduler.evict_request(req.request_id, req.status)
-                    release_cuda_request(self.running_batch, req.request_id)
+                    if self.backend_type == "sglang":
+                        release_sglang_request(self.running_batch, req.request_id)
+                    elif self.backend_type == "vllm":
+                        from parallax.vllm.batch_info import release_vllm_request
+
+                        release_vllm_request(self.model_runner, req.request_id)
                     if not self.is_last_peer:
                         self.finished_batch.append(req)
                 else:
@@ -995,37 +1059,98 @@ class Executor:
     ):
         """
         Process a batch of requests in CUDA.
+
+        Supports both vLLM and SGLang backends with Pipeline Parallelism.
+
+        Args:
+            prepared_inputs: Dict containing batch data and metadata
+            return_decoded_tokens: If True, return token IDs (last peer);
+                                  If False, return hidden states (intermediate peer)
+
+        Returns:
+            token_ids (Tensor): If return_decoded_tokens=True
+            hidden_states (Tensor): If return_decoded_tokens=False
         """
-        assert "forward_batch" in prepared_inputs, "forward_batch should be in cuda prepared inputs"
-        assert (
-            "pp_proxy_tensors" in prepared_inputs
-        ), "pp_proxy_tensors should be in cuda prepared inputs"
-        forward_batch = prepared_inputs["forward_batch"]
-        pp_proxy_tensors = prepared_inputs["pp_proxy_tensors"]
-        logits_output, _ = self.model_runner.forward(
-            forward_batch=forward_batch,
-            pp_proxy_tensors=pp_proxy_tensors,
-        )
+        if self.backend_type == "vllm":
+            # ========== vLLM Backend ==========
+            assert (
+                "scheduler_output" in prepared_inputs
+            ), "scheduler_output should be provided for vLLM backend"
+            assert (
+                "pp_proxy_tensors" in prepared_inputs
+            ), "pp_proxy_tensors should be in cuda prepared inputs"
+            scheduler_output = prepared_inputs["scheduler_output"]
+            pp_proxy_tensors = prepared_inputs["pp_proxy_tensors"]
+            intermediate_tensors = None
+            if pp_proxy_tensors is not None:
+                # Convert SGLang's PPProxyTensors to vLLM's IntermediateTensors
+                from vllm.sequence import IntermediateTensors
 
-        if self.cur_batch:
-            if self.cur_batch.forward_mode.is_extend():
-                # Merge the new batch into the running batch
-                if not self.cur_batch.is_empty():
-                    if self.running_batch.is_empty():
-                        self.running_batch = self.cur_batch
-                    else:
-                        # Merge running_batch with prefill batch
-                        self.running_batch.merge_batch(self.cur_batch)
-            self.cur_batch = None
+                intermediate_tensors = IntermediateTensors(pp_proxy_tensors.tensors)
+                logger.debug(f"vLLM: Using intermediate_tensors for PP (non-first peer)")
 
-        if return_decoded_tokens:
-            next_token_ids = self.model_runner.sample(logits_output, forward_batch)
-            return next_token_ids
-        # Currently hack the result of (hidden_state + residual) here for GPU
-        final_hidden_states = (
-            logits_output.tensors["hidden_states"] + logits_output.tensors["residual"]
-        )
-        return final_hidden_states
+            # Execute model with vLLM
+            output = self.model_runner.execute_model(
+                scheduler_output=scheduler_output,
+                intermediate_tensors=intermediate_tensors,
+            )
+
+            # Return appropriate output based on peer position
+            if return_decoded_tokens:
+                # Last peer: return sampled token IDs
+                return output.sampled_token_ids
+            else:
+                # Intermediate peer: return hidden states for next peer
+                if hasattr(output, "hidden_states") and output.hidden_states is not None:
+                    return output.hidden_states
+                else:
+                    raise RuntimeError(
+                        "vLLM backend: expected hidden_states in output for PP, but got None. "
+                        "This typically means the model runner is not configured for pipeline parallelism."
+                    )
+
+        else:  # self.backend_type == "sglang"
+            # ========== SGLang Backend ==========
+            assert (
+                "forward_batch" in prepared_inputs
+            ), "forward_batch should be in cuda prepared inputs"
+            assert (
+                "pp_proxy_tensors" in prepared_inputs
+            ), "pp_proxy_tensors should be in cuda prepared inputs"
+
+            forward_batch = prepared_inputs["forward_batch"]
+            pp_proxy_tensors = prepared_inputs["pp_proxy_tensors"]
+
+            # Execute model with SGLang
+            logits_output, _ = self.model_runner.forward(
+                forward_batch=forward_batch,
+                pp_proxy_tensors=pp_proxy_tensors,
+            )
+
+            # SGLang-specific batch management: merge prefill batch into running batch
+            if self.cur_batch:
+                if self.cur_batch.forward_mode.is_extend():
+                    # Merge the new batch into the running batch
+                    if not self.cur_batch.is_empty():
+                        if self.running_batch.is_empty():
+                            self.running_batch = self.cur_batch
+                        else:
+                            # Merge running_batch with prefill batch
+                            self.running_batch.merge_batch(self.cur_batch)
+                self.cur_batch = None
+
+            # Return appropriate output based on peer position
+            if return_decoded_tokens:
+                # Last peer: sample and return token IDs
+                next_token_ids = self.model_runner.sample(logits_output, forward_batch)
+                return next_token_ids
+            else:
+                # Intermediate peer: return hidden states for next peer
+                # Note: SGLang stores hidden_states + residual separately
+                final_hidden_states = (
+                    logits_output.tensors["hidden_states"] + logits_output.tensors["residual"]
+                )
+                return final_hidden_states
 
     def _process_batch_mlx(
         self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True
@@ -1206,9 +1331,14 @@ class Executor:
                 for req in batch_to_process:
                     self.scheduler.evict_request(req.request_id, req.status)
                     if self.device == "cuda":
-                        from parallax.sglang.batch_info import release_cuda_request
+                        if self.backend_type == "vllm":
+                            from parallax.vllm.batch_info import release_vllm_request
 
-                        release_cuda_request(self.running_batch, req.request_id)
+                            release_vllm_request(self.model_runner, req.request_id)
+                        elif self.backend_type == "sglang":
+                            from parallax.sglang.batch_info import release_sglang_request
+
+                            release_sglang_request(self.running_batch, req.request_id)
                     else:
                         self.kv_cache_manager.release_request(req.request_id)
 
@@ -1234,6 +1364,7 @@ def create_executor_config(args: argparse.Namespace):
         "start_layer": args.start_layer,
         "end_layer": args.end_layer,
         "dtype": args.dtype,
+        "gpu_backend": args.gpu_backend if hasattr(args, "gpu_backend") else "sglang",
         "max_sequence_length": args.max_sequence_length if "max_sequence_length" in args else None,
         "max_batch_size": args.max_batch_size if "max_batch_size" in args else None,
         "kv_block_size": args.kv_block_size,
