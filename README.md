@@ -33,7 +33,7 @@ A fully decentralized inference engine developed by [Gradient](https://gradient.
 ## Installation
 
 ### Prerequisites
-- Python>=3.11.0
+- Python>=3.11.0,<3.14.0
 - Ubuntu-24.04 for Blackwell GPUs
 
 Below are installation methods for different operating systems.
@@ -61,7 +61,7 @@ git clone https://github.com/GradientHQ/parallax.git
 cd parallax
 
 # Enter Python virtual environment
-python -m venv ./venv
+python3 -m venv ./venv
 source ./venv/bin/activate
 
 pip install -e '.[mac]'
@@ -78,6 +78,14 @@ pip install -e '.[dev]'
 [Click here](https://github.com/GradientHQ/parallax/releases/latest/download/Gradient_Parallax_PC_Setup.exe) to get latest Windows installer.
 
 After installing .exe, right click Windows start button and click ```Windows Terminal(Admin)``` to start a Powershell console as administrator.
+
+❗ Make sure you open your terminal with administrator privileges.
+#### Ways to run Windows Terminal as administrator
+
+- Start menu: Right‑click Start and choose “Windows Terminal (Admin)”, or search “Windows Terminal”, right‑click the result, and select “Run as administrator”.
+- Run dialog: Press Win+R → type `wt` → press Ctrl+Shift+Enter.
+- Task Manager: Press Ctrl+Shift+Esc → File → Run new task → enter `wt` → check “Create this task with administrator privileges”.
+- File Explorer: Open the target folder → hold Ctrl+Shift → right‑click in the folder → select “Open in Terminal”.
 
 Start Windows dependencies installation by simply typing this command in console:
 ```sh

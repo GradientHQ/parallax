@@ -8,7 +8,7 @@ name = "parallax"
 version = "0.0.1"
 description = "Decentralised pipeline-parallel LLM serving with Sglang + MLX-LM + Lattica"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 packages = [
   { include = "parallax", from = "src" },
   { include = "scheduling", from = "src" },
