@@ -1,15 +1,29 @@
 """
-Scheduling requests to form batches.sche
+Continuous Batching Scheduler.
 
-A scheduler will maintain a Priority Queue for request waiting pool.
-We support continuous batching, and similar to TensorRT-LLM,
-    we favors prefill requests over decode requests.
+State managed by the scheduler:
+    1. Prefill Wait Queue (FIFO): incoming prefill requests waiting for admission;
+    2. Running Requests: inflight requests with KV-cache residency;
+    3. Active Batch: the concrete batch chosen for the next model forward.
+
+We use an explicit 2-Phase approach:
+    * Phase 1 (Admission): wait queue -> running requests
+        Implemented by `admit_requests`. We admit requests when capacity
+        allows (e.g., max concurrent requests, memory availability). Admitted
+        requests get KV-cache residency and become inflight.
+    * Phase 2 (Batching): running requests -> active batch for actual forward
+        Implemented by `form_batch`. We prioritize PREFILL requests
+        first within `max_num_tokens_per_batch` and `micro_batch_size`,
+        then include DECODE requests that are marked ready for the next decode step.
+
+Our scheduler also handles tokenization and pre-processing for the First Peer's requests.
 """
 
-import heapq
 import time
-from typing import Dict, List, Literal, Optional, Tuple
+from collections import OrderedDict
+from typing import Dict, List, Optional
 
+from parallax.server.kv_cache import KVCacheManager
 from parallax.server.metrics import update_metrics
 from parallax.server.request import InitialRequest, Request, RequestStatus
 from parallax_utils.logging_config import get_logger
@@ -19,29 +33,29 @@ logger = get_logger(__name__)
 
 class Scheduler:
     """
-    A simple scheduler to manage requests and form them into batches.
-    This scheduler is designed to handle requests in a FIFO manner.
+    2-Phase approach:
+        * Phase 1: wait queue -> running requests (all inflight requests)
+        * Phase 2: running requests -> active batch (actual model forward)
     """
 
     def __init__(
         self,
         max_batch_size: int = 16,
         max_num_tokens_per_batch: int = 4096,
-        prefill_priority: Literal[0, 1] = 0,
         scheduler_wait_ms: int = 200,
         micro_batch_ratio: int = 2,
         is_first_peer: bool = False,
+        kv_cache_manager: Optional[KVCacheManager] = None,
         **kwargs,
     ):
         """
         Args:
-            max_batch_size: Maximum number of running requests;
+            max_batch_size: Maximum number of running / inflight requests;
             max_num_tokens_per_batch: Maxmimum number of prefill + decode tokens in a single batch;
-            prefill_priority: Priority for prefill requests,
-                default 0 for prefill, 1 for decode, 0 for higher priority;
             scheduler_wait_ms: The minimum time to wait before dispatching a batch;
-            micro_batch_ratio: micro_batch_size = max_batch_size // micro_batch_ratio
-            tokenizer: The tokenizer to use for the model.
+            micro_batch_ratio: micro_batch_size = max_batch_size // micro_batch_ratio;
+            tokenizer: The tokenizer to use for the model;
+            kv_cache_manager: The KV cache manager to use for the scheduler.
         """
         self.max_batch_size = max_batch_size
         self.max_num_tokens_per_batch = max_num_tokens_per_batch
@@ -55,15 +69,15 @@ class Scheduler:
             self.max_new_tokens = kwargs.get("max_new_tokens", 512)
             self.max_total_length = kwargs.get("max_total_length", 1024)
 
-        # Priority queue: (priority, arrival_time, request_id, request_object)
-        self._request_queue: List[Tuple[int, float, str, Request]] = []
+        # Prefill wait queue (FIFO) for admission; supports moving chunked prefill to front
+        self._wait_queue: List[Request] = []
         # Keeps track of all in-flight requests
-        self._running_requests: Dict[str, Request] = {}
+        self._running_requests: Dict[str, Request] = OrderedDict()
+        # The actual batch of requests for model forward runner
+        self._active_batch: Dict[str, Request] = {}
 
-        self.priority_map = {
-            RequestStatus.PREFILLING: prefill_priority,
-            RequestStatus.DECODING: 1 - prefill_priority,
-        }
+        self.kv_cache_manager = kv_cache_manager
+
         self._last_dispatch_ts = time.time()
         # Track last reported running requests to avoid redundant metric updates
         self._last_reported_running_requests: int = 0
@@ -75,7 +89,7 @@ class Scheduler:
     @property
     def num_queued_requests(self) -> int:
         """Get the number of requests in the scheduler."""
-        return len(self._request_queue)
+        return len(self._wait_queue)
 
     @property
     def num_running_requests(self) -> int:
@@ -85,7 +99,7 @@ class Scheduler:
     @property
     def has_pending_requests(self) -> bool:
         """Check if there are any pending requests in the scheduler."""
-        return len(self._request_queue) > 0
+        return len(self._wait_queue) > 0
 
     def get_running_request(self, request_id: str) -> Optional[Request]:
         """Gets a request that is currently in the running state."""
@@ -100,7 +114,7 @@ class Scheduler:
         )
 
     def enque_request(self, request: Request | str):
-        """Add a request to the scheduler."""
+        """Enque a request to the scheduler's wait queue."""
         if isinstance(request, str):
             request = self._prompt_string_to_request(request)
 
@@ -110,25 +124,35 @@ class Scheduler:
                 f"{request.status}. Not adding to the scheduler."
             )
             return
-        arrival_time = time.time()
-        priority = self.priority_map.get(request.status, 1)
-        heapq.heappush(self._request_queue, (priority, arrival_time, request.request_id, request))
-        logger.debug(f"Request {request.request_id} added to the scheduler.")
-        logger.debug(f"Scheduler queue size: {len(self._request_queue)}")
-        # Running count does not change on enqueue; do not update metrics here
 
-    def evict_request(self, request_id: str, status: Optional[RequestStatus] = None):
+        # TODO: Handle chunked prefill.
+        if request.is_decoding:
+            rid = request.request_id
+            if rid not in self._running_requests:
+                raise ValueError(
+                    f"Decode request {rid} must already be admitted (in running requests)."
+                )
+            # Mark as ready and update recency ordering so earlier-ready decodes
+            # are encountered first during actual batch formation
+            self._running_requests.move_to_end(rid)
+            logger.debug(f"Decode request {rid} marked ready for next decode.")
+            return
+
+        self._wait_queue.append(request)
+        request.ready_for_next_step = True
+        logger.debug(
+            f"Prefill request {request.request_id} added to the prefill wait queue (size={len(self._wait_queue)})."
+        )
+
+    def evict_request(self, request_id: str):
         """Removes a request from the scheduler's running queue."""
-        _ = status  # status is used by the first peer's logic but not here.
         if request_id in self._running_requests:
             self._running_requests.pop(request_id)
             logger.debug(f"Evicted request {request_id} from scheduler.")
             # Update metrics only if running count changed since last report
             try:
                 curr = self.num_running_requests
-                # if curr != self._last_reported_running_requests:
                 update_metrics(current_requests=curr)
-                # self._last_reported_running_requests = curr
             except Exception:
                 pass
         else:
@@ -179,42 +203,28 @@ class Scheduler:
         queued = self.num_queued_requests >= self.micro_batch_size
         return waited or queued
 
-    def form_batch(self) -> List[Request]:
-        """Get the next batch of requests.
+    def admit_requests(self) -> None:
+        """Move requests from wait queue into running (inflight) set, up to capacity.
 
-        At-most `micro_batch_size` requests will be returned.
+        Pushes admitted requests directly into the running set.
         """
-        if not self.has_pending_requests:
-            return []
-
-        inflight_tokens = 0
-
-        batch = []
-        save_index = []
-        for index, request in enumerate(self._request_queue):
-            if len(batch) >= self.micro_batch_size:
-                save_index.append(index)
+        while self._wait_queue and len(self._running_requests) < self.max_batch_size:
+            req = self._wait_queue.pop(0)
+            rid = req.request_id
+            if rid in self._running_requests:
+                # Already inflight; chunked-prefill, skip
                 continue
-            _, _, rid, req = request
-
-            cost = req.prompt_len if req.is_prefill else 1
-            if cost + inflight_tokens > self.max_num_tokens_per_batch:
-                save_index.append(index)
-                continue
-
-            if rid not in self._running_requests:
-                if len(self._running_requests) >= self.max_batch_size:
-                    save_index.append(index)
-                    continue
-
-            batch.append(req)
+            # Check kv cache pool
+            if self.kv_cache_manager is not None:
+                if not self.kv_cache_manager.has_request(req.request_id):
+                    if not self.kv_cache_manager.add_request(req, req.total_length):
+                        logger.warning(
+                            f"Request {rid} can't be admit to running batch due to KV cache size."
+                        )
+                        continue
             self._running_requests[rid] = req
 
-            inflight_tokens += cost
-
-        self._request_queue = [self._request_queue[i] for i in save_index]
-
-        # Reflect current running requests metric after forming the batch
+        # Reflect current running requests metric after admission
         try:
             curr = self.num_running_requests
             if curr != self._last_reported_running_requests:
@@ -222,5 +232,65 @@ class Scheduler:
                 self._last_reported_running_requests = curr
         except Exception:
             pass
+
+        self._last_dispatch_ts = time.time()
+        return None
+
+    def form_batch(self) -> List[Request]:
+        """Form the active batch for the next forward pass.
+
+        - Select prefills first (FIFO by admission), then decodes that are ready
+          following the OrderedDict iteration order where ready decodes are
+          moved-to-end upon readiness, while respecting micro_batch_size and
+          max_num_tokens_per_batch.
+        """
+        # TODO: we need to fully decouple admit_requests and form_batch
+        #       to overlap micro-batch scheduling with both model running & communication to other peers.
+        self.admit_requests()
+        if not self._running_requests:
+            return []
+
+        inflight_tokens = 0
+        batch: List[Request] = []
+
+        # Prefill candidates: preserve admission order via OrderedDict iteration
+        prefill_candidates: List[Request] = [
+            req for req in self._running_requests.values() if req.is_prefill
+        ]
+
+        # Decode candidates: only those ready, maintain OrderedDict order which was
+        # updated upon readiness (earlier-ready decodes appear earlier)
+        decode_ready_candidates: List[Request] = [
+            req
+            for req in self._running_requests.values()
+            if req.is_decoding and req.ready_for_next_step
+        ]
+
+        # 1) Fill with prefills first
+        for req in prefill_candidates:
+            if len(batch) >= self.micro_batch_size:
+                break
+            cost = req.prompt_len
+            if cost + inflight_tokens > self.max_num_tokens_per_batch:
+                continue
+            batch.append(req)
+            inflight_tokens += cost
+
+        # 2) Fill remaining with ready decodes
+        for req in decode_ready_candidates:
+            if len(batch) >= self.micro_batch_size:
+                break
+            cost = 1
+            if cost + inflight_tokens > self.max_num_tokens_per_batch:
+                continue
+            batch.append(req)
+            inflight_tokens += cost
+
+        # Track the active batch mapping for introspection / downstream usage
+        self._active_batch = {r.request_id: r for r in batch}
+
+        # Clear ready flags for decodes included in this batch
+        for r in batch:
+            r.ready_for_next_step = False
 
         return batch

@@ -52,7 +52,10 @@ def test_decode_pipeline_multiple_steps(start_layer, end_layer, num_decode_steps
     prefill_inputs_p1 = executor_peer1._prepare_batch_inputs(prefill_batch_p1)
     assert prefill_inputs_p1 is not None, "Failed to prepare batch inputs"
     prefill_batch_data = prefill_inputs_p1["prefill_batch"]
+    print("Pre Process")
     hidden_states_p1 = executor_peer1.process_batch(prefill_batch_data, return_decoded_tokens=False)
+    print(hidden_states_p1)
+    print("Process done")
     prefill_reqs_p2 = executor_peer1._prepare_next_batch_requests(
         requests=prefill_batch_data["requests"],
         hidden_states=hidden_states_p1,

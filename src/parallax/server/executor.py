@@ -242,6 +242,7 @@ class Executor:
             micro_batch_ratio=micro_batch_ratio,
             is_first_peer=self.is_first_peer,
             tokenizer=self.tokenizer,
+            kv_cache_manager=self.kv_cache_manager if self.device == "mlx" else None,
         )
         logger.debug(
             f"Scheduler initialized (max_batch_size={max_batch_size}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"
@@ -758,6 +759,7 @@ class Executor:
                         if not self.is_last_peer:
                             self.finished_batch.append(req)
                     else:
+                        # Mark ready for next decode step on first peer
                         self.scheduler.enque_request(original_req)
 
                     # detokenize and send to http server
@@ -780,7 +782,7 @@ class Executor:
                     req, IntermediateRequest
                 ), "Non-first peers must receive IntermediateRequests."
                 if req.is_finished or req.hidden_states is None:
-                    self.scheduler.evict_request(req.request_id, req.status)
+                    self.scheduler.evict_request(req.request_id)
                     release_cuda_request(self.running_batch, req.request_id)
                     if not self.is_last_peer:
                         self.finished_batch.append(req)
@@ -804,8 +806,6 @@ class Executor:
             # or IntermediateRequests from the last peer.
             for req in requests:
                 if isinstance(req, InitialRequest):
-                    if not self.kv_cache_manager.has_request(req.request_id):
-                        self.kv_cache_manager.add_request(req, req.total_length)
                     self.scheduler.enque_request(req)
                 elif isinstance(req, IntermediateRequest):
                     original_req = self.scheduler.get_running_request(req.request_id)
@@ -874,14 +874,12 @@ class Executor:
                         f"kv cache manager has {self.kv_cache_manager.tokens_in_cache} tokens, "
                         f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
                     )
-                    self.scheduler.evict_request(req.request_id, req.status)
+                    self.scheduler.evict_request(req.request_id)
                     if not self.is_last_peer:
                         self.finished_batch.append(req)
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
-                    if not self.kv_cache_manager.has_request(req.request_id):
-                        self.kv_cache_manager.add_request(req, req.total_length)
 
     def _prepare_next_single_request(self, request: Request, hidden_states: Any) -> Request:
         """Handle request state changes both inter and intra peers.
@@ -1204,7 +1202,7 @@ class Executor:
                 logger.exception(f"Error processing batch: {e}")
                 # Naive error handling: release and evict all requests in the batch
                 for req in batch_to_process:
-                    self.scheduler.evict_request(req.request_id, req.status)
+                    self.scheduler.evict_request(req.request_id)
                     if self.device == "cuda":
                         from parallax.sglang.batch_info import release_cuda_request
 
