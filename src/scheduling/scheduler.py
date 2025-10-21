@@ -430,7 +430,7 @@ class Scheduler:
                         self._node_assigned_request_count[node_id] = (
                             self._node_assigned_request_count.get(node_id, 0) + 1
                         )
-                        n.add_request()
+                        # n.add_request()
                 logger.debug(
                     "Dispatched request %s via path %s", getattr(req, "request_id", "?"), path
                 )
