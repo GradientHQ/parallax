@@ -1,7 +1,8 @@
 """
-vLLM Model Runner wrapper for Parallax.
+vLLM Model Runner wrapper for Parallax with Pipeline Parallelism support.
 
 Integrates vLLM v1 GPUModelRunner for CUDA backend.
+Uses vLLM's native Pipeline Parallelism mechanism to load only required layers.
 """
 
 from __future__ import annotations
@@ -25,11 +26,143 @@ from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 from vllm.config import VllmConfig
+from vllm.distributed import (
+    initialize_model_parallel,
+    get_pp_group,
+)
+from vllm.v1.core.kv_cache_manager import KVCacheManager
 
 from parallax.server.request import Request
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+class ParallaxVLLMModelRunner(GPUModelRunner):
+    """
+    Extended vLLM GPUModelRunner that leverages vLLM's native Pipeline Parallelism.
+
+    This class uses vLLM's PPMissingLayer mechanism to load only the required layers
+    during model initialization, avoiding the need to load and then prune the full model.
+    """
+
+    def __init__(
+        self,
+        vllm_config: VllmConfig,
+        kv_cache_config: KVCacheConfig,
+        device: str,
+        start_layer: int,
+        end_layer: int,
+        num_hidden_layers: int,
+    ):
+        """
+        Args:
+            vllm_config: vLLM configuration object
+            kv_cache_config: KV cache configuration
+            device: Device to run on (e.g., "cuda")
+            start_layer: First layer index to load (inclusive)
+            end_layer: Last layer index to load (exclusive)
+            num_hidden_layers: Total number of layers in the full model
+        """
+        # Store layer information before calling super().__init__
+        self.start_layer = start_layer
+        self.end_layer = end_layer
+        self.num_hidden_layers = num_hidden_layers
+        self.num_shard_layers = end_layer - start_layer
+
+        self.is_first_peer = start_layer == 0
+        self.is_last_peer = end_layer == num_hidden_layers
+
+        # Calculate PP rank and size for vLLM
+        # We simulate a PP setup where each Parallax peer is a PP rank
+        self.pp_rank = 0  # Will be updated based on layer range
+        self.pp_size = 1  # Single node, but with layer slicing
+
+        # Call parent init
+        super().__init__(vllm_config=vllm_config, device=torch.device(device))
+        self.kv_cache_config = kv_cache_config
+
+        logger.info(
+            f"ParallaxVLLMModelRunner initialized: layers [{start_layer}, {end_layer}), "
+            f"is_first={self.is_first_peer}, is_last={self.is_last_peer}"
+        )
+
+    def initialize_kv_cache_manager(self, max_model_len: int) -> KVCacheManager:
+        """
+        Initialize vLLM's native KVCacheManager.
+
+        This should be called after the model is loaded to properly set up
+        the KV cache management system.
+
+        Args:
+            max_model_len: Maximum sequence length the model can handle
+
+        Returns:
+            Initialized KVCacheManager instance
+        """
+        logger.info("Initializing vLLM KVCacheManager...")
+
+        kv_cache_manager = KVCacheManager(
+            kv_cache_config=self.kv_cache_config,
+            max_model_len=max_model_len,
+            enable_caching=True,  # Enable prefix caching
+            use_eagle=False,  # Not using EAGLE speculative decoding
+            log_stats=True,  # Enable stats logging
+            enable_kv_cache_events=False,  # Disable KV cache events for now
+            dcp_world_size=1,  # Decode Context Parallelism world size
+        )
+
+        self.kv_cache_manager = kv_cache_manager
+        logger.info(
+            f"KVCacheManager initialized: block_size={kv_cache_manager.block_size}, "
+            f"usage={kv_cache_manager.usage:.2%}"
+        )
+
+        return kv_cache_manager
+
+    def load_model(self) -> None:
+        """
+        Load model using vLLM's native layer loading mechanism.
+
+        This method uses vLLM's make_layers function which creates PPMissingLayer
+        placeholders for layers outside [start_layer, end_layer), ensuring only
+        the required layers are actually loaded from checkpoint.
+        """
+        logger.info(f"Loading vLLM model with layers [{self.start_layer}, {self.end_layer})...")
+
+        # Temporarily override vLLM's PP configuration for this peer
+        # This allows us to use vLLM's layer skipping mechanism
+        import vllm.distributed.parallel_state as parallel_state
+        from vllm.distributed.utils import get_pp_indices
+
+        # Monkey-patch get_pp_indices to return our custom layer range
+        original_get_pp_indices = parallel_state.get_pp_indices
+
+        def custom_get_pp_indices(num_layers: int, rank: int, world_size: int):
+            """Return our custom layer range instead of vLLM's calculated range."""
+            logger.debug(
+                f"custom_get_pp_indices called: num_layers={num_layers}, "
+                f"returning [{self.start_layer}, {self.end_layer})"
+            )
+            return self.start_layer, self.end_layer
+
+        # Temporarily replace the function
+        import vllm.distributed.utils
+
+        vllm.distributed.utils.get_pp_indices = custom_get_pp_indices
+
+        try:
+            # Now call the parent load_model, which will use our custom layer range
+            super().load_model()
+            logger.info(
+                f"Successfully loaded {self.num_shard_layers} layers "
+                f"[{self.start_layer}:{self.end_layer}]"
+            )
+        finally:
+            # Restore original function
+            vllm.distributed.utils.get_pp_indices = original_get_pp_indices
+
+        logger.info("Model loaded successfully with partial layers")
 
 
 def initialize_vllm_model_runner(
@@ -40,28 +173,52 @@ def initialize_vllm_model_runner(
     attention_backend: str,
     kv_block_size: int,
     dtype: str = "float16",
-) -> Tuple[GPUModelRunner, Dict, Any]:
-    """Initialize vLLM GPUModelRunner.
+) -> Tuple[ParallaxVLLMModelRunner, Dict, Any]:
+    """Initialize vLLM GPUModelRunner with true partial layer loading.
 
-    Args:
-        model_repo: HuggingFace model repo path
-        start_layer: Start layer index (for PP)
-        end_layer: End layer index (for PP)
-        kv_cache_memory_fraction: Fraction of GPU memory for KV cache
-        attention_backend: Attention backend (e.g., "flash_attn")
-        kv_block_size: KV cache block size
-        dtype: Model dtype
+        This function leverages vLLM's native Pipeline Parallelism mechanism to load
+        only the required layers, avoiding the memory overhead of loading the full model.
 
-    Returns:
-        (model_runner, config_dict, tokenizer)
+        The key insight is to monkey-patch vLLM's get_pp_indices function during model
+        loading, which allows us to control exactly which layers are loaded. Layers
+        outside the [start_layer, end_layer) range are replaced with PPMissingLayer
+        placeholders that consume minimal memory.
+
+        Args:
+            model_repo: HuggingFace model repo path
+            start_layer: Start layer index (inclusive)
+            end_layer: End layer index (exclusive)
+            kv_cache_memory_fraction: Fraction of GPU memory for KV cache
+            attention_backend: Attention backend (e.g., "flash_attn")
+            kv_block_size: KV cache block size
+            dtype: Model dtype
+
+        Returns:
+            (model_runner, config_dict, tokenizer)
+
+        Example:
+            >>> # Load only layers 8-16 of a 32-layer model
+            >>> runner, config, tok = initialize_vllm_model_runner(
+            ...     "meta-llama/Llama-2-7b-hf", 8, 16, 0.8, "flash_attn", 64
+            ... )
+            >>> # Only 8 layers are actually loaded into memory
+    ```
     """
-    logger.info(f"Initializing vLLM model runner for {model_repo}")
+    logger.info(
+        f"Initializing vLLM model runner for {model_repo}, " f"layers=[{start_layer}, {end_layer})"
+    )
 
     # Load HuggingFace config and tokenizer
     hf_config = AutoConfig.from_pretrained(model_repo, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(model_repo, trust_remote_code=True)
 
     num_hidden_layers = hf_config.num_hidden_layers
+
+    if end_layer > num_hidden_layers:
+        raise ValueError(
+            f"end_layer ({end_layer}) cannot be greater than "
+            f"num_hidden_layers ({num_hidden_layers})"
+        )
 
     # Build vLLM configs
     model_config = ModelConfig(
@@ -81,9 +238,19 @@ def initialize_vllm_model_runner(
         cache_dtype="auto",
     )
 
-    # For single-node in Parallax, we don't use vLLM's internal PP
+    # Configure PP for layer slicing
+    # We set pp_size > 1 to enable vLLM's layer skipping mechanism
+    # but use our custom get_pp_indices to control which layers to load
+    is_first_peer = start_layer == 0
+    is_last_peer = end_layer == num_hidden_layers
+
+    # Calculate a virtual PP size that makes sense
+    # For example, if we have 32 layers and loading [8, 16), we're in the "middle"
+    # Set pp_size=2 to enable PP mode, and we'll override the layer calculation
+    virtual_pp_size = 2 if not (is_first_peer and is_last_peer) else 1
+
     parallel_config = ParallelConfig(
-        pipeline_parallel_size=1,
+        pipeline_parallel_size=virtual_pp_size,
         tensor_parallel_size=1,
         distributed_executor_backend=None,
     )
@@ -122,17 +289,25 @@ def initialize_vllm_model_runner(
         num_gpu_blocks=None,  # Will be calculated by model runner
     )
 
-    # Initialize GPUModelRunner
-    model_runner = GPUModelRunner(
+    # Initialize our custom ParallaxVLLMModelRunner
+    model_runner = ParallaxVLLMModelRunner(
         vllm_config=vllm_config,
         kv_cache_config=kv_cache_config,
         device="cuda",
+        start_layer=start_layer,
+        end_layer=end_layer,
+        num_hidden_layers=num_hidden_layers,
     )
 
-    # Load model
-    logger.info("Loading vLLM model...")
+    # Load model with partial layers
+    logger.info("Loading vLLM model (partial layers)...")
     model_runner.load_model()
     logger.info("vLLM model loaded successfully")
+
+    # Initialize KV Cache Manager after model is loaded
+    logger.info("Initializing KV Cache Manager...")
+    model_runner.initialize_kv_cache_manager(max_model_len=model_config.max_model_len)
+    logger.info("KV Cache Manager initialized successfully")
 
     # Return config as dict for compatibility with Parallax executor
     config_dict = {
@@ -142,87 +317,9 @@ def initialize_vllm_model_runner(
         "num_key_value_heads": getattr(
             hf_config, "num_key_value_heads", hf_config.num_attention_heads
         ),
+        "head_dim": getattr(
+            hf_config, "head_dim", hf_config.hidden_size // hf_config.num_attention_heads
+        ),
     }
 
     return model_runner, config_dict, tokenizer
-
-
-class VLLMKVCacheManager:
-    """Simple KV cache block manager for vLLM integration."""
-
-    def __init__(self, model_runner: GPUModelRunner, block_size: int):
-        self.model_runner = model_runner
-        self.block_size = block_size
-        self.request_blocks: Dict[str, List[int]] = {}
-        self.next_block_id = 0
-
-        # Get available blocks from model runner
-        self.total_blocks = model_runner.kv_cache_config.num_gpu_blocks
-        self.free_blocks = list(range(self.total_blocks))
-
-    def allocate(self, request_id: str, num_tokens: int) -> Tuple[List[int], ...]:
-        """Allocate KV cache blocks for a request.
-
-        Returns:
-            block_ids: Tuple of lists of block IDs (one per KV cache layer)
-        """
-        num_blocks_needed = (num_tokens + self.block_size - 1) // self.block_size
-
-        if len(self.free_blocks) < num_blocks_needed:
-            raise RuntimeError(
-                f"Not enough KV cache blocks. Needed: {num_blocks_needed}, Available: {len(self.free_blocks)}"
-            )
-
-        # Allocate blocks
-        allocated = []
-        for _ in range(num_blocks_needed):
-            block_id = self.free_blocks.pop(0)
-            allocated.append(block_id)
-
-        self.request_blocks[request_id] = allocated
-
-        # vLLM expects tuple of lists (one per layer group)
-        # For simplicity, we use the same blocks for all layers
-        return (allocated,)
-
-    def free(self, request_id: str):
-        """Free KV cache blocks for a request."""
-        if request_id in self.request_blocks:
-            blocks = self.request_blocks.pop(request_id)
-            self.free_blocks.extend(blocks)
-
-    def get_blocks(self, request_id: str) -> Tuple[List[int], ...]:
-        """Get allocated blocks for a request."""
-        return (self.request_blocks.get(request_id, []),)
-
-
-from __future__ import annotations
-
-from typing import Any, Tuple
-
-from parallax_utils.logging_config import get_logger
-
-logger = get_logger(__name__)
-
-
-def initialize_vllm_model_runner(
-    model_repo: str,
-    start_layer: int,
-    end_layer: int,
-    kv_cache_memory_fraction: float,
-    attention_backend: str,
-    kv_block_size: int,
-    dtype: str = "float16",
-) -> Tuple[Any, dict, Any]:
-    """Initialize vLLM GPUModelRunner (scaffold).
-
-    This function is a placeholder and documents the expected return values:
-    - model_runner: An object exposing execute_model() compatible with vLLM v1.
-    - config: A dict-like model config with at least num_hidden_layers.
-    - tokenizer: Tokenizer instance used by executor.
-    """
-    raise NotImplementedError(
-        "vLLM backend scaffolding is present, but the actual model runner "
-        "initialization is not implemented yet. Please implement "
-        "parallax.vllm.model_runner.initialize_vllm_model_runner() per the plan."
-    )

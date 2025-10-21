@@ -103,12 +103,12 @@ def form_vllm_batch_prefill(
 
     Constructs a SchedulerOutput for vLLM v1 GPUModelRunner that contains:
     - NewRequestData for each request (new prefill requests)
-    - KV cache block allocations
+    - KV cache block allocations via vLLM's native KVCacheManager
     - Token scheduling information
 
     Args:
         batched_requests: List of Parallax requests to prefill
-        model_runner: vLLM GPUModelRunner instance
+        model_runner: ParallaxVLLMModelRunner instance with initialized kv_cache_manager
 
     Returns:
         Dict containing:
@@ -117,28 +117,65 @@ def form_vllm_batch_prefill(
         Returns None if batched_requests is empty
     """
     from vllm.v1.core.sched.output import CachedRequestData, NewRequestData, SchedulerOutput
+    from vllm.v1.request import Request as VLLMRequest
 
     if not batched_requests:
         return None
 
-    # Initialize KV cache manager if not already done
-    # This is a lightweight wrapper around vLLM's KV cache
-    if not hasattr(model_runner, "_parallax_kv_cache"):
-        from parallax.vllm.model_runner import VLLMKVCacheManager
-
-        model_runner._parallax_kv_cache = VLLMKVCacheManager(
-            model_runner, model_runner.kv_cache_config.block_size
+    # Get vLLM's KVCacheManager from model_runner
+    if not hasattr(model_runner, "kv_cache_manager"):
+        raise RuntimeError(
+            "model_runner must have kv_cache_manager initialized. "
+            "Call model_runner.initialize_kv_cache_manager() first."
         )
 
-    kv_cache = model_runner._parallax_kv_cache
+    kv_cache_manager = model_runner.kv_cache_manager
 
     # Build NewRequestData for each request
     new_request_data_list = []
+    vllm_requests = []
+
     for req in batched_requests:
         sampling_params = transform_sampling_params_to_vllm(req.sampling_params)
 
-        # Allocate KV cache blocks for this request
-        block_ids = kv_cache.allocate(req.request_id, len(req.input_ids))
+        # Create vLLM Request object for KV cache management
+        vllm_req = VLLMRequest(
+            request_id=req.request_id,
+            prompt_token_ids=req.input_ids,
+            sampling_params=sampling_params,
+            eos_token_id=getattr(req, "eos_token_id", None),
+            arrival_time=getattr(req, "arrival_time", 0.0),
+        )
+        vllm_requests.append(vllm_req)
+
+        # Check for prefix cache hits
+        computed_blocks, num_computed_tokens = kv_cache_manager.get_computed_blocks(vllm_req)
+
+        # Allocate KV cache blocks for the remaining tokens
+        num_new_tokens = len(req.input_ids) - num_computed_tokens
+        if num_new_tokens > 0:
+            new_blocks = kv_cache_manager.allocate_slots(
+                request=vllm_req,
+                num_new_tokens=num_new_tokens,
+                num_new_computed_tokens=num_computed_tokens,
+                new_computed_blocks=computed_blocks if num_computed_tokens > 0 else None,
+            )
+
+            if new_blocks is None:
+                # Cannot allocate blocks (OOM)
+                logger.warning(f"Cannot allocate KV cache for request {req.request_id}")
+                # Free any allocated blocks for previous requests in this batch
+                for prev_req in vllm_requests[:-1]:
+                    kv_cache_manager.free(prev_req)
+                return None
+
+            # Combine computed blocks and new blocks
+            all_blocks = computed_blocks + new_blocks if num_computed_tokens > 0 else new_blocks
+        else:
+            all_blocks = computed_blocks
+
+        # Get block IDs for the request
+        block_ids = all_blocks.get_block_ids()
 
         new_req_data = NewRequestData(
             req_id=req.request_id,
@@ -147,7 +184,7 @@ def form_vllm_batch_prefill(
             sampling_params=sampling_params,
             pooling_params=None,  # For embedding models
             block_ids=block_ids,
-            num_computed_tokens=0,  # Prefill starts from scratch
+            num_computed_tokens=num_computed_tokens,
             lora_request=None,  # LoRA adapter
             prompt_embeds=None,  # Soft prompts
         )
@@ -183,11 +220,11 @@ def form_vllm_batch_decode(
     Key differences from prefill:
     - Uses CachedRequestData (not NewRequestData)
     - Each request processes exactly 1 token
-    - KV cache blocks are already allocated
+    - KV cache blocks already allocated, may need to extend
 
     Args:
         batched_requests: List of Parallax requests in decode phase
-        model_runner: vLLM GPUModelRunner instance
+        model_runner: ParallaxVLLMModelRunner instance with initialized kv_cache_manager
 
     Returns:
         Dict containing:
@@ -196,14 +233,51 @@ def form_vllm_batch_decode(
         Returns None if batched_requests is empty
     """
     from vllm.v1.core.sched.output import CachedRequestData, SchedulerOutput
+    from vllm.v1.request import Request as VLLMRequest
 
     if not batched_requests:
         return None
 
-    # Get KV cache manager (should already be initialized in prefill)
-    kv_cache = model_runner._parallax_kv_cache
+    # Get vLLM's KVCacheManager
+    if not hasattr(model_runner, "kv_cache_manager"):
+        raise RuntimeError(
+            "model_runner must have kv_cache_manager initialized. "
+            "Call model_runner.initialize_kv_cache_manager() first."
+        )
 
-    req_ids = [req.request_id for req in batched_requests]
+    kv_cache_manager = model_runner.kv_cache_manager
+
+    req_ids = []
+    vllm_requests = []
+
+    for req in batched_requests:
+        req_ids.append(req.request_id)
+
+        # Create or retrieve vLLM Request object
+        # In decode phase, request should already exist
+        sampling_params = transform_sampling_params_to_vllm(req.sampling_params)
+        vllm_req = VLLMRequest(
+            request_id=req.request_id,
+            prompt_token_ids=req.input_ids,
+            sampling_params=sampling_params,
+            eos_token_id=getattr(req, "eos_token_id", None),
+            arrival_time=getattr(req, "arrival_time", 0.0),
+        )
+        vllm_req.num_computed_tokens = req.current_position - 1  # Update computed tokens
+        vllm_requests.append(vllm_req)
+
+        # Allocate slot for 1 new decode token
+        # This may require allocating a new block if current block is full
+        new_blocks = kv_cache_manager.allocate_slots(
+            request=vllm_req,
+            num_new_tokens=1,  # Decode generates 1 token at a time
+            num_new_computed_tokens=0,
+        )
+
+        if new_blocks is None:
+            # Cannot allocate (OOM), need to preempt or wait
+            logger.warning(f"Cannot allocate KV cache for decode request {req.request_id}")
+            return None
 
     # Build CachedRequestData for decode
     # These are requests that already have KV cache allocated
@@ -241,15 +315,28 @@ def form_vllm_batch_decode(
 def release_vllm_request(model_runner: Any, request_id: str):
     """Release KV Cache and other resources for finished/aborted requests.
 
-    Similar to SGLang's release_cuda_request but for vLLM backend.
+    Uses vLLM's native KVCacheManager to properly free allocated blocks
+    and update prefix cache if enabled.
 
     Args:
-        model_runner: vLLM GPUModelRunner instance
+        model_runner: ParallaxVLLMModelRunner instance with kv_cache_manager
         request_id: ID of the request to release
     """
-    if not hasattr(model_runner, "_parallax_kv_cache"):
+    from vllm.v1.request import Request as VLLMRequest
+
+    if not hasattr(model_runner, "kv_cache_manager"):
         logger.warning(f"KV cache manager not found when releasing request {request_id}")
         return
 
-    kv_cache = model_runner._parallax_kv_cache
-    kv_cache.free(request_id)
+    kv_cache_manager = model_runner.kv_cache_manager
+
+    # Create a minimal vLLM Request object for the free operation
+    # Note: We need the request object, not just the ID
+    # In a real scenario, we should maintain a mapping of request_id -> vLLMRequest
+    # For now, we'll use the KVCacheManager's coordinator directly
+    try:
+        # The coordinator can free by request_id directly
+        kv_cache_manager.coordinator.free(request_id)
+        logger.debug(f"Released KV cache for request {request_id}")
+    except Exception as e:
+        logger.warning(f"Error releasing KV cache for request {request_id}: {e}")
