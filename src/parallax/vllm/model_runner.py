@@ -28,8 +28,13 @@ from vllm.distributed import (
     get_pp_group,
 )
 from vllm.v1.core.kv_cache_manager import KVCacheManager
-from vllm.v1.core.kv_cache_utils import get_request_block_hasher, init_none_hash
-from vllm.v1.kv_cache_interface import KVCacheConfig
+from vllm.v1.core.kv_cache_utils import (
+    get_request_block_hasher,
+    init_none_hash,
+    get_kv_cache_configs,
+    generate_scheduler_kv_cache_config,
+)
+from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
 from parallax.server.request import Request
@@ -49,7 +54,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
     def __init__(
         self,
         vllm_config: VllmConfig,
-        kv_cache_config: KVCacheConfig,
+        kv_cache_config: Optional[KVCacheConfig],
         device: str,
         start_layer: int,
         end_layer: int,
@@ -58,7 +63,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         """
         Args:
             vllm_config: vLLM configuration object
-            kv_cache_config: KV cache configuration
+            kv_cache_config: KV cache configuration (can be None, will be created by KVCacheManager)
             device: Device to run on (e.g., "cuda")
             start_layer: First layer index to load (inclusive)
             end_layer: Last layer index to load (exclusive)
@@ -83,12 +88,66 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
 
         # Call parent init
         super().__init__(vllm_config=vllm_config, device=torch.device(device))
+        # KV cache config will be created by KVCacheManager during initialization
         self.kv_cache_config = kv_cache_config
 
         logger.info(
             f"ParallaxVLLMModelRunner initialized: layers [{start_layer}, {end_layer}), "
             f"is_first={self.is_first_peer}, is_last={self.is_last_peer}"
         )
+
+    def _create_kv_cache_config(self) -> KVCacheConfig:
+        """
+        Create KV cache configuration from the loaded model.
+
+        This method leverages vLLM's native KV cache configuration generation
+        by extracting KV cache specs from the model's attention layers and
+        using vLLM's utilities to generate the proper configuration.
+
+        Returns:
+            KVCacheConfig: Properly configured KV cache configuration
+        """
+        logger.info("Generating KV cache configuration from model...")
+
+        # Get KV cache specs from model's attention layers
+        # This method is provided by vLLM's GPUModelRunner
+        kv_cache_specs = self.model.get_kv_cache_spec()
+
+        # Get available GPU memory for KV cache
+        # Use vLLM's memory profiling utilities
+        from vllm.utils import get_gpu_memory
+
+        free_memory, _ = get_gpu_memory(self.device.index or 0)
+
+        # Calculate available memory for KV cache based on cache_config
+        gpu_memory_utilization = self.cache_config.gpu_memory_utilization
+        available_memory = int(free_memory * gpu_memory_utilization)
+
+        logger.info(
+            f"Available GPU memory for KV cache: "
+            f"{available_memory / (1024**3):.2f} GB "
+            f"({gpu_memory_utilization:.1%} of {free_memory / (1024**3):.2f} GB)"
+        )
+
+        # Use vLLM's utility to generate KV cache config
+        # This handles all the complexity of different attention types,
+        # hybrid models, sliding windows, etc.
+        kv_cache_configs = get_kv_cache_configs(
+            vllm_config=self.vllm_config,
+            kv_cache_specs=[kv_cache_specs],  # Single worker
+            available_memory=[available_memory],
+        )
+
+        # For scheduler (single worker case), we can use the first config
+        kv_cache_config = generate_scheduler_kv_cache_config(kv_cache_configs)
+
+        logger.info(
+            f"KV cache config generated: "
+            f"num_blocks={kv_cache_config.num_blocks}, "
+            f"num_groups={len(kv_cache_config.kv_cache_groups)}"
+        )
+
+        return kv_cache_config
 
     def initialize_kv_cache_manager(self, max_model_len: int) -> KVCacheManager:
         """
@@ -104,6 +163,10 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             Initialized KVCacheManager instance
         """
         logger.info("Initializing vLLM KVCacheManager...")
+
+        # Generate KV cache config from model if not already provided
+        if self.kv_cache_config is None:
+            self.kv_cache_config = self._create_kv_cache_config()
 
         kv_cache_manager = KVCacheManager(
             kv_cache_config=self.kv_cache_config,
@@ -313,16 +376,14 @@ def initialize_vllm_model_runner(
         compilation_config=None,
     )
 
-    # Determine KV cache blocks
-    kv_cache_config = KVCacheConfig(
-        block_size=kv_block_size,
-        num_gpu_blocks=None,  # Will be calculated by model runner
-    )
+    # Note: KVCacheConfig will be created by vLLM's KVCacheManager during initialization
+    # We don't need to manually create it here as it requires complex layer-specific information
+    # The KVCacheManager will handle this based on the model's architecture
 
     # Initialize our custom ParallaxVLLMModelRunner
     model_runner = ParallaxVLLMModelRunner(
         vllm_config=vllm_config,
-        kv_cache_config=kv_cache_config,
+        kv_cache_config=None,  # Will be created by KVCacheManager
         device="cuda",
         start_layer=start_layer,
         end_layer=end_layer,

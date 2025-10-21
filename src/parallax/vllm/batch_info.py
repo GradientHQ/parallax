@@ -69,42 +69,6 @@ def transform_sampling_params_to_vllm(old_params: ParallaxSamplingParams) -> VLL
     return params
 
 
-def transform_requests_to_vllm(
-    batched_requests: List[Request],
-    model_runner: Any | None = None,
-) -> List[VLLMRequest]:
-    """Transforms Parallax Request to vLLM Request format.
-
-    Note: Only used if we later choose to feed vLLM Engine directly.
-    Currently we bypass the Engine and use GPUModelRunner directly.
-
-    Args:
-        batched_requests: List of Parallax requests
-
-    Returns:
-        List of vLLM Request objects
-    """
-    vllm_reqs = []
-    for old_req in batched_requests:
-        sampling_params = transform_sampling_params_to_vllm(old_req.sampling_params)
-        block_hasher = getattr(model_runner, "request_block_hasher", None) if model_runner else None
-        vllm_req = VLLMRequest(
-            request_id=old_req.request_id,
-            prompt_token_ids=old_req.input_ids,
-            sampling_params=sampling_params,
-            pooling_params=None,
-            eos_token_id=getattr(old_req, "eos_token_id", None),
-            client_index=getattr(old_req, "client_index", 0),
-            block_hasher=block_hasher,
-        )
-        output_ids = getattr(old_req, "output_ids", None) or []
-        if output_ids:
-            vllm_req.append_output_token_ids(output_ids)
-        vllm_reqs.append(vllm_req)
-
-    return vllm_reqs
-
-
 def _build_vllm_request(
     req: Request,
     sampling_params: VLLMSamplingParams,
