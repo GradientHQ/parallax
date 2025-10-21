@@ -123,6 +123,7 @@ class Scheduler:
             )
             return
 
+        request.ready_for_next_step = True
         # TODO: Handle chunked prefill.
         if request.is_decoding:
             rid = request.request_id
@@ -130,14 +131,14 @@ class Scheduler:
                 raise ValueError(
                     f"Decode request {rid} must already be admitted (in running requests)."
                 )
-            # Mark as ready and update recency ordering so earlier-ready decodes
-            # are encountered first during actual batch formation
+            # Merge incoming decode readiness/state into the existing running request
+            self._running_requests[rid] = request
+            # Update recency ordering so earlier-ready decodes are encountered first during batching
             self._running_requests.move_to_end(rid)
             logger.debug(f"Decode request {rid} marked ready for next decode.")
             return
 
         self._wait_queue.append(request)
-        request.ready_for_next_step = True
         logger.debug(
             f"Prefill request {request.request_id} added to the prefill wait queue (size={len(self._wait_queue)})."
         )
