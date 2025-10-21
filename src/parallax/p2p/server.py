@@ -300,7 +300,7 @@ class GradientServer:
 
         if self.scheduler_addr is not None:  # central scheduler mode
             try:
-                self.scheduler_stub = RPCConnectionHandler(self.lattica, None).get_stub(
+                self.scheduler_stub = RPCConnectionHandler(self.lattica, None, None).get_stub(
                     self.scheduler_peer_id
                 )
                 node_info = self.get_node_info()

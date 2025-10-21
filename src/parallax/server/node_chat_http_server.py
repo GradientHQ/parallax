@@ -31,11 +31,11 @@ async def init_app_states(state: State, node_chat_http_server):
 
 
 async def v1_chat_completions(request_data: Dict, request_id: str, received_ts: int):
-    """
-    Handles the v1/chat/completions requests asynchronously.
-    It gets the prompts from HTTPHandler and returns to the frontend.
-    """
     return app.state.http_server.chat_completion(request_data, request_id, received_ts)
+
+
+async def get_cluster_status():
+    return app.state.http_server.get_cluster_status()
 
 
 @app.post("/v1/chat/completions")
@@ -45,6 +45,11 @@ async def openai_v1_chat_completions(raw_request: Request):
     request_id = uuid.uuid4()
     received_ts = time.time()
     return await v1_chat_completions(request_data, request_id, received_ts)
+
+
+@app.get("/cluster/status")
+async def cluster_status():
+    return await get_cluster_status()
 
 
 class NodeChatHttpServer:
@@ -115,9 +120,10 @@ class NodeChatHttpServer:
     def chat_completion(self, request_data, request_id: str, received_ts: int):
         if self.scheduler_addr is not None:  # central scheduler mode
             try:
-                self.scheduler_stub = RPCConnectionHandler(self.lattica, None).get_stub(
-                    self.scheduler_peer_id
-                )
+                if self.scheduler_stub is None:
+                    self.scheduler_stub = RPCConnectionHandler(self.lattica, None, None).get_stub(
+                        self.scheduler_peer_id
+                    )
                 stub = self.scheduler_stub
                 is_stream = request_data.get("stream", False)
                 try:
@@ -158,6 +164,56 @@ class NodeChatHttpServer:
 
             except Exception as e:
                 logger.exception(f"Error in chat completion: {e}")
+                return JSONResponse(
+                    content={"error": "Internal server error"},
+                    status_code=500,
+                )
+        else:
+            logger.error("No scheduler address specified")
+            return JSONResponse(
+                content={"error": "No scheduler address specified"},
+                status_code=500,
+            )
+
+    def get_cluster_status(self):
+        if self.scheduler_addr is not None:  # central scheduler mode
+            try:
+                if self.scheduler_stub is None:
+                    self.scheduler_stub = RPCConnectionHandler(self.lattica, None, None).get_stub(
+                        self.scheduler_peer_id
+                    )
+                stub = self.scheduler_stub
+                try:
+
+                    async def stream_status():
+                        response = stub.cluster_status()
+                        try:
+                            iterator = iterate_in_threadpool(response)
+                            async for chunk in iterator:
+                                yield chunk
+                        finally:
+                            logger.debug(f"client disconnected for cluster status")
+                            response.cancel()
+
+                    resp = StreamingResponse(
+                        stream_status(),
+                        # media_type="text/event-stream",
+                        media_type="application/x-ndjson",
+                        headers={
+                            "X-Content-Type-Options": "nosniff",
+                            "Cache-Control": "no-cache",
+                        },
+                    )
+                    return resp
+                except Exception as e:
+                    logger.exception(f"Error in get cluster status: {e}")
+                    return JSONResponse(
+                        content={"error": "Internal server error"},
+                        status_code=500,
+                    )
+
+            except Exception as e:
+                logger.exception(f"Error in get cluster status: {e}")
                 return JSONResponse(
                     content={"error": "Internal server error"},
                     status_code=500,
