@@ -40,7 +40,7 @@ class Scheduler:
         rebalance_threshold: float = float("inf"),
         water_filling_max_iterations: int = 40,
         request_warm_up_for_reshard: int = 0,
-        heartbeat_timeout: float = 60.0,
+        heartbeat_timeout: float = 3600.0,
     ) -> None:
         """Initialize the scheduler.
 

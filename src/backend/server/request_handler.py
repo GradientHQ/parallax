@@ -2,6 +2,7 @@ import json
 from typing import Dict
 
 import aiohttp
+from asyncio import CancelledError
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
@@ -98,13 +99,18 @@ class RequestHandler:
 
                 async def stream_generator():
                     response = stub.chat_completion(request_data)
+                    logger.debug(f"response type: {type(response)}, instance id: {id(response)}")
                     try:
                         iterator = iterate_in_threadpool(response)
                         async for chunk in iterator:
+                            logger.debug(f"Scheduler returned chunk {chunk}")
                             yield chunk
+                    except (CancelledError) as ex:
+                        logger.exception(ex)
                     finally:
-                        logger.debug(f"client disconnected for {request_id}")
+                        logger.debug(f"cancel response for {request_id}")
                         response.cancel()
+                        logger.debug(f"response canceled for {request_id}")
 
                 resp = StreamingResponse(
                     stream_generator(),

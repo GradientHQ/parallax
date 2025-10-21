@@ -173,6 +173,7 @@ class TransformerConnectionHandler(ConnectionHandler):
                     ) as response:
                         for chunk in response.iter_bytes():
                             if chunk:
+                                logger.debug(f"Worker returned chunk: {chunk}")
                                 yield chunk
                 else:
                     response = client.post(
@@ -547,7 +548,8 @@ class GradientServer:
                     # Announce the range ID
                     try:
                         if self.scheduler_peer_id is not None:
-                            self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                            # self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                            pass
                         else:
                             self.lattica.store(
                                 key=self.prefix_id,
@@ -610,14 +612,14 @@ class GradientServer:
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
             "kv_cache_ratio": 0.25,
-            "param_hosting_ratio": 0.65,
+            "param_hosting_ratio": 0.03,
             "max_concurrent_requests": self.max_batch_size,
             "max_sequence_length": (
                 1024 if self.max_sequence_length is None else self.max_sequence_length
             ),
             "rtt_to_nodes": self.rtts,
             "status": self.status.value,
-            "is_active": self.status == ServerState.READY,
+            # "is_active": self.status == ServerState.READY,
         }
 
         if is_update:

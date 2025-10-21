@@ -6,6 +6,8 @@ This module provides the main CLI entry point for Parallax, supporting
 commands like 'run' and 'join' that mirror the functionality of the
 bash scripts.
 """
+import faulthandler
+faulthandler.enable()
 
 import argparse
 import os

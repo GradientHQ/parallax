@@ -235,7 +235,7 @@ class SchedulerManage:
             if self.scheduler.layer_allocator.has_full_active_pipeline()
             else NODE_STATUS_WAITING
         )
-        logger.debug(f"SchedulerManage status queried: {status}")
+        # logger.debug(f"SchedulerManage status queried: {status}")
         return status
 
     def get_call_url_by_node_id(self, node_id):
