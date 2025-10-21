@@ -553,6 +553,12 @@ def initialize_sgl_model_runner(
         attention_backend = "triton"
         moe_runner_backend = "triton_kernel"
 
+    # Check if the model is Qwen3-Next and set kv_block_size to 1
+    architectures = config.get("architectures", [])
+    if architectures and any("Qwen3Next" in arch for arch in architectures):
+        logger.debug(f"Qwen3-Next model detected, setting kv_block_size to 1")
+        kv_block_size = 1
+
     server_args = form_sgl_server_args(
         original_model_path,
         dtype,
