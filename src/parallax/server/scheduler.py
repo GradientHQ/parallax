@@ -69,12 +69,10 @@ class Scheduler:
             self.max_new_tokens = kwargs.get("max_new_tokens", 512)
             self.max_total_length = kwargs.get("max_total_length", 1024)
 
-        # Prefill wait queue (FIFO) for admission; supports moving chunked prefill to front
+        # Prefill wait queue (FIFO) for admission
         self._wait_queue: List[Request] = []
         # Keeps track of all in-flight requests
         self._running_requests: Dict[str, Request] = OrderedDict()
-        # The actual batch of requests for model forward runner
-        self._active_batch: Dict[str, Request] = {}
 
         self.kv_cache_manager = kv_cache_manager
 
@@ -285,9 +283,6 @@ class Scheduler:
                 continue
             batch.append(req)
             inflight_tokens += cost
-
-        # Track the active batch mapping for introspection / downstream usage
-        self._active_batch = {r.request_id: r for r in batch}
 
         # Clear ready flags for decodes included in this batch
         for r in batch:

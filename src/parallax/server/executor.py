@@ -759,7 +759,6 @@ class Executor:
                         if not self.is_last_peer:
                             self.finished_batch.append(req)
                     else:
-                        # Mark ready for next decode step on first peer
                         self.scheduler.enque_request(original_req)
 
                     # detokenize and send to http server
