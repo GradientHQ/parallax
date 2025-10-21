@@ -7,7 +7,8 @@ Uses vLLM's native Pipeline Parallelism mechanism to load only required layers.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+import importlib
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 from transformers import AutoConfig, AutoTokenizer
@@ -21,16 +22,15 @@ from vllm.config import (
     ParallelConfig,
     SchedulerConfig,
 )
-from vllm.v1.core.sched.output import CachedRequestData, NewRequestData, SchedulerOutput
-from vllm.v1.kv_cache_interface import KVCacheConfig
-from vllm.v1.outputs import ModelRunnerOutput
-from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 from vllm.config import VllmConfig
 from vllm.distributed import (
     initialize_model_parallel,
     get_pp_group,
 )
 from vllm.v1.core.kv_cache_manager import KVCacheManager
+from vllm.v1.core.kv_cache_utils import get_request_block_hasher, init_none_hash
+from vllm.v1.kv_cache_interface import KVCacheConfig
+from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
 from parallax.server.request import Request
 from parallax_utils.logging_config import get_logger
@@ -78,6 +78,9 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         self.pp_rank = 0  # Will be updated based on layer range
         self.pp_size = 1  # Single node, but with layer slicing
 
+        self.request_block_hasher: Optional[Callable[[Any], List[Any]]] = None
+        self.enable_prefix_caching: bool = True
+
         # Call parent init
         super().__init__(vllm_config=vllm_config, device=torch.device(device))
         self.kv_cache_config = kv_cache_config
@@ -113,6 +116,33 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         )
 
         self.kv_cache_manager = kv_cache_manager
+        cache_config = self.vllm_config.cache_config
+        enable_prefix = cache_config.enable_prefix_caching
+        if enable_prefix is None:
+            enable_prefix = True
+        self.enable_prefix_caching = enable_prefix
+
+        self.request_block_hasher = None
+        if enable_prefix and kv_cache_manager.block_size is not None:
+            try:
+                hashing_mod = importlib.import_module("vllm.utils.hashing")
+                get_hash_fn_by_name: Callable[[str], Callable[[Any], bytes]] = getattr(
+                    hashing_mod, "get_hash_fn_by_name"
+                )
+                hash_fn = get_hash_fn_by_name(cache_config.prefix_caching_hash_algo)
+            except (ModuleNotFoundError, AttributeError) as exc:
+                logger.warning("Unable to initialize prefix cache hashing: %s", exc)
+            else:
+                init_none_hash(hash_fn)
+                block_size = kv_cache_manager.block_size
+                if block_size is None and self.kv_cache_config.kv_cache_groups:
+                    block_size = self.kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
+                if block_size is not None:
+                    self.request_block_hasher = get_request_block_hasher(block_size, hash_fn)
+                    logger.info(
+                        "Initialized prefix cache block hasher with block_size=%d", block_size
+                    )
+
         logger.info(
             f"KVCacheManager initialized: block_size={kv_cache_manager.block_size}, "
             f"usage={kv_cache_manager.usage:.2%}"
