@@ -1,80 +1,116 @@
-"""
-为 vLLM 后端组装批次输入，接口尽量与 sglang 的 form_* 类似，便于在 executor 中切换。
-注意：这里不做 KV 管理，由各 peer 内的模型自行处理（性能可能不及 vLLM 内部调度）。
-"""
-
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
-
-import torch
+from typing import Any, Dict, List
 
 from parallax.server.request import Request
+from parallax.server.sampling.sampling_params import (
+    SamplingParams as ParallaxSamplingParams,
+)
+from vllm.v1.request import Request as VLLMRequest
+from vllm.sampling_params import (
+    SamplingParams as VLLMSamplingParams,
+    StructuredOutputsParams,
+)
+from parallax_utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
-def _pad_2d(seqs: List[torch.Tensor], pad_id: int) -> Tuple[torch.Tensor, torch.Tensor]:
-    """将一组 1D token 张量 padding 为 2D (B, L_max)，返回 padded 和 长度 tensor。"""
-    if not seqs:
-        return torch.empty(0, 0, dtype=torch.long), torch.empty(0, dtype=torch.long)
-    max_len = max(x.numel() for x in seqs)
-    bsz = len(seqs)
-    padded = torch.full((bsz, max_len), pad_id, dtype=seqs[0].dtype, device=seqs[0].device)
-    lengths = torch.empty(bsz, dtype=torch.long, device=seqs[0].device)
-    for i, x in enumerate(seqs):
-        L = x.numel()
-        padded[i, :L] = x
-        lengths[i] = L
-    return padded, lengths
+def transform_sampling_params_to_vllm(old_params: ParallaxSamplingParams) -> VLLMSamplingParams:
+    """Transforms Parallax SamplingParams to vLLM SamplingParams format."""
+    # Map Parallax json_schema -> vLLM structured_outputs
+    structured = (
+        StructuredOutputsParams(json=old_params.json_schema)
+        if getattr(old_params, "json_schema", None) is not None
+        else None
+    )
+
+    # vLLM uses max_tokens/min_tokens naming
+    params = VLLMSamplingParams(
+        max_tokens=old_params.max_new_tokens,
+        min_tokens=old_params.min_new_tokens,
+        temperature=old_params.temperature,
+        top_p=old_params.top_p,
+        min_p=old_params.min_p,
+        top_k=old_params.top_k,
+        stop_token_ids=(
+            list(old_params.stop_token_ids)
+            if getattr(old_params, "stop_token_ids", None) is not None
+            else None
+        ),
+        ignore_eos=old_params.ignore_eos,
+        stop=old_params.stop_strs,
+        repetition_penalty=old_params.repetition_penalty,
+        presence_penalty=old_params.presence_penalty,
+        frequency_penalty=old_params.frequency_penalty,
+        structured_outputs=structured,
+    )
+    return params
 
 
-def form_vllm_batch_prefill(
-    batched_requests: List[Request], pad_token_id: int
-) -> Dict[str, Any]:
-    """首个 peer: 使用 input_ids；中间/最后 peer: 由 executor 传入 intermediate_tensors。
-    这里仅组装 input_ids/lengths/requests（供首个 peer 使用）。
+def transform_requests_to_vllm(batched_requests: List[Request]) -> List[VLLMRequest]:
+    """Transforms Parallax Request to vLLM Request format.
+    Note: Only used if we later choose to feed vLLM Engine directly.
     """
-    if len(batched_requests) == 0:
+    vllm_reqs = []
+    for old_req in batched_requests:
+        sampling_params = transform_sampling_params_to_vllm(old_req.sampling_params)
+        vllm_req = VLLMRequest(
+            request_id=old_req.request_id,
+            prompt_token_ids=old_req.input_ids,
+            sampling_params=sampling_params,
+            eos_token_id=getattr(old_req, "eos_token_id", None),
+            client_index=getattr(old_req, "client_index", 0),
+        )
+        vllm_reqs.append(vllm_req)
+    return vllm_reqs
+
+
+def form_vllm_batch_prefill(batched_requests: List[Request], pad_token_id: int) -> Dict[str, Any] | None:
+    """Builds the vLLM prefill batch inputs for the first peer.
+
+    Returns a dict with:
+      - input_ids: List[List[int]] padded to max prompt length with pad_token_id.
+    """
+    batch_size = len(batched_requests)
+    if batch_size == 0:
         return None
-    # 收集 tokens（first peer 情况）
-    token_lists: List[torch.Tensor] = []
+
+    # Collect prompts and compute max length
+    seqs: List[List[int]] = []
+    max_len = 0
     for req in batched_requests:
-        assert hasattr(req, "input_ids") and req.input_ids is not None
-        # 将 list[int] 转为 torch tensor
-        token_lists.append(torch.tensor(req.input_ids, dtype=torch.long, device="cuda"))
-    input_ids, lengths = _pad_2d(token_lists, pad_token_id)
-    return {
-        "input_ids": input_ids,
-        "lengths": lengths,
-        "requests": batched_requests,
-    }
+        assert req.is_prefill, f"Request {req.request_id} is not a prefill request."
+        assert req.input_ids is not None and len(req.input_ids) > 0, (
+            f"Request {req.request_id} has empty input_ids for prefill"
+        )
+        seqs.append(req.input_ids)
+        if len(req.input_ids) > max_len:
+            max_len = len(req.input_ids)
+
+    # Right-pad to max_len with pad_token_id
+    padded: List[List[int]] = [seq + [pad_token_id] * (max_len - len(seq)) for seq in seqs]
+
+    return {"input_ids": padded}
 
 
-def form_vllm_batch_decode(
-    batched_requests: List[Request], is_first_peer: bool
-) -> Dict[str, Any]:
-    """解码批次：
-    - 首个 peer: 仅传最后一个 token。
-    - 中间/最后 peer: 由 executor 提供 intermediate_tensors。
-    这里只组装首个 peer 所需的输入。
+def form_vllm_batch_decode(batched_requests: List[Request], is_first_peer: bool) -> Dict[str, Any] | None:
+    """Builds the vLLM decode batch inputs for the first peer.
+
+    For decode, the first peer feeds the last generated token per request.
+    Other peers return None (they use pp_proxy_tensors path).
     """
-    if len(batched_requests) == 0:
-        return None
     if not is_first_peer:
-        # 非首个 peer 不需要 tokens 输入
-        return {
-            "input_ids": None,
-            "lengths": torch.tensor([1 for _ in batched_requests], device="cuda"),
-            "requests": batched_requests,
-        }
-    last_tokens: List[torch.Tensor] = []
+        return None
+
+    # For first peer, gather the next-step input token ids (last output token)
+    tokens: List[int] = []
     for req in batched_requests:
-        assert req.output_ids is not None and len(req.output_ids) > 0
-        last_tokens.append(torch.tensor([req.output_ids[-1]], dtype=torch.long, device="cuda"))
-    input_ids, lengths = _pad_2d(last_tokens, pad_id=0)
-    return {
-        "input_ids": input_ids,
-        "lengths": lengths,
-        "requests": batched_requests,
-    }
+        assert req.is_decoding, f"Request {req.request_id} is not a decode request."
+        assert req.output_ids is not None and len(req.output_ids) > 0, (
+            f"Decode step requires at least one output token for {req.request_id}"
+        )
+        tokens.append(req.output_ids[-1])
 
-
+    # Use shape [batch, 1] for consistency
+    return {"input_ids": [[tok] for tok in tokens]}
