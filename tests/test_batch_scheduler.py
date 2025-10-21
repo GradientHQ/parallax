@@ -1,5 +1,3 @@
-import pytest
-
 from parallax.server.request import InitialRequest, Request, RequestStatus
 from parallax.server.scheduler import Scheduler
 
@@ -23,8 +21,10 @@ def make_prefill(rid: str, prompt_len: int) -> InitialRequest:
     return InitialRequest(request_id=rid, input_ids=[0] * prompt_len)
 
 
-def make_decode(rid: str) -> Request:
-    return Request(request_id=rid, status=RequestStatus.DECODING)
+def make_decode(rid: str, ready: bool = True) -> Request:
+    r = Request(request_id=rid, status=RequestStatus.DECODING)
+    r.ready_for_next_step = ready
+    return r
 
 
 def test_prefill_fifo_and_micro_batch():
@@ -82,7 +82,6 @@ def test_token_budget_prefill_skipped_decode_taken():
     sched._running_requests[d.request_id] = d
     sched.enque_request(d)
 
-    sched.admit_requests()
     batch = sched.form_batch()
     ids = [r.request_id for r in batch]
     assert ids == ["d"]
@@ -103,9 +102,6 @@ def test_kv_cache_admission_guard_blocks_prefill():
     sched.enque_request(p)
 
     # Admission should fail and running set remains empty; batch should be empty
-    sched.admit_requests()
     batch = sched.form_batch()
     assert len(batch) == 0
     assert sched.num_running_requests == 0
-
-
