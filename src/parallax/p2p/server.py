@@ -326,7 +326,8 @@ class GradientServer:
                 # Publish executor metrics to backend on each update
                 def _publish_metrics(_snapshot):
                     try:
-                        self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                        # self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                        pass
                     except Exception:
                         pass
 
