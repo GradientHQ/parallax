@@ -95,14 +95,6 @@ async def cluster_status():
     )
 
 
-@app.post("/v1/completions")
-async def openai_v1_completions(raw_request: Request):
-    request_data = await raw_request.json()
-    request_id = uuid.uuid4()
-    received_ts = time.time()
-    return await request_handler.v1_completions(request_data, request_id, received_ts)
-
-
 @app.post("/v1/chat/completions")
 async def openai_v1_chat_completions(raw_request: Request):
     request_data = await raw_request.json()
@@ -145,6 +137,7 @@ if __name__ == "__main__":
             f"/ip4/0.0.0.0/udp/{args.udp_port}/quic-v1",
         ],
         announce_maddrs=args.announce_maddrs,
+        http_port=args.port,
     )
 
     request_handler.set_scheduler_manage(scheduler_manage)
