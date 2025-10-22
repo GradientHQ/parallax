@@ -29,7 +29,7 @@ export interface ModelInfo {
   readonly logoUrl: string;
 }
 
-export type ClusterStatus = 'idle' | 'waiting' | 'available' | 'rebalancing';
+export type ClusterStatus = 'idle' | 'waiting' | 'available' | 'rebalancing' | 'failed';
 
 export interface ClusterInfo {
   readonly id: string;

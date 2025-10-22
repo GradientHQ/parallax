@@ -142,6 +142,27 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
     }
   }, [clusterStatus, openRebalancing]);
 
+  const [dialogFailed, { open: openFailed }] = useAlertDialog({
+    color: 'primary',
+    title: '',
+    content: (
+      <>
+        <Typography variant='body1'>Scheduler restart</Typography>
+        <Typography variant='body2' color='text.disabled'>
+          We have noticed that your scheduler has been disconnected (this would be the computer that
+          ran the <strong>parallax run</strong> command). You would need to restart the scheduler,
+          reconfigure the cluster, and your chat will be back up again!
+        </Typography>
+      </>
+    ),
+    confirmLabel: 'Finish',
+  });
+  useEffect(() => {
+    if (clusterStatus === 'idle' || clusterStatus === 'failed') {
+      openFailed();
+    }
+  }, [clusterStatus, openFailed]);
+
   const [sidebarExpanded, setMenuOpen] = useState(true);
 
   const [dialogJoinCommand, { open: openJoinCommand }] = useAlertDialog({
@@ -304,6 +325,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
       {dialogJoinCommand}
       {dialogWaiting}
       {dialogRebalancing}
+      {dialogFailed}
     </DrawerLayoutRoot>
   );
 };
