@@ -6,7 +6,7 @@ import { HashRouter } from 'react-router-dom';
 import { CssBaseline, styled } from '@mui/material';
 import { ThemeProvider } from './themes';
 import { MainRouter, ChatRouter } from './router';
-import { ChatProvider, ClusterProvider } from './services';
+import { ChatProvider, ClusterProvider, HostProvider, type HostProps } from './services';
 
 const AppRoot = styled('div')(({ theme }) => {
   const { palette, typography } = theme;
@@ -25,16 +25,21 @@ const AppRoot = styled('div')(({ theme }) => {
   };
 });
 
-const Providers: FC<PropsWithChildren> = ({ children }) => {
+const Providers: FC<PropsWithChildren & { readonly hostProps: HostProps }> = ({
+  children,
+  hostProps,
+}) => {
   return (
     <StrictMode>
       <HashRouter>
         <ThemeProvider>
           <CssBaseline />
           <AppRoot>
-            <ClusterProvider>
-              <ChatProvider>{children}</ChatProvider>
-            </ClusterProvider>
+            <HostProvider {...hostProps}>
+              <ClusterProvider>
+                <ChatProvider>{children}</ChatProvider>
+              </ClusterProvider>
+            </HostProvider>
           </AppRoot>
         </ThemeProvider>
       </HashRouter>
@@ -44,7 +49,7 @@ const Providers: FC<PropsWithChildren> = ({ children }) => {
 
 export const Main = () => {
   return (
-    <Providers>
+    <Providers hostProps={{ type: 'cluster' }}>
       <MainRouter />
     </Providers>
   );
@@ -52,7 +57,7 @@ export const Main = () => {
 
 export const Chat = () => {
   return (
-    <Providers>
+    <Providers hostProps={{ type: 'node' }}>
       <ChatRouter />
     </Providers>
   );
