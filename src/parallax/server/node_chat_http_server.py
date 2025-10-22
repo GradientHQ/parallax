@@ -152,9 +152,13 @@ class NodeChatHttpServer:
 
                         async def stream_generator():
                             response = stub.chat_completion(request_data)
-                            iterator = iterate_in_threadpool(response)
-                            async for chunk in iterator:
-                                yield chunk
+
+                            try:
+                                iterator = iterate_in_threadpool(response)
+                                async for chunk in iterator:
+                                    yield chunk
+                            finally:
+                                response.cancel()
 
                         resp = StreamingResponse(
                             stream_generator(),
@@ -204,10 +208,31 @@ class NodeChatHttpServer:
 
                     async def stream_status():
                         response = stub.cluster_status()
-                        iterator = iterate_in_threadpool(response)
-                        async for chunk in iterator:
-                            yield chunk
-                            time.sleep(1)
+
+                        async def non_blocking_next_streamiter(stream_iter, timeout=0.01):
+                            try:
+                                chunk = await asyncio.wait_for(
+                                    asyncio.get_event_loop().run_in_executor(
+                                        None, next, stream_iter
+                                    ),
+                                    timeout=timeout,
+                                )
+                                return chunk
+                            except asyncio.TimeoutError:
+                                return None
+                            except StopIteration:
+                                return None
+
+                        try:
+                            as_iterator = iter(response)
+                            for _ in range(60):
+                                await asyncio.sleep(1)
+                                chunk = await non_blocking_next_streamiter(as_iterator, timeout=0.1)
+                                if chunk is None:
+                                    continue
+                                yield (chunk)
+                        finally:
+                            response.cancel()
 
                     resp = StreamingResponse(
                         stream_status(),
