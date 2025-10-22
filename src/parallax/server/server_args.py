@@ -166,7 +166,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
 
     parser.add_argument(
-        "--gpu_backend",
+        "--gpu-backend",
         type=str,
         default="sglang",
         choices=["sglang", "vllm"],

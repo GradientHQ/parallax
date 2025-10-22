@@ -115,7 +115,10 @@ class Executor:
                     f"Initializing vLLM model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
                 )
             elif self.backend_type == "sglang":
-                from sglang.srt.managers.schedule_batch import ScheduleBatch as CudaScheduleBatch
+                from sglang.srt.managers.schedule_batch import (
+                    ScheduleBatch as CudaScheduleBatch,
+                )
+
                 from parallax.sglang.model_runner import (
                     initialize_sgl_model_runner as initialize_cuda_model_runner,
                 )
@@ -1336,7 +1339,9 @@ class Executor:
 
                             release_vllm_request(self.model_runner, req.request_id)
                         elif self.backend_type == "sglang":
-                            from parallax.sglang.batch_info import release_sglang_request
+                            from parallax.sglang.batch_info import (
+                                release_sglang_request,
+                            )
 
                             release_sglang_request(self.running_batch, req.request_id)
                     else:
