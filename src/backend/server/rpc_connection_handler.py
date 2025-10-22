@@ -8,8 +8,9 @@ from scheduling.scheduler import Scheduler
 
 logger = get_logger(__name__)
 
-import httpx
 import json
+
+import httpx
 
 
 class RPCConnectionHandler(ConnectionHandler):
@@ -83,7 +84,7 @@ class RPCConnectionHandler(ConnectionHandler):
         except Exception as e:
             logger.exception(f"node_update error: {e}")
             return {}
-    
+
     @rpc_stream_iter
     def chat_completion(
         self,
@@ -110,14 +111,13 @@ class RPCConnectionHandler(ConnectionHandler):
         except Exception as e:
             logger.exception(f"Error in chat completion: {e}")
             yield b"internal server error"
-    
+
     @rpc_stream_iter
     def cluster_status(self):
         try:
             with httpx.Client(timeout=10 * 60, proxy=None, trust_env=False) as client:
                 with client.stream(
-                    "GET",
-                    f"http://localhost:{self.http_port}/cluster/status"
+                    "GET", f"http://localhost:{self.http_port}/cluster/status"
                 ) as response:
                     for chunk in response.iter_bytes():
                         if chunk:
