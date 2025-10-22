@@ -4,7 +4,7 @@ Continuous Batching Scheduler.
 State managed by the scheduler:
     1. Prefill Wait Queue (FIFO): incoming prefill requests waiting for admission;
     2. Running Requests: inflight requests with KV-cache residency;
-    3. Active Batch: the concrete batch chosen for the next model forward.
+Main `form_batch` function will return the concrete batch chosen for the next model forward.
 
 We use an explicit 2-Phase approach:
     * Phase 1 (Admission): wait queue -> running requests
@@ -43,7 +43,7 @@ class Scheduler:
         max_batch_size: int = 16,
         max_num_tokens_per_batch: int = 4096,
         scheduler_wait_ms: int = 200,
-        micro_batch_ratio: int = 2,
+        micro_batch_ratio: int = 1,
         is_first_peer: bool = False,
         kv_cache_manager: Optional[KVCacheManager] = None,
         **kwargs,
