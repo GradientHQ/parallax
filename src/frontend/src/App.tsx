@@ -1,5 +1,11 @@
-import { styled } from '@mui/material';
-import { Router } from './router';
+import './global.css';
+
+import type { FC, PropsWithChildren } from 'react';
+import { StrictMode } from 'react';
+import { HashRouter } from 'react-router-dom';
+import { CssBaseline, styled } from '@mui/material';
+import { ThemeProvider } from './themes';
+import { MainRouter, ChatRouter } from './router';
 import { ChatProvider, ClusterProvider } from './services';
 
 const AppRoot = styled('div')(({ theme }) => {
@@ -19,14 +25,35 @@ const AppRoot = styled('div')(({ theme }) => {
   };
 });
 
-export const App = () => {
+const Providers: FC<PropsWithChildren> = ({ children }) => {
   return (
-    <AppRoot>
-      <ClusterProvider>
-        <ChatProvider>
-          <Router />
-        </ChatProvider>
-      </ClusterProvider>
-    </AppRoot>
+    <StrictMode>
+      <HashRouter>
+        <ThemeProvider>
+          <CssBaseline />
+          <AppRoot>
+            <ClusterProvider>
+              <ChatProvider>{children}</ChatProvider>
+            </ClusterProvider>
+          </AppRoot>
+        </ThemeProvider>
+      </HashRouter>
+    </StrictMode>
+  );
+};
+
+export const Main = () => {
+  return (
+    <Providers>
+      <MainRouter />
+    </Providers>
+  );
+};
+
+export const Chat = () => {
+  return (
+    <Providers>
+      <ChatRouter />
+    </Providers>
   );
 };
