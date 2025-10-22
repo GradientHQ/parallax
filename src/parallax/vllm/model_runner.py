@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import importlib
 from typing import Any, Callable, Dict, List, Optional, Tuple
-
+import vllm
 import torch
 from transformers import AutoConfig, AutoTokenizer
 from vllm.config import (
     CacheConfig,
-    DecodingConfig,
     DeviceConfig,
     LoadConfig,
     ModelConfig,
@@ -351,8 +350,6 @@ def initialize_vllm_model_runner(
         max_model_len=model_config.max_model_len,
     )
 
-    decoding_config = DecodingConfig()
-
     vllm_config = VllmConfig(
         model_config=model_config,
         cache_config=cache_config,
@@ -362,7 +359,6 @@ def initialize_vllm_model_runner(
         load_config=load_config,
         lora_config=None,
         speculative_config=None,
-        decoding_config=decoding_config,
         observability_config=None,
         prompt_adapter_config=None,
         quant_config=None,
