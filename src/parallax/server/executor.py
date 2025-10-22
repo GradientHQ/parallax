@@ -18,7 +18,9 @@ Executor handles
 """
 
 import argparse
+import threading
 import time
+from queue import Queue
 from typing import Any, Dict, List, Optional
 
 import mlx.core as mx
@@ -275,6 +277,14 @@ class Executor:
             self.send_to_ipc_socket = get_zmq_socket(
                 self.zmq_context, zmq.PUSH, executor_output_ipc_addr, bind=False
             )
+
+        # Background sender to overlap compute with inter-peer communication
+        self._send_queue: Optional[Queue] = None
+        self._sender_thread: Optional[threading.Thread] = None
+        if hasattr(self, "send_to_peer_socket"):
+            self._send_queue = Queue()
+            self._sender_thread = threading.Thread(target=self._sender_worker, daemon=True)
+            self._sender_thread.start()
 
     @classmethod
     def create_from_args(cls, args: argparse.Namespace):
@@ -1112,6 +1122,38 @@ class Executor:
         )
         return ret
 
+    def _sender_worker(self):
+        """Background worker that sends messages to the next peer.
+
+        This allows overlapping model compute with network I/O.
+        """
+        while True:
+            item = self._send_queue.get()
+            if item is None:
+                # Shutdown signal
+                self._send_queue.task_done()
+                break
+            try:
+                kind, payload = item
+                if kind == "forward":
+                    self.send_to_peer_socket.send_multipart(
+                        [
+                            b"forward",
+                            request_to_proto(payload, self.device).SerializeToString(),
+                        ]
+                    )
+                elif kind == "abort":
+                    self.send_to_peer_socket.send_multipart(
+                        [b"abort", abort_request_to_proto(payload).SerializeToString()]
+                    )
+                else:
+                    # Unknown kind; ignore
+                    pass
+            except Exception:
+                logger.exception("Error sending message to peer")
+            finally:
+                self._send_queue.task_done()
+
     def run_loop(self):
         """The main loop of the executor."""
         logger.debug(
@@ -1129,9 +1171,12 @@ class Executor:
 
             # 3. Send finished batch to next peer
             if len(self.finished_batch) > 0 and self.is_first_peer:
-                self.send_to_peer_socket.send_multipart(
-                    [b"abort", abort_request_to_proto(self.finished_batch).SerializeToString()]
-                )
+                if self._send_queue is not None:
+                    self._send_queue.put(("abort", self.finished_batch))
+                else:
+                    self.send_to_peer_socket.send_multipart(
+                        [b"abort", abort_request_to_proto(self.finished_batch).SerializeToString()]
+                    )
                 self.finished_batch = []
 
             # 4. Check if we should form a batch
@@ -1186,12 +1231,17 @@ class Executor:
                             self._handle_input_requests(next_batch)
                         else:
                             # Send output to next peer
-                            self.send_to_peer_socket.send_multipart(
-                                [
-                                    b"forward",
-                                    request_to_proto(next_batch, self.device).SerializeToString(),
-                                ]
-                            )
+                            if self._send_queue is not None:
+                                self._send_queue.put(("forward", next_batch))
+                            else:
+                                self.send_to_peer_socket.send_multipart(
+                                    [
+                                        b"forward",
+                                        request_to_proto(
+                                            next_batch, self.device
+                                        ).SerializeToString(),
+                                    ]
+                                )
                             logger.debug(
                                 f"Processed batch of type {batch_type} with {len(next_batch)} requests "
                                 f"in {(time.time() - start_time) * 1000:.3f} ms"
@@ -1215,10 +1265,24 @@ class Executor:
     def shutdown(self):
         """Shuts down the executor."""
         logger.debug("Executor shutting down...")
-        self.recv_from_peer_socket.close()
-        self.send_to_peer_socket.close()
-        self.recv_from_ipc_socket.close()
-        self.send_to_ipc_socket.close()
+        # Drain and stop sender thread
+        try:
+            if self._send_queue is not None:
+                self._send_queue.put(None)
+                self._send_queue.join()
+            if self._sender_thread is not None:
+                self._sender_thread.join(timeout=1.0)
+        except Exception:
+            pass
+        # Close sockets if present
+        if hasattr(self, "recv_from_peer_socket"):
+            self.recv_from_peer_socket.close()
+        if hasattr(self, "send_to_peer_socket"):
+            self.send_to_peer_socket.close()
+        if hasattr(self, "recv_from_ipc_socket"):
+            self.recv_from_ipc_socket.close()
+        if hasattr(self, "send_to_ipc_socket"):
+            self.send_to_ipc_socket.close()
         self.zmq_context.term()
         logger.debug("Executor shutdown complete.")
 
