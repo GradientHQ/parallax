@@ -38,3 +38,14 @@ def monkey_patch_linear_layer_ids(self):
         and i >= self.start_layer
         and i < self.end_layer
     ]
+
+
+@property
+def monkey_patch_full_attention_layer_ids(self):
+    return [
+        i
+        for i, type_value in enumerate(self.layers_block_type)
+        if type_value == HybridLayerType.full_attention.value
+        and i >= self.start_layer
+        and i < self.end_layer
+    ]

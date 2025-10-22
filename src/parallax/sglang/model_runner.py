@@ -465,10 +465,14 @@ def monkey_patch_qwen3_next():
     )
     from parallax.sglang.monkey_patch.qwen3_next_config import (
         monkey_patch_linear_layer_ids,
+        monkey_patch_full_attention_layer_ids,
     )
 
     sys.modules["sglang.srt.models.qwen3_next"] = parallax_qwen3_next_model_module
     sglang.srt.configs.qwen3_next.Qwen3NextConfig.linear_layer_ids = monkey_patch_linear_layer_ids
+    sglang.srt.configs.qwen3_next.Qwen3NextConfig.full_attention_layer_ids = (
+        monkey_patch_full_attention_layer_ids
+    )
 
 
 ## TODO: Move this when sgalang supports gpt_oss pipeline parallelism
@@ -553,7 +557,6 @@ def initialize_sgl_model_runner(
         attention_backend = "triton"
         moe_runner_backend = "triton_kernel"
 
-    # Check if the model is Qwen3-Next and set kv_block_size to 1
     architectures = config.get("architectures", [])
     if architectures and any("Qwen3Next" in arch for arch in architectures):
         logger.debug(f"Qwen3-Next model detected, setting kv_block_size to 1")
@@ -580,8 +583,9 @@ def initialize_sgl_model_runner(
     model_config.hf_config.tie_word_embeddings = False
     model_config.hf_config.start_layer = start_layer
     model_config.hf_config.end_layer = end_layer
-    logger.debug(f"model_start_layer: {model_config.hf_config.start_layer}")
-    logger.debug(f"model_end_layer: {model_config.hf_config.end_layer}")
+    print("Model config:", model_config)
+    print("model_start_layer:", model_config.hf_config.start_layer)
+    print("model_end_layer:", model_config.hf_config.end_layer)
     model_runner = ParallaxModelRunner(
         model_config=model_config,
         mem_fraction_static=kv_cache_memory_fraction,
