@@ -15,15 +15,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from vllm.sampling_params import SamplingParams as VLLMSamplingParams
+from vllm.sampling_params import StructuredOutputsParams
+from vllm.v1.core.sched.output import CachedRequestData, NewRequestData, SchedulerOutput
+from vllm.v1.request import Request as VLLMRequest
+
 from parallax.server.request import Request
 from parallax.server.sampling.sampling_params import (
     SamplingParams as ParallaxSamplingParams,
-)
-from vllm.v1.core.sched.output import CachedRequestData, NewRequestData, SchedulerOutput
-from vllm.v1.request import Request as VLLMRequest
-from vllm.sampling_params import (
-    SamplingParams as VLLMSamplingParams,
-    StructuredOutputsParams,
 )
 from parallax_utils.logging_config import get_logger
 

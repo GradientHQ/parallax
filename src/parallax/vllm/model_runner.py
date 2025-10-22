@@ -12,7 +12,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 from transformers import AutoConfig, AutoTokenizer
-
 from vllm.config import (
     CacheConfig,
     DecodingConfig,
@@ -21,23 +20,18 @@ from vllm.config import (
     ModelConfig,
     ParallelConfig,
     SchedulerConfig,
-)
-from vllm.config import VllmConfig
-from vllm.distributed import (
-    initialize_model_parallel,
-    get_pp_group,
+    VllmConfig,
 )
 from vllm.v1.core.kv_cache_manager import KVCacheManager
 from vllm.v1.core.kv_cache_utils import (
+    generate_scheduler_kv_cache_config,
+    get_kv_cache_configs,
     get_request_block_hasher,
     init_none_hash,
-    get_kv_cache_configs,
-    generate_scheduler_kv_cache_config,
 )
-from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
+from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
-from parallax.server.request import Request
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -226,7 +220,6 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         # Temporarily override vLLM's PP configuration for this peer
         # This allows us to use vLLM's layer skipping mechanism
         import vllm.distributed.parallel_state as parallel_state
-        from vllm.distributed.utils import get_pp_indices
 
         # Monkey-patch get_pp_indices to return our custom layer range
         original_get_pp_indices = parallel_state.get_pp_indices
