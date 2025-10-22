@@ -4,28 +4,26 @@
   </p>
 </div>
 
-# Parallax
-A fully decentralized inference engine developed by [Gradient](https://gradient.network). Parallax lets you build your own AI cluster for model inference onto a set of distributed nodes despite their varying configuration and physical location.
-<!-- <h3> -->
-
 | [**Gradient**](https://gradient.network)
 | [**Blog**](https://gradient.network/blog/parallax-world-inference-engine)
 | [**X(Twitter)**](https://x.com/Gradient_HQ)
 | [**Discord**](https://discord.gg/gradientnetwork)
 | [**Arxiv**](https://arxiv.org/pdf/2509.26182v1)
 
-🔥 **NEW: Parallax version 0.0.1 has been released!**
+## News
+- [2025/10] 🔥 Parallax version 0.0.01 has been released!
 
-<!-- </h3> -->
+## About
+A fully decentralized inference engine developed by [Gradient](https://gradient.network). Parallax lets you build your own AI cluster for model inference onto a set of distributed nodes despite their varying configuration and physical location. Its core features include:
 
-## Features
-* Run LLM at home with personal devices.
-* Cross-platform support.
-* Pipeline parallel model sharding.
-* Dynamic KV cache management + continuous batching for MAC.
-* Dynamic request scheduling and routing for high performance.
+- **Host local LLM on personal devices**
+- **Cross-platform support**
+- **Pipeline parallel model sharding**
+- **Dynamic KV cache management & continuous batching for Mac**
+- **Dynamic request scheduling and routing for high performance**
 
-## Backend Architecture
+The backend architecture:
+
 * P2P communication powered by [Lattica](https://github.com/GradientHQ/lattica)
 * GPU backend powered by [SGLang](https://github.com/sgl-project/sglang)
 * MAC backend powered by [MLX LM](https://github.com/ml-explore/mlx-lm)
@@ -116,7 +114,7 @@ docker run -it --gpus all --network host gradientservice/parallax:latest-hopper 
 ```
 The container starts under parallax workspace and you should be able to run parallax directly.
 
-## Getting started
+## Getting Started
 
 We will walk through you the easiest way to quickly set up your own AI cluster
 
@@ -273,4 +271,4 @@ For Windows, simply go to Control Panel → Programs → Uninstall a program, fi
 |Qwen3-Next    | Qwen         | [Qwen3-Next](https://huggingface.co/collections/Qwen/qwen3-next-68c25fd6838e585db8eeea9d) | [Qwen3-Next: Towards Ultimate Training & Inference Efficiency](https://qwen.ai/blog?id=4074cca80393150c248e508aa62983f9cb7d27cd&from=research.latest-advancements-list) | "Qwen3-Next" is the latest generation of Qwen models by Alibaba/Qwen, with improved efficiency and performance. Includes models like Qwen3-Next-80B-A3B-Instruct (80B parameters, instruction-tuned) and Qwen3-Next-80B-A3B-Thinking (80B, reasoning enhanced). Variants include FP8 quantized and instruction-tuned models. |
 |Qwen3         | Qwen         | [Qwen3](https://huggingface.co/collections/Qwen/qwen3-67dd247413f0e2e4f653967f) | [Qwen3: Think Deeper, Act Faster](https://qwen.ai/blog?id=1e3fa5c2d4662af2855586055ad037ed9e555125&from=research.research-list) | "Qwen3" is the third generation of Qwen LLMs, available in multiple sizes (e.g., 0.6B, 1.7B, 4B, 8B, 14B, 30B, 32B, 235B). Variants include FP8 quantized and instruction-tuned models. |
 |Qwen2.5       | Qwen         | [Qwen2.5](https://huggingface.co/collections/Qwen/qwen25-66e81a666513e518adb90d9e) | [Qwen2.5: A Party of Foundation Models!](https://qwen.ai/blog?id=6da44b4d3b48c53f5719bab9cc18b732a7065647&from=research.research-list) | "Qwen2.5" is an earlier generation of Qwen models, with sizes like 0.5B, 1.5B, 3B, 7B, 14B, 32B, 72B. These models are available in base and instruction-tuned versions. |
-|Meta Llama 3  | Meta         | [Meta Llama 3](https://huggingface.co/collections/meta-llama/meta-llama-3-66214712577ca38149ebb2b6) <br>[Llama 3.1](https://huggingface.co/collections/meta-llama/llama-31-669fc079a0c406a149a5738f) <br>[Llama 3.2](https://huggingface.co/collections/meta-llama/llama-32-66f448ffc8c32f949b04c8cf) <br>[Llama 3.3](https://huggingface.co/collections/meta-llama/llama-33-67531d5c405ec5d08a852000) | [Introducing Meta Llama 3: The most capable openly available LLM to date](https://ai.meta.com/blog/meta-llama-3/) | "Meta Llama 3" is Meta's third-generation Llama model, available in sizes such as 8B and 70B parameters. Includes instruction-tuned and quantized (e.g., FP8) variants. |
+|Meta Llama 3  | Meta         | [Meta Llama 3](https://huggingface.co/collections/meta-llama/meta-llama-3-66214712577ca38149ebb2b6) <br>[Llama 3.1](https://huggingface.co/collections/meta-llama/llama-31-669fc079a0c406a149a5738f) <br>[Llama 3.2](https://huggingface.co/collections/meta-llama/llama-32-66f448ffc8c32f949b04c8cf) <br>[Llama 3.3](https://huggingface.co/collections/meta-llama/llama-33-67531d5c405ec5d08a852000) | [Introducing Meta Llama 3: The most capable openly available LLM to date](https://ai.meta.com/blog/meta-llama-3/) | "Meta Llama 3" is Meta's third-generation Llama model, available in sizes such as 8B and 70B parameters. Includes instruction-tuned and quantized (e.g., FP8) variants. | 
