@@ -6,25 +6,26 @@ It will start the P2P server and the executor.
 
 Example command:
 python src/parallax/launch.py \
-    --model-path Qwen/Qwen3-0.6B-MLX-bf16 \
+    --model-path Qwen/Qwen3-0.6B \
     --max-num-tokens-per-batch 16384 \
     --max-batch-size 128 \
-    --start-layer 14 \
-    --end-layer 28 \
-    --initial-peers {peer of GPU which hold the first half model}
+    --start-layer 0 \
+    --end-layer 28
 """
 
 import multiprocessing
+import os
 import tempfile
 import threading
 
 from parallax.p2p.server import ServerState, launch_p2p_server
 from parallax.server.executor import Executor
 from parallax.server.http_server import launch_http_server
+from parallax.server.node_chat_http_server import launch_node_chat_http_server
 from parallax.server.server_args import parse_args
 from parallax.utils.utils import get_current_device
 from parallax_utils.ascii_anime import display_parallax_join
-from parallax_utils.logging_config import get_logger
+from parallax_utils.logging_config import get_logger, set_log_level
 
 logger = get_logger("parallax.launch")
 
@@ -38,6 +39,7 @@ MLX_MODEL_NAME_MAP = {
     "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8": "mlx-community/Qwen3-235B-A22B-Thinking-2507-4bit",
     "Qwen/Qwen3-235B-A22B-GPTQ-Int4": "mlx-community/Qwen3-235B-A22B-4bit",
     "moonshotai/Kimi-K2-Instruct": "mlx-community/Kimi-K2-Instruct-4bit",
+    "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
 }
 
 if __name__ == "__main__":
@@ -46,13 +48,18 @@ if __name__ == "__main__":
     gradient_server = None
     http_server_process = None
     executor = None
+    node_chat_http_server_process = None
     try:
         args = parse_args()
+        set_log_level(args.log_level)
         logger.debug(f"args: {args}")
         args.recv_from_peer_addr = f"ipc://{tempfile.NamedTemporaryFile().name}"
         args.send_to_peer_addr = f"ipc://{tempfile.NamedTemporaryFile().name}"
         args.executor_input_ipc = f"ipc://{tempfile.NamedTemporaryFile().name}"
         args.executor_output_ipc = f"ipc://{tempfile.NamedTemporaryFile().name}"
+
+        # Silence tokenizer warnings
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
         logger.debug(f"executor_input_addr: {args.executor_input_ipc}")
         logger.debug(f"executor_output_addr: {args.executor_output_ipc}")
@@ -70,6 +77,7 @@ if __name__ == "__main__":
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
             executor = Executor.create_from_args(args)
+            node_chat_http_server_process = launch_node_chat_http_server(args)
             launch_p2p_server(
                 initial_peers=args.initial_peers,
                 scheduler_addr=args.scheduler_addr,
@@ -77,9 +85,9 @@ if __name__ == "__main__":
                 pp_start_layer=args.start_layer,
                 pp_end_layer=args.end_layer,
                 hidden_layers=executor.config.get("num_hidden_layers"),
-                dht_port=args.dht_port,
+                tcp_port=args.tcp_port,
+                udp_port=args.udp_port,
                 dht_prefix=args.dht_prefix,
-                host_maddrs=args.host_maddrs,
                 announce_maddrs=args.announce_maddrs,
                 http_port=args.port,
                 notify_url=args.notify_url,
@@ -97,9 +105,9 @@ if __name__ == "__main__":
                 pp_start_layer=None,
                 pp_end_layer=None,
                 hidden_layers=None,
-                dht_port=args.dht_port,
+                tcp_port=args.tcp_port,
+                udp_port=args.udp_port,
                 dht_prefix=args.dht_prefix,
-                host_maddrs=args.host_maddrs,
                 announce_maddrs=args.announce_maddrs,
                 http_port=args.port,
                 notify_url=args.notify_url,
@@ -130,6 +138,7 @@ if __name__ == "__main__":
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
             executor = Executor.create_from_args(args)
+            node_chat_http_server_process = launch_node_chat_http_server(args)
 
         if gradient_server is not None:
             gradient_server.status = ServerState.READY
@@ -155,6 +164,21 @@ if __name__ == "__main__":
                     target=terminate_http_server_process, args=(http_server_process,)
                 )
                 t.start()
+        if node_chat_http_server_process is not None:
+
+            def terminate_node_chat_http_server_process(process):
+                logger.debug("Terminating node chat HTTP server process...")
+                try:
+                    process.kill()
+                    process.join()
+                except Exception as e:
+                    logger.error(f"Failed to terminate node chat HTTP server process: {e}")
+
+            t = threading.Thread(
+                target=terminate_node_chat_http_server_process,
+                args=(node_chat_http_server_process,),
+            )
+            t.start()
         if gradient_server is not None:
             gradient_server.shutdown()
         if executor is not None:

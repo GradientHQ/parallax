@@ -61,7 +61,7 @@ git clone https://github.com/GradientHQ/parallax.git
 cd parallax
 
 # Enter Python virtual environment
-python -m venv ./venv
+python3 -m venv ./venv
 source ./venv/bin/activate
 
 pip install -e '.[mac]'
@@ -78,6 +78,14 @@ pip install -e '.[dev]'
 [Click here](https://github.com/GradientHQ/parallax/releases/latest/download/Gradient_Parallax_PC_Setup.exe) to get latest Windows installer.
 
 After installing .exe, right click Windows start button and click ```Windows Terminal(Admin)``` to start a Powershell console as administrator.
+
+❗ Make sure you open your terminal with administrator privileges.
+#### Ways to run Windows Terminal as administrator
+
+- Start menu: Right‑click Start and choose “Windows Terminal (Admin)”, or search “Windows Terminal”, right‑click the result, and select “Run as administrator”.
+- Run dialog: Press Win+R → type `wt` → press Ctrl+Shift+Enter.
+- Task Manager: Press Ctrl+Shift+Esc → File → Run new task → enter `wt` → check “Create this task with administrator privileges”.
+- File Explorer: Open the target folder → hold Ctrl+Shift → right‑click in the folder → select “Open in Terminal”.
 
 Start Windows dependencies installation by simply typing this command in console:
 ```sh
@@ -208,7 +216,6 @@ An example of serving Qwen3-0.6B with 2-nodes:
 python3 ./parallax/src/parallax/launch.py \
 --model-path Qwen/Qwen3-0.6B \
 --port 3000 \
---dht-port 5000 \
 --max-batch-size 8 \
 --start-layer 0 \
 --end-layer 14
@@ -218,7 +225,6 @@ python3 ./parallax/src/parallax/launch.py \
 python3 ./parallax/src/parallax/launch.py \
 --model-path Qwen/Qwen3-0.6B \
 --port 3000 \
---dht-port 5000 \
 --max-batch-size 8 \
 --start-layer 14 \
 --end-layer 28
