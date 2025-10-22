@@ -70,6 +70,7 @@ class ParallaxGroupCoordinator(SGLGroupCoordinator):
         use_hpu_communicator: bool,
         use_xpu_communicator: bool,
         use_npu_communicator: bool,
+        use_torch_symm_mem: bool = False,
         use_message_queue_broadcaster: bool = False,
         group_name: Optional[str] = None,
         pp_start_layer: int = 0,
@@ -87,6 +88,7 @@ class ParallaxGroupCoordinator(SGLGroupCoordinator):
             use_hpu_communicator=use_hpu_communicator,
             use_xpu_communicator=use_xpu_communicator,
             use_npu_communicator=use_npu_communicator,
+            use_torch_symm_mem=use_torch_symm_mem,
             use_message_queue_broadcaster=use_message_queue_broadcaster,
             group_name=group_name,
         )
@@ -437,7 +439,7 @@ def monkey_patch_make_layers(
     # circula imports
     from sglang.srt.distributed import get_pp_group
     from sglang.srt.layers.utils import PPMissingLayer
-    from sglang.srt.offloader import get_offloader
+    from sglang.srt.utils.offloader import get_offloader
 
     assert not pp_size or num_hidden_layers >= pp_size
     start_layer, end_layer = get_pp_group().pp_start_layer, get_pp_group().pp_end_layer
