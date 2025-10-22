@@ -7,12 +7,14 @@ from typing import Dict
 import fastapi
 import uvicorn
 from fastapi import Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from lattica import Lattica
 from starlette.concurrency import iterate_in_threadpool
 from starlette.datastructures import State
 
 from backend.server.rpc_connection_handler import RPCConnectionHandler
+from common.file_util import get_project_root
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -50,6 +52,25 @@ async def openai_v1_chat_completions(raw_request: Request):
 @app.get("/cluster/status")
 async def cluster_status():
     return await get_cluster_status()
+
+
+# Disable caching for index.html
+@app.get("/")
+async def serve_index():
+    response = FileResponse(str(get_project_root()) + "/src/frontend/dist/chat.html")
+    # Disable cache
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
+# mount the frontend
+app.mount(
+    "/",
+    StaticFiles(directory=str(get_project_root() / "src" / "frontend" / "dist"), html=True),
+    name="static",
+)
 
 
 class NodeChatHttpServer:
@@ -131,13 +152,9 @@ class NodeChatHttpServer:
 
                         async def stream_generator():
                             response = stub.chat_completion(request_data)
-                            try:
-                                iterator = iterate_in_threadpool(response)
-                                async for chunk in iterator:
-                                    yield chunk
-                            finally:
-                                logger.debug(f"client disconnected for {request_id}")
-                                response.cancel()
+                            iterator = iterate_in_threadpool(response)
+                            async for chunk in iterator:
+                                yield chunk
 
                         resp = StreamingResponse(
                             stream_generator(),
@@ -187,17 +204,13 @@ class NodeChatHttpServer:
 
                     async def stream_status():
                         response = stub.cluster_status()
-                        try:
-                            iterator = iterate_in_threadpool(response)
-                            async for chunk in iterator:
-                                yield chunk
-                        finally:
-                            logger.debug(f"client disconnected for cluster status")
-                            response.cancel()
+                        iterator = iterate_in_threadpool(response)
+                        async for chunk in iterator:
+                            yield chunk
+                            time.sleep(1)
 
                     resp = StreamingResponse(
                         stream_status(),
-                        # media_type="text/event-stream",
                         media_type="application/x-ndjson",
                         headers={
                             "X-Content-Type-Options": "nosniff",
