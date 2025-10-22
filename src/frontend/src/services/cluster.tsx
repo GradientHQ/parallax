@@ -6,6 +6,7 @@ import { createStreamClusterStatus, getModelList, initScheduler } from './api';
 
 import logoUrlQwen from '../assets/models/Qwen3.png';
 import logoUrlGpt from '../assets/models/OpenAI-black-monoblossom.svg';
+import { useHost } from './host';
 
 const getLogoUrl = (name: string) => {
   name = name.toLowerCase();
@@ -85,6 +86,8 @@ const context = createContext<readonly [ClusterStates, ClusterActions] | undefin
 const { Provider } = context;
 
 export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
+  const [{ type: hostType }] = useHost();
+
   // Init Parameters
   const [networkType, setNetworkType] = useState<NetworkType>('local');
   const [initNodesNumber, setInitNodesNumber] = useState(1);
@@ -94,6 +97,9 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
   const [modelInfoList, setModelInfoList] = useState<readonly ModelInfo[]>([]);
 
   const updateModelList = useRefCallback(async () => {
+    if (hostType === 'node') {
+      return;
+    }
     let succeed = false;
     while (!succeed) {
       try {
