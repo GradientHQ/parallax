@@ -136,7 +136,16 @@ class NodeChatHttpServer:
                 logger.error("Failed to get scheduler peer id")
                 return False
 
-        return True
+        # ensure connect to scheduler
+        for _ in range(10):
+            if self.scheduler_peer_id in self.lattica.get_all_peers():
+                return True
+            logger.warning(
+                "Scheduler peer id not found, waiting for 1 second."
+            )
+            time.sleep(1)
+
+        return False
 
     def chat_completion(self, request_data, request_id: str, received_ts: int):
         if self.scheduler_addr is not None:  # central scheduler mode
@@ -286,9 +295,10 @@ class NodeChatHttpServer:
         1. The HTTP server and executor both run in the main process.
         2. Inter-process communication is done through IPC (each process uses a different port) via the ZMQ library.
         """
-        if not self.build_lattica():
-            logger.error("Failed to build lattica")
-            exit(1)
+        while not self.build_lattica():
+            logger.error("Failed to build lattica, waiting for 10 seconds")
+            time.sleep(10)
+        logger.info("Lattica built successfully")
 
         asyncio.run(
             init_app_states(
