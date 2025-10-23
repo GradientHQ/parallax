@@ -36,6 +36,7 @@ PUBLIC_RELAY_SERVERS = [
     "/dns4/relay-lattica-eu.gradient.network/tcp/18080/p2p/12D3KooWRAuR7rMNA7Yd4S1vgKS6akiJfQoRNNexTtzWxYPiWfG5",
 ]
 
+
 def check_python_version():
     """Check if Python version is 3.11 or higher."""
     if sys.version_info < (3, 11) or sys.version_info >= (3, 14):
@@ -156,6 +157,7 @@ def _execute_with_graceful_shutdown(cmd: list[str], env: dict[str, str] | None =
             logger.info("Subprocess not found, skipping shutdown...")
         sys.exit(0)
 
+
 def _get_relay_params():
     return [
         "--relay-servers",
@@ -163,6 +165,7 @@ def _get_relay_params():
         "--initial-peers",
         *PUBLIC_INITIAL_PEERS,
     ]
+
 
 def run_command(args, passthrough_args: list[str] | None = None):
     """Run the scheduler (equivalent to scripts/start.sh)."""
