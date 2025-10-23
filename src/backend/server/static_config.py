@@ -14,7 +14,6 @@ MODEL_LIST = [
     "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8",
     "Qwen/Qwen3-Next-80B-A3B-Thinking",
     "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8",
-    "Qwen/Qwen3-0.6B",
     "Qwen/Qwen3-0.6B-FP8",
     "Qwen/Qwen3-1.7B",
     "Qwen/Qwen3-1.7B-FP8",
