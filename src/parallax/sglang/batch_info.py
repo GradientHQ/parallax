@@ -5,8 +5,9 @@ The following is the flow of data structures for a batch in SGLang:
 ScheduleBatch -> ModelWorkerBatch -> ForwardBatch
 """
 
-from typing import List
 from types import SimpleNamespace
+from typing import List
+
 import torch
 from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch

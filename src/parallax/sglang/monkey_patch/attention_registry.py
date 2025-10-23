@@ -6,9 +6,7 @@ for hybrid linear attention models on SM89 architecture.
 
 import logging
 from typing import TYPE_CHECKING
-from sglang.srt.layers.attention.attention_registry import (
-    attn_backend_wrapper as original_attn_backend_wrapper,
-)
+
 from sglang.srt.utils import is_blackwell, is_npu
 
 if TYPE_CHECKING:
