@@ -61,13 +61,13 @@ def apply_qwen3_next_monkey_patch():
         else:
             self.embed_tokens = PPMissingLayer()
 
-        def get_layer(idx: int, layer_prefix: str):
+        def get_layer(idx: int, prefix: str):
             layer_class = m.ALL_DECODER_LAYER_TYPES[config.layers_block_type[idx]]
             return layer_class(
                 config,
                 idx,
                 quant_config=quant_config,
-                prefix=layer_prefix,
+                prefix=prefix,
                 alt_stream=alt_stream,
             )
 
@@ -177,14 +177,44 @@ def apply_qwen3_next_monkey_patch():
     def _pp_load_weights(
         self, weights: Iterable[Tuple[str, torch.Tensor]], is_mtp: bool = False
     ) -> Set[str]:
-        # Keep non-layer weights (layer_id None) and local slice
-        filtered = []
+        """Filter incoming weights to only those relevant for this PP slice.
+
+        Rules:
+        - Layer weights: keep only if layer_id in [start, end).
+        - Non-layer weights (layer_id is None):
+            * keep if they correspond to names present in current params_dict (e.g., model.norm on last rank,
+              embed on first rank, lm_head on all ranks), or
+            * keep if they match known mapping keywords (so original loader can rename and resolve), or
+            * keep if they are explicitly skipped by original loader (e.g., rotary_emb.inv_freq), harmless to pass.
+        This prevents KeyError like 'model.norm.weight' on non-last ranks where norm is a PPMissingLayer.
+        """
         start = getattr(self.model, "start_layer", None)
         end = getattr(self.model, "end_layer", None)
+        params_dict = dict(self.named_parameters())
+        mapping_keywords = (
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+            "self_attn",
+        )
+
+        filtered: list[tuple[str, torch.Tensor]] = []
         for name, w in weights:
             layer_id = get_layer_id(name)
-            if layer_id is None or (start is None) or (start <= layer_id < end):
-                filtered.append((name, w))
+            if layer_id is not None:
+                if (start is None) or (start <= layer_id < end):
+                    filtered.append((name, w))
+            else:
+                if (
+                    (name in params_dict)
+                    or any(k in name for k in mapping_keywords)
+                    or ("rotary_emb.inv_freq" in name)
+                ):
+                    filtered.append((name, w))
+
         return orig_load_weights(self, filtered, is_mtp=is_mtp)
 
     # Bind patches
