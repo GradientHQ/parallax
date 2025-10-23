@@ -68,7 +68,7 @@ def form_sgl_batch_prefill(
     """Initialize a prefill ScheduleBatch -> ModelWorkerBatch -> ForwardBatch workflow"""
     sgl_reqs = transform_requests_to_sglang(requests)
     dummy_tree_cache = SimpleNamespace(
-        page_size=1,
+        page_size=model_runner.server_args.page_size,
         device=model_runner.device,
         token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
     )
