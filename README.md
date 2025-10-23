@@ -137,7 +137,7 @@ parallax run
 
 Open http://localhost:3001 and you should see the setup interface.
 
-![Model select](docs/images/node_join.png)
+![Model select](docs/images/node_config.png)
 
 Select your desired node and model config and click continue.
 
@@ -154,7 +154,7 @@ parallax join -s {scheduler-address}
 parallax join -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
 ```
 
-![Node join](docs/images/node_config.png)
+![Node join](docs/images/node_join.png)
 
 You should see your nodes start to show up with their status. Wait until all nodes are successfully connected, and you will automatically be directed to the chat interface.
 
@@ -163,6 +163,10 @@ You should see your nodes start to show up with their status. Wait until all nod
 Done! You have your own AI cluster now.
 
 ![Chat](docs/images/chat_interface.png)
+
+#### Chat on Node
+
+If you are only running the node service on your machine, you can visit http://localhost:3002 to access the chat page.
 
 ### Without frontend
 #### Step 1: Launch scheduler
