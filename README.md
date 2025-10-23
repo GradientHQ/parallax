@@ -1,6 +1,6 @@
 <div align="center">
   <p align="center">
-    <img src="docs/images/parallax.jpg" width="720">
+    <img src="docs/images/parallax.png" width="720">
   </p>
 </div>
 
