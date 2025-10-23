@@ -526,6 +526,13 @@ def apply_parallax_monkey_patch():
     monkey_patch_gpt_oss()
     monkey_patch_triton_backend_init()
 
+    # Apply attention registry monkey patch for SM89 FlashAttentionBackend fix
+    from parallax.sglang.monkey_patch.attention_registry import (
+        apply_attention_registry_monkey_patch,
+    )
+
+    apply_attention_registry_monkey_patch()
+
 
 def initialize_sgl_model_runner(
     original_model_path: str,

@@ -4,7 +4,7 @@ import torch
 from sglang.srt.layers.attention.triton_backend import TritonAttnBackend
 from sglang.srt.layers.dp_attention import get_attention_tp_size
 from sglang.srt.model_executor.model_runner import ModelRunner
-from sglang.srt.utils import get_bool_env_var, get_device_core_count
+from sglang.srt.utils import get_bool_env_var, get_device_core_count, get_int_env_var
 
 
 def parallax_triton_backend_init(
@@ -48,6 +48,22 @@ def parallax_triton_backend_init(
     self.static_kv_splits = get_bool_env_var("SGLANG_TRITON_DECODE_ATTN_STATIC_KV_SPLITS", "false")
     self.max_kv_splits = model_runner.server_args.triton_attention_num_kv_splits
 
+    # Decide whether enable deterministic inference with batch-invariant operations
+    self.enable_deterministic = model_runner.server_args.enable_deterministic_inference
+
+    # Configure deterministic inference settings
+    if self.enable_deterministic:
+        # Use fixed split tile size for batch invariance
+        self.split_tile_size = get_int_env_var("SGLANG_TRITON_DECODE_SPLIT_TILE_SIZE", 256)
+        # Set static_kv_splits to False to use deterministic logic instead
+        self.static_kv_splits = False
+    else:
+        self.split_tile_size = model_runner.server_args.triton_attention_split_tile_size
+
+    if self.split_tile_size is not None:
+        self.max_kv_splits = (
+            self.max_context_len + self.split_tile_size - 1
+        ) // self.split_tile_size
     # Check arguments
     assert not (
         model_runner.sliding_window_size is not None
@@ -79,7 +95,11 @@ def parallax_triton_backend_init(
         self.mask_indptr = torch.zeros((max_bs + 1,), dtype=torch.int64, device=model_runner.device)
 
     # Initialize forward metadata
-    self.forward_metadata = None
+    from sglang.srt.layers.attention.triton_backend import ForwardMetadata
+
+    self.forward_metadata: ForwardMetadata = None
+
+    self.cuda_graph_custom_mask = None
 
 
 def apply_triton_backend_init_monkey_patch():
