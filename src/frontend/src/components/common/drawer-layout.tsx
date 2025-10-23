@@ -9,7 +9,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { useCluster } from '../../services';
+import { useCluster, useHost } from '../../services';
 import { useAlertDialog } from '../mui';
 import { IconBrandGradient } from '../brand';
 import {
@@ -85,6 +85,8 @@ const DrawerLayoutContent = styled(Stack)(({ theme }) => {
 });
 
 export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
+  const [{ type: hostType }] = useHost();
+
   const [
     {
       modelName,
@@ -115,7 +117,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
     confirmLabel: 'Finish',
   });
   useEffect(() => {
-    if (clusterStatus === 'waiting') {
+    if (hostType === 'cluster' && clusterStatus === 'waiting') {
       openWaiting();
     }
   }, [clusterStatus, openWaiting]);
@@ -158,8 +160,14 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
     confirmLabel: 'Finish',
   });
   useEffect(() => {
-    if (clusterStatus === 'idle' || clusterStatus === 'failed') {
+    if (clusterStatus === 'failed') {
       openFailed();
+      return;
+    }
+    if (clusterStatus === 'idle') {
+      // Delay trigger, due to the cluster init status is 'idle' before connecting to the scheduler.
+      const timeoutId = setTimeout(() => openFailed(), 1000);
+      return () => clearTimeout(timeoutId);
     }
   }, [clusterStatus, openFailed]);
 
