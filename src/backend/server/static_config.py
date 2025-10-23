@@ -46,6 +46,10 @@ MODEL_LIST = [
     "nvidia/Llama-3.3-70B-Instruct-FP8",
     "nvidia/Llama-3.1-70B-Instruct-FP8",
     "nvidia/Llama-3.1-8B-Instruct-FP8",
+    "deepseek-ai/DeepSeek-V3.1",
+    "deepseek-ai/DeepSeek-R1",
+    "deepseek-ai/DeepSeek-V3",
+    "deepseek-ai/DeepSeek-V2",
     "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
 ]
 
