@@ -6,7 +6,7 @@ ScheduleBatch -> ModelWorkerBatch -> ForwardBatch
 """
 
 from typing import List
-
+from types import SimpleNamespace
 import torch
 from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
@@ -67,11 +67,16 @@ def form_sgl_batch_prefill(
 ) -> ForwardBatch:
     """Initialize a prefill ScheduleBatch -> ModelWorkerBatch -> ForwardBatch workflow"""
     sgl_reqs = transform_requests_to_sglang(requests)
+    dummy_tree_cache = SimpleNamespace(
+        page_size=1,
+        device=model_runner.device,
+        token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
+    )
     schedule_batch = ScheduleBatch.init_new(
         reqs=sgl_reqs,
         req_to_token_pool=model_runner.req_to_token_pool,
         token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
-        tree_cache=None,
+        tree_cache=dummy_tree_cache,
         model_config=model_runner.model_config,
         enable_overlap=False,
         spec_algorithm=SpeculativeAlgorithm.NONE,
@@ -193,6 +198,8 @@ def form_sgl_batch_decode(
 
 def release_cuda_request(running_batch: ScheduleBatch, request_id: str):
     """Release KV Cache and other resources for finished/aborted requests."""
+    if running_batch is None or running_batch.is_empty():
+        return
     seq_lens_cpu = running_batch.seq_lens.cpu().numpy()
     idx = find_index(running_batch, request_id)
     req = running_batch.reqs.pop(idx)
