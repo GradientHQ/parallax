@@ -50,7 +50,6 @@ MODEL_LIST = [
     "deepseek-ai/DeepSeek-R1",
     "deepseek-ai/DeepSeek-V3",
     "deepseek-ai/DeepSeek-V2",
-    "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
 ]
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
