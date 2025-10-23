@@ -140,9 +140,7 @@ class NodeChatHttpServer:
         for _ in range(10):
             if self.scheduler_peer_id in self.lattica.get_all_peers():
                 return True
-            logger.warning(
-                "Scheduler peer id not found, waiting for 1 second."
-            )
+            logger.warning("Scheduler peer id not found, waiting for 1 second.")
             time.sleep(1)
 
         return False
