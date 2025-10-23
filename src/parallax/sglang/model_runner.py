@@ -7,7 +7,6 @@ arguments needed by decentralized inference.
 import logging
 import os
 import random
-import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sglang
@@ -462,15 +461,18 @@ def monkey_patch_make_layers(
 
 ## TODO: Move this when sgalang supports qwen3_next pipeline parallelism
 def monkey_patch_qwen3_next():
-    from parallax.sglang.monkey_patch import (
-        qwen3_next_model as parallax_qwen3_next_model_module,
-    )
     from parallax.sglang.monkey_patch.qwen3_next_config import (
         monkey_patch_full_attention_layer_ids,
         monkey_patch_linear_layer_ids,
     )
+    from parallax.sglang.monkey_patch.qwen3_next_model import (
+        apply_qwen3_next_monkey_patch,
+    )
 
-    sys.modules["sglang.srt.models.qwen3_next"] = parallax_qwen3_next_model_module
+    # Apply minimal, method-level monkey patches to sglang's qwen3_next
+    apply_qwen3_next_monkey_patch()
+
+    # Patch config helpers (layer block typing) as before
     sglang.srt.configs.qwen3_next.Qwen3NextConfig.linear_layer_ids = monkey_patch_linear_layer_ids
     sglang.srt.configs.qwen3_next.Qwen3NextConfig.full_attention_layer_ids = (
         monkey_patch_full_attention_layer_ids

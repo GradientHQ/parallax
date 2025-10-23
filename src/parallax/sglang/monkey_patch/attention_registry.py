@@ -44,7 +44,7 @@ def monkey_patch_attn_backend_wrapper(runner: "ModelRunner", full_attn_backend: 
                 assert (
                     runner.server_args.attention_backend == "ascend"
                 ), "ascend backend is the only supported backend on NPU for hybrid GDN models, use --attention-backend ascend to specify the backend."
-            logger.info(f"Using hybrid linear attention backend for hybrid GDN models.")
+            logger.debug(f"Using hybrid linear attention backend for hybrid GDN models.")
             linear_attn_backend = GDNAttnBackend(runner)
         elif runner.mamba2_config is not None:
             linear_attn_backend = Mamba2AttnBackend(runner)
@@ -74,7 +74,7 @@ def monkey_patch_attn_backend_wrapper(runner: "ModelRunner", full_attn_backend: 
 
             apply_triton_backend_init_monkey_patch()
 
-            logger.info(
+            logger.debug(
                 "Replacing FlashAttentionBackend with TritonAttnBackend for SM89 compatibility"
             )
             full_attn_backend = TritonAttnBackend(runner)
