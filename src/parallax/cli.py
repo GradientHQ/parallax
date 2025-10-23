@@ -12,8 +12,8 @@ import os
 import signal
 import subprocess
 import sys
-from pathlib import Path
 
+from common.file_util import get_project_root
 from common.static_config import get_relay_params
 from parallax_utils.logging_config import get_logger
 
@@ -27,19 +27,6 @@ def check_python_version():
             f"Error: Python 3.11 or higher is required. Current version is {sys.version_info.major}.{sys.version_info.minor}."
         )
         sys.exit(1)
-
-
-def get_project_root():
-    """Get the project root directory."""
-    # Search for the project root by looking for pyproject.toml in parent directories
-    current_dir = Path(__file__).parent
-    while current_dir != current_dir.parent:
-        if (current_dir / "pyproject.toml").exists():
-            return current_dir
-        current_dir = current_dir.parent
-
-    # If not found, fallback to current working directory
-    return Path.cwd()
 
 
 def _flag_present(args_list: list[str], flag_names: list[str]) -> bool:
@@ -168,8 +155,6 @@ def run_command(args, passthrough_args: list[str] | None = None):
     # Build the command to run the backend main.py
     passthrough_args = passthrough_args or []
     cmd = [sys.executable, str(backend_main)]
-    if not _flag_present(passthrough_args, ["--dht-port"]):
-        cmd.extend(["--dht-port", "5001"])
     if not _flag_present(passthrough_args, ["--port"]):
         cmd.extend(["--port", "3001"])
 
