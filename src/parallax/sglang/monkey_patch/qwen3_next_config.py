@@ -15,6 +15,7 @@ class HybridLayerType(enum.Enum):
     mamba2 = "mamba"
 
 
+@property
 def monkey_patch_linear_layer_ids(self):
     """Return linear-attention layer ids restricted to the PP slice.
 
@@ -30,6 +31,7 @@ def monkey_patch_linear_layer_ids(self):
     ]
 
 
+@property
 def monkey_patch_full_attention_layer_ids(self):
     """Return full-attention layer ids restricted to the PP slice.
 
@@ -55,5 +57,5 @@ def apply_qwen3_next_config_monkey_patch():
 
     import sglang.srt.configs.qwen3_next as s
 
-    s.Qwen3NextConfig.linear_layer_ids = property(monkey_patch_linear_layer_ids)
-    s.Qwen3NextConfig.full_attention_layer_ids = property(monkey_patch_full_attention_layer_ids)
+    s.Qwen3NextConfig.linear_layer_ids = monkey_patch_linear_layer_ids
+    s.Qwen3NextConfig.full_attention_layer_ids = monkey_patch_full_attention_layer_ids
