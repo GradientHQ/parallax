@@ -133,6 +133,11 @@ parallax run
 parallax run
 ```
 
+When running `parallax run` for the first time or after an update, some basic info (like version and gpu name) might be sent to help improve the project. To disable this, use the `-u` flag:
+```sh
+parallax run -u
+```
+
 #### Step 2: Set cluster and model config
 
 Open http://localhost:3001 and you should see the setup interface.
@@ -157,6 +162,11 @@ parallax join -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
 ![Node join](docs/images/node_join.png)
 
 You should see your nodes start to show up with their status. Wait until all nodes are successfully connected, and you will automatically be directed to the chat interface.
+
+When running `parallax join` for the first time or after an update, some basic info (like version and gpu name) might be sent to help improve the project. To disable this, use the `-u` flag:
+```sh
+parallax join -u
+```
 
 #### Step 4: Chat
 

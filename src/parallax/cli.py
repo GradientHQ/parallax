@@ -176,7 +176,8 @@ def _get_relay_params():
 
 def run_command(args, passthrough_args: list[str] | None = None):
     """Run the scheduler (equivalent to scripts/start.sh)."""
-    update_package_info()
+    if not args.skip_upload:
+        update_package_info()
 
     check_python_version()
 
@@ -210,7 +211,8 @@ def run_command(args, passthrough_args: list[str] | None = None):
 
 def join_command(args, passthrough_args: list[str] | None = None):
     """Join a distributed cluster (equivalent to scripts/join.sh)."""
-    update_package_info()
+    if not args.skip_upload:
+        update_package_info()
 
     check_python_version()
 
@@ -362,6 +364,9 @@ Examples:
     run_parser.add_argument(
         "-r", "--use-relay", action="store_true", help="Use public relay servers"
     )
+    run_parser.add_argument(
+        "-u", "--skip-upload", action="store_true", help="Skip upload package info"
+    )
 
     # Add 'join' command parser
     join_parser = subparsers.add_parser(
@@ -376,6 +381,9 @@ Examples:
     )
     join_parser.add_argument(
         "-r", "--use-relay", action="store_true", help="Use public relay servers"
+    )
+    join_parser.add_argument(
+        "-u", "--skip-upload", action="store_true", help="Skip upload package info"
     )
 
     # Accept unknown args and pass them through to the underlying python command
