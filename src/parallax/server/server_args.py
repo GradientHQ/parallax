@@ -150,6 +150,10 @@ def parse_args() -> argparse.Namespace:
         help="Choose the GPU moe kernels",
     )
 
+    parser.add_argument(
+        "--skip-node-chat-server", action="store_true", help="Skip node chat server"
+    )
+
     # Logging and debugging
     parser.add_argument(
         "--log-level",
