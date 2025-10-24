@@ -129,13 +129,20 @@ class Executor:
             else:
                 raise ValueError(f"Unsupported GPU backend type: {self.backend_type}")
 
+            # Prepare all parameters for model runner initialization
+            model_runner_params = {
+                "model_repo": model_repo,
+                "start_layer": start_layer,
+                "end_layer": end_layer,
+                "kv_cache_memory_fraction": kv_cache_memory_fraction,
+                "attention_backend": attention_backend,
+                "kv_block_size": kv_block_size,
+                "max_num_tokens_per_batch": max_num_tokens_per_batch,
+                "dtype": dtype,
+            }
+
             self.model_runner, self.config, self.tokenizer = initialize_cuda_model_runner(
-                model_repo,
-                start_layer,
-                end_layer,
-                kv_cache_memory_fraction,
-                attention_backend,
-                kv_block_size,
+                **model_runner_params
             )
             self.running_batch = None
             self.cur_batch = None
@@ -1100,12 +1107,28 @@ class Executor:
 
             # Return appropriate output based on peer position
             if return_decoded_tokens:
-                # Last peer: return sampled token IDs
-                return output.sampled_token_ids
+                # Last peer: return sampled token IDs as tensor
+                # Convert list[list[int]] to tensor
+                import torch
+
+                sampled_token_ids = output.sampled_token_ids
+                if isinstance(sampled_token_ids, list) and len(sampled_token_ids) > 0:
+                    # Convert to tensor: pad sequences to same length
+                    max_len = max(len(seq) for seq in sampled_token_ids)
+                    padded_tokens = []
+                    for seq in sampled_token_ids:
+                        padded_seq = seq + [-1] * (max_len - len(seq))  # Pad with -1
+                        padded_tokens.append(padded_seq)
+                    return torch.tensor(padded_tokens, dtype=torch.int64)
+                else:
+                    return torch.tensor(sampled_token_ids, dtype=torch.int64)
             else:
                 # Intermediate peer: return hidden states for next peer
                 if hasattr(output, "hidden_states") and output.hidden_states is not None:
                     return output.hidden_states
+                elif hasattr(output, "tensors") and "hidden_states" in output.tensors:
+                    # Handle IntermediateTensors case
+                    return output.tensors["hidden_states"]
                 else:
                     raise RuntimeError(
                         "vLLM backend: expected hidden_states in output for PP, but got None. "

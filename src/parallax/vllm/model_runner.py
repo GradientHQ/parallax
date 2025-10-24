@@ -14,6 +14,7 @@ import torch
 from transformers import AutoConfig, AutoTokenizer
 from vllm.config import (
     CacheConfig,
+    CompilationConfig,
     DeviceConfig,
     LoadConfig,
     ModelConfig,
@@ -28,12 +29,75 @@ from vllm.v1.core.kv_cache_utils import (
     get_request_block_hasher,
     init_none_hash,
 )
-from vllm.v1.kv_cache_interface import KVCacheConfig
+from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheGroupSpec, KVCacheTensor
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def _create_kv_cache_config_from_specs(
+    kv_cache_group: KVCacheGroupSpec,
+    attn_layers: List[str],
+    kv_cache_memory_fraction: float,
+) -> KVCacheConfig:
+    """
+    Create KV cache configuration from KV cache group specs and attention layers.
+
+    This is a standalone function that can be used by both the model runner's
+    _create_kv_cache_config method and the initialize_vllm_model_runner function.
+
+    Args:
+        kv_cache_group: KV cache group specification
+        attn_layers: List of attention layer names
+        kv_cache_memory_fraction: Fraction of GPU memory to use for KV cache
+
+    Returns:
+        KVCacheConfig: Properly configured KV cache configuration
+    """
+    import torch
+
+    # Calculate available GPU memory for KV cache
+    free_memory, total_memory = torch.cuda.mem_get_info(0)
+    available_memory = int(free_memory * kv_cache_memory_fraction)
+
+    logger.info(
+        f"Available GPU memory for KV cache: "
+        f"{available_memory / (1024**3):.2f} GB "
+        f"({kv_cache_memory_fraction:.1%} of {free_memory / (1024**3):.2f} GB)"
+    )
+
+    # Calculate page_size_bytes for proper tensor sizing
+    page_size_bytes = kv_cache_group.kv_cache_spec.page_size_bytes
+
+    # Calculate reasonable number of blocks based on available memory
+    # Each block needs page_size_bytes, so we can fit this many blocks
+    max_blocks_by_memory = available_memory // page_size_bytes
+
+    # Use a conservative estimate (80% of max possible blocks)
+    # But ensure we don't exceed available memory
+    num_blocks = max(100, min(1000, int(max_blocks_by_memory * 0.8)))
+
+    logger.info(f"Calculated KV cache blocks: {num_blocks} (max possible: {max_blocks_by_memory})")
+
+    # Ensure tensor size is divisible by page_size_bytes
+    tensor_size_bytes = page_size_bytes * num_blocks
+
+    # Ensure KVCacheTensor.shared_by covers all attention layers; otherwise
+    # vLLM will assert that some layers are not initialized.
+    kv_cache_config = KVCacheConfig(
+        num_blocks=num_blocks,
+        kv_cache_tensors=[
+            KVCacheTensor(
+                size=tensor_size_bytes,
+                shared_by=attn_layers,
+            )
+        ],
+        kv_cache_groups=[kv_cache_group],
+    )
+
+    return kv_cache_config
 
 
 class ParallaxVLLMModelRunner(GPUModelRunner):
@@ -89,7 +153,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             f"is_first={self.is_first_peer}, is_last={self.is_last_peer}"
         )
 
-    def _create_kv_cache_config(self) -> KVCacheConfig:
+    def _create_kv_cache_config(self, kv_cache_memory_fraction: float = None) -> KVCacheConfig:
         """
         Create KV cache configuration from the loaded model.
 
@@ -103,36 +167,110 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         logger.info("Generating KV cache configuration from model...")
 
         # Get KV cache specs from model's attention layers
-        # This method is provided by vLLM's GPUModelRunner
-        kv_cache_specs = self.model.get_kv_cache_spec()
+        # Try to access the method directly, bypassing cudagraph wrapper if needed
+        try:
+            kv_cache_specs = self.model.get_kv_cache_spec()
+        except AttributeError:
+            # If cudagraph wrapper is blocking access, try to get specs from the underlying model
+            logger.warning(
+                "Cannot access get_kv_cache_spec due to cudagraph wrapper, using fallback method"
+            )
+            # Use a simplified approach - let KVCacheManager handle the details
+            kv_cache_specs = None
 
         # Get available GPU memory for KV cache
-        # Use vLLM's memory profiling utilities
-        from vllm.utils import get_gpu_memory
+        # Use PyTorch's native memory info function
+        import torch
 
-        free_memory, _ = get_gpu_memory(self.device.index or 0)
+        free_memory, total_memory = torch.cuda.mem_get_info(self.device.index or 0)
 
-        # Calculate available memory for KV cache based on cache_config
-        gpu_memory_utilization = self.cache_config.gpu_memory_utilization
-        available_memory = int(free_memory * gpu_memory_utilization)
+        # Calculate available memory for KV cache
+        # Use provided fraction or fall back to cache_config
+        memory_fraction = (
+            kv_cache_memory_fraction
+            if kv_cache_memory_fraction is not None
+            else self.cache_config.gpu_memory_utilization
+        )
+        available_memory = int(free_memory * memory_fraction)
 
         logger.info(
             f"Available GPU memory for KV cache: "
             f"{available_memory / (1024**3):.2f} GB "
-            f"({gpu_memory_utilization:.1%} of {free_memory / (1024**3):.2f} GB)"
+            f"({memory_fraction:.1%} of {free_memory / (1024**3):.2f} GB)"
         )
 
         # Use vLLM's utility to generate KV cache config
         # This handles all the complexity of different attention types,
         # hybrid models, sliding windows, etc.
-        kv_cache_configs = get_kv_cache_configs(
-            vllm_config=self.vllm_config,
-            kv_cache_specs=[kv_cache_specs],  # Single worker
-            available_memory=[available_memory],
-        )
+        if kv_cache_specs is not None:
+            kv_cache_configs = get_kv_cache_configs(
+                vllm_config=self.vllm_config,
+                kv_cache_specs=[kv_cache_specs],  # Single worker
+                available_memory=[available_memory],
+            )
+            # For scheduler (single worker case), we can use the first config
+            kv_cache_config = generate_scheduler_kv_cache_config(kv_cache_configs)
+        else:
+            # Fallback: create a basic KV cache config
+            logger.info("Using fallback KV cache configuration")
 
-        # For scheduler (single worker case), we can use the first config
-        kv_cache_config = generate_scheduler_kv_cache_config(kv_cache_configs)
+            # Try to get model info from the loaded model to create a more accurate config
+            try:
+                # Get model architecture info from the loaded model
+                model = self.model
+                if hasattr(model, "model") and hasattr(model.model, "config"):
+                    hf_config = model.model.config
+                    num_hidden_layers = getattr(hf_config, "num_hidden_layers", 28)
+                    num_attention_heads = getattr(hf_config, "num_attention_heads", 8)
+                    hidden_size = getattr(hf_config, "hidden_size", 1024)
+                    head_size = hidden_size // num_attention_heads
+                else:
+                    # Fallback to default values
+                    num_hidden_layers = 28
+                    num_attention_heads = 8
+                    head_size = 128
+
+                logger.info(
+                    f"Using model info: layers={num_hidden_layers}, heads={num_attention_heads}, head_size={head_size}"
+                )
+
+            except Exception as e:
+                logger.warning(f"Could not get model info: {e}, using defaults")
+                num_hidden_layers = 28
+                num_attention_heads = 8
+                head_size = 128
+
+            # Create a basic KV cache group with the block size from cache config
+            from vllm.v1.kv_cache_interface import KVCacheGroupSpec, FullAttentionSpec
+
+            # Get the correct dtype from the model config to match query/key dtypes
+            model_dtype = self.vllm_config.model_config.dtype
+            if isinstance(model_dtype, str):
+                from vllm.utils.torch_utils import STR_DTYPE_TO_TORCH_DTYPE
+
+                model_dtype = STR_DTYPE_TO_TORCH_DTYPE.get(model_dtype, torch.float16)
+
+            kv_cache_group = KVCacheGroupSpec(
+                layer_names=[
+                    f"model.layers.{i}" for i in range(self.start_layer, self.end_layer)
+                ],  # Only loaded layers
+                kv_cache_spec=FullAttentionSpec(
+                    block_size=self.cache_config.block_size,
+                    num_kv_heads=num_attention_heads,  # Use actual model info
+                    head_size=head_size,  # Use actual model info
+                    dtype=model_dtype,  # Use model dtype instead of hardcoded float16
+                ),
+            )
+
+            # Use the extracted function to create KV cache config
+            # Get layer names for the loaded layers
+            layer_names = [f"model.layers.{i}" for i in range(self.start_layer, self.end_layer)]
+
+            kv_cache_config = _create_kv_cache_config_from_specs(
+                kv_cache_group=kv_cache_group,
+                attn_layers=layer_names,
+                kv_cache_memory_fraction=memory_fraction,
+            )
 
         logger.info(
             f"KV cache config generated: "
@@ -186,23 +324,85 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
                     hashing_mod, "get_hash_fn_by_name"
                 )
                 hash_fn = get_hash_fn_by_name(cache_config.prefix_caching_hash_algo)
+                init_none_hash(hash_fn)
             except (ModuleNotFoundError, AttributeError) as exc:
                 logger.warning("Unable to initialize prefix cache hashing: %s", exc)
-            else:
-                init_none_hash(hash_fn)
-                block_size = kv_cache_manager.block_size
-                if block_size is None and self.kv_cache_config.kv_cache_groups:
-                    block_size = self.kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
-                if block_size is not None:
-                    self.request_block_hasher = get_request_block_hasher(block_size, hash_fn)
-                    logger.info(
-                        "Initialized prefix cache block hasher with block_size=%d", block_size
-                    )
 
+                # Use a simple fallback hash function
+                def simple_hash_fn(obj: Any) -> bytes:
+                    return str(hash(str(obj))).encode("utf-8")
+
+                hash_fn = simple_hash_fn
+                logger.info("Using simple fallback hash function for prefix caching")
+
+            # Initialize block hasher regardless of whether we got the hash function from vLLM or fallback
+            block_size = kv_cache_manager.block_size
+            if block_size is None and self.kv_cache_config.kv_cache_groups:
+                block_size = self.kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
+            if block_size is not None:
+                self.request_block_hasher = get_request_block_hasher(block_size, hash_fn)
+                logger.info("Initialized prefix cache block hasher with block_size=%d", block_size)
+
+        # Add detailed debugging information
         logger.info(
             f"KVCacheManager initialized: block_size={kv_cache_manager.block_size}, "
             f"usage={kv_cache_manager.usage:.2%}"
         )
+
+        # Debug block pool information
+        if hasattr(kv_cache_manager.block_pool, "get_num_free_blocks"):
+            free_blocks = kv_cache_manager.block_pool.get_num_free_blocks()
+            total_blocks = getattr(kv_cache_manager.block_pool, "num_blocks", "unknown")
+            logger.info(f"Block pool: {free_blocks} free blocks out of {total_blocks} total blocks")
+
+        # Debug coordinator information
+        if hasattr(kv_cache_manager.coordinator, "block_pool"):
+            coordinator_pool = kv_cache_manager.coordinator.block_pool
+            if hasattr(coordinator_pool, "get_num_free_blocks"):
+                coordinator_free = coordinator_pool.get_num_free_blocks()
+                logger.info(f"Coordinator block pool: {coordinator_free} free blocks")
+
+        # Test KV cache allocation with a dummy request
+        try:
+
+            from vllm.v1.request import Request
+            from vllm.sampling_params import SamplingParams
+
+            # Create a test request to verify KV cache allocation
+            test_request = Request(
+                request_id="test_kv_cache",
+                prompt_token_ids=[1, 2, 3, 4, 5],  # Dummy token IDs
+                sampling_params=SamplingParams(
+                    temperature=0.0,
+                    max_tokens=10,
+                ),
+                pooling_params=None,
+                eos_token_id=2,
+                lora_request=None,
+            )
+
+            # Try to allocate some blocks for the test request
+            allocated_blocks = kv_cache_manager.allocate_slots(
+                request=test_request,
+                num_new_tokens=5,
+            )
+
+            if allocated_blocks is not None:
+                logger.info(
+                    f"Test KV cache allocation successful: {len(allocated_blocks.blocks[0])} blocks allocated"
+                )
+                logger.info(f"KV cache usage after test: {kv_cache_manager.usage:.2%}")
+
+                # Free the test blocks
+                kv_cache_manager.free(test_request)
+                logger.info(
+                    f"KV cache usage after freeing test blocks: {kv_cache_manager.usage:.2%}"
+                )
+            else:
+                logger.warning("Test KV cache allocation failed - no blocks available")
+
+        except Exception as e:
+            logger.warning(f"KV cache test failed: {e}")
 
         return kv_cache_manager
 
@@ -218,10 +418,10 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
 
         # Temporarily override vLLM's PP configuration for this peer
         # This allows us to use vLLM's layer skipping mechanism
-        import vllm.distributed.parallel_state as parallel_state
+        from vllm.distributed.utils import get_pp_indices
 
         # Monkey-patch get_pp_indices to return our custom layer range
-        original_get_pp_indices = parallel_state.get_pp_indices
+        original_get_pp_indices = get_pp_indices
 
         def custom_get_pp_indices(num_layers: int, rank: int, world_size: int):
             """Return our custom layer range instead of vLLM's calculated range."""
@@ -257,7 +457,9 @@ def initialize_vllm_model_runner(
     kv_cache_memory_fraction: float,
     attention_backend: str,
     kv_block_size: int,
+    max_num_tokens_per_batch: int = 1024,
     dtype: str = "float16",
+    **kwargs,
 ) -> Tuple[ParallaxVLLMModelRunner, Dict, Any]:
     """Initialize vLLM GPUModelRunner with true partial layer loading.
 
@@ -293,9 +495,46 @@ def initialize_vllm_model_runner(
         f"Initializing vLLM model runner for {model_repo}, " f"layers=[{start_layer}, {end_layer})"
     )
 
-    # Load HuggingFace config and tokenizer
+    # Load HuggingFace config and tokenizer first
     hf_config = AutoConfig.from_pretrained(model_repo, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(model_repo, trust_remote_code=True)
+
+    # Calculate virtual PP size (needed for both configs)
+    is_first_peer = start_layer == 0
+    is_last_peer = end_layer == hf_config.num_hidden_layers
+    virtual_pp_size = 2 if not (is_first_peer and is_last_peer) else 1
+
+    # Initialize vLLM distributed environment for pipeline parallelism
+    # This is required for vLLM's pipeline parallel mechanism to work
+    import vllm.distributed.parallel_state as parallel_state
+    import os
+
+    # Initialize distributed environment if not already initialized
+    if not parallel_state.model_parallel_is_initialized():
+        logger.info("Initializing vLLM distributed environment...")
+
+        # Set required environment variables for single GPU scenario
+        if "RANK" not in os.environ:
+            os.environ["RANK"] = "0"
+        if "WORLD_SIZE" not in os.environ:
+            os.environ["WORLD_SIZE"] = "1"
+        if "LOCAL_RANK" not in os.environ:
+            os.environ["LOCAL_RANK"] = "0"
+        if "MASTER_ADDR" not in os.environ:
+            os.environ["MASTER_ADDR"] = "localhost"
+        if "MASTER_PORT" not in os.environ:
+            os.environ["MASTER_PORT"] = "12355"
+
+        try:
+            parallel_state.init_distributed_environment()
+            parallel_state.initialize_model_parallel(
+                tensor_model_parallel_size=1,  # Single GPU
+                pipeline_model_parallel_size=virtual_pp_size,  # Match ParallelConfig
+            )
+            logger.info(f"vLLM distributed environment initialized with pp_size={virtual_pp_size}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize distributed environment: {e}")
+            logger.info("Continuing without distributed initialization...")
 
     num_hidden_layers = hf_config.num_hidden_layers
 
@@ -326,13 +565,7 @@ def initialize_vllm_model_runner(
     # Configure PP for layer slicing
     # We set pp_size > 1 to enable vLLM's layer skipping mechanism
     # but use our custom get_pp_indices to control which layers to load
-    is_first_peer = start_layer == 0
-    is_last_peer = end_layer == num_hidden_layers
-
-    # Calculate a virtual PP size that makes sense
-    # For example, if we have 32 layers and loading [8, 16), we're in the "middle"
-    # Set pp_size=2 to enable PP mode, and we'll override the layer calculation
-    virtual_pp_size = 2 if not (is_first_peer and is_last_peer) else 1
+    # virtual_pp_size is already calculated above
 
     parallel_config = ParallelConfig(
         pipeline_parallel_size=virtual_pp_size,
@@ -344,8 +577,11 @@ def initialize_vllm_model_runner(
     load_config = LoadConfig(load_format="auto")
 
     # Minimal scheduler config (we bypass vLLM scheduler)
+    # Ensure max_num_batched_tokens is at least as large as max_model_len
+    # Use the provided max_num_tokens_per_batch parameter
+    max_batched_tokens = max(max_num_tokens_per_batch, model_config.max_model_len)
     scheduler_config = SchedulerConfig(
-        max_num_batched_tokens=8192,
+        max_num_batched_tokens=max_batched_tokens,
         max_num_seqs=256,
         max_model_len=model_config.max_model_len,
     )
@@ -362,17 +598,17 @@ def initialize_vllm_model_runner(
         observability_config=None,
         prompt_adapter_config=None,
         quant_config=None,
-        compilation_config=None,
+        compilation_config=CompilationConfig(),
+        kv_transfer_config=None,
+        kv_events_config=None,
+        additional_config={},
+        instance_id="",
     )
 
-    # Note: KVCacheConfig will be created by vLLM's KVCacheManager during initialization
-    # We don't need to manually create it here as it requires complex layer-specific information
-    # The KVCacheManager will handle this based on the model's architecture
-
-    # Initialize our custom ParallaxVLLMModelRunner
+    # Initialize runner first; we'll build KV cache config after model load
     model_runner = ParallaxVLLMModelRunner(
         vllm_config=vllm_config,
-        kv_cache_config=None,  # Will be created by KVCacheManager
+        kv_cache_config=None,
         device="cuda",
         start_layer=start_layer,
         end_layer=end_layer,
@@ -383,6 +619,47 @@ def initialize_vllm_model_runner(
     logger.info("Loading vLLM model (partial layers)...")
     model_runner.load_model()
     logger.info("vLLM model loaded successfully")
+
+    # Let vLLM automatically generate KV cache configuration
+    # This ensures proper shape and format compatibility
+    logger.info("Letting vLLM automatically generate KV cache configuration...")
+
+    # Get KV cache specs from the loaded model
+    kv_cache_specs = model_runner.get_kv_cache_spec()
+
+    if not kv_cache_specs:
+        raise RuntimeError("No KV cache specs found in the loaded model")
+
+    # Calculate available memory for KV cache
+    import torch
+
+    free_memory, total_memory = torch.cuda.mem_get_info(0)
+    available_memory = int(free_memory * kv_cache_memory_fraction)
+
+    logger.info(
+        f"Available GPU memory for KV cache: "
+        f"{available_memory / (1024**3):.2f} GB "
+        f"({kv_cache_memory_fraction:.1%} of {free_memory / (1024**3):.2f} GB)"
+    )
+
+    # Use vLLM's utility to generate KV cache config
+    from vllm.v1.core.kv_cache_utils import get_kv_cache_configs, generate_scheduler_kv_cache_config
+
+    kv_cache_configs = get_kv_cache_configs(
+        vllm_config=model_runner.vllm_config,
+        kv_cache_specs=[kv_cache_specs],  # Single worker
+        available_memory=[available_memory],
+    )
+
+    # For single worker case, use the first config
+    kv_cache_config = generate_scheduler_kv_cache_config(kv_cache_configs)
+
+    model_runner.kv_cache_config = kv_cache_config
+
+    # Initialize GPU-side KV cache (creates attn_groups, block tables, etc.)
+    logger.info("Initializing GPUModelRunner KV cache...")
+    model_runner.initialize_kv_cache(kv_cache_config)
+    logger.info("GPUModelRunner KV cache initialized successfully")
 
     # Initialize KV Cache Manager after model is loaded
     logger.info("Initializing KV Cache Manager...")

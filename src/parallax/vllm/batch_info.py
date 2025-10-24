@@ -122,7 +122,7 @@ def form_vllm_batch_prefill(
 
     kv_cache_manager = model_runner.kv_cache_manager
 
-    num_common_prefix_blocks = [0] * getattr(kv_cache_manager, "num_kv_cache_groups", 1)
+    num_common_prefix_blocks = [0] * len(model_runner.kv_cache_config.kv_cache_groups)
 
     created_vllm_requests: List[VLLMRequest] = []
 
@@ -248,7 +248,8 @@ def form_vllm_batch_decode(
         req_ids.append(req.request_id)
         resumed_from_preemption.append(False)
         new_token_ids.append([])
-        resumed_req_token_ids.append(None)
+        # For decode requests, we don't have resumed token IDs
+        resumed_req_token_ids.append([])
 
         sampling_params = transform_sampling_params_to_vllm(req.sampling_params)
         vllm_req = _build_vllm_request(req, sampling_params, model_runner, include_outputs=True)
@@ -277,10 +278,8 @@ def form_vllm_batch_decode(
         req_ids=req_ids,
         resumed_from_preemption=resumed_from_preemption,
         new_token_ids=new_token_ids,
-        resumed_req_token_ids=resumed_req_token_ids,
         new_block_ids=new_block_ids,
         num_computed_tokens=num_computed_tokens,
-        num_output_tokens=num_output_tokens,
     )
 
     # Build SchedulerOutput for decode

@@ -529,6 +529,8 @@ def initialize_sgl_model_runner(
     attention_backend: str,
     kv_block_size: int,
     moe_runner_backend: str,
+    max_num_tokens_per_batch: int = 1024,
+    **kwargs,
 ):
     """
     Creates a SGL ModelRunner object.
