@@ -10,24 +10,40 @@ export const ChatMessages: FC = () => {
   const [{ status, messages }] = useChat();
 
   const refContainer = useRef<HTMLDivElement>(null);
-  const refBottom = useRef<HTMLDivElement>(null);
+  // const refBottom = useRef<HTMLDivElement>(null);
   const [isBottom, setIsBottom] = useState(true);
 
   const userScrolledUpRef = useRef(false);
   const autoScrollingRef = useRef(false);
   const prevScrollTopRef = useRef(0);
 
+  const scrollToBottom = useRefCallback(() => {
+    const el = refContainer.current;
+    if (!el) return;
+    userScrolledUpRef.current = false;
+    autoScrollingRef.current = true;
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      // el.lastElementChild?.scrollIntoView({ behavior: 'smooth' });
+    });
+    setTimeout(() => {
+      autoScrollingRef.current = false;
+    }, 250);
+  });
+
   useEffect(() => {
     if (userScrolledUpRef.current) return;
     autoScrollingRef.current = true;
-    refBottom.current?.scrollIntoView({ behavior: 'smooth' });
+    scrollToBottom();
     const t = setTimeout(() => {
       autoScrollingRef.current = false;
     }, 200);
     return () => clearTimeout(t);
   }, [messages]);
 
-  const onScroll = useRefCallback<UIEventHandler<HTMLDivElement>>(() => {
+  const onScroll = useRefCallback<UIEventHandler<HTMLDivElement>>((event) => {
+    event.stopPropagation();
+
     const container = refContainer.current;
     if (!container) return;
 
@@ -48,16 +64,30 @@ export const ChatMessages: FC = () => {
     }
   });
 
-  const scrollToBottom = () => {
-    const el = refContainer.current;
-    if (!el) return;
-    userScrolledUpRef.current = false;
-    autoScrollingRef.current = true;
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-    setTimeout(() => {
-      autoScrollingRef.current = false;
-    }, 250);
-  };
+  const nodeScrollToBottomButton = (
+    <IconButton
+      key='scroll-to-bottom'
+      onClick={scrollToBottom}
+      size='small'
+      aria-label='Scroll to bottom'
+      sx={{
+        position: 'absolute',
+        right: 12,
+        bottom: 8,
+        width: 28,
+        height: 28,
+        bgcolor: 'white',
+        border: '1px solid',
+        borderColor: 'grey.300',
+        '&:hover': { bgcolor: 'grey.100' },
+        opacity: isBottom ? 0 : 1,
+        pointerEvents: isBottom ? 'none' : 'auto',
+        transition: 'opacity .15s ease',
+      }}
+    >
+      <IconArrowDown />
+    </IconButton>
+  );
 
   const nodeStream = (
     <Stack
@@ -68,10 +98,13 @@ export const ChatMessages: FC = () => {
         height: '100%',
 
         overflowX: 'hidden',
-        overflowY: 'auto',
+        overflowY: 'scroll',
         '&::-webkit-scrollbar': { display: 'none' },
         scrollbarWidth: 'none',
         msOverflowStyle: 'none',
+
+        display: 'flex',
+        gap: 4,
       }}
       onScroll={onScroll}
       onWheel={(e) => {
@@ -87,7 +120,8 @@ export const ChatMessages: FC = () => {
 
       {status === 'opened' && <DotPulse size='large' />}
 
-      <Box ref={refBottom} sx={{ width: '100%', height: 0 }} />
+      {/* Last child for scroll to bottom */}
+      <Box sx={{ width: '100%', height: 0 }} />
     </Stack>
   );
 
@@ -95,34 +129,12 @@ export const ChatMessages: FC = () => {
     <Box
       sx={{
         position: 'relative',
-        gap: 4,
         flex: 1,
         overflow: 'hidden',
       }}
     >
       {nodeStream}
-      <IconButton
-        key='scroll-to-bottom'
-        onClick={scrollToBottom}
-        size='small'
-        aria-label='Scroll to bottom'
-        sx={{
-          position: 'absolute',
-          right: 12,
-          bottom: 8,
-          width: 28,
-          height: 28,
-          bgcolor: 'white',
-          border: '1px solid',
-          borderColor: 'grey.300',
-          '&:hover': { bgcolor: 'grey.100' },
-          opacity: isBottom ? 0 : 1,
-          pointerEvents: isBottom ? 'none' : 'auto',
-          transition: 'opacity .15s ease',
-        }}
-      >
-        <IconArrowDown />
-      </IconButton>
+      {nodeScrollToBottomButton}
     </Box>
   );
 };
