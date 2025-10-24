@@ -64,19 +64,14 @@ def monkey_patch_attn_backend_wrapper(runner: "ModelRunner", full_attn_backend: 
             and "FlashAttentionBackend" in str(full_attn_backend.__class__)
         ):
 
-            # Replace FlashAttentionBackend with TritonAttnBackend for SM89
             from sglang.srt.layers.attention.triton_backend import TritonAttnBackend
 
-            # Apply our triton backend monkey patch first to fix get_v_head_dim issue
             from parallax.sglang.monkey_patch.triton_backend import (
                 apply_triton_backend_init_monkey_patch,
             )
 
             apply_triton_backend_init_monkey_patch()
 
-            logger.debug(
-                "Replacing FlashAttentionBackend with TritonAttnBackend for SM89 compatibility"
-            )
             full_attn_backend = TritonAttnBackend(runner)
 
         return HybridLinearAttnBackend(full_attn_backend, linear_attn_backend, full_attn_layers)
@@ -85,9 +80,7 @@ def monkey_patch_attn_backend_wrapper(runner: "ModelRunner", full_attn_backend: 
 
 
 def apply_attention_registry_monkey_patch():
-    """Apply the monkey patch to fix SM89 FlashAttentionBackend issues."""
+
     import sglang.srt.layers.attention.attention_registry as attention_registry
 
-    # Replace the original function with our patched version
     attention_registry.attn_backend_wrapper = monkey_patch_attn_backend_wrapper
-    logger.debug("Applied attention registry monkey patch for SM89 FlashAttentionBackend fix")

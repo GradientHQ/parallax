@@ -462,21 +462,14 @@ def monkey_patch_make_layers(
 ## TODO: Move this when sgalang supports qwen3_next pipeline parallelism
 def monkey_patch_qwen3_next():
     from parallax.sglang.monkey_patch.qwen3_next_config import (
-        monkey_patch_full_attention_layer_ids,
-        monkey_patch_linear_layer_ids,
+        apply_qwen3_next_config_monkey_patch,
     )
     from parallax.sglang.monkey_patch.qwen3_next_model import (
         apply_qwen3_next_monkey_patch,
     )
 
-    # Apply minimal, method-level monkey patches to sglang's qwen3_next
     apply_qwen3_next_monkey_patch()
-
-    # Patch config helpers (layer block typing) as before
-    sglang.srt.configs.qwen3_next.Qwen3NextConfig.linear_layer_ids = monkey_patch_linear_layer_ids
-    sglang.srt.configs.qwen3_next.Qwen3NextConfig.full_attention_layer_ids = (
-        monkey_patch_full_attention_layer_ids
-    )
+    apply_qwen3_next_config_monkey_patch()
 
 
 ## TODO: Move this when sgalang supports gpt_oss pipeline parallelism
@@ -594,9 +587,10 @@ def initialize_sgl_model_runner(
     model_config.hf_config.tie_word_embeddings = False
     model_config.hf_config.start_layer = start_layer
     model_config.hf_config.end_layer = end_layer
-    print("Model config:", model_config)
-    print("model_start_layer:", model_config.hf_config.start_layer)
-    print("model_end_layer:", model_config.hf_config.end_layer)
+
+    logger.debug(f"model_start_layer: {model_config.hf_config.start_layer}")
+    logger.debug(f"model_end_layer: {model_config.hf_config.end_layer}")
+
     model_runner = ParallaxModelRunner(
         model_config=model_config,
         mem_fraction_static=kv_cache_memory_fraction,
