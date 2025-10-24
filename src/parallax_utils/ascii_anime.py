@@ -2,6 +2,8 @@ import json
 import math
 import os
 
+from common.file_util import get_project_root
+
 
 class HexColorPrinter:
     COLOR_MAP = {
@@ -198,7 +200,7 @@ def display_ascii_animation_join(animation_data, model_name):
 
 
 def display_parallax_run():
-    file_path = "./src/parallax_utils/anime/parallax_run.json"
+    file_path = str(get_project_root()) + "/src/parallax_utils/anime/parallax_run.json"
     try:
         with open(file_path, "r") as f:
             animation_data = json.load(f)
@@ -212,7 +214,7 @@ def display_parallax_run():
 
 
 def display_parallax_join(model_name):
-    file_path = "./src/parallax_utils/anime/parallax_join.json"
+    file_path = str(get_project_root()) + "/src/parallax_utils/anime/parallax_join.json"
     try:
         with open(file_path, "r") as f:
             animation_data = json.load(f)

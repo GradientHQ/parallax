@@ -3,20 +3,26 @@ import type { Dispatch, SetStateAction, FC, PropsWithChildren } from 'react';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useRefCallback } from '../hooks';
 import { createStreamClusterStatus, getModelList, initScheduler } from './api';
+import { useHost } from './host';
 
+import logoUrlOpenAI from '../assets/models/OpenAI-black-monoblossom.svg';
 import logoUrlQwen from '../assets/models/Qwen3.png';
-import logoUrlGpt from '../assets/models/OpenAI-black-monoblossom.svg';
+import logoUrlNvidia from '../assets/models/NVIDIA.png';
+import logoUrlMoonshotAI from '../assets/models/MoonshotAI.png';
+import logoUrlDeepseek from '../assets/models/DeepSeek.png';
+
+const logoUrlMap: Readonly<Record<string, string>> = {
+  openai: logoUrlOpenAI,
+  qwen: logoUrlQwen,
+  nvidia: logoUrlNvidia,
+  moonshotai: logoUrlMoonshotAI,
+  deepseek: logoUrlDeepseek,
+};
 
 const getLogoUrl = (name: string) => {
   name = name.toLowerCase();
   const parts = name.split(/[-/]/);
-  if (parts[0] === 'qwen') {
-    return logoUrlQwen;
-  }
-  if (parts[0] === 'openai') {
-    return logoUrlGpt;
-  }
-  return '';
+  return logoUrlMap[parts[0]] || '';
 };
 
 const debugLog = (...args: any[]) => {
@@ -29,7 +35,7 @@ export interface ModelInfo {
   readonly logoUrl: string;
 }
 
-export type ClusterStatus = 'idle' | 'waiting' | 'available' | 'rebalancing';
+export type ClusterStatus = 'idle' | 'waiting' | 'available' | 'rebalancing' | 'failed';
 
 export interface ClusterInfo {
   readonly id: string;
@@ -85,6 +91,8 @@ const context = createContext<readonly [ClusterStates, ClusterActions] | undefin
 const { Provider } = context;
 
 export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
+  const [{ type: hostType }] = useHost();
+
   // Init Parameters
   const [networkType, setNetworkType] = useState<NetworkType>('local');
   const [initNodesNumber, setInitNodesNumber] = useState(1);
@@ -94,6 +102,9 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
   const [modelInfoList, setModelInfoList] = useState<readonly ModelInfo[]>([]);
 
   const updateModelList = useRefCallback(async () => {
+    if (hostType === 'node') {
+      return;
+    }
     let succeed = false;
     while (!succeed) {
       try {

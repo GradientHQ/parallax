@@ -1,12 +1,11 @@
 """Logging configuration for Parallax."""
 
 import logging
-import os
 import sys
 import threading
 from typing import Optional
 
-__all__ = ["get_logger", "use_parallax_log_handler"]
+__all__ = ["get_logger", "use_parallax_log_handler", "set_log_level"]
 
 _init_lock = threading.Lock()
 _default_handler: logging.Handler | None = None
@@ -90,11 +89,16 @@ def _initialize_if_necessary():
         _default_handler.setFormatter(formatter)
 
         # root level from env or INFO
-        level_name = os.getenv("PARALLAX_LOGLEVEL", "INFO").upper()
-        logging.getLogger().setLevel(level_name)
+        logging.getLogger().setLevel("INFO")
 
         # Allow logs from our main packages by default
         _enable_default_handler(("parallax", "scheduling", "backend", "sglang"))
+
+
+def set_log_level(level_name: str):
+    """Set the root logger level."""
+    _initialize_if_necessary()
+    logging.getLogger().setLevel(level_name.upper())
 
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:

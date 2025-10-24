@@ -13,9 +13,10 @@ from backend.server.request_handler import RequestHandler
 from backend.server.scheduler_manage import SchedulerManage
 from backend.server.server_args import parse_args
 from backend.server.static_config import get_model_list, get_node_join_command
+from common.file_util import get_project_root
 from common.version_check import check_latest_release
 from parallax_utils.ascii_anime import display_parallax_run
-from parallax_utils.logging_config import get_logger
+from parallax_utils.logging_config import get_logger, set_log_level
 
 app = FastAPI()
 
@@ -106,7 +107,7 @@ async def openai_v1_chat_completions(raw_request: Request):
 # Disable caching for index.html
 @app.get("/")
 async def serve_index():
-    response = FileResponse("src/frontend/dist/index.html")
+    response = FileResponse(str(get_project_root()) + "/src/frontend/dist/index.html")
     # Disable cache
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
@@ -115,29 +116,30 @@ async def serve_index():
 
 
 # mount the frontend
-app.mount("/", StaticFiles(directory="src/frontend/dist", html=True), name="static")
+app.mount(
+    "/",
+    StaticFiles(directory=str(get_project_root() / "src" / "frontend" / "dist"), html=True),
+    name="static",
+)
 
 if __name__ == "__main__":
     args = parse_args()
+    set_log_level(args.log_level)
     logger.info(f"args: {args}")
     if args.log_level != "DEBUG":
         display_parallax_run()
     check_latest_release()
-    host_maddrs = args.host_maddrs
-    dht_port = args.dht_port
-    if args.dht_port is not None:
-        assert host_maddrs is None, "You can't use --dht-port and --host-maddrs at the same time"
-    else:
-        dht_port = 0
-    if host_maddrs is None:
-        host_maddrs = [f"/ip4/0.0.0.0/tcp/{dht_port}", f"/ip6/::/tcp/{dht_port}"]
 
     scheduler_manage = SchedulerManage(
         initial_peers=args.initial_peers,
         relay_servers=args.relay_servers,
         dht_prefix=args.dht_prefix,
-        host_maddrs=host_maddrs,
+        host_maddrs=[
+            f"/ip4/0.0.0.0/tcp/{args.tcp_port}",
+            f"/ip4/0.0.0.0/udp/{args.udp_port}/quic-v1",
+        ],
         announce_maddrs=args.announce_maddrs,
+        http_port=args.port,
     )
 
     request_handler.set_scheduler_manage(scheduler_manage)
