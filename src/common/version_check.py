@@ -35,8 +35,9 @@ def check_latest_release():
                 if latest != ver:
                     print(
                         f"\033[93m[Parallax] New version available: {latest} (current: {ver})\033[0m\n"
-                        f"run `pip install -U parallax` to update for macOS or Linux\n"
-                        f"run `parallax install` to update for Windows\n"
+                        f"For macOS, run `git pull && pip install -e '.[mac]'` to update.\n"
+                        f"For Linux, run `git pull && pip install -e '.[gpu]'` to update.\n"
+                        f"For Windows, run `parallax install` to update\n"
                     )
     except Exception:
         pass
