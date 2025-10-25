@@ -22,13 +22,16 @@ def monkey_patch_linear_layer_ids(self):
     This is intended to be bound as a property on
     `sglang.srt.configs.qwen3_next.Qwen3NextConfig`.
     """
-    return [
+    lst = [
         i
         for i, type_value in enumerate(self.layers_block_type)
         if type_value == HybridLayerType.linear_attention.value
         and i >= self.start_layer
         and i < self.end_layer
     ]
+    # If no matching layer id, return at least [-1]
+    # just for pp
+    return lst if lst else [-1]
 
 
 @property
@@ -38,13 +41,16 @@ def monkey_patch_full_attention_layer_ids(self):
     This is intended to be bound as a property on
     `sglang.srt.configs.qwen3_next.Qwen3NextConfig`.
     """
-    return [
+    lst = [
         i
         for i, type_value in enumerate(self.layers_block_type)
         if type_value == HybridLayerType.full_attention.value
         and i >= self.start_layer
         and i < self.end_layer
     ]
+    # If no matching layer id, return at least [-1]
+    # just for pp
+    return lst if lst else [-1]
 
 
 def apply_qwen3_next_config_monkey_patch():
