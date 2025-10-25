@@ -351,6 +351,8 @@ async def v1_chat_completions(raw_request: fastapi.Request):
     app.state.http_handler.create_request(request_json)
     app.state.http_handler.send_request(request_json)
     req = app.state.http_handler.processing_requests.get(request_id)
+    if req is None:
+        return create_error_response("Request not found", "RequestNotFoundError")
     is_stream = req.stream
 
     if is_stream:
