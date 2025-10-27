@@ -18,6 +18,11 @@ from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+MODEL_TYPE_MAP = {
+    "kimi_k2": "deepseek_v3",
+    "minimax": "minimax_m2",
+}
+
 
 class MLXModelLoader:
     """
@@ -79,6 +84,22 @@ class MLXModelLoader:
             except Exception as e:
                 logger.warning(f"Failed to load model from {model_file}: {e}")
 
+    def _create_default_model_args(self, config: Dict[str, Any]) -> Any:
+        """Create default model arguments from config."""
+        model_args = {
+            "hidden_size": config.get("hidden_size", 0),
+            "num_attention_heads": config.get("num_attention_heads", 0),
+            "num_key_value_heads": config.get("num_key_value_heads", 0),
+            "num_hidden_layers": config.get("num_hidden_layers", 0),
+            "intermediate_size": config.get("intermediate_size", 0),
+            "vocab_size": config.get("vocab_size", 0),
+            "head_dim": config.get("head_dim", 128),
+            "num_local_experts": config.get("num_local_experts", None),
+            "num_experts_per_tok": config.get("num_experts_per_tok", None),
+            "moe_intermediate_size": config.get("moe_intermediate_size", None),
+        }
+        return type("ModelArgs", (), model_args)()
+
     def load(
         self, lazy: bool = False, strict: bool = True
     ) -> Tuple[nn.Module, Dict[str, Any], Any]:
@@ -115,14 +136,17 @@ class MLXModelLoader:
         # We need the model object to know its structure and which layers it owns.
         # This part mirrors the logic from the provided utils.py to get model_args.
         model_type = config.get("model_type")
-        if model_type == "kimi_k2":
-            model_type = "deepseek_v3"
+        if model_type in MODEL_TYPE_MAP:
+            model_type = MODEL_TYPE_MAP[model_type]
+
         if not model_type:
             raise ValueError("model_type not found in config.json")
         try:
-            arch_module = importlib.import_module(f"mlx_lm.models.{model_type}")
+            # Import from project's models directory
+            arch_module = importlib.import_module(f"parallax.models.{model_type}")
             model_args_class = getattr(arch_module, "ModelArgs")
             model_args = model_args_class.from_dict(config)
+
         except (ImportError, AttributeError) as e:
             raise ValueError(f"Failed to load architecture for model_type '{model_type}'.") from e
 
