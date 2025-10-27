@@ -645,6 +645,7 @@ class GradientServer:
         if self.lattica is not None:
             self.lattica.close()
 
+
 def launch_p2p_server(
     initial_peers: List[str],
     scheduler_addr: Optional[str],
