@@ -1,14 +1,11 @@
 # Copyright © 2025 Apple Inc.
 
 from dataclasses import dataclass
-from typing import Any, List, Optional
-from typing import Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import mlx.core as mx
 import mlx.nn as nn
-
-from mlx_lm.models.base import BaseModelArgs, create_attention_mask, scaled_dot_product_attention
-from mlx_lm.models.cache import KVCache
+from mlx_lm.models.base import BaseModelArgs, scaled_dot_product_attention
 from mlx_lm.models.switch_layers import SwitchGLU
 
 
