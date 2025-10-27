@@ -262,7 +262,7 @@ class ParallaxMiniMaxM2Block(MLXMiniMaxM2Block):
     @classmethod
     def get_architecture(cls):
         """Get the architecture name for the block."""
-        return "Qwen2ForCausalLM"
+        return "MiniMaxM2CausalLM"
 
 
 EntryClass = ParallaxMiniMaxM2Block
