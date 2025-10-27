@@ -143,6 +143,7 @@ class NodeChatHttpServer:
             logger.warning("Scheduler peer id not found, waiting for 1 second.")
             time.sleep(1)
 
+        self.lattica.close()
         return False
 
     def chat_completion(self, request_data, request_id: str, received_ts: int):
