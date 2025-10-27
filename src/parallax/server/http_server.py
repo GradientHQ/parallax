@@ -188,7 +188,11 @@ class HTTPHandler:
                     "matched_stop": request_info.matched_stop,
                 },
             ],
-            "usage": None,
+            "usage": {
+                "prompt_tokens": request_info.prompt_tokens,
+                "total_tokens": request_info.prompt_tokens + request_info.completion_tokens,
+                "completion_tokens": request_info.completion_tokens,
+            },
         }
         choice = response["choices"][0]
         choice["delta"] = {"role": role, "content": content}
@@ -234,7 +238,6 @@ class HTTPHandler:
                 "prompt_tokens": request_info.prompt_tokens,
                 "total_tokens": request_info.prompt_tokens + request_info.completion_tokens,
                 "completion_tokens": request_info.completion_tokens,
-                "prompt_tokens_details": None,
             },
         }
         choice = response["choices"][0]
@@ -256,6 +259,7 @@ class HTTPHandler:
 
             request_info = self.processing_requests[rid]
             request_info.update_time = time.time()
+            request_info.prompt_tokens = recv_dict["prompt_tokens"]
             next_token_id = recv_dict["next_token_id"]
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
