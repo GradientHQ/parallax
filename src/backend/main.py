@@ -150,6 +150,7 @@ if __name__ == "__main__":
     if model_name is not None and init_nodes_num is not None:
         scheduler_manage.run(model_name, init_nodes_num, is_local_network)
 
+    host = args.host
     port = args.port
 
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info", loop="uvloop")
+    uvicorn.run(app, host=host, port=port, log_level="info", loop="uvloop")
