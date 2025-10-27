@@ -31,8 +31,10 @@ from vllm.v1.core.kv_cache_utils import (
 )
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheGroupSpec, KVCacheTensor
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+from parallax.utils.tokenizer_utils import load_tokenizer
 
 from parallax_utils.logging_config import get_logger
+from mlx_lm.utils import get_model_path, load_config
 
 logger = get_logger(__name__)
 
@@ -215,30 +217,14 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             logger.info("Using fallback KV cache configuration")
 
             # Try to get model info from the loaded model to create a more accurate config
-            try:
+            
                 # Get model architecture info from the loaded model
-                model = self.model
-                if hasattr(model, "model") and hasattr(model.model, "config"):
-                    hf_config = model.model.config
-                    num_hidden_layers = getattr(hf_config, "num_hidden_layers", 28)
-                    num_attention_heads = getattr(hf_config, "num_attention_heads", 8)
-                    hidden_size = getattr(hf_config, "hidden_size", 1024)
-                    head_size = hidden_size // num_attention_heads
-                else:
-                    # Fallback to default values
-                    num_hidden_layers = 28
-                    num_attention_heads = 8
-                    head_size = 128
-
-                logger.info(
-                    f"Using model info: layers={num_hidden_layers}, heads={num_attention_heads}, head_size={head_size}"
-                )
-
-            except Exception as e:
-                logger.warning(f"Could not get model info: {e}, using defaults")
-                num_hidden_layers = 28
-                num_attention_heads = 8
-                head_size = 128
+            model = self.model
+            hf_config = model.model.config
+            num_attention_heads = getattr(hf_config, "num_attention_heads", 8)
+            hidden_size = getattr(hf_config, "hidden_size", 1024)
+            head_size = hidden_size // num_attention_heads
+            
 
             # Create a basic KV cache group with the block size from cache config
             from vllm.v1.kv_cache_interface import KVCacheGroupSpec, FullAttentionSpec
@@ -314,7 +300,8 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         enable_prefix = cache_config.enable_prefix_caching
         if enable_prefix is None:
             enable_prefix = True
-        self.enable_prefix_caching = enable_prefix
+
+        self.enable_prefix_caching = False
 
         self.request_block_hasher = None
         if enable_prefix and kv_cache_manager.block_size is not None:
@@ -349,60 +336,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             f"usage={kv_cache_manager.usage:.2%}"
         )
 
-        # Debug block pool information
-        if hasattr(kv_cache_manager.block_pool, "get_num_free_blocks"):
-            free_blocks = kv_cache_manager.block_pool.get_num_free_blocks()
-            total_blocks = getattr(kv_cache_manager.block_pool, "num_blocks", "unknown")
-            logger.info(f"Block pool: {free_blocks} free blocks out of {total_blocks} total blocks")
-
-        # Debug coordinator information
-        if hasattr(kv_cache_manager.coordinator, "block_pool"):
-            coordinator_pool = kv_cache_manager.coordinator.block_pool
-            if hasattr(coordinator_pool, "get_num_free_blocks"):
-                coordinator_free = coordinator_pool.get_num_free_blocks()
-                logger.info(f"Coordinator block pool: {coordinator_free} free blocks")
-
-        # Test KV cache allocation with a dummy request
-        try:
-
-            from vllm.v1.request import Request
-            from vllm.sampling_params import SamplingParams
-
-            # Create a test request to verify KV cache allocation
-            test_request = Request(
-                request_id="test_kv_cache",
-                prompt_token_ids=[1, 2, 3, 4, 5],  # Dummy token IDs
-                sampling_params=SamplingParams(
-                    temperature=0.0,
-                    max_tokens=10,
-                ),
-                pooling_params=None,
-                eos_token_id=2,
-                lora_request=None,
-            )
-
-            # Try to allocate some blocks for the test request
-            allocated_blocks = kv_cache_manager.allocate_slots(
-                request=test_request,
-                num_new_tokens=5,
-            )
-
-            if allocated_blocks is not None:
-                logger.info(
-                    f"Test KV cache allocation successful: {len(allocated_blocks.blocks[0])} blocks allocated"
-                )
-                logger.info(f"KV cache usage after test: {kv_cache_manager.usage:.2%}")
-
-                # Free the test blocks
-                kv_cache_manager.free(test_request)
-                logger.info(
-                    f"KV cache usage after freeing test blocks: {kv_cache_manager.usage:.2%}"
-                )
-            else:
-                logger.warning("Test KV cache allocation failed - no blocks available")
-
-        except Exception as e:
-            logger.warning(f"KV cache test failed: {e}")
+        
 
         return kv_cache_manager
 
@@ -495,13 +429,15 @@ def initialize_vllm_model_runner(
         f"Initializing vLLM model runner for {model_repo}, " f"layers=[{start_layer}, {end_layer})"
     )
 
-    # Load HuggingFace config and tokenizer first
-    hf_config = AutoConfig.from_pretrained(model_repo, trust_remote_code=True)
-    tokenizer = AutoTokenizer.from_pretrained(model_repo, trust_remote_code=True)
+    model_path = get_model_path(model_repo)[0]
+    config = load_config(model_path)
+    tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
+    dtype = config.get("torch_dtype", "bfloat16")
 
     # Calculate virtual PP size (needed for both configs)
+    num_hidden_layers = getattr(config, "num_hidden_layers", 28)
     is_first_peer = start_layer == 0
-    is_last_peer = end_layer == hf_config.num_hidden_layers
+    is_last_peer = end_layer == num_hidden_layers
     virtual_pp_size = 2 if not (is_first_peer and is_last_peer) else 1
 
     # Initialize vLLM distributed environment for pipeline parallelism
@@ -536,7 +472,7 @@ def initialize_vllm_model_runner(
             logger.warning(f"Failed to initialize distributed environment: {e}")
             logger.info("Continuing without distributed initialization...")
 
-    num_hidden_layers = hf_config.num_hidden_layers
+    
 
     if end_layer > num_hidden_layers:
         raise ValueError(
@@ -552,7 +488,7 @@ def initialize_vllm_model_runner(
         trust_remote_code=True,
         dtype=dtype,
         seed=0,
-        max_model_len=getattr(hf_config, "max_position_embeddings", 4096),
+        max_model_len=getattr(config, "max_position_embeddings", 4096),
     )
 
     cache_config = CacheConfig(
@@ -574,7 +510,7 @@ def initialize_vllm_model_runner(
     )
 
     device_config = DeviceConfig(device="cuda")
-    load_config = LoadConfig(load_format="auto")
+    load_config_for_config = LoadConfig(load_format="auto")
 
     # Minimal scheduler config (we bypass vLLM scheduler)
     # Ensure max_num_batched_tokens is at least as large as max_model_len
@@ -592,7 +528,7 @@ def initialize_vllm_model_runner(
         parallel_config=parallel_config,
         scheduler_config=scheduler_config,
         device_config=device_config,
-        load_config=load_config,
+        load_config=load_config_for_config,
         lora_config=None,
         speculative_config=None,
         observability_config=None,
@@ -667,16 +603,6 @@ def initialize_vllm_model_runner(
     logger.info("KV Cache Manager initialized successfully")
 
     # Return config as dict for compatibility with Parallax executor
-    config_dict = {
-        "num_hidden_layers": num_hidden_layers,
-        "hidden_size": hf_config.hidden_size,
-        "num_attention_heads": hf_config.num_attention_heads,
-        "num_key_value_heads": getattr(
-            hf_config, "num_key_value_heads", hf_config.num_attention_heads
-        ),
-        "head_dim": getattr(
-            hf_config, "head_dim", hf_config.hidden_size // hf_config.num_attention_heads
-        ),
-    }
+    
 
-    return model_runner, config_dict, tokenizer
+    return model_runner, config, tokenizer
