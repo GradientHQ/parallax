@@ -4,6 +4,10 @@
   </p>
 </div>
 
+[![license](https://img.shields.io/github/license/GradientHQ/parallax.svg)](https://github.com/GradientHQ/parallax/tree/main/LICENSE)
+[![issue resolution](https://img.shields.io/github/issues-closed-raw/GradientHQ/parallax)](https://github.com/GradientHQ/parallax/issues)
+[![open issues](https://img.shields.io/github/issues-raw/GradientHQ/parallax)](https://github.com/GradientHQ/parallax/issues)
+
 | [**Gradient**](https://gradient.network)
 | [**Blog**](https://gradient.network/blog/parallax-world-inference-engine)
 | [**X(Twitter)**](https://x.com/Gradient_HQ)
