@@ -7,7 +7,6 @@ arguments needed by decentralized inference.
 import logging
 import os
 import random
-import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sglang
@@ -70,6 +69,7 @@ class ParallaxGroupCoordinator(SGLGroupCoordinator):
         use_hpu_communicator: bool,
         use_xpu_communicator: bool,
         use_npu_communicator: bool,
+        use_torch_symm_mem: bool = False,
         use_message_queue_broadcaster: bool = False,
         group_name: Optional[str] = None,
         pp_start_layer: int = 0,
@@ -87,6 +87,7 @@ class ParallaxGroupCoordinator(SGLGroupCoordinator):
             use_hpu_communicator=use_hpu_communicator,
             use_xpu_communicator=use_xpu_communicator,
             use_npu_communicator=use_npu_communicator,
+            use_torch_symm_mem=use_torch_symm_mem,
             use_message_queue_broadcaster=use_message_queue_broadcaster,
             group_name=group_name,
         )
@@ -437,7 +438,7 @@ def monkey_patch_make_layers(
     # circula imports
     from sglang.srt.distributed import get_pp_group
     from sglang.srt.layers.utils import PPMissingLayer
-    from sglang.srt.offloader import get_offloader
+    from sglang.srt.utils.offloader import get_offloader
 
     assert not pp_size or num_hidden_layers >= pp_size
     start_layer, end_layer = get_pp_group().pp_start_layer, get_pp_group().pp_end_layer
@@ -460,15 +461,15 @@ def monkey_patch_make_layers(
 
 ## TODO: Move this when sgalang supports qwen3_next pipeline parallelism
 def monkey_patch_qwen3_next():
-    from parallax.sglang.monkey_patch import (
-        qwen3_next_model as parallax_qwen3_next_model_module,
-    )
     from parallax.sglang.monkey_patch.qwen3_next_config import (
-        monkey_patch_linear_layer_ids,
+        apply_qwen3_next_config_monkey_patch,
+    )
+    from parallax.sglang.monkey_patch.qwen3_next_model import (
+        apply_qwen3_next_monkey_patch,
     )
 
-    sys.modules["sglang.srt.models.qwen3_next"] = parallax_qwen3_next_model_module
-    sglang.srt.configs.qwen3_next.Qwen3NextConfig.linear_layer_ids = monkey_patch_linear_layer_ids
+    apply_qwen3_next_monkey_patch()
+    apply_qwen3_next_config_monkey_patch()
 
 
 ## TODO: Move this when sgalang supports gpt_oss pipeline parallelism
@@ -553,6 +554,11 @@ def initialize_sgl_model_runner(
         attention_backend = "triton"
         moe_runner_backend = "triton_kernel"
 
+    architectures = config.get("architectures", [])
+    if architectures and any("Qwen3Next" in arch for arch in architectures):
+        logger.debug(f"Qwen3-Next model detected, setting kv_block_size to 1")
+        kv_block_size = 1
+
     server_args = form_sgl_server_args(
         original_model_path,
         dtype,
@@ -574,8 +580,10 @@ def initialize_sgl_model_runner(
     model_config.hf_config.tie_word_embeddings = False
     model_config.hf_config.start_layer = start_layer
     model_config.hf_config.end_layer = end_layer
+
     logger.debug(f"model_start_layer: {model_config.hf_config.start_layer}")
     logger.debug(f"model_end_layer: {model_config.hf_config.end_layer}")
+
     model_runner = ParallaxModelRunner(
         model_config=model_config,
         mem_fraction_static=kv_cache_memory_fraction,

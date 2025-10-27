@@ -7,7 +7,7 @@ from lattica import Lattica
 from backend.server.constants import NODE_STATUS_AVAILABLE, NODE_STATUS_WAITING
 from backend.server.rpc_connection_handler import RPCConnectionHandler
 from backend.server.static_config import get_model_info, get_node_join_command
-from common.static_config import PUBLIC_INITIAL_PEERS, PUBLIC_RELAY_SERVERS
+from parallax.cli import PUBLIC_INITIAL_PEERS, PUBLIC_RELAY_SERVERS
 from parallax.p2p.server import TransformerConnectionHandler
 from parallax_utils.logging_config import get_logger
 from scheduling.node import RequestSignal
@@ -31,6 +31,7 @@ class SchedulerManage:
         dht_prefix: str = "gradient",
         host_maddrs: List[str] = [],
         announce_maddrs: List[str] = [],
+        http_port: int = 3001,
     ):
         """Initialize the manager with networking bootstrap parameters."""
         self.initial_peers = initial_peers
@@ -38,7 +39,7 @@ class SchedulerManage:
         self.dht_prefix = dht_prefix
         self.host_maddrs = host_maddrs
         self.announce_maddrs = announce_maddrs
-
+        self.http_port = http_port
         self.model_name = None
         self.init_nodes_num = None
         self.scheduler = None
@@ -190,6 +191,7 @@ class SchedulerManage:
         self.connection_handler = RPCConnectionHandler(
             lattica=self.lattica,
             scheduler=self.scheduler,
+            http_port=self.http_port,
         )
         logger.debug("RPCConnectionHandler initialized")
 

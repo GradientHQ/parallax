@@ -188,7 +188,11 @@ class HTTPHandler:
                     "matched_stop": request_info.matched_stop,
                 },
             ],
-            "usage": None,
+            "usage": {
+                "prompt_tokens": request_info.prompt_tokens,
+                "total_tokens": request_info.prompt_tokens + request_info.completion_tokens,
+                "completion_tokens": request_info.completion_tokens,
+            },
         }
         choice = response["choices"][0]
         choice["delta"] = {"role": role, "content": content}
@@ -234,7 +238,6 @@ class HTTPHandler:
                 "prompt_tokens": request_info.prompt_tokens,
                 "total_tokens": request_info.prompt_tokens + request_info.completion_tokens,
                 "completion_tokens": request_info.completion_tokens,
-                "prompt_tokens_details": None,
             },
         }
         choice = response["choices"][0]
@@ -256,6 +259,7 @@ class HTTPHandler:
 
             request_info = self.processing_requests[rid]
             request_info.update_time = time.time()
+            request_info.prompt_tokens = recv_dict["prompt_tokens"]
             next_token_id = recv_dict["next_token_id"]
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
@@ -345,12 +349,14 @@ async def v1_chat_completions(raw_request: fastapi.Request):
     # Check if request_json has "rid", otherwise generate new one
     request_id = request_json.get("rid")
     if request_id is None:
-        request_id = uuid.uuid4()
-        request_json["rid"] = str(request_id)
+        request_id = str(uuid.uuid4())
+        request_json["rid"] = request_id
 
     app.state.http_handler.create_request(request_json)
     app.state.http_handler.send_request(request_json)
     req = app.state.http_handler.processing_requests.get(request_id)
+    if req is None:
+        return create_error_response("Request not found", "RequestNotFoundError")
     is_stream = req.stream
 
     if is_stream:

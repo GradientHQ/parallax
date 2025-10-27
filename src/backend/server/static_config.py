@@ -14,7 +14,6 @@ MODEL_LIST = [
     "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8",
     "Qwen/Qwen3-Next-80B-A3B-Thinking",
     "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8",
-    "Qwen/Qwen3-0.6B",
     "Qwen/Qwen3-0.6B-FP8",
     "Qwen/Qwen3-1.7B",
     "Qwen/Qwen3-1.7B-FP8",
@@ -46,7 +45,10 @@ MODEL_LIST = [
     "nvidia/Llama-3.3-70B-Instruct-FP8",
     "nvidia/Llama-3.1-70B-Instruct-FP8",
     "nvidia/Llama-3.1-8B-Instruct-FP8",
-    "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
+    "deepseek-ai/DeepSeek-V3.1",
+    "deepseek-ai/DeepSeek-R1",
+    "deepseek-ai/DeepSeek-V3",
+    "deepseek-ai/DeepSeek-V2",
 ]
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""

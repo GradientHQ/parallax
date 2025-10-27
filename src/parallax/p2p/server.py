@@ -266,7 +266,7 @@ class GradientServer:
 
         if len(self.initial_peers) > 0:
             logger.info(f"Using initial peers: {self.initial_peers}")
-            self.lattica.with_bootstraps(self.initial_peers)
+            self.lattica.with_bootstraps(self.initial_peers).with_mdns(False)
 
         self.lattica.build()
 
@@ -300,13 +300,13 @@ class GradientServer:
 
         if self.scheduler_addr is not None:  # central scheduler mode
             try:
-                self.scheduler_stub = RPCConnectionHandler(self.lattica, None).get_stub(
+                self.scheduler_stub = RPCConnectionHandler(self.lattica, None, None).get_stub(
                     self.scheduler_peer_id
                 )
                 node_info = self.get_node_info()
                 if node_info == {}:
                     logger.error("Failed to get node info, try again after 10 seconds")
-                    del self.lattica
+                    self.lattica.close()
                     self.lattica = None
                     time.sleep(10)
                     return self.run()
@@ -642,6 +642,8 @@ class GradientServer:
             self.announcer.join()
         if self.routing_table_updater is not None:
             self.routing_table_updater.join()
+        if self.lattica is not None:
+            self.lattica.close()
 
 
 def launch_p2p_server(

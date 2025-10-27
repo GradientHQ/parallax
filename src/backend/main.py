@@ -14,6 +14,7 @@ from backend.server.scheduler_manage import SchedulerManage
 from backend.server.server_args import parse_args
 from backend.server.static_config import get_model_list, get_node_join_command
 from common.file_util import get_project_root
+from common.version_check import check_latest_release
 from parallax_utils.ascii_anime import display_parallax_run
 from parallax_utils.logging_config import get_logger, set_log_level
 
@@ -95,14 +96,6 @@ async def cluster_status():
     )
 
 
-@app.post("/v1/completions")
-async def openai_v1_completions(raw_request: Request):
-    request_data = await raw_request.json()
-    request_id = uuid.uuid4()
-    received_ts = time.time()
-    return await request_handler.v1_completions(request_data, request_id, received_ts)
-
-
 @app.post("/v1/chat/completions")
 async def openai_v1_chat_completions(raw_request: Request):
     request_data = await raw_request.json()
@@ -135,6 +128,7 @@ if __name__ == "__main__":
     logger.info(f"args: {args}")
     if args.log_level != "DEBUG":
         display_parallax_run()
+    check_latest_release()
 
     scheduler_manage = SchedulerManage(
         initial_peers=args.initial_peers,
@@ -145,6 +139,7 @@ if __name__ == "__main__":
             f"/ip4/0.0.0.0/udp/{args.udp_port}/quic-v1",
         ],
         announce_maddrs=args.announce_maddrs,
+        http_port=args.port,
     )
 
     request_handler.set_scheduler_manage(scheduler_manage)
@@ -155,6 +150,7 @@ if __name__ == "__main__":
     if model_name is not None and init_nodes_num is not None:
         scheduler_manage.run(model_name, init_nodes_num, is_local_network)
 
+    host = args.host
     port = args.port
 
-    uvicorn.run(app, host="localhost", port=port, log_level="info", loop="uvloop")
+    uvicorn.run(app, host=host, port=port, log_level="info", loop="uvloop")

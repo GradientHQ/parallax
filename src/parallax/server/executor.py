@@ -763,6 +763,7 @@ class Executor:
 
                     # detokenize and send to http server
                     req_dict = {
+                        "prompt_tokens": len(req.input_ids),
                         "next_token_id": req.next_token_id,
                         "rid": req.request_id,
                     }
@@ -843,6 +844,7 @@ class Executor:
 
                     # detokenize and send to http server
                     req_dict = {
+                        "prompt_tokens": len(req.input_ids),
                         "next_token_id": req.next_token_id,
                         "rid": req.request_id,
                     }
