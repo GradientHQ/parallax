@@ -107,7 +107,7 @@ class HTTPHandler:
         # Load tokenizer for separate detokenizers
         model_path = get_model_path(model_path_str)[0]
         config = load_config(model_path)
-        self.model_path = model_path
+        self.model_path_str = model_path_str
         self.tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
         self.detokenizer_class, self.tokenmap = load_detokenizer(model_path, self.tokenizer)
 
@@ -169,7 +169,7 @@ class HTTPHandler:
         if is_first:
             role = "assistant"
             content = ""
-            if "minimax-m2" in self.model_path.lower():
+            if "minimax-m2" in self.model_path_str.lower():
                 content = "<think>"
         elif is_last:
             role = None
