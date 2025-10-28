@@ -87,6 +87,10 @@ def get_model_info(model_name):
     elif quant_method in ("mxfp4", "int4", "awq", "gptq"):
         param_bytes_per_element = 0.5
 
+    ## Only for hack, fix it when support different quantization bits
+    if "minimax_m2" in model_name.lower():
+        param_bytes_per_element = 0.5  # MiniMax M2 uses FP16 weights
+
     # get local experts
     num_local_experts = config.get("num_local_experts", None)
     if num_local_experts is None:
