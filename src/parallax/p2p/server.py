@@ -576,9 +576,13 @@ class GradientServer:
                                     f"current_layers=[{self.block_start_index}, {self.block_end_index})"
                                 )
                                 
-                                # If explicit restart signal or layer allocation changed
-                                if needs_restart or (new_start is not None and new_end is not None and 
-                                                     (new_start != self.block_start_index or new_end != self.block_end_index)):
+                                # Check if layer allocation actually changed
+                                layers_changed = (new_start is not None and new_end is not None and 
+                                                 (new_start != self.block_start_index or new_end != self.block_end_index))
+                                
+                                # Only restart if layers actually changed
+                                # If needs_restart is set but layers are the same, no need to restart
+                                if layers_changed:
                                     logger.critical(
                                         f"🔄 RESTART SIGNAL: {rebalance_reason or 'Layer allocation changed'}\n"
                                         f"   Current: ({self.block_start_index}-{self.block_end_index})\n"
@@ -587,6 +591,15 @@ class GradientServer:
                                     )
                                     self.shutdown(restart_for_rebalance=True)
                                     return
+                                elif needs_restart:
+                                    logger.info(
+                                        f"📋 Restart signal received but layer allocation unchanged "
+                                        f"[{self.block_start_index}, {self.block_end_index}). "
+                                        f"No restart needed. Reason: {rebalance_reason}"
+                                    )
+                                    # Clear the restart flag on scheduler side by sending update
+                                    # This prevents repeated restart signals
+                                    pass
                         else:
                             self.lattica.store(
                                 key=self.prefix_id,
