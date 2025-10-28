@@ -10,6 +10,8 @@ import logoUrlQwen from '../assets/models/Qwen3.png';
 import logoUrlNvidia from '../assets/models/NVIDIA.png';
 import logoUrlMoonshotAI from '../assets/models/MoonshotAI.png';
 import logoUrlDeepseek from '../assets/models/DeepSeek.png';
+import logoUrlZai from '../assets/models/Zai.png';
+import logoUrlMiniMax from '../assets/models/MiniMax.png';
 
 const logoUrlMap: Readonly<Record<string, string>> = {
   openai: logoUrlOpenAI,
@@ -17,6 +19,8 @@ const logoUrlMap: Readonly<Record<string, string>> = {
   nvidia: logoUrlNvidia,
   moonshotai: logoUrlMoonshotAI,
   deepseek: logoUrlDeepseek,
+  zai: logoUrlZai,
+  minimax: logoUrlMiniMax,
 };
 
 const getLogoUrl = (name: string) => {
