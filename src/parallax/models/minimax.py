@@ -42,9 +42,13 @@ class ParallaxMiniMaxAttention(MLXMiniMaxAttention):
         keys = self.k_proj(x)
         values = self.v_proj(x)
 
-        queries = queries.reshape(batch, target_len, self.n_heads, -1).transpose(0, 2, 1, 3)
-        keys = keys.reshape(batch, target_len, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
-        values = values.reshape(batch, target_len, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
+        queries = queries.reshape(batch, target_len, self.num_attention_heads, -1).transpose(
+            0, 2, 1, 3
+        )
+        keys = keys.reshape(batch, target_len, self.num_key_value_heads, -1).transpose(0, 2, 1, 3)
+        values = values.reshape(batch, target_len, self.num_key_value_heads, -1).transpose(
+            0, 2, 1, 3
+        )
 
         # for batch, rope offset is not correct due to padding in batch
         queries_rotated = self.rope(queries, offset=offset)
