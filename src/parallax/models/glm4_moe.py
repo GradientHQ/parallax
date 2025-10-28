@@ -75,7 +75,7 @@ class ParallaxGLM4MoeBlock(MLXGLM4MoeBlock):
 
     def __init__(self, args: ModelArgs, layer_idx: int):
         super().__init__(args, layer_idx)
-        self.self_attn = ParallaxGLM4MoeAttention(args, layer_idx)
+        self.self_attn = ParallaxGLM4MoeAttention(args)
 
     def __call__(
         self,
