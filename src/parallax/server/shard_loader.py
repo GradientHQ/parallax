@@ -18,7 +18,10 @@ from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-MODEL_TYPE_MAP = {"kimi_k2": "deepseek_v3"}
+MODEL_CLASS_MAP = {
+    "kimi_k2": "mlx_lm.models.deepseek_v3",
+    "minimax": "parallax.models.minimax",
+}
 
 
 class MLXModelLoader:
@@ -133,14 +136,16 @@ class MLXModelLoader:
         # We need the model object to know its structure and which layers it owns.
         # This part mirrors the logic from the provided utils.py to get model_args.
         model_type = config.get("model_type")
-        if model_type in MODEL_TYPE_MAP:
-            model_type = MODEL_TYPE_MAP[model_type]
-
         if not model_type:
             raise ValueError("model_type not found in config.json")
+        
+        if model_type in MODEL_CLASS_MAP:
+            model_class = MODEL_CLASS_MAP[model_type]
+        else:
+            model_class = f"mlx_lm.models.{model_type}"
+
         try:
-            # Import from project's models directory
-            arch_module = importlib.import_module(f"parallax.models.{model_type}")
+            arch_module = importlib.import_module(model_class)
             model_args_class = getattr(arch_module, "ModelArgs")
             model_args = model_args_class.from_dict(config)
 
