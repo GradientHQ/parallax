@@ -88,8 +88,8 @@ def get_model_info(model_name):
         param_bytes_per_element = 0.5
 
     # Only for hack, fix it when support different quantization bits
-    if "minimax-m2" in model_name.lower():
-        param_bytes_per_element = 0.5
+    # if "minimax-m2" in model_name.lower():
+    #     param_bytes_per_element = 0.5
 
     # get local experts
     num_local_experts = config.get("num_local_experts", None)
