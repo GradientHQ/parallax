@@ -135,7 +135,14 @@ class SchedulerManage:
         self.init_nodes_num = init_nodes_num
 
         model_info = get_model_info(model_name)
-        self.scheduler = Scheduler(model_info, [], min_nodes_bootstrapping=init_nodes_num)
+        # Increase heartbeat_timeout to 300s (5 min) to avoid false positives during inference
+        # The default 60s is too short when nodes are busy with request processing
+        self.scheduler = Scheduler(
+            model_info, 
+            [], 
+            min_nodes_bootstrapping=init_nodes_num,
+            heartbeat_timeout=300.0
+        )
 
         # Run the scheduler's event/dispatch loops in background so the process
         # can continue to serve RPCs and HTTP traffic.

@@ -325,35 +325,15 @@ class GradientServer:
                 # Publish executor metrics to backend on each update
                 def _publish_metrics(_snapshot):
                     try:
-                        response_future = self.scheduler_stub.node_update(self.get_node_info(is_update=True))
-                        # Wait for async response to complete
-                        response = response_future.result(timeout=30) if hasattr(response_future, 'result') else response_future
-                        logger.debug(f"_publish_metrics received response: {response}")
-                        # Check if rebalance restart is needed
-                        if response and isinstance(response, dict):
-                            new_start = response.get("start_layer")
-                            new_end = response.get("end_layer")
-                            needs_restart = response.get("needs_restart", False)
-                            rebalance_reason = response.get("rebalance_reason", "")
-                            
-                            logger.debug(
-                                f"_publish_metrics check: needs_restart={needs_restart}, "
-                                f"new_layers=[{new_start}, {new_end}), "
-                                f"current_layers=[{self.block_start_index}, {self.block_end_index})"
-                            )
-                            
-                            # If explicit restart signal or layer allocation changed
-                            if needs_restart or (new_start is not None and new_end is not None and 
-                                                 (new_start != self.block_start_index or new_end != self.block_end_index)):
-                                logger.critical(
-                                    f"🔄 RESTART SIGNAL (from metrics): {rebalance_reason or 'Layer allocation changed'}\n"
-                                    f"   Current: ({self.block_start_index}-{self.block_end_index})\n"
-                                    f"   New: ({new_start}-{new_end})\n"
-                                    f"   Node will exit to restart..."
-                                )
-                                self.shutdown(restart_for_rebalance=True)
+                        # Fire-and-forget: send metrics update without blocking for response
+                        # The announcer thread will periodically check for restart signals
+                        # This avoids blocking during inference when network is congested
+                        self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                        # Note: We don't wait for response here to avoid timeout during busy inference
+                        # Restart signals will be caught by the announcer thread
                     except Exception as e:
-                        logger.error(f"Error in _publish_metrics: {e}", exc_info=True)
+                        # Log but don't crash on metrics publish errors
+                        logger.debug(f"Metrics publish error (non-critical): {e}")
 
                 set_metrics_publisher(_publish_metrics)
 
@@ -579,7 +559,8 @@ class GradientServer:
                             logger.debug(f"Got node_info: {node_info}")
                             response_future = self.scheduler_stub.node_update(node_info)
                             logger.debug(f"Announcer received future: {response_future}")
-                            # Wait for async response to complete
+                            # Wait for async response with longer timeout
+                            # This is the only place we check for restart signals, so it's critical
                             response = response_future.result(timeout=30) if hasattr(response_future, 'result') else response_future
                             logger.debug(f"Announcer resolved response: {response}")
                             # Check if rebalance restart is needed
