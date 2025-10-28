@@ -11,7 +11,7 @@
 | [**Gradient**](https://gradient.network)
 | [**Blog**](https://gradient.network/blog/parallax-world-inference-engine)
 | [**X(Twitter)**](https://x.com/Gradient_HQ)
-| [**Discord**](https://discord.gg/gradientnetwork)
+| [**Discord**](https://discord.gg/parallax)
 | [**Arxiv**](https://arxiv.org/pdf/2509.26182v1)
 
 ## News
