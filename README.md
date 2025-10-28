@@ -9,7 +9,7 @@
 [![open issues](https://img.shields.io/github/issues-raw/GradientHQ/parallax)](https://github.com/GradientHQ/parallax/issues)
 
 | [**Gradient**](https://gradient.network)
-| [**Blog**](https://gradient.network/blog/parallax-world-inference-engine)
+| [**Blog**](https://gradient.network/blog/parallax-the-sovereign-ai-os)
 | [**X(Twitter)**](https://x.com/Gradient_HQ)
 | [**Discord**](https://discord.gg/parallax)
 | [**Arxiv**](https://arxiv.org/pdf/2509.26182v1)
