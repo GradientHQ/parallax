@@ -1,18 +1,10 @@
-import math
-from dataclasses import dataclass
-from functools import partial
-from typing import Any, Dict, Optional
+from typing import Optional, Tuple
 
 import mlx.core as mx
-import mlx.nn as nn
-
-from typing import Optional, Tuple
-from mlx_lm.models.base import BaseModelArgs, create_attention_mask, scaled_dot_product_attention
-from mlx_lm.models.switch_layers import SwitchGLU
 from mlx_lm.models.base import scaled_dot_product_attention
 from mlx_lm.models.glm4_moe import Attention as MLXGLM4MoeAttention
-from mlx_lm.models.glm4_moe import ModelArgs
 from mlx_lm.models.glm4_moe import DecoderLayer as MLXGLM4MoeBlock
+from mlx_lm.models.glm4_moe import ModelArgs
 
 
 class ParallaxGLM4MoeAttention(MLXGLM4MoeAttention):

@@ -6,11 +6,10 @@ from sglang.srt.distributed import get_pp_group
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
 from sglang.srt.layers.utils import get_layer_id
 from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
-from sglang.srt.model_loader.weight_utils import (
-    default_weight_loader,
-)
+from sglang.srt.model_loader.weight_utils import default_weight_loader
 
 logger = logging.getLogger(__name__)
+
 
 def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]], is_nextn=False):
     """Load model weights with proper mapping for GLM4 Moe architecture."""
@@ -20,9 +19,7 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]],
             assert num_nextn_layers == 1, "Only 1 nextn layer is supported"
             # compatible with old design
             nextn_layer_id = (
-                0
-                if self.config.num_hidden_layers == 1
-                else self.config.num_hidden_layers
+                0 if self.config.num_hidden_layers == 1 else self.config.num_hidden_layers
             )
         else:
             raise ValueError("num_nextn_predict_layers is not in the config")
@@ -74,10 +71,7 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]],
                 num_nextn_layers = self.config.num_nextn_predict_layers
                 if num_nextn_layers > 0 and name.startswith("model.layers"):
                     name_list = name.split(".")
-                    if (
-                        len(name_list) >= 3
-                        and int(name_list[2]) >= self.config.num_hidden_layers
-                    ):
+                    if len(name_list) >= 3 and int(name_list[2]) >= self.config.num_hidden_layers:
                         continue
         else:
             if not name.startswith(nextn_layer_prefix):
@@ -163,9 +157,7 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]],
 
                 if name in params_dict.keys():
                     param = params_dict[name]
-                    weight_loader = getattr(
-                        param, "weight_loader", default_weight_loader
-                    )
+                    weight_loader = getattr(param, "weight_loader", default_weight_loader)
                     weight_loader(param, loaded_weight)
                 else:
                     logger.warning(f"Parameter {name} not found in params_dict")
@@ -174,8 +166,7 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]],
 def apply_glm4_moe_monkey_patch():
     """Apply monkey patches to GLM4 Moe for PP support and weight loading."""
     import sglang.srt.models.glm4_moe as glm4_moe_module
-    
-    
+
     def pp_forward(
         self,
         input_ids: torch.Tensor,
@@ -197,7 +188,6 @@ def apply_glm4_moe_monkey_patch():
             return self.logits_processor(input_ids, hidden_states, self.lm_head, forward_batch)
         else:
             return hidden_states
-    
+
     glm4_moe_module.Glm4MoeForCausalLM.forward = pp_forward
     glm4_moe_module.Glm4MoeForCausalLM.load_weights = monkey_patch_load_weights
-    

@@ -495,12 +495,12 @@ def monkey_patch_minimax_m2_model():
 
     apply_minimax_m2_monkey_patch()
 
+
 def monkey_patch_glm4_moe_model():
-    from parallax.sglang.monkey_patch.glm4_moe_model import (
-        apply_glm4_moe_monkey_patch,
-    )
-    
+    from parallax.sglang.monkey_patch.glm4_moe_model import apply_glm4_moe_monkey_patch
+
     apply_glm4_moe_monkey_patch()
+
 
 def form_sgl_server_args(
     model_path: str,
