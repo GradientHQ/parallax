@@ -1,6 +1,5 @@
 import asyncio
 import json
-import multiprocessing as mp
 import time
 from typing import Dict
 
@@ -319,17 +318,6 @@ class NodeChatHttpServer:
             )
         )
         asyncio.run(self.run_uvicorn())
-
-
-def launch_node_chat_http_server(args):
-    """
-    Launch function of node chat http server.
-    It creates a sub-process for the http server.
-    """
-    node_chat_http_server = NodeChatHttpServer(args)
-    process = mp.Process(target=node_chat_http_server.run)
-    process.start()
-    return process
 
 
 def run_node_chat_http_server(args):
