@@ -554,6 +554,7 @@ class GradientServer:
                     # Announce the range ID
                     try:
                         if self.scheduler_peer_id is not None:
+                            logger.debug(f"--------------------------------------------------")
                             logger.debug("Calling node_update from announcer thread")
                             node_info = self.get_node_info(is_update=True)
                             logger.debug(f"Got node_info: {node_info}")
