@@ -547,7 +547,25 @@ class GradientServer:
                     # Announce the range ID
                     try:
                         if self.scheduler_peer_id is not None:
-                            self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                            response = self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                            # Check if rebalance restart is needed
+                            if response and isinstance(response, dict):
+                                new_start = response.get("start_layer")
+                                new_end = response.get("end_layer")
+                                needs_restart = response.get("needs_restart", False)
+                                rebalance_reason = response.get("rebalance_reason", "")
+                                
+                                # If explicit restart signal or layer allocation changed
+                                if needs_restart or (new_start is not None and new_end is not None and 
+                                                     (new_start != self.block_start_index or new_end != self.block_end_index)):
+                                    logger.critical(
+                                        f"🔄 RESTART SIGNAL: {rebalance_reason or 'Layer allocation changed'}\n"
+                                        f"   Current: ({self.block_start_index}-{self.block_end_index})\n"
+                                        f"   New: ({new_start}-{new_end})\n"
+                                        f"   Node will exit to restart..."
+                                    )
+                                    self.shutdown(restart_for_rebalance=True)
+                                    return
                         else:
                             self.lattica.store(
                                 key=self.prefix_id,
@@ -610,7 +628,7 @@ class GradientServer:
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
             "kv_cache_ratio": 0.25,
-            "param_hosting_ratio": 0.65,
+            "param_hosting_ratio": 0.06,
             "max_concurrent_requests": self.max_batch_size,
             "max_sequence_length": (
                 1024 if self.max_sequence_length is None else self.max_sequence_length
@@ -630,13 +648,16 @@ class GradientServer:
 
         return info
 
-    def shutdown(self):
+    def shutdown(self, restart_for_rebalance=False):
         self.stop_event.set()
 
         self.status = ServerState.OFFLINE
         if self.scheduler_addr is not None:
             logger.info(f"Leave scheduler: {self.lattica.peer_id()}")
-            self.scheduler_stub.node_leave(self.get_node_info(is_update=True))
+            try:
+                self.scheduler_stub.node_leave(self.get_node_info(is_update=True))
+            except Exception as e:
+                logger.warning(f"Failed to notify scheduler of node leave: {e}")
 
         if self.announcer is not None:
             self.announcer.join()
@@ -644,6 +665,12 @@ class GradientServer:
             self.routing_table_updater.join()
         if self.lattica is not None:
             self.lattica.close()
+        
+        # If rebalance restart is needed, exit with special code
+        if restart_for_rebalance:
+            logger.info("Exiting with code 100 to trigger restart for rebalancing...")
+            import sys
+            sys.exit(100)
 
 
 def launch_p2p_server(

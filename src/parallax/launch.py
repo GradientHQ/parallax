@@ -17,6 +17,7 @@ import multiprocessing
 import os
 import tempfile
 import threading
+import time
 
 from common.version_check import check_latest_release
 from parallax.p2p.server import ServerState, launch_p2p_server
@@ -43,13 +44,14 @@ MLX_MODEL_NAME_MAP = {
     "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
 }
 
-if __name__ == "__main__":
-    multiprocessing.set_start_method("spawn", force=True)
-
+def run_node():
+    """Run the node. Returns True if should restart (rebalance), False otherwise."""
     gradient_server = None
     http_server_process = None
     executor = None
     node_chat_http_server_process = None
+    should_restart = False
+    
     try:
         args = parse_args()
         set_log_level(args.log_level)
@@ -145,6 +147,13 @@ if __name__ == "__main__":
         if gradient_server is not None:
             gradient_server.status = ServerState.READY
         executor.run_loop()
+    except SystemExit as e:
+        # Check if this is a rebalance restart (exit code 100)
+        if hasattr(e, 'code') and e.code == 100:
+            logger.info("🔄 Rebalance detected. Node will restart internally...")
+            should_restart = True
+        else:
+            raise  # Re-raise for other exit codes
     except KeyboardInterrupt:
         logger.debug("Received interrupt signal, shutting down...")
     except Exception as e:
@@ -187,3 +196,33 @@ if __name__ == "__main__":
             executor.shutdown()
         if t is not None:
             t.join()
+    
+    return should_restart
+
+
+if __name__ == "__main__":
+    multiprocessing.set_start_method("spawn", force=True)
+    
+    # Auto-restart loop for rebalancing
+    max_restart_attempts = 10
+    restart_count = 0
+    
+    while restart_count <= max_restart_attempts:
+        should_restart = run_node()
+        
+        if should_restart:
+            restart_count += 1
+            logger.info(
+                f"♻️  Restarting node for rebalancing (attempt {restart_count}/{max_restart_attempts})..."
+            )
+            if restart_count > max_restart_attempts:
+                logger.error(
+                    f"❌ Maximum restart attempts ({max_restart_attempts}) reached. "
+                    "Please check cluster configuration."
+                )
+                break
+            # Wait a bit before restarting to allow cleanup
+            time.sleep(2)
+        else:
+            # Normal exit or error, don't restart
+            break

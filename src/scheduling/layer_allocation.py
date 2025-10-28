@@ -563,6 +563,33 @@ class BaseLayerAllocator:
                 return False
         return True
 
+    def has_contiguous_pipeline(self) -> bool:
+        """Return True if nodes form a contiguous (non-overlapping) pipeline.
+        
+        A contiguous pipeline means each layer is covered by exactly one node,
+        and nodes connect end-to-end without gaps or overlaps.
+        For example: node1[0,14), node2[14,28) is contiguous.
+        But node1[0,22), node2[14,28) is not (overlap at 14-22).
+        """
+        total_layers = self.num_total_layers
+        layer_count: Dict[int, int] = {}
+        
+        # Count how many nodes cover each layer
+        for _, (s, e) in self.node_allocation.items():
+            if s is None or e is None:
+                continue
+            for layer in range(s, e):
+                layer_count[layer] = layer_count.get(layer, 0) + 1
+        
+        # Check that all layers are covered exactly once
+        for layer in range(total_layers):
+            if layer not in layer_count:
+                return False  # Gap: layer not covered
+            if layer_count[layer] != 1:
+                return False  # Overlap: layer covered by multiple nodes
+        
+        return True
+
     def layer_replication_stats(self) -> Tuple[int, int, float]:
         """Return (min, max, avg) number of nodes hosting each layer.
 

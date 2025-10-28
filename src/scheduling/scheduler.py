@@ -99,6 +99,9 @@ class Scheduler:
         # Thread-safe bootstrap state
         self._bootstrapped: bool = False
         self._bootstrapped_event: threading.Event = threading.Event()
+        # Track if rebalance is needed (nodes should restart)
+        self._rebalance_restart_needed: bool = False
+        self._rebalance_reason: str = ""
         logger.debug(
             f"Scheduler initialized, min_nodes_bootstrapping {self.min_nodes_bootstrapping}, "
             f"strategy {strategy}, rebalance threshold {rebalance_threshold}"
@@ -144,6 +147,14 @@ class Scheduler:
             return False
         self._bootstrapped = True
         self._bootstrapped_event.set()
+        # Clear rebalance restart flag after successful bootstrap
+        if self._rebalance_restart_needed:
+            logger.info(
+                "Rebalance complete: All nodes have restarted and pipeline is established. "
+                "Clearing restart flag."
+            )
+            self._rebalance_restart_needed = False
+            self._rebalance_reason = ""
         logger.debug("Bootstrapping completed successfully; full pipeline established")
         return True
 
@@ -271,8 +282,32 @@ class Scheduler:
             "Leaving node %s (start=%s, end=%s)", node_id, node.start_layer, node.end_layer
         )
         self.layer_allocator.leave(node_id)
-        if self.layer_allocator.should_global_rebalance():
-            logger.debug("Global rebalance triggered due to node leave")
+        
+        # Check if we need to trigger global rebalance
+        needs_rebalance = False
+        rebalance_reason = ""
+        
+        # Case 1: No full pipeline coverage
+        if not self.layer_allocator.has_full_pipeline():
+            needs_rebalance = True
+            rebalance_reason = f"Node {node_id} left, no complete pipeline coverage"
+        # Case 2: Has full coverage but not contiguous (has overlaps or gaps)
+        elif not self.layer_allocator.has_contiguous_pipeline():
+            needs_rebalance = True
+            rebalance_reason = f"Node {node_id} left, pipeline has overlaps/gaps (not contiguous)"
+        # Case 3: Load imbalance exceeds threshold
+        elif self.layer_allocator.should_global_rebalance():
+            needs_rebalance = True
+            rebalance_reason = f"Node {node_id} left, load imbalance detected"
+        
+        if needs_rebalance:
+            logger.warning(
+                f"Global rebalance triggered: {rebalance_reason}. "
+                f"{len(self.nodes)} nodes remaining. All nodes need to restart."
+            )
+            # Set restart flag for all remaining nodes
+            self._rebalance_restart_needed = True
+            self._rebalance_reason = rebalance_reason
             # TODO: send a signal to the nodes to stop running requests
             #       and re-assign start/end layers so nodes can re-shard
             self._bootstrapped = False
