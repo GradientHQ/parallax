@@ -41,6 +41,7 @@ MLX_MODEL_NAME_MAP = {
     "moonshotai/Kimi-K2-Instruct": "mlx-community/Kimi-K2-Instruct-4bit",
     "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
     "MiniMaxAI/MiniMax-M2": "mlx-community/MiniMax-M2-4bit",
+    "zai-org/GLM-4.6": "mlx-community/GLM-4.6-4bit",
 }
 
 if __name__ == "__main__":
