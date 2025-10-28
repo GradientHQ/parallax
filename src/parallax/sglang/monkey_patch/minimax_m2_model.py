@@ -11,7 +11,9 @@ from sglang.srt.model_loader.weight_utils import (
     maybe_remap_kv_scale_name,
 )
 from sglang.srt.models.minimax_m2 import get_spec_layer_idx_from_weight_name
+
 logger = logging.getLogger(__name__)
+
 
 def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
     """Load model weights with proper mapping for MiniMax architecture."""
@@ -42,7 +44,7 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]])
             if not pp_group.is_last_rank:
                 logger.debug("Skipping lm_head weight '%s' on non-last PP rank", name)
                 continue
-        
+
         layer_id = get_layer_id(name)
         if (
             layer_id is not None
@@ -106,9 +108,7 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]])
                     continue
 
                 param = params_dict[name]
-                weight_loader = getattr(
-                    param, "weight_loader", default_weight_loader
-                )
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
         loaded_params.add(name)
     return loaded_params

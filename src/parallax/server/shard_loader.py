@@ -122,7 +122,7 @@ class MLXModelLoader:
         model_type = config.get("model_type")
         if not model_type:
             raise ValueError("model_type not found in config.json")
-        
+
         if model_type in MODEL_CLASS_MAP:
             model_class = MODEL_CLASS_MAP[model_type]
         else:
