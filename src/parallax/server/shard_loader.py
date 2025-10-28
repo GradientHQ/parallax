@@ -18,10 +18,7 @@ from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-MODEL_TYPE_MAP = {
-    "kimi_k2": "deepseek_v3",
-    "minimax": "minimax_m2",
-}
+MODEL_TYPE_MAP = {"kimi_k2": "deepseek_v3"}
 
 
 class MLXModelLoader:

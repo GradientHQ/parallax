@@ -41,8 +41,8 @@ parallax = "parallax.cli:main"
 
 mac = [
   "torch==2.8.0",
-  "mlx-lm==0.28.0",
-  "mlx==0.29.1",
+  "mlx-lm @ git+https://github.com/ml-explore/mlx-lm.git",
+  "mlx==0.29.3",
 ]
 
 gpu = [
