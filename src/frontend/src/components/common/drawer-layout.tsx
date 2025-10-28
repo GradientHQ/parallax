@@ -217,7 +217,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
     <DrawerLayoutRoot direction='row'>
       <DrawerLayoutSide
         sx={{
-          width: sidebarExpanded ? '16.25rem' : '3.5rem',
+          width: sidebarExpanded ? '18.5rem' : '3.5rem', // Increased from 16.25rem to accommodate longer text
           paddingInline: sidebarExpanded ? 2 : 2,
         }}
       >

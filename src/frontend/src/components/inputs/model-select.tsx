@@ -144,15 +144,19 @@ export const ModelSelect: FC<ModelSelectProps> = ({ variant = 'outlined' }) => {
           const model = modelInfoList.find((m) => m.name === value);
           if (!model) return value as string;
 
-          return variant === 'outlined' ?
+          const displayText = variant === 'outlined' ?
               <ValueRow>
                 <ModelLogo src={model.logoUrl} />
                 <Stack gap={0.25}>
                   <ModelDisplayName>{model.displayName}</ModelDisplayName>
-                  <ModelName>{model.name}</ModelName>
+                  <ModelName>
+                    {model.name}{model.numLayers ? ` (${model.numLayers} total layers)` : ''}
+                  </ModelName>
                 </Stack>
               </ValueRow>
-            : model.name;
+            : model.numLayers ? `${model.name} (${model.numLayers} total layers)` : model.name;
+          
+          return displayText;
         }}
         IconComponent={hostType === 'node' ? () => null : undefined}
       >

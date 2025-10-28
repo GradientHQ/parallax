@@ -33,6 +33,7 @@ export interface ModelInfo {
   readonly name: string;
   readonly displayName: string;
   readonly logoUrl: string;
+  readonly numLayers?: number;
 }
 
 export type ClusterStatus = 'idle' | 'waiting' | 'available' | 'rebalancing' | 'failed';
@@ -111,10 +112,11 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
       try {
         const rawList = await getModelList();
         setModelInfoList((prev) => {
-          const next = rawList.map((name) => ({
-            name,
-            displayName: name,
-            logoUrl: getLogoUrl(name),
+          const next = rawList.map((item) => ({
+            name: item.name,
+            displayName: item.name,
+            logoUrl: getLogoUrl(item.name),
+            numLayers: item.num_layers,
           }));
           if (JSON.stringify(next) !== JSON.stringify(prev)) {
             debugLog('setModelInfoList', next);
