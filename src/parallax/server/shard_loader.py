@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional, Tuple
 import mlx.core as mx
 import safetensors
 from mlx import nn
-from mlx_lm.utils import get_model_path, load_config
+from mlx_lm.utils import _download, load_config
 
 from parallax.server.model import ShardedModel
 from parallax.utils.tokenizer_utils import load_tokenizer
@@ -112,7 +112,7 @@ class MLXModelLoader:
         Returns:
             A tuple containing the loaded sharded MLX model and its configuration dictionary.
         """
-        model_path, _ = get_model_path(self.model_path_str)
+        model_path = _download(self.model_path_str)
         config = load_config(model_path)
         tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
 
