@@ -20,7 +20,7 @@ const logoUrlMap: Readonly<Record<string, string>> = {
   moonshotai: logoUrlMoonshotAI,
   deepseek: logoUrlDeepseek,
   zai: logoUrlZai,
-  minimax: logoUrlMiniMax,
+  minimaxai: logoUrlMiniMax,
 };
 
 const getLogoUrl = (name: string) => {
