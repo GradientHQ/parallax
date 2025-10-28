@@ -15,7 +15,7 @@
 | [**Arxiv**](https://arxiv.org/pdf/2509.26182v1)
 
 ## News
-- [2025/10] 🔥 Parallax version 0.0.01 has been released!
+- [2025/10] 🔥 Parallax version 0.0.1 has been released!
 
 ## About
 A fully decentralized inference engine developed by [Gradient](https://gradient.network). Parallax lets you build your own AI cluster for model inference onto a set of distributed nodes despite their varying configuration and physical location. Its core features include:
