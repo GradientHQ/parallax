@@ -112,11 +112,15 @@ class SchedulerManage:
         return [self.build_node_info(node) for node in self.scheduler.nodes]
 
     def build_node_info(self, node):
+        layer_info = None
+        if node.start_layer is not None and node.end_layer is not None:
+            layer_info = f"{node.start_layer}-{node.end_layer}"
         return {
             "node_id": node.node_id,
             "status": NODE_STATUS_AVAILABLE if node.is_active else NODE_STATUS_WAITING,
             "gpu_name": node.hardware.gpu_name,
             "gpu_memory": node.hardware.memory_gb,
+            "layers": layer_info,
         }
 
     def _start_scheduler(self, model_name, init_nodes_num):
