@@ -11,12 +11,13 @@ from sglang.srt.model_loader.weight_utils import (
     maybe_remap_kv_scale_name,
 )
 from sglang.srt.models.minimax_m2 import get_spec_layer_idx_from_weight_name
-
+logger = logging.getLogger(__name__)
 
 def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
     """Load model weights with proper mapping for MiniMax architecture."""
 
     stacked_params_mapping = [
+        # (param_name, shard_name, shard_id)
         ("qkv_proj", "q_proj", "q"),
         ("qkv_proj", "k_proj", "k"),
         ("qkv_proj", "v_proj", "v"),
@@ -24,6 +25,8 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]])
         ("gate_up_proj", "up_proj", 1),
     ]
 
+    # Params for weights, fp8 weight scales, fp8 activation scales
+    # (param_name, weight_name, expert_id, shard_id)
     expert_params_mapping = FusedMoE.make_expert_params_mapping(
         ckpt_gate_proj_name="w1",
         ckpt_down_proj_name="w2",
@@ -32,44 +35,14 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]])
     )
 
     params_dict = dict(self.named_parameters())
-    logger = logging.getLogger(__name__)
-
-    weight_name_map = {
-        "lm_head.weight": "model.embed_tokens.weight",
-    }
-
-    def resolve_param(name: str):
-        """Resolve weight name to actual parameter, handling tied weights and PP filtering."""
-        if name in weight_name_map:
-            mapped_name = weight_name_map[name]
-            if mapped_name in params_dict:
-                logger.debug("Mapped '%s' -> '%s' (tied weight)", name, mapped_name)
-                return mapped_name, params_dict[mapped_name]
-
-        if name in params_dict:
-            return name, params_dict[name]
-
-        alt = f"model.{name}"
-        if alt in params_dict:
-            return alt, params_dict[alt]
-
-        matches = [k for k in params_dict.keys() if k.endswith(name)]
-        if len(matches) == 1:
-            return matches[0], params_dict[matches[0]]
-
-        if name in ("model.norm.weight", "model.embed_tokens.weight"):
-            logger.debug("Weight '%s' not found (PP-sliced)", name)
-            return None, None
-
-        if ("lm_head" in name) or ("embed" in name):
-            sample = [k for k in params_dict.keys() if ("lm_head" in k) or ("embed" in k)]
-            if not sample:
-                sample = list(params_dict.keys())[:50]
-            logger.warning("Failed to resolve '%s'. Sample params: %s", name, sample)
-        return None, None
-
     loaded_params: Set[str] = set()
     for name, loaded_weight in weights:
+        if "lm_head" in name:
+            pp_group = getattr(self, "pp_group", None) or get_pp_group()
+            if not pp_group.is_last_rank:
+                logger.debug("Skipping lm_head weight '%s' on non-last PP rank", name)
+                continue
+        
         layer_id = get_layer_id(name)
         if (
             layer_id is not None
@@ -77,28 +50,31 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]])
             and (layer_id < self.model.start_layer or layer_id >= self.model.end_layer)
         ):
             continue
-
         if "rotary_emb.inv_freq" in name:
             continue
 
         spec_layer = get_spec_layer_idx_from_weight_name(self.config, name)
         if spec_layer is not None:
-            continue
+            continue  # skip spec decode layers for main model
 
         for param_name, weight_name, shard_id in stacked_params_mapping:
+            # Skip non-stacked layers and experts (experts handled below).
             if weight_name not in name:
                 continue
+            # We have mlp.experts[0].gate_proj in the checkpoint.
+            # Since we handle the experts below in expert_params_mapping,
+            # we need to skip here BEFORE we update the name, otherwise
+            # name will be updated to mlp.experts[0].gate_up_proj, which
+            # will then be updated below in expert_params_mapping
+            # for mlp.experts[0].gate_gate_up_proj, which breaks load.
             if ("mlp.experts." in name) and name not in params_dict:
                 continue
             name = name.replace(weight_name, param_name)
+            # Skip loading extra bias for GPTQ models.
             if name.endswith(".bias") and name not in params_dict:
                 continue
 
-            resolved_name, param = resolve_param(name)
-            if param is None:
-                if name not in ("model.norm.weight", "model.embed_tokens.weight"):
-                    logger.warning("Skipping weight '%s' (no matching parameter)", name)
-                continue
+            param = params_dict[name]
             weight_loader = param.weight_loader
             weight_loader(param, loaded_weight, shard_id)
             break
@@ -109,28 +85,30 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]])
                     continue
                 name = name.replace(weight_name, param_name)
 
-                resolved_name, param = resolve_param(name)
-                if param is None:
-                    if name not in ("model.norm.weight", "model.embed_tokens.weight"):
-                        logger.warning("Skipping expert weight '%s' (no matching parameter)", name)
-                    continue
+                param = params_dict[name]
                 weight_loader = param.weight_loader
-                weight_loader(param, loaded_weight, name, shard_id=shard_id, expert_id=expert_id)
+                weight_loader(
+                    param,
+                    loaded_weight,
+                    name,
+                    shard_id=shard_id,
+                    expert_id=expert_id,
+                )
                 break
             else:
+                # Skip loading extra bias for GPTQ models.
                 if name.endswith(".bias") and name not in params_dict:
                     continue
 
+                # Remapping the name of FP8 kv-scale.
                 name = maybe_remap_kv_scale_name(name, params_dict)
                 if name is None:
                     continue
 
-                resolved_name, param = resolve_param(name)
-                if param is None:
-                    if name not in ("model.norm.weight", "model.embed_tokens.weight"):
-                        logger.warning("Skipping weight '%s' (no matching parameter)", name)
-                    continue
-                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                param = params_dict[name]
+                weight_loader = getattr(
+                    param, "weight_loader", default_weight_loader
+                )
                 weight_loader(param, loaded_weight)
         loaded_params.add(name)
     return loaded_params
