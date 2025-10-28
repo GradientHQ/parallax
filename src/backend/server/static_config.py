@@ -88,7 +88,8 @@ def get_model_info(model_name):
         param_bytes_per_element = 0.5
 
     ## Only for hack, fix it when support different quantization bits
-    if "minimax_m2" in model_name.lower():
+    print("Model:", model_name, "Quantization method:", quant_method)
+    if "minimax-m2" in model_name.lower():
         param_bytes_per_element = 0.5  # MiniMax M2 uses FP16 weights
 
     # get local experts
