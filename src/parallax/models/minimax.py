@@ -102,7 +102,7 @@ class ParallaxMiniMaxBlock(MLXMiniMaxBlock):
     ):
         r, (k_cache, v_cache) = self.self_attn(self.input_layernorm(x), mask, cache, offset=offset)
         h = x + r
-        r = self.mlp(self.post_attention_layernorm(h))
+        r = self.block_sparse_moe(self.post_attention_layernorm(h))
         out = h + r
         return out, (k_cache, v_cache)
 
