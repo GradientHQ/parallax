@@ -86,7 +86,7 @@ class Scheduler:
 
         # Event queues for main loop orchestration (thread-safe)
         self._pending_joins: "queue.Queue[Node]" = queue.Queue()
-        self._pending_leaves: "queue.Queue[str]" = queue.Queue()
+        self._pending_leaves: "queue.Queue[Tuple[str, bool]]" = queue.Queue()  # (node_id, is_rebalance_leave)
         self._pending_node_updates: "queue.Queue[Tuple[str, Optional[int], Optional[float], Optional[Dict[str, float]], Optional[bool]]]" = (queue.Queue())
 
         # Concurrency controls
@@ -228,9 +228,9 @@ class Scheduler:
         self._pending_joins.put(node)
         self._wake_event.set()
 
-    def enqueue_leave(self, node_id: str) -> None:
+    def enqueue_leave(self, node_id: str, is_rebalance_leave: bool = False) -> None:
         """Enqueue a leave event."""
-        self._pending_leaves.put(node_id)
+        self._pending_leaves.put((node_id, is_rebalance_leave))
         self._wake_event.set()
 
     def enqueue_node_update(
@@ -273,15 +273,32 @@ class Scheduler:
         with self._node_count_cv:
             self._node_count_cv.notify_all()
 
-    def leave(self, node_id: str) -> None:
-        """Remove a node from allocation and refresh plan and materialized nodes."""
+    def leave(self, node_id: str, is_rebalance_leave: bool = False) -> None:
+        """Remove a node from allocation and refresh plan and materialized nodes.
+        
+        Args:
+            node_id: ID of the node leaving
+            is_rebalance_leave: If True, this leave is part of a rebalance restart,
+                               so we should NOT trigger another rebalance (avoid cascade)
+        """
         if node_id not in self.layer_allocator.node_id_to_node:
             raise ValueError(f"Node {node_id} not found in nodes")
         node = self.node_id_to_node[node_id]
         logger.debug(
-            "Leaving node %s (start=%s, end=%s)", node_id, node.start_layer, node.end_layer
+            "Leaving node %s (start=%s, end=%s), is_rebalance_leave=%s", 
+            node_id, node.start_layer, node.end_layer, is_rebalance_leave
         )
         self.layer_allocator.leave(node_id)
+        
+        # Skip rebalance trigger if this leave is part of a rebalance restart
+        # (to avoid cascading rebalances when nodes exit to restart)
+        if is_rebalance_leave:
+            logger.info(
+                f"Node {node_id} leaving for rebalance restart, skipping rebalance trigger"
+            )
+            with self._node_count_cv:
+                self._node_count_cv.notify_all()
+            return
         
         # Check if we need to trigger global rebalance
         needs_rebalance = False
@@ -542,11 +559,11 @@ class Scheduler:
         """Handle pending leave events safely."""
         while True:
             try:
-                node_id = self._pending_leaves.get_nowait()
+                node_id, is_rebalance_leave = self._pending_leaves.get_nowait()
             except queue.Empty:
                 break
             try:
-                self.leave(node_id)
+                self.leave(node_id, is_rebalance_leave=is_rebalance_leave)
             except Exception as exc:
                 logger.warning(f"Leave failed for {node_id}: {exc}")
 

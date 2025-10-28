@@ -146,6 +146,8 @@ def run_node():
 
         if gradient_server is not None:
             gradient_server.status = ServerState.READY
+            # Set executor reference for shutdown coordination
+            gradient_server.set_executor(executor)
         executor.run_loop()
     except SystemExit as e:
         # Check if this is a rebalance restart (exit code 100)
@@ -191,8 +193,14 @@ def run_node():
             )
             t.start()
         if gradient_server is not None:
+            # Check if rebalance restart is needed before shutdown
+            if gradient_server.needs_rebalance_restart():
+                should_restart = True
+                logger.info("🔄 Rebalance restart detected, will restart node...")
+            # shutdown() has duplicate-call protection
             gradient_server.shutdown()
         if executor is not None:
+            # shutdown() has duplicate-call protection
             executor.shutdown()
         if t is not None:
             t.join()
@@ -221,8 +229,9 @@ if __name__ == "__main__":
                     "Please check cluster configuration."
                 )
                 break
-            # Wait a bit before restarting to allow cleanup
-            time.sleep(2)
+            # Wait before restarting to allow cleanup and scheduler to stabilize
+            logger.info("⏳ Waiting 5 seconds before restart...")
+            time.sleep(8)
         else:
             # Normal exit or error, don't restart
             break
