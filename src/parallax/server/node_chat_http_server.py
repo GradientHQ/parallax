@@ -330,3 +330,8 @@ def launch_node_chat_http_server(args):
     process = mp.Process(target=node_chat_http_server.run)
     process.start()
     return process
+
+
+def run_node_chat_http_server(args):
+    node_chat_http_server = NodeChatHttpServer(args)
+    node_chat_http_server.run()

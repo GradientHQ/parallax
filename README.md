@@ -178,9 +178,20 @@ Done! You have your own AI cluster now.
 
 ![Chat](docs/images/chat_interface.png)
 
-#### Chat on Node
+#### Accessing the chat interface from another non-scheduler computer
 
-If you are only running the node service on your machine, you can visit http://localhost:3002 to access the chat page.
+You can access the chat interface from any non-scheduler computer, not just those running a node server. Simply start the chat server with:
+
+```sh
+# local area network env
+parallax chat
+# public network env
+parallax chat -s {scheduler-address}
+# example
+parallax chat -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
+```
+
+After launching, visit [http://localhost:3002](http://localhost:3002) in your browser to use the chat interface.
 
 ### Without frontend
 #### Step 1: Launch scheduler
