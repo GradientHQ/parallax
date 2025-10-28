@@ -84,22 +84,6 @@ class MLXModelLoader:
             except Exception as e:
                 logger.warning(f"Failed to load model from {model_file}: {e}")
 
-    def _create_default_model_args(self, config: Dict[str, Any]) -> Any:
-        """Create default model arguments from config."""
-        model_args = {
-            "hidden_size": config.get("hidden_size", 0),
-            "num_attention_heads": config.get("num_attention_heads", 0),
-            "num_key_value_heads": config.get("num_key_value_heads", 0),
-            "num_hidden_layers": config.get("num_hidden_layers", 0),
-            "intermediate_size": config.get("intermediate_size", 0),
-            "vocab_size": config.get("vocab_size", 0),
-            "head_dim": config.get("head_dim", 128),
-            "num_local_experts": config.get("num_local_experts", None),
-            "num_experts_per_tok": config.get("num_experts_per_tok", None),
-            "moe_intermediate_size": config.get("moe_intermediate_size", None),
-        }
-        return type("ModelArgs", (), model_args)()
-
     def load(
         self, lazy: bool = False, strict: bool = True
     ) -> Tuple[nn.Module, Dict[str, Any], Any]:
