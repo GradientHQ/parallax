@@ -21,26 +21,16 @@ class ParallaxMiniMaxAttention(MLXMiniMaxAttention):
         offset: int = 0,
         lengths: Optional[mx.array] = None,
     ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
-        """
-        Attention forward pass with explicit KV cache handling.
 
-        Args:
-            x: (batch, target_len, hidden_dim) - Input hidden states for the current query segment.
-            mask: (batch, n_q_heads, target_len, source_len)
-            cache: Optional tuple (past_k, past_v).
-                   shape: (batch, n_kv_heads, S_past_padded, head_dim)
-            offset: source_len_padded (scalar, used for RoPE calculation).
-
-        Returns:
-            output_h: (batch, target_len, hidden_dim) - Output hidden states.
-            new_k: (batch, n_kv_heads, target_len, head_dim) - New keys for this segment.
-            new_v: (batch, n_kv_heads, target_len, head_dim) - New values for this segment.
-        """
         batch, target_len, _ = x.shape
 
         queries = self.q_proj(x)
         keys = self.k_proj(x)
         values = self.v_proj(x)
+
+        if self.use_qk_norm:
+            queries = self.q_norm(queries)
+            keys = self.k_norm(keys)
 
         queries = queries.reshape(batch, target_len, self.num_attention_heads, -1).transpose(
             0, 2, 1, 3
