@@ -168,6 +168,8 @@ class HTTPHandler:
         if is_first:
             role = "assistant"
             content = ""
+            if "minimax-m2" in self.model_path.lower():
+                content = "<think>"
         elif is_last:
             role = None
             content = None
