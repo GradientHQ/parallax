@@ -1,3 +1,4 @@
+![2360](https://github.com/user-attachments/assets/ec0ce925-b71d-484a-bb0c-c5cc86f3e93b)
 <div align="center">
   <p align="center">
     <img src="docs/images/parallax.png" width="720">
