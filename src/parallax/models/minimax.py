@@ -1,7 +1,7 @@
 # Copyright © 2025 Apple Inc.
 
 from dataclasses import dataclass
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import mlx.core as mx
 import mlx.nn as nn
