@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 from math import floor
 from typing import Callable, Dict, List, Optional
 
-from parallax_utils.logging_config import get_logger
 from parallax.utils.utils import get_current_device
+from parallax_utils.logging_config import get_logger
 from parallax_utils.utils import bytes_per_element, compute_max_batch_size
 from scheduling.model_info import ModelInfo
 

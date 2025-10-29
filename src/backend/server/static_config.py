@@ -1,6 +1,7 @@
 import json
-from pathlib import Path
 import logging
+from pathlib import Path
+
 from scheduling.model_info import ModelInfo
 
 # Supported model list
