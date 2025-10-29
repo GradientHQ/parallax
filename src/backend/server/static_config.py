@@ -50,6 +50,7 @@ MODEL_LIST = [
     "deepseek-ai/DeepSeek-V3",
     "deepseek-ai/DeepSeek-V2",
     "MiniMaxAI/MiniMax-M2",
+    "zai-org/GLM-4.6",
 ]
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
