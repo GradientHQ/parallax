@@ -183,10 +183,12 @@ class RPCConnectionHandler(ConnectionHandler):
         gpu_name = hardware_json.get("gpu_name")
         memory_gb = hardware_json.get("memory_gb")
         memory_bandwidth_gbps = hardware_json.get("memory_bandwidth_gbps")
+        device = hardware_json.get("device")
         return NodeHardwareInfo(
             node_id=node_id,
             tflops_fp16=tflops_fp16,
             gpu_name=gpu_name,
             memory_gb=memory_gb,
             memory_bandwidth_gbps=memory_bandwidth_gbps,
+            device=device,
         )
