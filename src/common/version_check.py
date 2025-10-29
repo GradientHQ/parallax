@@ -1,13 +1,12 @@
+import importlib.metadata
 import json
 import urllib.request
-
-import pkg_resources
 
 
 def get_current_version():
     version = "unknown"
     try:
-        version = pkg_resources.get_distribution("parallax").version
+        version = importlib.metadata.version("parallax")
     except Exception:
         try:
             import parallax

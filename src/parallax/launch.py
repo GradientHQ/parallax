@@ -22,7 +22,6 @@ from common.version_check import check_latest_release
 from parallax.p2p.server import ServerState, launch_p2p_server
 from parallax.server.executor import Executor
 from parallax.server.http_server import launch_http_server
-from parallax.server.node_chat_http_server import launch_node_chat_http_server
 from parallax.server.server_args import parse_args
 from parallax.utils.utils import get_current_device
 from parallax_utils.ascii_anime import display_parallax_join
@@ -41,6 +40,8 @@ MLX_MODEL_NAME_MAP = {
     "Qwen/Qwen3-235B-A22B-GPTQ-Int4": "mlx-community/Qwen3-235B-A22B-4bit",
     "moonshotai/Kimi-K2-Instruct": "mlx-community/Kimi-K2-Instruct-4bit",
     "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
+    "MiniMaxAI/MiniMax-M2": "mlx-community/MiniMax-M2-4bit",
+    "zai-org/GLM-4.6": "mlx-community/GLM-4.6-4bit",
 }
 
 if __name__ == "__main__":
@@ -49,7 +50,6 @@ if __name__ == "__main__":
     gradient_server = None
     http_server_process = None
     executor = None
-    node_chat_http_server_process = None
     try:
         args = parse_args()
         set_log_level(args.log_level)
@@ -140,7 +140,6 @@ if __name__ == "__main__":
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
             executor = Executor.create_from_args(args)
-            node_chat_http_server_process = launch_node_chat_http_server(args)
 
         if gradient_server is not None:
             gradient_server.status = ServerState.READY
@@ -166,21 +165,6 @@ if __name__ == "__main__":
                     target=terminate_http_server_process, args=(http_server_process,)
                 )
                 t.start()
-        if node_chat_http_server_process is not None:
-
-            def terminate_node_chat_http_server_process(process):
-                logger.debug("Terminating node chat HTTP server process...")
-                try:
-                    process.kill()
-                    process.join()
-                except Exception as e:
-                    logger.error(f"Failed to terminate node chat HTTP server process: {e}")
-
-            t = threading.Thread(
-                target=terminate_node_chat_http_server_process,
-                args=(node_chat_http_server_process,),
-            )
-            t.start()
         if gradient_server is not None:
             gradient_server.shutdown()
         if executor is not None:

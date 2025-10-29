@@ -18,6 +18,11 @@ from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+MODEL_CLASS_MAP = {
+    "kimi_k2": "mlx_lm.models.deepseek_v3",
+    "minimax": "parallax.models.minimax",
+}
+
 
 class MLXModelLoader:
     """
@@ -94,7 +99,7 @@ class MLXModelLoader:
         Returns:
             A tuple containing the loaded sharded MLX model and its configuration dictionary.
         """
-        model_path, _ = get_model_path(self.model_path_str)
+        model_path = get_model_path(self.model_path_str)[0]
         config = load_config(model_path)
         tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
 
@@ -115,14 +120,19 @@ class MLXModelLoader:
         # We need the model object to know its structure and which layers it owns.
         # This part mirrors the logic from the provided utils.py to get model_args.
         model_type = config.get("model_type")
-        if model_type == "kimi_k2":
-            model_type = "deepseek_v3"
         if not model_type:
             raise ValueError("model_type not found in config.json")
+
+        if model_type in MODEL_CLASS_MAP:
+            model_class = MODEL_CLASS_MAP[model_type]
+        else:
+            model_class = f"mlx_lm.models.{model_type}"
+
         try:
-            arch_module = importlib.import_module(f"mlx_lm.models.{model_type}")
+            arch_module = importlib.import_module(model_class)
             model_args_class = getattr(arch_module, "ModelArgs")
             model_args = model_args_class.from_dict(config)
+
         except (ImportError, AttributeError) as e:
             raise ValueError(f"Failed to load architecture for model_type '{model_type}'.") from e
 
