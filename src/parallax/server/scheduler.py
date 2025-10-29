@@ -43,7 +43,7 @@ class Scheduler:
         max_batch_size: int = 16,
         max_num_tokens_per_batch: int = 4096,
         scheduler_wait_ms: int = 200,
-        micro_batch_ratio: int = 1,
+        micro_batch_ratio: int = 2,
         is_first_peer: bool = False,
         kv_cache_manager: Optional[KVCacheManager] = None,
         **kwargs,
@@ -93,11 +93,6 @@ class Scheduler:
     def num_running_requests(self) -> int:
         """Get the number of requests currently being processed."""
         return len(self._running_requests)
-
-    @property
-    def has_pending_requests(self) -> bool:
-        """Check if there are any pending requests in the scheduler."""
-        return len(self._wait_queue) > 0
 
     def get_running_request(self, request_id: str) -> Optional[Request]:
         """Gets a request that is currently in the running state."""
@@ -196,13 +191,7 @@ class Scheduler:
 
         return finished
 
-    def should_dispatch(self) -> bool:
-        """Helper check if the scheduler should dispatch a batch."""
-        waited = (time.time() - self._last_dispatch_ts) * 1000 >= self.scheduler_wait_ms
-        queued = self.num_queued_requests >= self.micro_batch_size
-        return waited or queued
-
-    def admit_requests(self) -> None:
+    def admit_requests(self):
         """Move requests from wait queue into running (inflight) set, up to capacity.
 
         Pushes admitted requests directly into the running set.
@@ -222,6 +211,9 @@ class Scheduler:
                         )
                         continue
             self._running_requests[rid] = req
+            logger.debug(
+                f"Admitted to running: rid={rid}, status={req.status}, running_size={len(self._running_requests)}, ready={req.ready_for_next_step}"
+            )
 
         # Reflect current running requests metric after admission
         try:
@@ -232,8 +224,7 @@ class Scheduler:
         except Exception:
             pass
 
-        self._last_dispatch_ts = time.time()
-        return None
+        return
 
     def form_batch(self) -> List[Request]:
         """Form the active batch for the next forward pass.
@@ -243,9 +234,6 @@ class Scheduler:
           moved-to-end upon readiness, while respecting micro_batch_size and
           max_num_tokens_per_batch.
         """
-        # TODO: we need to fully decouple admit_requests and form_batch
-        #       to overlap micro-batch scheduling with both model running & communication to other peers.
-        self.admit_requests()
         if not self._running_requests:
             return []
 
@@ -253,17 +241,14 @@ class Scheduler:
         batch: List[Request] = []
 
         # Prefill candidates: preserve admission order via OrderedDict iteration
-        prefill_candidates: List[Request] = [
-            req for req in self._running_requests.values() if req.is_prefill
-        ]
-
-        # Decode candidates: only those ready, maintain OrderedDict order which was
-        # updated upon readiness (earlier-ready decodes appear earlier)
-        decode_ready_candidates: List[Request] = [
-            req
-            for req in self._running_requests.values()
-            if req.is_decoding and req.ready_for_next_step
-        ]
+        prefill_candidates = []
+        decode_candidates = []
+        for req in self._running_requests.values():
+            if req.ready_for_next_step:
+                if req.is_prefill:
+                    prefill_candidates.append(req)
+                elif req.is_decoding:
+                    decode_candidates.append(req)
 
         # 1) Fill with prefills first
         for req in prefill_candidates:
@@ -276,7 +261,7 @@ class Scheduler:
             inflight_tokens += cost
 
         # 2) Fill remaining with ready decodes
-        for req in decode_ready_candidates:
+        for req in decode_candidates:
             if len(batch) >= self.micro_batch_size:
                 break
             cost = 1
@@ -289,4 +274,10 @@ class Scheduler:
         for r in batch:
             r.ready_for_next_step = False
 
+        if batch:
+            logger.debug(
+                "Form batch selected=%s inflight_tokens=%d",
+                [f"{r.request_id}:{r.status}, ready:{r.ready_for_next_step}" for r in batch],
+                inflight_tokens,
+            )
         return batch

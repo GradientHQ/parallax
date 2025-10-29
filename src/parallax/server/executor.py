@@ -1055,7 +1055,7 @@ class Executor:
             ]
         # k_caches shape: (num_layers, B, num_kv_heads, L_padded, head_dim)
         logger.debug(
-            f"Processed batch with {len(prepared_inputs['requests'])} requests, "
+            f"Processing batch with {len(prepared_inputs['requests'])} requests, "
             f"request status: {prepared_inputs['requests'][0].status}, "
             f"hidden_states shape: {hidden_states.shape}, "
             f"k_caches shape: {k_caches.shape}, "
@@ -1136,12 +1136,8 @@ class Executor:
                 )
                 self.finished_batch = []
 
-            # 4. Check if we should form a batch
-            if not self.scheduler.should_dispatch():
-                time.sleep(0.01)  # prevent busy waiting
-                continue
-
-            # 5. Form a batch from the scheduler's queue
+            # 4. Admit requests into running set up to capacity, then form batch
+            self.scheduler.admit_requests()
             batch_to_process = self.scheduler.form_batch()
             if not batch_to_process:
                 continue
