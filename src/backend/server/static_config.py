@@ -107,8 +107,10 @@ def get_model_info(model_name):
         param_bytes_per_element = 0.5
 
     mlx_param_bytes_per_element = param_bytes_per_element
+    mlx_model_name = model_name
     if model_name in MLX_MODEL_NAME_MAP:
-        mlx_config = _load_config_only(MLX_MODEL_NAME_MAP[model_name])
+        mlx_model_name = MLX_MODEL_NAME_MAP[model_name]
+        mlx_config = _load_config_only(mlx_model_name)
         mlx_quant_dict = mlx_config.get("quantization_config", None)
         if "bits" in mlx_quant_dict:
             mlx_param_bytes_per_element = mlx_quant_dict["bits"] / 8

@@ -140,12 +140,18 @@ class RPCConnectionHandler(ConnectionHandler):
         list_node_allocations = self.scheduler.list_node_allocations()
         for node_id, start_layer, end_layer in list_node_allocations:
             if current_node_id == node_id:
-                return {
-                    "node_id": node_id,
-                    "model_name": self.scheduler.model_info.model_name,
-                    "start_layer": start_layer,
-                    "end_layer": end_layer,
-                }
+                node = self.scheduler.get_node(node_id)
+                if node:
+                    return {
+                        "node_id": node_id,
+                        "model_name": (
+                            node.model_info.model_name
+                            if node.hardware.device != "mlx"
+                            else node.model_info.mlx_model_name
+                        ),
+                        "start_layer": start_layer,
+                        "end_layer": end_layer,
+                    }
         return {}
 
     def build_node(self, node_json: dict):

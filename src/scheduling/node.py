@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from math import floor
 from typing import Callable, Dict, List, Optional
 
-from parallax.utils.utils import get_current_device
 from parallax_utils.logging_config import get_logger
 from parallax_utils.utils import bytes_per_element, compute_max_batch_size
 from scheduling.model_info import ModelInfo
@@ -36,6 +35,7 @@ class NodeHardwareInfo:
     gpu_name: str
     memory_gb: float
     memory_bandwidth_gbps: float
+    device: str
 
 
 @dataclass
@@ -295,7 +295,7 @@ class Node:
             available_memory_bytes,
             self.model_info.decoder_layer_io_bytes(roofline=False),
         )
-        if get_current_device() == "mlx":
+        if self.hardware.device == "mlx":
             # For mlx, consider mlx bit factor
             return floor(
                 available_memory_bytes
