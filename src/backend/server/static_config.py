@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-
+import logging
 from scheduling.model_info import ModelInfo
 
 # Supported model list
@@ -53,6 +53,21 @@ MODEL_LIST = [
     "zai-org/GLM-4.6",
 ]
 
+MLX_MODEL_NAME_MAP = {
+    "openai/gpt-oss-20b": "mlx-community/gpt-oss-20b-MXFP4-Q8",
+    "openai/gpt-oss-120b": "mlx-community/gpt-oss-120b-4bit",
+    "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8": "mlx-community/Qwen3-Next-80B-A3B-Instruct-8bit",
+    "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8": "mlx-community/Qwen3-Next-80B-A3B-Thinking-8bit",
+    "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8": "mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit",
+    "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8": "mlx-community/Qwen3-235B-A22B-Thinking-2507-4bit",
+    "Qwen/Qwen3-235B-A22B-GPTQ-Int4": "mlx-community/Qwen3-235B-A22B-4bit",
+    "moonshotai/Kimi-K2-Instruct": "mlx-community/Kimi-K2-Instruct-4bit",
+    "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
+    "MiniMaxAI/MiniMax-M2": "mlx-community/MiniMax-M2-4bit",
+    "zai-org/GLM-4.6": "mlx-community/GLM-4.6-4bit",
+}
+
+logger = logging.getLogger(__name__)
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
 
 NODE_JOIN_COMMAND_PUBLIC_NETWORK = """parallax join -s {scheduler_addr} """
@@ -76,6 +91,8 @@ def get_model_info(model_name):
     config = _load_config_only(model_name)
 
     # get quant method
+    # logger.info(f"Loading model config from {model_name}")
+
     quant_method = config.get("quant_method", None)
     quantization_config = config.get("quantization_config", None)
     if quant_method is None and quantization_config is not None:
@@ -88,9 +105,12 @@ def get_model_info(model_name):
     elif quant_method in ("mxfp4", "int4", "awq", "gptq"):
         param_bytes_per_element = 0.5
 
-    # Only for hack, fix it when support different quantization bits
-    # if "minimax-m2" in model_name.lower():
-    #     param_bytes_per_element = 0.5
+    mlx_param_bytes_per_element = param_bytes_per_element
+    if model_name in MLX_MODEL_NAME_MAP:
+        mlx_config = _load_config_only(MLX_MODEL_NAME_MAP[model_name])
+        mlx_quant_dict = mlx_config.get("quantization_config", None)
+        if "bits" in mlx_quant_dict:
+            mlx_param_bytes_per_element = mlx_quant_dict["bits"] / 8
 
     # get local experts
     num_local_experts = config.get("num_local_experts", None)
@@ -112,6 +132,7 @@ def get_model_info(model_name):
         num_layers=config.get("num_hidden_layers", 0),
         ffn_num_projections=3,
         param_bytes_per_element=param_bytes_per_element,
+        mlx_param_bytes_per_element=mlx_param_bytes_per_element,
         cache_bytes_per_element=2,
         embedding_bytes_per_element=2,
         num_local_experts=num_local_experts,
