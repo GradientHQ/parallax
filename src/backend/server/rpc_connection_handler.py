@@ -140,7 +140,7 @@ class RPCConnectionHandler(ConnectionHandler):
         list_node_allocations = self.scheduler.list_node_allocations()
         for node_id, start_layer, end_layer in list_node_allocations:
             if current_node_id == node_id:
-                node = self.scheduler.get_node(node_id)
+                node = self.scheduler.node_id_to_node.get(node_id)
                 if node:
                     return {
                         "node_id": node_id,

@@ -124,6 +124,7 @@ def get_model_info(model_name):
 
     model_info = ModelInfo(
         model_name=model_name,
+        mlx_model_name=mlx_model_name,
         head_size=config.get("head_dim", 128),
         qk_nope_head_dim=config.get("qk_nope_head_dim", None),
         qk_rope_head_dim=config.get("qk_rope_head_dim", None),
