@@ -23,7 +23,7 @@ class ModelInfo:
     """
 
     model_name: str
-    mlx_model_name: str = None
+    mlx_model_name: str
     head_size: int
     hidden_dim: int
     intermediate_dim: int
