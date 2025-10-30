@@ -49,6 +49,8 @@ MODEL_LIST = [
     "deepseek-ai/DeepSeek-R1",
     "deepseek-ai/DeepSeek-V3",
     "deepseek-ai/DeepSeek-V2",
+    "MiniMaxAI/MiniMax-M2",
+    "zai-org/GLM-4.6",
 ]
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
@@ -85,6 +87,10 @@ def get_model_info(model_name):
         param_bytes_per_element = 1
     elif quant_method in ("mxfp4", "int4", "awq", "gptq"):
         param_bytes_per_element = 0.5
+
+    # Only for hack, fix it when support different quantization bits
+    # if "minimax-m2" in model_name.lower():
+    #     param_bytes_per_element = 0.5
 
     # get local experts
     num_local_experts = config.get("num_local_experts", None)

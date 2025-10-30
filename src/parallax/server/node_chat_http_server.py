@@ -1,6 +1,5 @@
 import asyncio
 import json
-import multiprocessing as mp
 import time
 from typing import Dict
 
@@ -116,6 +115,19 @@ class NodeChatHttpServer:
             self.lattica.with_bootstraps(self.initial_peers)
 
         self.lattica.build()
+
+        if len(self.relay_servers) > 0:
+            try:
+                is_symmetric_nat = self.lattica.is_symmetric_nat()
+                if is_symmetric_nat is None:
+                    logger.warning("Failed to get is symmetric NAT, skip")
+                elif is_symmetric_nat:
+                    logger.error(
+                        "Your network NAT type is symmetric, relay does not work on this type of NAT, see https://en.wikipedia.org/wiki/Network_address_translation"
+                    )
+                    exit(1)
+            except Exception as e:
+                logger.exception(f"Error in is symmetric NAT: {e}, skip")
 
         if self.scheduler_addr == "auto":
             self.scheduler_peer_id = None
@@ -308,12 +320,6 @@ class NodeChatHttpServer:
         asyncio.run(self.run_uvicorn())
 
 
-def launch_node_chat_http_server(args):
-    """
-    Launch function of node chat http server.
-    It creates a sub-process for the http server.
-    """
+def run_node_chat_http_server(args):
     node_chat_http_server = NodeChatHttpServer(args)
-    process = mp.Process(target=node_chat_http_server.run)
-    process.start()
-    return process
+    node_chat_http_server.run()
