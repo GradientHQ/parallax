@@ -234,6 +234,7 @@ class Scheduler:
           moved-to-end upon readiness, while respecting micro_batch_size and
           max_num_tokens_per_batch.
         """
+        self.admit_requests()
         if not self._running_requests:
             return []
 
