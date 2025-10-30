@@ -1,15 +1,3 @@
-"""
-Store information about a vLLM batch.
-
-This module provides batch formation utilities for vLLM v1 backend integration.
-It transforms Parallax requests into vLLM-compatible structures for both prefill
-and decode stages.
-
-Key differences from SGLang:
-- vLLM uses SchedulerOutput (flat) vs SGLang's ScheduleBatch (hierarchical)
-- KV Cache is managed independently via KVCache object
-- Sampling is integrated in execute_model() call
-"""
 
 from __future__ import annotations
 
@@ -30,22 +18,11 @@ logger = get_logger(__name__)
 
 
 def transform_sampling_params_to_vllm(old_params: ParallaxSamplingParams) -> VLLMSamplingParams:
-    """Transforms Parallax SamplingParams to vLLM SamplingParams format.
-
-    Args:
-        old_params: Parallax sampling parameters
-
-    Returns:
-        vLLM SamplingParams object
-    """
-    # Map Parallax json_schema -> vLLM structured_outputs
     structured = (
         StructuredOutputsParams(json=old_params.json_schema)
         if getattr(old_params, "json_schema", None) is not None
         else None
     )
-
-    # vLLM uses max_tokens/min_tokens naming
     params = VLLMSamplingParams(
         max_tokens=old_params.max_new_tokens,
         min_tokens=old_params.min_new_tokens,
@@ -96,24 +73,9 @@ def form_vllm_batch_prefill(
     batched_requests: List[Request],
     model_runner: Any = None,
 ) -> Optional[SchedulerOutput]:
-    """Prepare a vLLM prefill batch.
-
-    Constructs a SchedulerOutput for vLLM v1 GPUModelRunner that contains:
-    - NewRequestData for each request (new prefill requests)
-    - KV cache block allocations via vLLM's native KVCacheManager
-    - Token scheduling information
-
-    Args:
-        batched_requests: List of Parallax requests to prefill
-        model_runner: ParallaxVLLMModelRunner instance with initialized kv_cache_manager
-
-    Returns:
-        SchedulerOutput compatible with vLLM GPUModelRunner, or None if the batch is empty.
-    """
     if not batched_requests:
         return None
 
-    # Get vLLM's KVCacheManager from model_runner
     if not hasattr(model_runner, "kv_cache_manager"):
         raise RuntimeError(
             "model_runner must have kv_cache_manager initialized. "
@@ -126,7 +88,6 @@ def form_vllm_batch_prefill(
 
     created_vllm_requests: List[VLLMRequest] = []
 
-    # Build NewRequestData for each request
     new_request_data_list = []
     num_scheduled_tokens: Dict[str, int] = {}
     total_tokens = 0
@@ -137,10 +98,8 @@ def form_vllm_batch_prefill(
         vllm_req = _build_vllm_request(req, sampling_params, model_runner, include_outputs=False)
         created_vllm_requests.append(vllm_req)
 
-        # Check for prefix cache hits
         computed_blocks, num_computed_tokens = kv_cache_manager.get_computed_blocks(vllm_req)
 
-        # Allocate KV cache blocks for the remaining tokens
         prompt_token_ids = getattr(req, "input_ids", None) or []
         num_new_tokens = max(len(prompt_token_ids) - num_computed_tokens, 0)
         if num_new_tokens > 0:
@@ -152,31 +111,27 @@ def form_vllm_batch_prefill(
             )
 
             if new_blocks is None:
-                # Cannot allocate blocks (OOM)
                 logger.warning(f"Cannot allocate KV cache for request {req.request_id}")
-                # Free any allocated blocks for previous requests in this batch
                 for prev_req in created_vllm_requests[:-1]:
                     kv_cache_manager.free(prev_req)
                 return None
 
-            # Combine computed blocks and new blocks
             all_blocks = computed_blocks + new_blocks if num_computed_tokens > 0 else new_blocks
         else:
             all_blocks = computed_blocks
 
-        # Get block IDs for the request
         block_ids = all_blocks.get_block_ids()
 
         new_req_data = NewRequestData(
             req_id=req.request_id,
             prompt_token_ids=req.input_ids,
-            mm_features=[],  # Multimodal features (empty for text-only)
+            mm_features=[],
             sampling_params=sampling_params,
-            pooling_params=None,  # For embedding models
+            pooling_params=None,
             block_ids=block_ids,
             num_computed_tokens=num_computed_tokens,
-            lora_request=None,  # LoRA adapter
-            prompt_embeds=None,  # Soft prompts
+            lora_request=None,
+            prompt_embeds=None,
         )
         new_request_data_list.append(new_req_data)
 
@@ -184,21 +139,19 @@ def form_vllm_batch_prefill(
         num_scheduled_tokens[req.request_id] = scheduled_tokens
         total_tokens += scheduled_tokens
 
-    # Build SchedulerOutput
-    # This is the main data structure that vLLM's model runner expects
     scheduler_output = SchedulerOutput(
         scheduled_new_reqs=new_request_data_list,
-        scheduled_cached_reqs=CachedRequestData.make_empty(),  # No cached reqs in prefill
+        scheduled_cached_reqs=CachedRequestData.make_empty(),
         num_scheduled_tokens=num_scheduled_tokens,
         total_num_scheduled_tokens=total_tokens,
-        scheduled_spec_decode_tokens={},  # Speculative decoding tokens
-        scheduled_encoder_inputs={},  # For encoder-decoder models
-        num_common_prefix_blocks=num_common_prefix_blocks,  # Prefix caching baseline
-        finished_req_ids=set(),  # No finished requests in prefill
-        free_encoder_mm_hashes=[],  # Encoder multimodal hash cleanup
-        structured_output_request_ids=[],  # Requests using structured output
-        grammar_bitmask=None,  # Grammar constraints
-        kv_connector_metadata=None,  # KV connector for disaggregation
+        scheduled_spec_decode_tokens={},
+        scheduled_encoder_inputs={},
+        num_common_prefix_blocks=num_common_prefix_blocks,
+        finished_req_ids=set(),
+        free_encoder_mm_hashes=[],
+        structured_output_request_ids=[],
+        grammar_bitmask=None,
+        kv_connector_metadata=None,
     )
 
     return scheduler_output
@@ -208,25 +161,9 @@ def form_vllm_batch_decode(
     batched_requests: List[Request],
     model_runner: Any = None,
 ) -> Optional[SchedulerOutput]:
-    """Prepare a vLLM decode batch.
-
-    Constructs a SchedulerOutput for vLLM v1 GPUModelRunner for decode stage.
-    Key differences from prefill:
-    - Uses CachedRequestData (not NewRequestData)
-    - Each request processes exactly 1 token
-    - KV cache blocks already allocated, may need to extend
-
-    Args:
-        batched_requests: List of Parallax requests in decode phase
-        model_runner: ParallaxVLLMModelRunner instance with initialized kv_cache_manager
-
-    Returns:
-        SchedulerOutput describing the decode work, or None if the batch is empty.
-    """
     if not batched_requests:
         return None
 
-    # Get vLLM's KVCacheManager
     if not hasattr(model_runner, "kv_cache_manager"):
         raise RuntimeError(
             "model_runner must have kv_cache_manager initialized. "
@@ -248,7 +185,6 @@ def form_vllm_batch_decode(
         req_ids.append(req.request_id)
         resumed_from_preemption.append(False)
         new_token_ids.append([])
-        # For decode requests, we don't have resumed token IDs
         resumed_req_token_ids.append([])
 
         sampling_params = transform_sampling_params_to_vllm(req.sampling_params)
@@ -282,9 +218,8 @@ def form_vllm_batch_decode(
         num_computed_tokens=num_computed_tokens,
     )
 
-    # Build SchedulerOutput for decode
     scheduler_output = SchedulerOutput(
-        scheduled_new_reqs=[],  # No new requests in decode
+        scheduled_new_reqs=[],
         scheduled_cached_reqs=cached_req_data,
         num_scheduled_tokens=num_scheduled_tokens,
         total_num_scheduled_tokens=sum(num_scheduled_tokens.values()),
@@ -302,27 +237,13 @@ def form_vllm_batch_decode(
 
 
 def release_vllm_request(model_runner: Any, request_id: str):
-    """Release KV Cache and other resources for finished/aborted requests.
-
-    Uses vLLM's native KVCacheManager to properly free allocated blocks
-    and update prefix cache if enabled.
-
-    Args:
-        model_runner: ParallaxVLLMModelRunner instance with kv_cache_manager
-        request_id: ID of the request to release
-    """
     if not hasattr(model_runner, "kv_cache_manager"):
         logger.warning(f"KV cache manager not found when releasing request {request_id}")
         return
 
     kv_cache_manager = model_runner.kv_cache_manager
 
-    # Create a minimal vLLM Request object for the free operation
-    # Note: We need the request object, not just the ID
-    # In a real scenario, we should maintain a mapping of request_id -> vLLMRequest
-    # For now, we'll use the KVCacheManager's coordinator directly
     try:
-        # The coordinator can free by request_id directly
         kv_cache_manager.coordinator.free(request_id)
         logger.debug(f"Released KV cache for request {request_id}")
     except Exception as e:
