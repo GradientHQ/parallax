@@ -96,6 +96,9 @@ class Executor:
         # GPU/SGLang Specialized Configs
         attention_backend: Optional[str] = "torch_native",
         moe_runner_backend: Optional[str] = "auto",
+        # Tensor Parallel Configs
+        tp_rank: Optional[int] = 0,
+        tp_size: Optional[int] = 1,
     ):
         # Backend
         self.device = get_current_device()
@@ -118,10 +121,14 @@ class Executor:
                 attention_backend,
                 kv_block_size,
                 moe_runner_backend,
+                tp_rank,
+                tp_size,
             )
             logger.debug(
                 f"CUDA model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
             )
+            self.tp_group = self.model_runner.tp_group()
+            self.tp_cpu_group = self.tp_group.cpu_group
             # SGL KV Cache Manager is already initialized in ScheduleBatch
             # TODO: Replace ScheduleBatch to Parallax inflight batch
             self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
@@ -147,6 +154,7 @@ class Executor:
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
         self.num_shard_layers = end_layer - start_layer
+        self.tp_rank = tp_rank
 
         # Metrics throttling for per-layer latency updates
         self.layer_latency_update_every = int(max(1, layer_latency_update_every))
@@ -280,83 +288,106 @@ class Executor:
         """Create executor from command line arguments."""
         return cls(**create_executor_config(args))
 
+    def _tensor_parallel_broadcast_byobj(self, broadcast_obj):
+        """Wrapper for broadcast pyobject in TP group"""
+        from sglang.srt.utils import broadcast_pyobj
+
+        broadcast_pyobj(
+            broadcast_obj,
+            self.tp_group.rank,
+            self.tp_cpu_group,
+            src=self.tp_group.ranks[0],
+        )
+
     def recv_requests_from_http(self) -> List[Request]:
         """Receives requests from http frontend"""
-        recv_reqs = []
-        while True:
-            try:
-                raw_request = self.recv_from_ipc_socket.recv_pyobj(zmq.NOBLOCK)
+        if self.tp_rank == 0:
+            recv_reqs = []
+            while True:
+                try:
+                    raw_request = self.recv_from_ipc_socket.recv_pyobj(zmq.NOBLOCK)
 
-                # Check if this is an abort request
-                if isinstance(raw_request, dict) and raw_request.get("type") == "abort":
-                    logger.debug(
-                        f"Received abort request from HTTP for request ID: {raw_request.get('rid')}"
-                    )
-                    self.scheduler.cancel_request(raw_request.get("rid"))
-                else:
-                    # Normal request processing - do tokenization and form InitialRequest
-                    req = self._handle_raw_request(raw_request)
-                    recv_reqs.append(req)
-            except zmq.ZMQError:
-                break
-            except Exception as e:
-                logger.exception(f"Error receiving http request: {e}")
+                    # Check if this is an abort request
+                    if isinstance(raw_request, dict) and raw_request.get("type") == "abort":
+                        logger.debug(
+                            f"Received abort request from HTTP for request ID: {raw_request.get('rid')}"
+                        )
+                        self.scheduler.cancel_request(raw_request.get("rid"))
+                    else:
+                        # Normal request processing - do tokenization and form InitialRequest
+                        req = self._handle_raw_request(raw_request)
+                        recv_reqs.append(req)
+                except zmq.ZMQError:
+                    break
+                except Exception as e:
+                    logger.exception(f"Error receiving http request: {e}")
+        else:
+            recv_reqs = None
+        if self.tp_size > 1:
+            self._tensor_parallel_broadcast_byobj(recv_reqs)
         if recv_reqs:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
         return recv_reqs
 
     def recv_requests_from_peer(self) -> List[Request]:
         """Receives requests from the RPC server."""
-        recv_reqs = []
-        while True:
-            try:
-                recv_req = self.recv_from_peer_socket.recv_multipart(zmq.NOBLOCK)
-                assert len(recv_req) == 2, f"Received invalid request: {recv_req}"
-                if recv_req[0] == b"forward":
-                    # Create a new ForwardRequest instance and parse from bytes
-                    forward_request = forward_pb2.ForwardRequest()
-                    forward_request.ParseFromString(recv_req[1])
-                    recv_req = proto_to_request(forward_request, self.device)
+        if self.tp_rank == 0:
+            recv_reqs = []
+            while True:
+                try:
+                    recv_req = self.recv_from_peer_socket.recv_multipart(zmq.NOBLOCK)
+                    assert len(recv_req) == 2, f"Received invalid request: {recv_req}"
+                    if recv_req[0] == b"forward":
+                        # Create a new ForwardRequest instance and parse from bytes
+                        forward_request = forward_pb2.ForwardRequest()
+                        forward_request.ParseFromString(recv_req[1])
+                        recv_req = proto_to_request(forward_request, self.device)
 
-                    # Convert hidden_states dtype if necessary
-                    if recv_req is not None and len(recv_req) > 0:
-                        for req in recv_req:
-                            if req.hidden_states is not None:
-                                if req.hidden_states.dtype != self.dtype:
-                                    logger.debug(
-                                        f"Converting hidden_states dtype from {req.hidden_states.dtype} to {self.dtype} for request {req.request_id}"
-                                    )
-                                    if self.device == "cuda":
-                                        req.hidden_states = req.hidden_states.to(self.dtype)
-                                    elif self.device == "mlx":
-                                        req.hidden_states = req.hidden_states.astype(self.dtype)
-                                    else:
-                                        raise ValueError(f"Unsupported device type: {self.device}")
+                        # Convert hidden_states dtype if necessary
+                        if recv_req is not None and len(recv_req) > 0:
+                            for req in recv_req:
+                                if req.hidden_states is not None:
+                                    if req.hidden_states.dtype != self.dtype:
+                                        logger.debug(
+                                            f"Converting hidden_states dtype from {req.hidden_states.dtype} to {self.dtype} for request {req.request_id}"
+                                        )
+                                        if self.device == "cuda":
+                                            req.hidden_states = req.hidden_states.to(self.dtype)
+                                        elif self.device == "mlx":
+                                            req.hidden_states = req.hidden_states.astype(self.dtype)
+                                        else:
+                                            raise ValueError(
+                                                f"Unsupported device type: {self.device}"
+                                            )
 
-                    # Move current position for first peer
-                    if self.is_first_peer:
-                        for req in recv_req:
-                            req.current_position += 1
-                    recv_reqs.extend(recv_req)
-                elif recv_req[0] == b"abort":
-                    abort_request = forward_pb2.AbortRequest()
-                    abort_request.ParseFromString(recv_req[1])
-                    recv_req = proto_to_abort_request(abort_request)
-                    recv_reqs.extend(recv_req)
-                else:
-                    raise ValueError(f"Unknown request type: {recv_req[0]}")
-                # First peer is responsible for tokenization
-                # if self.is_first_peer and isinstance(recv_req, InitialRequest):
-                #     recv_req.input_ids = self.tokenizer.encode(recv_req.prompt)
-                #     recv_req.prompt_len = len(recv_req.input_ids)
-                #     recv_req.max_total_length = min(
-                #         recv_req.max_total_length, recv_req.prompt_len + recv_req.max_new_tokens
-                #     )
+                        # Move current position for first peer
+                        if self.is_first_peer:
+                            for req in recv_req:
+                                req.current_position += 1
+                        recv_reqs.extend(recv_req)
+                    elif recv_req[0] == b"abort":
+                        abort_request = forward_pb2.AbortRequest()
+                        abort_request.ParseFromString(recv_req[1])
+                        recv_req = proto_to_abort_request(abort_request)
+                        recv_reqs.extend(recv_req)
+                    else:
+                        raise ValueError(f"Unknown request type: {recv_req[0]}")
+                    # First peer is responsible for tokenization
+                    # if self.is_first_peer and isinstance(recv_req, InitialRequest):
+                    #     recv_req.input_ids = self.tokenizer.encode(recv_req.prompt)
+                    #     recv_req.prompt_len = len(recv_req.input_ids)
+                    #     recv_req.max_total_length = min(
+                    #         recv_req.max_total_length, recv_req.prompt_len + recv_req.max_new_tokens
+                    #     )
 
-            except zmq.ZMQError:
-                break
-            except Exception as e:
-                logger.exception(f"Error receiving or deserializing request: {e}")
+                except zmq.ZMQError:
+                    break
+                except Exception as e:
+                    logger.exception(f"Error receiving or deserializing request: {e}")
+        else:
+            recv_reqs = None
+        if self.tp_size > 1:
+            self._tensor_parallel_broadcast_byobj(recv_reqs)
         if recv_reqs:
             logger.debug(f"Received {len(recv_reqs)} peer requests")
         return recv_reqs
@@ -963,33 +994,38 @@ class Executor:
         self, requests: List[Request], hidden_states: Any, lengths: Any
     ) -> List[Request]:
         """Prepares a batch of requests for the next stage of the pipeline."""
-        batched_requests = []
-        pre_length = 0
-        for i, src_request in enumerate(requests):
-            if self.is_last_peer:
-                # Last peer gets a 1D array of token IDs
-                hidden_state_for_req = hidden_states[i : i + 1]
-            else:
-                # Other peers get a 3D array of hidden states
-                if src_request.is_prefill:
-                    true_length = int(lengths[i])
-                    if hidden_states.ndim == 3:
-                        hidden_state_for_req = hidden_states[i, :true_length, :]
-                    else:
-                        hidden_state_for_req = hidden_states[
-                            pre_length : pre_length + true_length, :
-                        ]
-                    pre_length += true_length
+        if self.tp_rank == 0:
+            batched_requests = []
+            pre_length = 0
+            for i, src_request in enumerate(requests):
+                if self.is_last_peer:
+                    # Last peer gets a 1D array of token IDs
+                    hidden_state_for_req = hidden_states[i : i + 1]
                 else:
-                    if hidden_states.ndim == 3:
-                        hidden_state_for_req = hidden_states[i, :, :]
+                    # Other peers get a 3D array of hidden states
+                    if src_request.is_prefill:
+                        true_length = int(lengths[i])
+                        if hidden_states.ndim == 3:
+                            hidden_state_for_req = hidden_states[i, :true_length, :]
+                        else:
+                            hidden_state_for_req = hidden_states[
+                                pre_length : pre_length + true_length, :
+                            ]
+                        pre_length += true_length
                     else:
-                        hidden_state_for_req = hidden_states[pre_length : pre_length + 1, :]
-                    pre_length += 1
+                        if hidden_states.ndim == 3:
+                            hidden_state_for_req = hidden_states[i, :, :]
+                        else:
+                            hidden_state_for_req = hidden_states[pre_length : pre_length + 1, :]
+                        pre_length += 1
 
-            next_req = self._prepare_next_single_request(src_request, hidden_state_for_req)
-            batched_requests.append(next_req)
+                next_req = self._prepare_next_single_request(src_request, hidden_state_for_req)
+                batched_requests.append(next_req)
+        else:
+            batched_requests = None
 
+        if self.tp_size > 1:
+            self._tensor_parallel_broadcast_byobj(batched_requests)
         return batched_requests
 
     def _process_batch_cuda(
@@ -1133,7 +1169,7 @@ class Executor:
             self._handle_input_requests(incoming_requests)
 
             # 3. Send finished batch to next peer
-            if len(self.finished_batch) > 0 and self.is_first_peer:
+            if len(self.finished_batch) > 0 and self.is_first_peer and self.tp_rank == 0:
                 self.send_to_peer_socket.send_multipart(
                     [b"abort", abort_request_to_proto(self.finished_batch).SerializeToString()]
                 )
@@ -1189,7 +1225,7 @@ class Executor:
                         if self.is_last_peer and self.is_first_peer:
                             # Single node: handle locally
                             self._handle_input_requests(next_batch)
-                        else:
+                        elif self.tp_rank == 0:
                             # Send output to next peer
                             self.send_to_peer_socket.send_multipart(
                                 [
@@ -1251,5 +1287,7 @@ def create_executor_config(args: argparse.Namespace):
         "executor_output_ipc_addr": args.executor_output_ipc,
         "attention_backend": args.attention_backend,
         "moe_runner_backend": args.moe_runner_backend,
+        "tp_rank": args.tp_rank,
+        "tp_size": args.tp_size,
     }
     return config
