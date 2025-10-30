@@ -19,7 +19,7 @@ from parallax.sglang.monkey_patch_utils.triton_backend import (
 )
 
 
-def apply_parallax_sgalng_monkey_patch():
+def apply_parallax_sglang_monkey_patch():
     apply_qwen3_next_monkey_patch()
     apply_qwen3_next_config_monkey_patch()
     apply_gpt_oss_monkey_patch()
