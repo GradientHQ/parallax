@@ -129,7 +129,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--request-timeout-s",
         type=int,
-        default=300,
+        default=600,
         help="Per-request timeout in seconds before automatic abort",
     )
 
@@ -220,7 +220,7 @@ def validate_args(args: argparse.Namespace) -> None:
     if args.scheduler_wait_ms < 0:
         raise ValueError("scheduler_wait_ms must be non-negative")
 
-    if getattr(args, "request_timeout_s", 300) is not None and args.request_timeout_s <= 0:
+    if getattr(args, "request_timeout_s", None) is not None and args.request_timeout_s <= 0:
         raise ValueError("request_timeout_s must be positive")
 
     # Validate supported dtypes
