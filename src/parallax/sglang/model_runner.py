@@ -7,7 +7,6 @@ arguments needed by decentralized inference.
 import logging
 import os
 import random
-from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sglang
 import sglang.srt.distributed.parallel_state
@@ -21,9 +20,6 @@ from sglang.srt.distributed import (
     set_custom_all_reduce,
     set_mscclpp_all_reduce,
 )
-from sglang.srt.distributed.parallel_state import (
-    GroupCoordinator as SGLGroupCoordinator,
-)
 from sglang.srt.layers.dp_attention import (
     get_attention_tp_group,
     initialize_dp_attention,
@@ -32,18 +28,14 @@ from sglang.srt.layers.moe import initialize_moe_config
 from sglang.srt.model_executor.model_runner import ModelRunner as SGLModelRunner
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils import (
-    LayerFn,
-    add_prefix,
     cpu_has_amx_support,
     get_available_gpu_memory,
     get_bool_env_var,
-    is_npu,
     monkey_patch_p2p_access_check,
 )
-from torch.distributed import Backend
 
-from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.sglang.monkey_patch import apply_parallax_monkey_patch
+from parallax.utils.tokenizer_utils import load_tokenizer
 
 logger = logging.getLogger(__name__)
 
