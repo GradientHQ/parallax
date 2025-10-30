@@ -34,7 +34,7 @@ from sglang.srt.utils import (
     monkey_patch_p2p_access_check,
 )
 
-from parallax.sglang.monkey_patch import apply_parallax_monkey_patch
+from parallax.sglang.monkey_patch import apply_parallax_sglang_monkey_patch
 from parallax.utils.tokenizer_utils import load_tokenizer
 
 logger = logging.getLogger(__name__)
@@ -229,7 +229,7 @@ def initialize_sgl_model_runner(
       - config: model config driven by mlx-lm
       - tokenizer: tokenizer driven by mlx-lm
     """
-    apply_parallax_monkey_patch()
+    apply_parallax_sglang_monkey_patch()
     model_path = get_model_path(original_model_path)[0]
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
