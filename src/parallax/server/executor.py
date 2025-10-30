@@ -1116,6 +1116,29 @@ class Executor:
         )
         return ret
 
+    def _release_and_evict_request(self, rid: str):
+        """Release per-request resources and evict from scheduler. Best-effort, never raises."""
+        # Release resources
+        if self.device == "cuda":
+            from parallax.sglang.batch_info import release_cuda_request
+
+            try:
+                release_cuda_request(self.running_batch, rid)
+            except Exception:
+                pass
+        else:
+            try:
+                if hasattr(self, "kv_cache_manager") and self.kv_cache_manager is not None:
+                    self.kv_cache_manager.release_request(rid)
+            except Exception:
+                pass
+
+        # Evict from scheduler
+        try:
+            self.scheduler.evict_request(rid)
+        except Exception:
+            pass
+
     def run_loop(self):
         """The main loop of the executor."""
         logger.debug(
@@ -1149,29 +1172,7 @@ class Executor:
                         logger.warning(
                             f"Request {rid} exceeded timeout ({req.timeout_s}s). Aborting and releasing resources."
                         )
-                        # Release resources
-                        if self.device == "cuda":
-                            from parallax.sglang.batch_info import release_cuda_request
-
-                            try:
-                                release_cuda_request(self.running_batch, rid)
-                            except Exception:
-                                pass
-                        else:
-                            try:
-                                if (
-                                    hasattr(self, "kv_cache_manager")
-                                    and self.kv_cache_manager is not None
-                                ):
-                                    self.kv_cache_manager.release_request(rid)
-                            except Exception:
-                                pass
-
-                        # Evict from scheduler
-                        try:
-                            self.scheduler.evict_request(rid)
-                        except Exception:
-                            pass
+                        self._release_and_evict_request(rid)
 
                         # Notify downstream peers to abort if this peer is the first peer in a pipeline
                         if self.is_first_peer and not self.is_last_peer:
@@ -1240,13 +1241,7 @@ class Executor:
                 logger.exception(f"Error processing batch: {e}")
                 # Naive error handling: release and evict all requests in the batch
                 for req in batch_to_process:
-                    self.scheduler.evict_request(req.request_id)
-                    if self.device == "cuda":
-                        from parallax.sglang.batch_info import release_cuda_request
-
-                        release_cuda_request(self.running_batch, req.request_id)
-                    else:
-                        self.kv_cache_manager.release_request(req.request_id)
+                    self._release_and_evict_request(req.request_id)
 
     def run_loop_in_background(self):
         """Run the executor loop in the background."""
