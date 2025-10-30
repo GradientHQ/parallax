@@ -46,6 +46,7 @@ class Scheduler:
         micro_batch_ratio: int = 2,
         is_first_peer: bool = False,
         kv_cache_manager: Optional[KVCacheManager] = None,
+        request_timeout_s: Optional[int] = 600,
         **kwargs,
     ):
         """
@@ -56,6 +57,7 @@ class Scheduler:
             micro_batch_ratio: micro_batch_size = max_batch_size // micro_batch_ratio;
             tokenizer: The tokenizer to use for the model;
             kv_cache_manager: The KV cache manager to use for the scheduler.
+            request_timeout_s: timeout for each inflight request (default 10mins).
         """
         self.max_batch_size = max_batch_size
         self.max_num_tokens_per_batch = max_num_tokens_per_batch
@@ -75,6 +77,8 @@ class Scheduler:
         self._running_requests: Dict[str, Request] = OrderedDict()
 
         self.kv_cache_manager = kv_cache_manager
+        # Default timeout for requests if not set on request object
+        self.request_timeout_s = request_timeout_s
 
         self._last_dispatch_ts = time.time()
         # Track last reported running requests to avoid redundant metric updates
@@ -211,6 +215,8 @@ class Scheduler:
                         )
                         continue
             self._running_requests[rid] = req
+            # Initialize timing for timeout enforcement
+            req.start_time = time.time()
             logger.debug(
                 f"Admitted to running: rid={rid}, status={req.status}, running_size={len(self._running_requests)}, ready={req.ready_for_next_step}"
             )
@@ -225,6 +231,24 @@ class Scheduler:
             pass
 
         return
+
+    def get_timed_out_requests(self) -> List[Request]:
+        """Return running requests that exceeded their timeout and mark them aborted.
+
+        This does not evict or release resources; callers must handle cleanup.
+        """
+        timed_out: List[Request] = []
+        now = time.time()
+        for req in list(self._running_requests.values()):
+            try:
+                if req.start_time is None:
+                    raise ValueError("Requests should have start time set.")
+                if now - req.start_time > self.timeout_s:
+                    req.abort = True
+                    timed_out.append(req)
+            except Exception:
+                continue
+        return timed_out
 
     def form_batch(self) -> List[Request]:
         """Form the active batch for the next forward pass.

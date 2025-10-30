@@ -104,6 +104,7 @@ class Request:
         self.sampling_params = sampling_params or SamplingParams()
         self.abort = False
         self.ready_for_next_step = False
+        self.start_time: Optional[float] = None
 
     @property
     def is_finished(self) -> bool:

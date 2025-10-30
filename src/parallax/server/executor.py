@@ -80,6 +80,7 @@ class Executor:
         prefill_priority: int = 0,
         micro_batch_ratio: int = 2,
         scheduler_wait_ms: int = 500,
+        request_timeout_s: Optional[int] = 600,
         # Metrics Configs
         layer_latency_update_every: int = 4096,
         # KV Cache Configs
@@ -243,6 +244,7 @@ class Executor:
             is_first_peer=self.is_first_peer,
             tokenizer=self.tokenizer,
             kv_cache_manager=self.kv_cache_manager if self.device == "mlx" else None,
+            request_timeout_s=request_timeout_s,
         )
         logger.debug(
             f"Scheduler initialized (max_batch_size={max_batch_size}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"
@@ -1138,6 +1140,45 @@ class Executor:
 
             # 4. Admit requests into running set up to capacity, then form batch
             self.scheduler.admit_requests()
+            # 4.1 Check for request timeouts and abort timed out requests
+            try:
+                timed_out_reqs = self.scheduler.get_timed_out_requests()
+                if timed_out_reqs:
+                    for req in timed_out_reqs:
+                        rid = req.request_id
+                        logger.warning(
+                            f"Request {rid} exceeded timeout ({req.timeout_s}s). Aborting and releasing resources."
+                        )
+                        # Release resources
+                        if self.device == "cuda":
+                            from parallax.sglang.batch_info import release_cuda_request
+
+                            try:
+                                release_cuda_request(self.running_batch, rid)
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                if (
+                                    hasattr(self, "kv_cache_manager")
+                                    and self.kv_cache_manager is not None
+                                ):
+                                    self.kv_cache_manager.release_request(rid)
+                            except Exception:
+                                pass
+
+                        # Evict from scheduler
+                        try:
+                            self.scheduler.evict_request(rid)
+                        except Exception:
+                            pass
+
+                        # Notify downstream peers to abort if this peer is the first peer in a pipeline
+                        if self.is_first_peer and not self.is_last_peer:
+                            self.finished_batch.append(req)
+            except Exception:
+                # Non-fatal; continue serving
+                pass
             batch_to_process = self.scheduler.form_batch()
             if not batch_to_process:
                 continue
