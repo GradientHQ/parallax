@@ -137,6 +137,11 @@ parallax run
 parallax run
 ```
 
+To allow the API to be accessible from other machines, add the argument `--host 0.0.0.0` when launching scheduler.
+```sh
+parallax run --host 0.0.0.0
+```
+
 When running `parallax run` for the first time or after an update, some basic info (like version and gpu name) might be sent to help improve the project. To disable this, use the `-u` flag:
 ```sh
 parallax run -u
@@ -192,6 +197,11 @@ parallax chat -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
 ```
 
 After launching, visit [http://localhost:3002](http://localhost:3002) in your browser to use the chat interface.
+
+To allow the API to be accessible from other machines, add the argument `--host 0.0.0.0` when launching chat interface.
+```sh
+parallax chat --host 0.0.0.0
+```
 
 ### Without frontend
 #### Step 1: Launch scheduler
