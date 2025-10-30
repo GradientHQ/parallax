@@ -76,6 +76,18 @@ Next time to re-activate this virtual environment, run ```source ./venv/bin/acti
 pip install -e '.[dev]'
 ```
 
+**Note for macOS users regarding network permissions**
+
+On macOS, you need to allow your terminal or IDE (such as Terminal, iTerm2, VS Code, Cursor, etc.) access to the local network in order for Parallax to work correctly. If the application prompts you for network access the first time you run Parallax, click "Allow." If you have already denied access, follow these steps to enable it:
+
+1. Open System Settings from the Apple menu.
+2. Click on Privacy & Security in the sidebar.
+3. Click on Local Network.
+4. For each app listed, turn the ability to access your local network on or off using the toggle switch.
+
+This will ensure Parallax has the proper network permissions for local communication.
+
+
 ### Windows Application
 [Click here](https://github.com/GradientHQ/parallax_win_cli/releases/latest/download/Parallax_Win_Setup.exe) to get latest Windows installer.
 
@@ -137,6 +149,11 @@ parallax run
 parallax run
 ```
 
+To allow the API to be accessible from other machines, add the argument `--host 0.0.0.0` when launching scheduler.
+```sh
+parallax run --host 0.0.0.0
+```
+
 When running `parallax run` for the first time or after an update, some basic info (like version and gpu name) might be sent to help improve the project. To disable this, use the `-u` flag:
 ```sh
 parallax run -u
@@ -192,6 +209,11 @@ parallax chat -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
 ```
 
 After launching, visit [http://localhost:3002](http://localhost:3002) in your browser to use the chat interface.
+
+To allow the API to be accessible from other machines, add the argument `--host 0.0.0.0` when launching chat interface.
+```sh
+parallax chat --host 0.0.0.0
+```
 
 ### Without frontend
 #### Step 1: Launch scheduler
