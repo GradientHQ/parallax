@@ -546,6 +546,8 @@ def initialize_sgl_model_runner(
     attention_backend: str,
     kv_block_size: int,
     moe_runner_backend: str,
+    tp_rank: int,
+    tp_size: int,
 ):
     """
     Creates a SGL ModelRunner object.
@@ -603,9 +605,9 @@ def initialize_sgl_model_runner(
     model_runner = ParallaxModelRunner(
         model_config=model_config,
         mem_fraction_static=kv_cache_memory_fraction,
-        gpu_id=0,
-        tp_rank=0,
-        tp_size=1,
+        gpu_id=tp_rank,  # Currently reuse tp_rank to only support TP.
+        tp_rank=tp_rank,
+        tp_size=tp_size,
         pp_rank=0,
         pp_size=1,
         moe_ep_rank=0,

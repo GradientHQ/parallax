@@ -150,6 +150,9 @@ def parse_args() -> argparse.Namespace:
         help="Choose the GPU moe kernels",
     )
 
+    # Tensor parallel configuration
+    parser.add_argument("--tp-size", type=int, default=1, help="Tensor parallel size")
+
     # Logging and debugging
     parser.add_argument(
         "--log-level",

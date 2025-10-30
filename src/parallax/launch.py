@@ -23,7 +23,7 @@ from parallax.p2p.server import ServerState, launch_p2p_server
 from parallax.server.executor import Executor
 from parallax.server.http_server import launch_http_server
 from parallax.server.server_args import parse_args
-from parallax.utils.utils import get_current_device
+from parallax.utils.utils import get_current_device, load_model_config_only
 from parallax_utils.ascii_anime import display_parallax_join
 from parallax_utils.logging_config import get_logger, set_log_level
 
@@ -44,12 +44,23 @@ MLX_MODEL_NAME_MAP = {
     "zai-org/GLM-4.6": "mlx-community/GLM-4.6-4bit",
 }
 
+
+def run_executor_process(args):
+    """Run executor as a subprocess"""
+    try:
+        executor = Executor.create_from_args(args)
+        executor.run_loop()
+    except Exception as e:
+        logger.exception(e)
+    finally:
+        executor.shutdown()
+
+
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)
 
     gradient_server = None
     http_server_process = None
-    executor = None
     try:
         args = parse_args()
         set_log_level(args.log_level)
@@ -70,7 +81,9 @@ if __name__ == "__main__":
             if mlx_model_repo is not None:
                 args.model_path = mlx_model_repo
                 logger.debug(f"Replace mlx model path: {mlx_model_repo}")
+
         if args.scheduler_addr is None:
+            # Launch without scheduler
             if args.log_level != "DEBUG":
                 display_parallax_join(args.model_path)
             check_latest_release()
@@ -78,14 +91,15 @@ if __name__ == "__main__":
             # only launch http server on head node
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
-            executor = Executor.create_from_args(args)
+
+            config = load_model_config_only(args.model_path)
             launch_p2p_server(
                 initial_peers=args.initial_peers,
                 scheduler_addr=args.scheduler_addr,
                 relay_servers=args.relay_servers,
                 pp_start_layer=args.start_layer,
                 pp_end_layer=args.end_layer,
-                hidden_layers=executor.config.get("num_hidden_layers"),
+                hidden_layers=config.get("num_hidden_layers"),
                 tcp_port=args.tcp_port,
                 udp_port=args.udp_port,
                 dht_prefix=args.dht_prefix,
@@ -99,6 +113,7 @@ if __name__ == "__main__":
                 max_sequence_length=args.max_sequence_length,
             )
         else:
+            # Join scheduler
             gradient_server = launch_p2p_server(
                 initial_peers=args.initial_peers,
                 scheduler_addr=args.scheduler_addr,
@@ -139,35 +154,45 @@ if __name__ == "__main__":
             # only launch http server on head node
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
-            executor = Executor.create_from_args(args)
+
+        executor_process_pool = []
+        tp_rank_range = range(args.tp_size)
+        for tp_rank in tp_rank_range:
+            args.tp_rank = tp_rank
+            # executor = Executor.create_from_args(args)
+            proc = multiprocessing.Process(
+                target=run_executor_process,
+                args=args,
+            )
+            proc.start()
+            executor_process_pool.append(proc)
 
         if gradient_server is not None:
             gradient_server.status = ServerState.READY
-        executor.run_loop()
     except KeyboardInterrupt:
         logger.debug("Received interrupt signal, shutting down...")
     except Exception as e:
         logger.exception(e)
     finally:
-        t = None
+        thread_pool = []
+
+        def terminate_subprocess(process):
+            logger.debug("Terminating subprocess...")
+            try:
+                process.kill()
+                process.join()
+            except Exception as e:
+                logger.error(f"Failed to terminate subprocess: {e}")
+
         if http_server_process is not None:
-
-            def terminate_http_server_process(process):
-                logger.debug("Terminating HTTP server process...")
-                try:
-                    process.kill()
-                    process.join()
-                except Exception as e:
-                    logger.error(f"Failed to terminate HTTP server process: {e}")
-
-            if http_server_process is not None:
-                t = threading.Thread(
-                    target=terminate_http_server_process, args=(http_server_process,)
-                )
-                t.start()
+            t = threading.Thread(target=terminate_subprocess, args=(http_server_process,))
+            thread_pool.append(t)
+            t.start()
         if gradient_server is not None:
             gradient_server.shutdown()
-        if executor is not None:
-            executor.shutdown()
-        if t is not None:
+        for executor_process in executor_process_pool:
+            t = threading.Thread(target=terminate_subprocess, args=(executor_process,))
+            thread_pool.append(t)
+            t.start()
+        for t in thread_pool:
             t.join()

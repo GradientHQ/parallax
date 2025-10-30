@@ -1,5 +1,7 @@
 """Utility functions."""
 
+import json
+from pathlib import Path
 from typing import List
 
 import mlx.core as mx
@@ -7,6 +9,7 @@ import numpy as np
 import psutil
 import torch
 import zmq
+from huggingface_hub import hf_hub_download
 
 
 def is_cuda_available():
@@ -266,3 +269,18 @@ def combine_padding_and_causal_masks(
     padding_mask_float = (padding_mask - 1) * inf_value
     padding_mask_float = padding_mask_float.astype(dtype)
     return causal_mask + padding_mask_float
+
+
+def load_model_config_only(name: str) -> dict:
+    local_path = Path(name)
+    if local_path.exists():
+        config_path = local_path / "config.json"
+        with open(config_path, "r") as f:
+            return json.load(f)
+
+    config_file = hf_hub_download(repo_id=name, filename="config.json")
+    with open(config_file, "r") as f:
+        return json.load(f)
+
+    config = _load_config_only(model_name)
+    return config
