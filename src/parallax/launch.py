@@ -18,7 +18,6 @@ import os
 import tempfile
 import threading
 
-from backend.server.static_config import MLX_MODEL_NAME_MAP
 from common.version_check import check_latest_release
 from parallax.p2p.server import ServerState, launch_p2p_server
 from parallax.server.executor import Executor
@@ -52,11 +51,7 @@ if __name__ == "__main__":
         logger.debug(f"executor_input_addr: {args.executor_input_ipc}")
         logger.debug(f"executor_output_addr: {args.executor_output_ipc}")
         # Hard code for mlx-community models
-        if get_current_device() == "mlx":
-            mlx_model_repo = MLX_MODEL_NAME_MAP.get(args.model_path, None)
-            if mlx_model_repo is not None:
-                args.model_path = mlx_model_repo
-                logger.debug(f"Replace mlx model path: {mlx_model_repo}")
+        logger.debug(f"self.model_path before mlx check: {args.model_path}")
         if args.scheduler_addr is None:
             if args.log_level != "DEBUG":
                 display_parallax_join(args.model_path)
@@ -109,11 +104,8 @@ if __name__ == "__main__":
             args.end_layer = gradient_server.block_end_index
             args.model_path = gradient_server.model_name
             # Hard code for mlx-community models
-            if get_current_device() == "mlx":
-                mlx_model_repo = MLX_MODEL_NAME_MAP.get(args.model_path, None)
-                if mlx_model_repo is not None:
-                    args.model_path = mlx_model_repo
-                    logger.debug(f"Replace mlx model path: {mlx_model_repo}")
+
+            logger.debug(f"self.model_path after mlx check: {args.model_path}")
             logger.debug(
                 f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}"
             )

@@ -4,68 +4,55 @@ from pathlib import Path
 
 from scheduling.model_info import ModelInfo
 
-# Supported model list
-MODEL_LIST = [
-    "Qwen/Qwen3-0.6B",
-    "openai/gpt-oss-20b",
-    "openai/gpt-oss-120b",
-    "moonshotai/Kimi-K2-Instruct",
-    "moonshotai/Kimi-K2-Instruct-0905",
-    "Qwen/Qwen3-Next-80B-A3B-Instruct",
-    "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8",
-    "Qwen/Qwen3-Next-80B-A3B-Thinking",
-    "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8",
-    "Qwen/Qwen3-0.6B-FP8",
-    "Qwen/Qwen3-1.7B",
-    "Qwen/Qwen3-1.7B-FP8",
-    "Qwen/Qwen3-4B",
-    "Qwen/Qwen3-4B-FP8",
-    "Qwen/Qwen3-4B-Instruct-2507",
-    "Qwen/Qwen3-4B-Instruct-2507-FP8",
-    "Qwen/Qwen3-4B-Thinking-2507",
-    "Qwen/Qwen3-4B-Thinking-2507-FP8",
-    "Qwen/Qwen3-8B",
-    "Qwen/Qwen3-8B-FP8",
-    "Qwen/Qwen3-14B",
-    "Qwen/Qwen3-14B-FP8",
-    "Qwen/Qwen3-32B",
-    "Qwen/Qwen3-32B-FP8",
-    "Qwen/Qwen3-30B-A3B",
-    "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
-    "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8",
-    "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8",
-    "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8",
-    "Qwen/Qwen3-235B-A22B-GPTQ-Int4",
-    "Qwen/Qwen2.5-0.5B-Instruct",
-    "Qwen/Qwen2.5-1.5B-Instruct",
-    "Qwen/Qwen2.5-3B-Instruct",
-    "Qwen/Qwen2.5-7B-Instruct",
-    "Qwen/Qwen2.5-14B-Instruct",
-    "Qwen/Qwen2.5-32B-Instruct",
-    "Qwen/Qwen2.5-72B-Instruct",
-    "nvidia/Llama-3.3-70B-Instruct-FP8",
-    "nvidia/Llama-3.1-70B-Instruct-FP8",
-    "nvidia/Llama-3.1-8B-Instruct-FP8",
-    "deepseek-ai/DeepSeek-V3.1",
-    "deepseek-ai/DeepSeek-R1",
-    "deepseek-ai/DeepSeek-V3",
-    "deepseek-ai/DeepSeek-V2",
-    "MiniMaxAI/MiniMax-M2",
-    "zai-org/GLM-4.6",
-]
-
-MLX_MODEL_NAME_MAP = {
+# Supported model list - key: model name, value: MLX model name (same as key if no MLX variant)
+MODELS = {
+    "Qwen/Qwen3-0.6B": "Qwen/Qwen3-0.6B",
     "openai/gpt-oss-20b": "mlx-community/gpt-oss-20b-MXFP4-Q8",
     "openai/gpt-oss-120b": "mlx-community/gpt-oss-120b-4bit",
+    "moonshotai/Kimi-K2-Instruct": "mlx-community/Kimi-K2-Instruct-4bit",
+    "moonshotai/Kimi-K2-Instruct-0905": "mlx-community/Kimi-K2-Instruct-0905-mlx-DQ3_K_M",
+    "Qwen/Qwen3-Next-80B-A3B-Instruct": "mlx-community/Qwen3-Next-80B-A3B-Instruct-8bit",
     "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8": "mlx-community/Qwen3-Next-80B-A3B-Instruct-8bit",
+    "Qwen/Qwen3-Next-80B-A3B-Thinking": "mlx-community/Qwen3-Next-80B-A3B-Thinking-8bit",
     "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8": "mlx-community/Qwen3-Next-80B-A3B-Thinking-8bit",
+    "Qwen/Qwen3-0.6B-FP8": "Qwen/Qwen3-0.6B",
+    "Qwen/Qwen3-1.7B": "Qwen/Qwen3-1.7B",
+    "Qwen/Qwen3-1.7B-FP8": "Qwen/Qwen3-1.7B",
+    "Qwen/Qwen3-4B": "Qwen/Qwen3-4B",
+    "Qwen/Qwen3-4B-FP8": "Qwen/Qwen3-4B",
+    "Qwen/Qwen3-4B-Instruct-2507": "Qwen/Qwen3-4B-Instruct-2507",
+    "Qwen/Qwen3-4B-Instruct-2507-FP8": "Qwen/Qwen3-4B-Instruct-2507-FP8",
+    "Qwen/Qwen3-4B-Thinking-2507": "Qwen/Qwen3-4B-Thinking-2507",
+    "Qwen/Qwen3-4B-Thinking-2507-FP8": "Qwen/Qwen3-4B-Thinking-2507-FP8",
+    "Qwen/Qwen3-8B": "Qwen/Qwen3-8B",
+    "Qwen/Qwen3-8B-FP8": "Qwen/Qwen3-8B-FP8",
+    "Qwen/Qwen3-14B": "Qwen/Qwen3-14B",
+    "Qwen/Qwen3-14B-FP8": "Qwen/Qwen3-14B-FP8",
+    "Qwen/Qwen3-32B": "Qwen/Qwen3-32B",
+    "Qwen/Qwen3-32B-FP8": "Qwen/Qwen3-32B-FP8",
+    "Qwen/Qwen3-30B-A3B": "Qwen/Qwen3-30B-A3B",
+    "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+    "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8": "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8",
     "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8": "mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit",
     "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8": "mlx-community/Qwen3-235B-A22B-Thinking-2507-4bit",
     "Qwen/Qwen3-235B-A22B-GPTQ-Int4": "mlx-community/Qwen3-235B-A22B-4bit",
-    "moonshotai/Kimi-K2-Instruct": "mlx-community/Kimi-K2-Instruct-4bit",
-    "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
+    "Qwen/Qwen2.5-0.5B-Instruct": "Qwen/Qwen2.5-0.5B-Instruct",
+    "Qwen/Qwen2.5-1.5B-Instruct": "Qwen/Qwen2.5-1.5B-Instruct",
+    "Qwen/Qwen2.5-3B-Instruct": "Qwen/Qwen2.5-3B-Instruct",
+    "Qwen/Qwen2.5-7B-Instruct": "Qwen/Qwen2.5-7B-Instruct",
+    "Qwen/Qwen2.5-14B-Instruct": "Qwen/Qwen2.5-14B-Instruct",
+    "Qwen/Qwen2.5-32B-Instruct": "Qwen/Qwen2.5-32B-Instruct",
+    "Qwen/Qwen2.5-72B-Instruct": "Qwen/Qwen2.5-72B-Instruct",
+    "nvidia/Llama-3.3-70B-Instruct-FP8": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "nvidia/Llama-3.1-70B-Instruct-FP8": "nvidia/Llama-3.1-70B-Instruct-FP8",
+    "nvidia/Llama-3.1-8B-Instruct-FP8": "nvidia/Llama-3.1-8B-Instruct-FP8",
+    "deepseek-ai/DeepSeek-V3.1": "deepseek-ai/DeepSeek-V3.1",
+    "deepseek-ai/DeepSeek-R1": "deepseek-ai/DeepSeek-R1",
+    "deepseek-ai/DeepSeek-V3": "deepseek-ai/DeepSeek-V3",
+    "deepseek-ai/DeepSeek-V2": "deepseek-ai/DeepSeek-V2",
     "MiniMaxAI/MiniMax-M2": "mlx-community/MiniMax-M2-4bit",
     "zai-org/GLM-4.6": "mlx-community/GLM-4.6-4bit",
+    "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
 }
 
 logger = logging.getLogger(__name__)
@@ -107,12 +94,12 @@ def get_model_info(model_name):
         param_bytes_per_element = 0.5
 
     mlx_param_bytes_per_element = param_bytes_per_element
-    mlx_model_name = model_name
-    if model_name in MLX_MODEL_NAME_MAP:
-        mlx_model_name = MLX_MODEL_NAME_MAP[model_name]
+    mlx_model_name = MODELS.get(model_name, model_name)
+
+    if mlx_model_name != model_name:
         mlx_config = _load_config_only(mlx_model_name)
         mlx_quant_dict = mlx_config.get("quantization_config", None)
-        if "bits" in mlx_quant_dict:
+        if mlx_quant_dict and "bits" in mlx_quant_dict:
             mlx_param_bytes_per_element = mlx_quant_dict["bits"] / 8
 
     # get local experts
@@ -147,7 +134,7 @@ def get_model_info(model_name):
 
 
 def get_model_list():
-    return MODEL_LIST
+    return list(MODELS.keys())
 
 
 def get_node_join_command(scheduler_addr, is_local_network):
