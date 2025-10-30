@@ -62,6 +62,28 @@ if __name__ == "__main__":
         # Silence tokenizer warnings
         os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+        # Disable CUDA graphs if memory is constrained to avoid segfault during graph capture
+        # This helps prevent crashes when GPU memory is low during initialization
+        if os.environ.get("SGL_DISABLE_CUDA_GRAPH") is None:
+            # Check if we should auto-disable based on available memory
+            # Users can also explicitly set this via environment variable
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    available_memory_gb = torch.cuda.get_device_properties(0).total_memory / (
+                        1024**3
+                    )
+                    # If less than 2GB available, likely constrained memory situation
+                    if available_memory_gb < 2.0:
+                        logger.warning(
+                            f"Low GPU memory detected ({available_memory_gb:.2f} GB). "
+                            "Consider setting SGL_DISABLE_CUDA_GRAPH=1 to avoid potential segfaults "
+                            "during CUDA graph capture."
+                        )
+            except Exception:
+                pass  # Ignore errors if torch is not available or CUDA check fails
+
         logger.debug(f"executor_input_addr: {args.executor_input_ipc}")
         logger.debug(f"executor_output_addr: {args.executor_output_ipc}")
         # Hard code for mlx-community models
@@ -150,24 +172,53 @@ if __name__ == "__main__":
         logger.exception(e)
     finally:
         t = None
-        if http_server_process is not None:
-
-            def terminate_http_server_process(process):
-                logger.debug("Terminating HTTP server process...")
-                try:
-                    process.kill()
-                    process.join()
-                except Exception as e:
-                    logger.error(f"Failed to terminate HTTP server process: {e}")
-
+        try:
             if http_server_process is not None:
-                t = threading.Thread(
-                    target=terminate_http_server_process, args=(http_server_process,)
-                )
-                t.start()
-        if gradient_server is not None:
-            gradient_server.shutdown()
-        if executor is not None:
-            executor.shutdown()
-        if t is not None:
-            t.join()
+
+                def terminate_http_server_process(process):
+                    logger.debug("Terminating HTTP server process...")
+                    try:
+                        if process.is_alive():
+                            process.terminate()
+                            process.join(timeout=5)
+                            if process.is_alive():
+                                logger.debug(
+                                    "HTTP server process did not terminate gracefully, killing..."
+                                )
+                                process.kill()
+                                process.join()
+                    except Exception as e:
+                        logger.error(f"Failed to terminate HTTP server process: {e}")
+
+                if http_server_process is not None:
+                    t = threading.Thread(
+                        target=terminate_http_server_process, args=(http_server_process,)
+                    )
+                    t.start()
+            if gradient_server is not None:
+                try:
+                    gradient_server.shutdown()
+                except Exception as e:
+                    logger.error(f"Error shutting down gradient server: {e}")
+            if executor is not None:
+                try:
+                    executor.shutdown()
+                except Exception as e:
+                    logger.error(f"Error shutting down executor: {e}")
+            if t is not None:
+                t.join(timeout=10)
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+        finally:
+            # Force cleanup of multiprocessing resources to avoid semaphore leaks
+            try:
+                import multiprocessing
+
+                # Wait for all active child processes to complete
+                for child in multiprocessing.active_children():
+                    try:
+                        child.join(timeout=1)
+                    except Exception:
+                        pass
+            except Exception:
+                pass

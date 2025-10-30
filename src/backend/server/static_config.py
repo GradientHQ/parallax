@@ -8,6 +8,8 @@ MODEL_LIST = [
     "Qwen/Qwen3-0.6B",
     "openai/gpt-oss-20b",
     "openai/gpt-oss-120b",
+    "openai/gpt-oss-safeguard-20b",
+    "openai/gpt-oss-safeguard-120b",
     "moonshotai/Kimi-K2-Instruct",
     "moonshotai/Kimi-K2-Instruct-0905",
     "Qwen/Qwen3-Next-80B-A3B-Instruct",
