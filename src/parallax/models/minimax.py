@@ -1,11 +1,9 @@
 # Copyright © 2025 Apple Inc.
 
-from dataclasses import dataclass
-from typing import Any, Optional, Tuple
+from typing import Optional, Tuple
 
 import mlx.core as mx
-import mlx.nn as nn
-from mlx_lm.models.base import BaseModelArgs, scaled_dot_product_attention
+from mlx_lm.models.base import scaled_dot_product_attention
 from mlx_lm.models.minimax import MiniMaxAttention as MLXMiniMaxAttention
 from mlx_lm.models.minimax import MiniMaxDecoderLayer as MLXMiniMaxBlock
 from mlx_lm.models.minimax import ModelArgs
