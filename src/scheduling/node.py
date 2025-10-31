@@ -12,7 +12,7 @@ Scheduling primitives for distributed LLM inference.
 import time
 from dataclasses import dataclass, field
 from math import floor
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from parallax_utils.logging_config import get_logger
 from parallax_utils.utils import bytes_per_element, compute_max_batch_size
