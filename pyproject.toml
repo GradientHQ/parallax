@@ -46,8 +46,8 @@ mac = [
 ]
 
 gpu = [
-  "mlx-lm==0.28.0",
   "mlx-lm @ git+https://github.com/ml-explore/mlx-lm.git@f2b0262824c2a2af82acd783decf638b10710b6d",
+  "mlx[cpu]==0.29.3",
   "sglang[all]==0.5.4.post1",
 ]
 
