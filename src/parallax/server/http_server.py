@@ -30,7 +30,7 @@ import zmq
 import zmq.asyncio
 from fastapi.responses import ORJSONResponse, StreamingResponse
 from mlx_lm.tokenizer_utils import StreamingDetokenizer
-from mlx_lm.utils import get_model_path, load_config
+from mlx_lm.utils import _download, load_config
 from pydantic import BaseModel
 from starlette.datastructures import State
 
@@ -105,7 +105,7 @@ class HTTPHandler:
         self.recv_from_executor = get_zmq_socket(context, zmq.PULL, executor_output_ipc_name, True)
         self.processing_requests: Dict[str, HTTPRequestInfo] = {}
         # Load tokenizer for separate detokenizers
-        model_path = get_model_path(model_path_str)[0]
+        model_path = _download(model_path_str)
         config = load_config(model_path)
         self.model_path_str = model_path_str
         self.tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))

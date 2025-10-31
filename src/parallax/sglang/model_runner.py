@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import sglang
 import sglang.srt.distributed.parallel_state
 import torch
-from mlx_lm.utils import get_model_path, load_config
+from mlx_lm.utils import _download, load_config
 from sglang.srt.configs.model_config import ModelConfig
 from sglang.srt.distributed import (
     get_tp_group,
@@ -555,7 +555,7 @@ def initialize_sgl_model_runner(
       - tokenizer: tokenizer driven by mlx-lm
     """
     apply_parallax_monkey_patch()
-    model_path = get_model_path(original_model_path)[0]
+    model_path = _download(original_model_path)
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")

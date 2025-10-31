@@ -7,7 +7,7 @@ from typing import List, Tuple
 import mlx.core as mx
 import pytest
 from mlx_lm.models.base import create_attention_mask
-from mlx_lm.utils import get_model_path, load_model
+from mlx_lm.utils import _download, load_model
 
 from parallax.server.server_info import ShardedModelInfo
 from parallax.server.shard_loader import MLXModelLoader
@@ -18,7 +18,7 @@ REPO_ID = "mlx-community/Qwen3-0.6B-bf16"
 TOTAL_LAYERS = 28
 
 
-model_path = get_model_path(REPO_ID)[0]
+model_path = _download(REPO_ID)
 ref_model, ref_config = load_model(model_path)
 ref_tokenizer = load_tokenizer(model_path, eos_token_ids=ref_config.get("eos_token_id", None))
 
