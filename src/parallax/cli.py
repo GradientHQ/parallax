@@ -239,6 +239,16 @@ def join_command(args, passthrough_args: list[str] | None = None):
         cmd.extend(["--max-batch-size", "8"])
     if not _flag_present(passthrough_args, ["--kv-block-size"]):
         cmd.extend(["--kv-block-size", "1024"])
+
+    # Add param-hosting-ratio and kv-cache-ratio if specified
+    if hasattr(args, "param_hosting_ratio") and args.param_hosting_ratio is not None:
+        if not _flag_present(passthrough_args, ["--param-hosting-ratio"]):
+            cmd.extend(["--param-hosting-ratio", str(args.param_hosting_ratio)])
+
+    if hasattr(args, "kv_cache_ratio") and args.kv_cache_ratio is not None:
+        if not _flag_present(passthrough_args, ["--kv-cache-ratio"]):
+            cmd.extend(["--kv-cache-ratio", str(args.kv_cache_ratio)])
+
     # The scheduler address is now taken directly from the parsed arguments.
     cmd.extend(["--scheduler-addr", args.scheduler_addr])
 
@@ -417,8 +427,29 @@ Examples:
     join_parser.add_argument(
         "-u", "--skip-upload", action="store_true", help="Skip upload package info"
     )
+    join_parser.add_argument(
+        "--max-num-tokens-per-batch",
+        type=int,
+        default=None,
+        help="Maximum number of tokens per batch",
+    )
+    join_parser.add_argument(
+        "--max-sequence-length", type=int, default=None, help="Maximum sequence length"
+    )
+    join_parser.add_argument(
+        "--param-hosting-ratio",
+        type=float,
+        default=0.65,
+        help="Ratio of GPU memory to use for parameter hosting",
+    )
+    join_parser.add_argument(
+        "--kv-cache-ratio",
+        type=float,
+        default=0.25,
+        help="Ratio of GPU memory to use for KV cache",
+    )
 
-    # Add 'chat' command parser
+    # Chat command
     chat_parser = subparsers.add_parser(
         "chat", help="Start the Parallax chat server (equivalent to scripts/chat.sh)"
     )

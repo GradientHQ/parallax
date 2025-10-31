@@ -76,6 +76,8 @@ if __name__ == "__main__":
                 model_name=args.model_path,
                 max_batch_size=args.max_batch_size,
                 max_sequence_length=args.max_sequence_length,
+                param_hosting_ratio=args.param_hosting_ratio,
+                kv_cache_ratio=args.kv_cache_ratio,
             )
         else:
             gradient_server = launch_p2p_server(
@@ -96,6 +98,8 @@ if __name__ == "__main__":
                 model_name=args.model_path,
                 max_batch_size=args.max_batch_size,
                 max_sequence_length=args.max_sequence_length,
+                param_hosting_ratio=args.param_hosting_ratio,
+                kv_cache_ratio=args.kv_cache_ratio,
             )
             args.start_layer = gradient_server.block_start_index
             args.end_layer = gradient_server.block_end_index
