@@ -564,7 +564,24 @@ class GradientServer:
                     # Announce the range ID
                     try:
                         if self.scheduler_peer_id is not None:
-                            self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                            response_future = self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                            # Get the response result
+                            response = response_future.result(timeout=30) if hasattr(response_future, 'result') else response_future
+                            
+                            # Print layer allocation information
+                            if response and isinstance(response, dict):
+                                start_layer = response.get("start_layer")
+                                end_layer = response.get("end_layer")
+                                model_name = response.get("model_name")
+                                if start_layer is not None and end_layer is not None:
+                                    logger.info(
+                                        f"Heartbeat: Node {self.lattica.peer_id()}... "
+                                        f"Model: {model_name}, Layers: [{start_layer}, {end_layer})"
+                                    )
+                                else:
+                                    logger.debug(f"Heartbeat response: {response}")
+                            else:
+                                logger.debug(f"Heartbeat: No layer allocation received yet")
                         else:
                             self.lattica.store(
                                 key=self.prefix_id,
