@@ -1,3 +1,22 @@
+"""Parallax model-parallel monkey patches for sglang.
+
+Summary:
+- ParallaxGroupCoordinator (subclasses sglang.srt.distributed.parallel_state.GroupCoordinator):
+    adds pp_start_layer, pp_end_layer, hidden_layers and redefines is_first_rank/is_last_rank to use
+    layer ranges.
+- monkey_patch_init_model_parallel_group: replaces
+    sglang.srt.distributed.parallel_state.init_model_parallel_group to return ParallaxGroupCoordinator.
+- monkey_patch_initialize_model_parallel: replaces
+    sglang.srt.distributed.parallel_state.initialize_model_parallel and passes PP layer bounds when
+    creating pipeline-parallel groups.
+- monkey_patch_make_layers: replaces sglang.srt.utils.make_layers; uses
+    get_pp_group().pp_start_layer/end_layer to instantiate local layers and PPMissingLayer placeholders
+    for non-local layers.
+
+These are minimal, reversible patches to support decentralized per-layer pipeline parallelism. Remove
+when upstream sglang provides native support.
+"""
+
 import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
 

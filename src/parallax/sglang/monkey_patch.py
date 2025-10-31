@@ -19,6 +19,8 @@ from parallax.sglang.monkey_patch_utils.triton_backend import (
 )
 
 
+## Here is some patch func for sglang
+## Hopefully, when sglang support pipeline parallelism natively, we can remove these patches
 def apply_parallax_sglang_monkey_patch():
     apply_qwen3_next_monkey_patch()
     apply_qwen3_next_config_monkey_patch()
