@@ -379,6 +379,8 @@ class Node:
         Returns:
             RTT in milliseconds, or float("inf") if no cached RTT exists.
         """
+        if self == other:
+            return 0.0
         if self.rtt_to_nodes is None:
             return float("inf")
         if other.node_id not in self.rtt_to_nodes:

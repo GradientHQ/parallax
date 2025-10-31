@@ -422,7 +422,8 @@ class Scheduler:
                 req = self._request_queue.get(timeout=poll_interval)
                 if req is None:
                     continue
-                path, ring_rtt = self.request_router.find_optimal_path(self.nodes, self.num_layers)
+                path, path_rtt = self.request_router.find_optimal_path(self.nodes, self.num_layers)
+                logger.debug(f"Path RTT: {path_rtt}")
                 req.routing_table = path
                 for node_id in path:
                     n = self.node_id_to_node[node_id]
