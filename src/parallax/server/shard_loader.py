@@ -165,7 +165,16 @@ class MLXModelLoader:
         shard_weights = {}
         layer_key_prefix = "model.layers"  # Common prefix
 
-        for wf in weight_files:
+        logger.debug(
+            f"Loading shard layers [{current_start_layer}, {current_end_layer}) from {len(weight_files)} weight files"
+        )
+        loaded_keys_count = 0
+
+        for file_idx, wf in enumerate(weight_files):
+            logger.debug(
+                f"Scanning weight file {file_idx + 1}/{len(weight_files)}: {pathlib.Path(wf).name}"
+            )
+            file_loaded_count = 0
             # For bf16 models, we need torch tensors as a bridge
             with safetensors.safe_open(wf, framework="pt") as f:
                 for key in f.keys():
@@ -213,6 +222,13 @@ class MLXModelLoader:
                     # If the key is needed, load only that tensor from the file
                     if is_needed:
                         shard_weights[remapped_key] = mx.array(f.get_tensor(key))
+                        loaded_keys_count += 1
+                        file_loaded_count += 1
+
+            if file_loaded_count > 0:
+                logger.debug(f"  Loaded {file_loaded_count} tensors from {pathlib.Path(wf).name}")
+            else:
+                logger.debug(f"  Skipped {pathlib.Path(wf).name} (no relevant layers)")
 
         if (quantization := config.get("quantization", None)) is not None:
             logger.info("Model is quantized. Applying quantization parameters...")
@@ -249,6 +265,10 @@ class MLXModelLoader:
                 mode=quantization.get("mode", "affine"),
                 class_predicate=class_predicate,
             )
+
+        logger.debug(
+            f"Loaded {loaded_keys_count} weight tensors for shard layers [{current_start_layer}, {current_end_layer})"
+        )
 
         model_shard.load_weights(list(shard_weights.items()), strict=strict)
 
