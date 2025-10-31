@@ -270,6 +270,19 @@ class GradientServer:
 
         self.lattica.build()
 
+        if len(self.relay_servers) > 0:
+            try:
+                is_symmetric_nat = self.lattica.is_symmetric_nat()
+                if is_symmetric_nat is None:
+                    logger.warning("Failed to get is symmetric NAT, skip")
+                elif is_symmetric_nat:
+                    logger.error(
+                        "Your network NAT type is symmetric, relay does not work on this type of NAT, see https://en.wikipedia.org/wiki/Network_address_translation"
+                    )
+                    exit(1)
+            except Exception as e:
+                logger.exception(f"Error in is symmetric NAT: {e}")
+
         if self.scheduler_addr == "auto":
             self.scheduler_peer_id = None
             for _ in range(20):

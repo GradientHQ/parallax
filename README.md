@@ -4,14 +4,18 @@
   </p>
 </div>
 
+[![license](https://img.shields.io/github/license/GradientHQ/parallax.svg)](https://github.com/GradientHQ/parallax/tree/main/LICENSE)
+[![issue resolution](https://img.shields.io/github/issues-closed-raw/GradientHQ/parallax)](https://github.com/GradientHQ/parallax/issues)
+[![open issues](https://img.shields.io/github/issues-raw/GradientHQ/parallax)](https://github.com/GradientHQ/parallax/issues)
+
 | [**Gradient**](https://gradient.network)
-| [**Blog**](https://gradient.network/blog/parallax-world-inference-engine)
+| [**Blog**](https://gradient.network/blog/parallax-the-sovereign-ai-os)
 | [**X(Twitter)**](https://x.com/Gradient_HQ)
-| [**Discord**](https://discord.gg/gradientnetwork)
+| [**Discord**](https://discord.gg/parallax)
 | [**Arxiv**](https://arxiv.org/pdf/2509.26182v1)
 
 ## News
-- [2025/10] 🔥 Parallax version 0.0.01 has been released!
+- [2025/10] 🔥 Parallax version 0.0.1 has been released!
 
 ## About
 A fully decentralized inference engine developed by [Gradient](https://gradient.network). Parallax lets you build your own AI cluster for model inference onto a set of distributed nodes despite their varying configuration and physical location. Its core features include:
@@ -71,6 +75,18 @@ Next time to re-activate this virtual environment, run ```source ./venv/bin/acti
 ```sh
 pip install -e '.[dev]'
 ```
+
+**Note for macOS users regarding network permissions**
+
+On macOS, you need to allow your terminal or IDE (such as Terminal, iTerm2, VS Code, Cursor, etc.) access to the local network in order for Parallax to work correctly. If the application prompts you for network access the first time you run Parallax, click "Allow." If you have already denied access, follow these steps to enable it:
+
+1. Open System Settings from the Apple menu.
+2. Click on Privacy & Security in the sidebar.
+3. Click on Local Network.
+4. For each app listed, turn the ability to access your local network on or off using the toggle switch.
+
+This will ensure Parallax has the proper network permissions for local communication.
+
 
 ### Windows Application
 [Click here](https://github.com/GradientHQ/parallax_win_cli/releases/latest/download/Parallax_Win_Setup.exe) to get latest Windows installer.
@@ -133,6 +149,11 @@ parallax run
 parallax run
 ```
 
+To allow the API to be accessible from other machines, add the argument `--host 0.0.0.0` when launching scheduler.
+```sh
+parallax run --host 0.0.0.0
+```
+
 When running `parallax run` for the first time or after an update, some basic info (like version and gpu name) might be sent to help improve the project. To disable this, use the `-u` flag:
 ```sh
 parallax run -u
@@ -174,9 +195,25 @@ Done! You have your own AI cluster now.
 
 ![Chat](docs/images/chat_interface.png)
 
-#### Chat on Node
+#### Accessing the chat interface from another non-scheduler computer
 
-If you are only running the node service on your machine, you can visit http://localhost:3002 to access the chat page.
+You can access the chat interface from any non-scheduler computer, not just those running a node server. Simply start the chat server with:
+
+```sh
+# local area network env
+parallax chat
+# public network env
+parallax chat -s {scheduler-address}
+# example
+parallax chat -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
+```
+
+After launching, visit [http://localhost:3002](http://localhost:3002) in your browser to use the chat interface.
+
+To allow the API to be accessible from other machines, add the argument `--host 0.0.0.0` when launching chat interface.
+```sh
+parallax chat --host 0.0.0.0
+```
 
 ### Without frontend
 #### Step 1: Launch scheduler
@@ -280,7 +317,9 @@ For Windows, simply go to Control Panel → Programs → Uninstall a program, fi
 
 |              | Provider     | HuggingFace Collection  |  Blog  | Description |
 |:-------------|:-------------|:----------------------------:|:----------------------------:|:----------------------------|
-|DeepSeek       | Deepseek    | [DeepSeek-V3.1](https://huggingface.co/collections/deepseek-ai/deepseek-v31) <br>[DeepSeek-R1](https://huggingface.co/collections/deepseek-ai/deepseek-r1) <br>[DeepSeek-V3](https://huggingface.co/collections/deepseek-ai/deepseek-v3) <br>[DeepSeek-V2](https://huggingface.co/collections/deepseek-ai/deepseek-v2) | [DeepSeek V3.1: The New Frontier in Artificial Intelligence](https://deepseek.ai/blog/deepseek-v31) | "DeepSeek" is an advanced large language model series from Deepseek AI, offering multiple generations such as DeepSeek-V3.1, DeepSeek-R1, DeepSeek-V2, and DeepSeek-V3. These models are designed for powerful natural language understanding and generation, with various sizes and capabilities for research and production use. |
+|DeepSeek      | Deepseek     | [DeepSeek-V3.1](https://huggingface.co/collections/deepseek-ai/deepseek-v31) <br>[DeepSeek-R1](https://huggingface.co/collections/deepseek-ai/deepseek-r1) <br>[DeepSeek-V3](https://huggingface.co/collections/deepseek-ai/deepseek-v3) <br>[DeepSeek-V2](https://huggingface.co/collections/deepseek-ai/deepseek-v2) | [DeepSeek V3.1: The New Frontier in Artificial Intelligence](https://deepseek.ai/blog/deepseek-v31) | "DeepSeek" is an advanced large language model series from Deepseek AI, offering multiple generations such as DeepSeek-V3.1, DeepSeek-R1, DeepSeek-V2, and DeepSeek-V3. These models are designed for powerful natural language understanding and generation, with various sizes and capabilities for research and production use. |
+|MiniMax-M2    | MiniMax AI  | [MiniMax-M2](https://huggingface.co/MiniMaxAI/MiniMax-M2) | [MiniMax M2 & Agent: Ingenious in Simplicity](https://www.minimax.io/news/minimax-m2) | MiniMax-M2 is a compact, fast, and cost-effective MoE model (230B parameters, 10B active) built for advanced coding and agentic workflows. It offers state-of-the-art intelligence and coding abilities, delivering efficient, reliable tool use and strong multi-step reasoning for developers and agents, with high throughput and low latency for easy deployment. |
+|GLM-4.6       | Z AI | [GLM-4.6](https://huggingface.co/zai-org/GLM-4.6) | [GLM-4.6: Advanced Agentic, Reasoning and Coding Capabilities](https://z.ai/blog/glm-4.6) | GLM-4.6 improves upon GLM-4.5 with a longer 200K token context window, stronger coding and reasoning performance, enhanced tool-use and agent integration, and refined writing quality. Outperforms previous versions and is highly competitive with leading open-source models across coding, reasoning, and agent benchmarks. |
 |Kimi-K2       | Moonshot AI  | [Kimi-K2](https://huggingface.co/collections/moonshotai/kimi-k2-6871243b990f2af5ba60617d) | [Kimi K2: Open Agentic Intelligence](https://moonshotai.github.io/Kimi-K2/) | "Kimi-K2" is Moonshot AI's Kimi-K2 model family, including Kimi-K2-Instruct and Kimi-K2-Instruct-0905. The models are designed for agentic intelligence and available in different versions and parameter sizes. |
 |Qwen          | Qwen         | [Qwen3-Next](https://huggingface.co/collections/Qwen/qwen3-next-68c25fd6838e585db8eeea9d) <br>[Qwen3](https://huggingface.co/collections/Qwen/qwen3-67dd247413f0e2e4f653967f) <br>[Qwen2.5](https://huggingface.co/collections/Qwen/qwen25-66e81a666513e518adb90d9e)| [Qwen3-Next: Towards Ultimate Training & Inference Efficiency](https://qwen.ai/blog?id=4074cca80393150c248e508aa62983f9cb7d27cd&from=research.latest-advancements-list) | The Qwen series is a family of large language models developed by Alibaba's Qwen team. It includes multiple generations such as Qwen2.5, Qwen3, and Qwen3-Next, which improve upon model architecture, efficiency, and capabilities. The models are available in various sizes and instruction-tuned versions, with support for cutting-edge features like long context and quantization. Suitable for a wide range of language tasks and open-source use cases. |
 |gpt-oss       | OpenAI       | [gpt-oss](https://huggingface.co/collections/openai/gpt-oss-68911959590a1634ba11c7a4) | [Introducing gpt-oss](https://openai.com/index/introducing-gpt-oss/) | "gpt-oss" refers to OpenAI's open-source GPT models, including gpt-oss-20b and gpt-oss-120b. The number (e.g., 20b, 120b) indicates the parameter count (20 billion, 120 billion).  |

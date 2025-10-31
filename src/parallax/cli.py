@@ -257,6 +257,38 @@ def join_command(args, passthrough_args: list[str] | None = None):
     _execute_with_graceful_shutdown(cmd, env=env)
 
 
+def chat_command(args, passthrough_args: list[str] | None = None):
+    """Start the Parallax chat server (equivalent to scripts/chat.sh)."""
+    check_python_version()
+
+    project_root = get_project_root()
+    launch_script = project_root / "src" / "parallax" / "launch_chat.py"
+
+    if not launch_script.exists():
+        print(f"Error: Launch chat script not found at {launch_script}")
+        sys.exit(1)
+
+    # Build the command to run the launch_chat.py script
+    passthrough_args = passthrough_args or []
+    cmd = [sys.executable, str(launch_script)]
+
+    cmd.extend(["--scheduler-addr", args.scheduler_addr])
+
+    # Relay logic based on effective scheduler address
+    if args.use_relay or (
+        args.scheduler_addr != "auto" and not str(args.scheduler_addr).startswith("/")
+    ):
+        logger.info("Using public relay servers")
+        cmd.extend(_get_relay_params())
+
+    # Append any passthrough args (unrecognized by this CLI) directly to the command
+    if passthrough_args:
+        cmd.extend(passthrough_args)
+
+    logger.info(f"Scheduler address: {args.scheduler_addr}")
+    _execute_with_graceful_shutdown(cmd)
+
+
 def collect_machine_info():
     """Collect machine information."""
     version = get_current_version()
@@ -386,6 +418,21 @@ Examples:
         "-u", "--skip-upload", action="store_true", help="Skip upload package info"
     )
 
+    # Add 'chat' command parser
+    chat_parser = subparsers.add_parser(
+        "chat", help="Start the Parallax chat server (equivalent to scripts/chat.sh)"
+    )
+    chat_parser.add_argument(
+        "-s",
+        "--scheduler-addr",
+        default="auto",
+        type=str,
+        help="Scheduler address (required)",
+    )
+    chat_parser.add_argument(
+        "-r", "--use-relay", action="store_true", help="Use public relay servers"
+    )
+
     # Accept unknown args and pass them through to the underlying python command
     args, passthrough_args = parser.parse_known_args()
 
@@ -397,6 +444,8 @@ Examples:
         run_command(args, passthrough_args)
     elif args.command == "join":
         join_command(args, passthrough_args)
+    elif args.command == "chat":
+        chat_command(args, passthrough_args)
     else:
         parser.print_help()
         sys.exit(1)
