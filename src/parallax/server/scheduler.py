@@ -123,6 +123,7 @@ class Scheduler:
             return
 
         request.ready_for_next_step = True
+        request.last_updated_time = time.time()
         # TODO: Handle chunked prefill.
         if request.is_decoding:
             rid = request.request_id
@@ -216,7 +217,7 @@ class Scheduler:
                         continue
             self._running_requests[rid] = req
             # Initialize timing for timeout enforcement
-            req.start_time = time.time()
+            req.last_updated_time = time.time()
             logger.debug(
                 f"Admitted to running: rid={rid}, status={req.status}, running_size={len(self._running_requests)}, ready={req.ready_for_next_step}"
             )
@@ -241,9 +242,9 @@ class Scheduler:
         now = time.time()
         for req in list(self._running_requests.values()):
             try:
-                if req.start_time is None:
-                    raise ValueError("Requests should have start time set.")
-                if now - req.start_time > self.timeout_s:
+                if req.last_updated_time is None:
+                    raise ValueError("Requests should have last updated time set.")
+                if now - req.last_updated_time > self.timeout_s:
                     req.abort = True
                     timed_out.append(req)
             except Exception:
@@ -298,6 +299,7 @@ class Scheduler:
         # Clear ready flags for decodes included in this batch
         for r in batch:
             r.ready_for_next_step = False
+            r.last_updated_time = time.time()
 
         if batch:
             logger.debug(
