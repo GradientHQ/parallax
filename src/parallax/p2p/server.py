@@ -691,7 +691,7 @@ def launch_p2p_server(
         scheduler_addr=scheduler_addr,
         relay_servers=relay_servers,
         block_start_index=pp_start_layer,
-        block_end_layer=pp_end_layer,
+        block_end_index=pp_end_layer,
         hidden_layers=hidden_layers,
         dht_prefix=dht_prefix,
         host_maddrs=[f"/ip4/0.0.0.0/tcp/{tcp_port}", f"/ip4/0.0.0.0/udp/{udp_port}/quic-v1"],
