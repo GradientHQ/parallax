@@ -338,9 +338,15 @@ class GradientServer:
                 # Publish executor metrics to backend on each update
                 def _publish_metrics(_snapshot):
                     try:
+                        # Fire-and-forget: send metrics update without blocking for response
+                        # The announcer thread will periodically check for restart signals
+                        # This avoids blocking during inference when network is congested
                         self.scheduler_stub.node_update(self.get_node_info(is_update=True))
-                    except Exception:
-                        pass
+                        # Note: We don't wait for response here to avoid timeout during busy inference
+                        # Restart signals will be caught by the announcer thread
+                    except Exception as e:
+                        # Log but don't crash on metrics publish errors
+                        logger.debug(f"Metrics publish error (non-critical): {e}")
 
                 set_metrics_publisher(_publish_metrics)
 
@@ -556,11 +562,58 @@ class GradientServer:
 
         def _announcer_thread():
             try:
+                logger.debug("Node announcer thread started")
                 while not self.stop_event.is_set():
                     # Announce the range ID
                     try:
                         if self.scheduler_peer_id is not None:
-                            self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                            logger.debug(f"--------------------------------------------------")
+                            logger.debug("Calling node_update from announcer thread")
+                            node_info = self.get_node_info(is_update=True)
+                            logger.debug(f"Got node_info: {node_info}")
+                            response_future = self.scheduler_stub.node_update(node_info)
+                            logger.debug(f"Announcer received future: {response_future}")
+                            # Wait for async response with longer timeout
+                            # This is the only place we check for restart signals, so it's critical
+                            response = response_future.result(timeout=30) if hasattr(response_future, 'result') else response_future
+                            logger.debug(f"Announcer resolved response: {response}")
+                            # Check if rebalance restart is needed
+                            if response and isinstance(response, dict):
+                                new_start = response.get("start_layer")
+                                new_end = response.get("end_layer")
+                                needs_restart = response.get("needs_restart", False)
+                                rebalance_reason = response.get("rebalance_reason", "")
+                                
+                                logger.debug(
+                                    f"Announcer check: needs_restart={needs_restart}, "
+                                    f"new_layers=[{new_start}, {new_end}), "
+                                    f"current_layers=[{self.block_start_index}, {self.block_end_index})"
+                                )
+                                
+                                # Check if layer allocation actually changed
+                                layers_changed = (new_start is not None and new_end is not None and 
+                                                 (new_start != self.block_start_index or new_end != self.block_end_index))
+                                
+                                # Only restart if layers actually changed
+                                # If needs_restart is set but layers are the same, no need to restart
+                                if layers_changed:
+                                    logger.critical(
+                                        f"🔄 RESTART SIGNAL: {rebalance_reason or 'Layer allocation changed'}\n"
+                                        f"   Current: ({self.block_start_index}-{self.block_end_index})\n"
+                                        f"   New: ({new_start}-{new_end})\n"
+                                        f"   Node will exit to restart..."
+                                    )
+                                    self.shutdown(restart_for_rebalance=True)
+                                    return
+                                elif needs_restart:
+                                    logger.info(
+                                        f"📋 Restart signal received but layer allocation unchanged "
+                                        f"[{self.block_start_index}, {self.block_end_index}). "
+                                        f"No restart needed. Reason: {rebalance_reason}"
+                                    )
+                                    # Clear the restart flag on scheduler side by sending update
+                                    # This prevents repeated restart signals
+                                    pass
                         else:
                             self.lattica.store(
                                 key=self.prefix_id,
@@ -584,7 +637,7 @@ class GradientServer:
         self.announcer = threading.Thread(target=_announcer_thread, daemon=True)
         self.announcer.start()
 
-    def get_node_info(self, is_update: bool = False):
+    def get_node_info(self, is_update: bool = False, is_rebalance_leave: bool = False):
         # update rtt to nodes
         if time.time() - self.rtt_last_update > self.rtt_update_interval:
             self.rtts = {}
@@ -623,7 +676,7 @@ class GradientServer:
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
             "kv_cache_ratio": 0.25,
-            "param_hosting_ratio": 0.65,
+            "param_hosting_ratio": 0.06,
             "max_concurrent_requests": self.max_batch_size,
             "max_sequence_length": (
                 1024 if self.max_sequence_length is None else self.max_sequence_length
@@ -640,23 +693,109 @@ class GradientServer:
                 info["layer_latency_ms"] = metrics.get("layer_latency_ms")
             info["start_layer"] = self.block_start_index
             info["end_layer"] = self.block_end_index
+        
+        # Mark if this is a rebalance-triggered leave (to avoid cascading rebalances)
+        if is_rebalance_leave:
+            info["is_rebalance_leave"] = True
 
         return info
 
-    def shutdown(self):
-        self.stop_event.set()
+    def needs_rebalance_restart(self):
+        """Check if node needs to restart for rebalancing."""
+        return getattr(self, '_restart_for_rebalance', False)
+    
+    def set_executor(self, executor):
+        """Set executor reference for shutdown coordination."""
+        self._executor = executor
+    
+    def shutdown(self, restart_for_rebalance=False):
+        import threading
+        
+        current_thread_name = threading.current_thread().name
+        logger.debug(f"shutdown() called by thread={current_thread_name}, restart_for_rebalance={restart_for_rebalance}")
+        
+        # Prevent duplicate shutdown calls
+        if hasattr(self, '_shutdown_called') and self._shutdown_called:
+            logger.debug(f"Shutdown already called, skipping duplicate call from thread={current_thread_name}")
+            return
+        self._shutdown_called = True
+        
+        # Store restart flag for later checking by main thread
+        if restart_for_rebalance:
+            self._restart_for_rebalance = True
+            logger.info(f"🔄 Rebalance restart requested (thread={current_thread_name}). Stopping executor...")
+            # Stop executor to interrupt main loop
+            if hasattr(self, '_executor') and self._executor is not None:
+                try:
+                    self._executor.shutdown()
+                    logger.info("Executor shutdown initiated")
+                except Exception as e:
+                    logger.warning(f"Error shutting down executor: {e}")
 
-        self.status = ServerState.OFFLINE
+        # Send node_leave RPC BEFORE setting offline status and closing connection
+        # This ensures the RPC completes successfully
         if self.scheduler_addr is not None:
-            logger.info(f"Leave scheduler: {self.lattica.peer_id()}")
-            self.scheduler_stub.node_leave(self.get_node_info(is_update=True))
+            logger.info(f"Leave scheduler: {self.lattica.peer_id()}, is_rebalance_leave={restart_for_rebalance}")
+            try:
+                # Mark if this leave is due to rebalance restart (to avoid cascading rebalances)
+                node_info = self.get_node_info(is_update=True, is_rebalance_leave=restart_for_rebalance)
+                
+                # If get_node_info returns empty (peers disconnected), create minimal info
+                if not node_info or not node_info.get('node_id'):
+                    logger.warning("get_node_info returned empty, creating minimal leave info")
+                    node_info = {
+                        "node_id": self.lattica.peer_id(),
+                        "hardware": {
+                            "node_id": self.lattica.peer_id(),
+                            "tflops_fp16": 7.1,
+                            "gpu_name": "Unknown",
+                            "memory_gb": 16.0,
+                            "memory_bandwidth_gbps": 100.0
+                        },
+                        "kv_cache_ratio": 0.25,
+                        "param_hosting_ratio": 0.06,
+                        "max_concurrent_requests": self.max_batch_size,
+                        "max_sequence_length": 1024,
+                        "rtt_to_nodes": {},
+                        "status": self.status.value,
+                        "is_active": False,
+                        "start_layer": self.block_start_index,
+                        "end_layer": self.block_end_index,
+                    }
+                    # Critical: ensure is_rebalance_leave is set
+                    if restart_for_rebalance:
+                        node_info["is_rebalance_leave"] = True
+                
+                logger.debug(f"Sending node_leave with is_rebalance_leave={node_info.get('is_rebalance_leave', False)}")
+                
+                # CRITICAL: Wait for RPC to complete before closing connection
+                # Otherwise the RPC call will fail with "channel closed" error
+                future = self.scheduler_stub.node_leave(node_info)
+                try:
+                    # Wait up to 3 seconds for the RPC to complete (timeout must be int)
+                    result = future.result(timeout=3)
+                    logger.info(f"node_leave RPC completed successfully: {result}")
+                except Exception as rpc_error:
+                    logger.error(f"node_leave RPC failed: {rpc_error}")
+            except Exception as e:
+                logger.warning(f"Failed to notify scheduler of node leave: {e}")
+        
+        # NOW set stop_event and offline status after RPC is sent
+        self.stop_event.set()
+        self.status = ServerState.OFFLINE
 
-        if self.announcer is not None:
-            self.announcer.join()
-        if self.routing_table_updater is not None:
-            self.routing_table_updater.join()
+        # Avoid joining the current thread (deadlock)
+        current_thread = threading.current_thread()
+        if self.announcer is not None and self.announcer != current_thread:
+            self.announcer.join(timeout=2)
+        if self.routing_table_updater is not None and self.routing_table_updater != current_thread:
+            self.routing_table_updater.join(timeout=2)
+        
+        # Close connection AFTER waiting for RPC to complete
         if self.lattica is not None:
+            logger.debug("Closing lattica connection...")
             self.lattica.close()
+            logger.debug("Lattica connection closed")
 
 
 def launch_p2p_server(

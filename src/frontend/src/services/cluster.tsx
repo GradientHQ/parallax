@@ -37,6 +37,7 @@ export interface ModelInfo {
   readonly name: string;
   readonly displayName: string;
   readonly logoUrl: string;
+  readonly numLayers?: number;
 }
 
 export type ClusterStatus = 'idle' | 'waiting' | 'available' | 'rebalancing' | 'failed';
@@ -64,6 +65,7 @@ export interface NodeInfo {
   readonly status: NodeStatus;
   readonly gpuName: string;
   readonly gpuMemory: number;
+  readonly layers?: string;
 }
 
 // Interface
@@ -114,10 +116,11 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
       try {
         const rawList = await getModelList();
         setModelInfoList((prev) => {
-          const next = rawList.map((name) => ({
-            name,
-            displayName: name,
-            logoUrl: getLogoUrl(name),
+          const next = rawList.map((item) => ({
+            name: item.name,
+            displayName: item.name,
+            logoUrl: getLogoUrl(item.name),
+            numLayers: item.num_layers,
           }));
           if (JSON.stringify(next) !== JSON.stringify(prev)) {
             debugLog('setModelInfoList', next);
@@ -177,11 +180,12 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
         setNodeInfoList((prev) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           let next = (node_list as any[]).map<NodeInfo>(
-            ({ node_id, status, gpu_name, gpu_memory }: any) => ({
+            ({ node_id, status, gpu_name, gpu_memory, layers }: any) => ({
               id: node_id,
               status,
               gpuName: gpu_name,
               gpuMemory: gpu_memory,
+              layers,
             }),
           );
 

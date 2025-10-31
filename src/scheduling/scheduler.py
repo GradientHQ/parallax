@@ -86,7 +86,7 @@ class Scheduler:
 
         # Event queues for main loop orchestration (thread-safe)
         self._pending_joins: "queue.Queue[Node]" = queue.Queue()
-        self._pending_leaves: "queue.Queue[str]" = queue.Queue()
+        self._pending_leaves: "queue.Queue[Tuple[str, bool]]" = queue.Queue()  # (node_id, is_rebalance_leave)
         self._pending_node_updates: "queue.Queue[Tuple[str, Optional[int], Optional[float], Optional[Dict[str, float]], Optional[bool]]]" = (queue.Queue())
 
         # Concurrency controls
@@ -99,6 +99,9 @@ class Scheduler:
         # Thread-safe bootstrap state
         self._bootstrapped: bool = False
         self._bootstrapped_event: threading.Event = threading.Event()
+        # Track if rebalance is needed (nodes should restart)
+        self._rebalance_restart_needed: bool = False
+        self._rebalance_reason: str = ""
         logger.debug(
             f"Scheduler initialized, min_nodes_bootstrapping {self.min_nodes_bootstrapping}, "
             f"strategy {strategy}, rebalance threshold {rebalance_threshold}"
@@ -144,6 +147,14 @@ class Scheduler:
             return False
         self._bootstrapped = True
         self._bootstrapped_event.set()
+        # Clear rebalance restart flag after successful bootstrap
+        if self._rebalance_restart_needed:
+            logger.info(
+                "Rebalance complete: All nodes have restarted and pipeline is established. "
+                "Clearing restart flag."
+            )
+            self._rebalance_restart_needed = False
+            self._rebalance_reason = ""
         logger.debug("Bootstrapping completed successfully; full pipeline established")
         return True
 
@@ -217,9 +228,9 @@ class Scheduler:
         self._pending_joins.put(node)
         self._wake_event.set()
 
-    def enqueue_leave(self, node_id: str) -> None:
+    def enqueue_leave(self, node_id: str, is_rebalance_leave: bool = False) -> None:
         """Enqueue a leave event."""
-        self._pending_leaves.put(node_id)
+        self._pending_leaves.put((node_id, is_rebalance_leave))
         self._wake_event.set()
 
     def enqueue_node_update(
@@ -262,17 +273,58 @@ class Scheduler:
         with self._node_count_cv:
             self._node_count_cv.notify_all()
 
-    def leave(self, node_id: str) -> None:
-        """Remove a node from allocation and refresh plan and materialized nodes."""
+    def leave(self, node_id: str, is_rebalance_leave: bool = False) -> None:
+        """Remove a node from allocation and refresh plan and materialized nodes.
+        
+        Args:
+            node_id: ID of the node leaving
+            is_rebalance_leave: If True, this leave is part of a rebalance restart,
+                               so we should NOT trigger another rebalance (avoid cascade)
+        """
         if node_id not in self.layer_allocator.node_id_to_node:
             raise ValueError(f"Node {node_id} not found in nodes")
         node = self.node_id_to_node[node_id]
         logger.debug(
-            "Leaving node %s (start=%s, end=%s)", node_id, node.start_layer, node.end_layer
+            "Leaving node %s (start=%s, end=%s), is_rebalance_leave=%s", 
+            node_id, node.start_layer, node.end_layer, is_rebalance_leave
         )
         self.layer_allocator.leave(node_id)
-        if self.layer_allocator.should_global_rebalance():
-            logger.debug("Global rebalance triggered due to node leave")
+        
+        # Skip rebalance trigger if this leave is part of a rebalance restart
+        # (to avoid cascading rebalances when nodes exit to restart)
+        if is_rebalance_leave:
+            logger.info(
+                f"Node {node_id} leaving for rebalance restart, skipping rebalance trigger"
+            )
+            with self._node_count_cv:
+                self._node_count_cv.notify_all()
+            return
+        
+        # Check if we need to trigger global rebalance
+        needs_rebalance = False
+        rebalance_reason = ""
+        
+        # Case 1: No full pipeline coverage
+        if not self.layer_allocator.has_full_pipeline():
+            needs_rebalance = True
+            rebalance_reason = f"Node {node_id} left, no complete pipeline coverage"
+        # Case 2: Has full coverage but not contiguous (has overlaps or gaps)
+        elif not self.layer_allocator.has_contiguous_pipeline():
+            needs_rebalance = True
+            rebalance_reason = f"Node {node_id} left, pipeline has overlaps/gaps (not contiguous)"
+        # Case 3: Load imbalance exceeds threshold
+        elif self.layer_allocator.should_global_rebalance():
+            needs_rebalance = True
+            rebalance_reason = f"Node {node_id} left, load imbalance detected"
+        
+        if needs_rebalance:
+            logger.warning(
+                f"Global rebalance triggered: {rebalance_reason}. "
+                f"{len(self.nodes)} nodes remaining. All nodes need to restart."
+            )
+            # Set restart flag for all remaining nodes
+            self._rebalance_restart_needed = True
+            self._rebalance_reason = rebalance_reason
             # TODO: send a signal to the nodes to stop running requests
             #       and re-assign start/end layers so nodes can re-shard
             self._bootstrapped = False
@@ -507,11 +559,11 @@ class Scheduler:
         """Handle pending leave events safely."""
         while True:
             try:
-                node_id = self._pending_leaves.get_nowait()
+                node_id, is_rebalance_leave = self._pending_leaves.get_nowait()
             except queue.Empty:
                 break
             try:
-                self.leave(node_id)
+                self.leave(node_id, is_rebalance_leave=is_rebalance_leave)
             except Exception as exc:
                 logger.warning(f"Leave failed for {node_id}: {exc}")
 

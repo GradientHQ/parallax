@@ -56,6 +56,7 @@ const ListItem = styled(MuiListItem)(({ theme }) => {
     backgroundColor: 'transparent',
     padding: spacing(2),
     overflow: 'visible',
+    minWidth: '200px', // Ensure minimum width to accommodate full text
   };
 }) as typeof MuiListItem;
 
@@ -76,6 +77,8 @@ const ListItemText = styled(MuiListItemText)(({ theme }) => {
     position: 'relative',
     display: 'block',
     height: '100%',
+    minWidth: '180px', // Ensure text container has enough width
+    overflow: 'visible',
   };
 }) as typeof MuiListItemText;
 
@@ -145,7 +148,7 @@ const Dash: FC<{ animate?: boolean }> = ({ animate }) => {
 };
 
 const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node }) => {
-  const { id, status, gpuName, gpuMemory } = node || { status: 'waiting' };
+  const { id, status, gpuName, gpuMemory, layers } = node || { status: 'waiting' };
   const { palette } = useTheme();
   const { main, lighter } =
     status === 'waiting' ?
@@ -163,6 +166,7 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
         opacity,
         padding: variant === 'menu' ? 0 : undefined,
         height: variant === 'menu' ? '2.5rem' : undefined,
+        minWidth: variant === 'menu' ? 'auto' : '220px', // Ensure menu items have enough width
       }}
     >
       <ListItemIcon>
@@ -172,6 +176,9 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
       <ListItemText>
         {(node && (
           <Stack
+            direction='row'
+            alignItems='center'
+            gap={1}
             sx={
               variant === 'menu' ?
                 {
@@ -180,12 +187,21 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
                   left: 0,
                   right: 0,
                   transform: 'translateY(-50%)',
+                  overflow: 'visible',
+                  whiteSpace: 'nowrap',
                 }
               : undefined
             }
           >
-            <Typography variant='body1' sx={{ fontWeight: 500 }}>
-              {gpuName} {gpuMemory}GB
+            <Typography 
+              variant='body1' 
+              sx={{ 
+                fontWeight: 500,
+                overflow: 'visible',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {gpuName} {gpuMemory}GB {layers && `｜ layers [${layers})`}
             </Typography>
             {/* <Typography variant='caption' color='text.disabled'>
               Rancho Cordova, United States

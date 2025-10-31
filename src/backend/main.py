@@ -36,10 +36,28 @@ request_handler = RequestHandler()
 
 @app.get("/model/list")
 async def model_list():
+    model_list_names = get_model_list()
+    # Enhanced model list with layer count info
+    model_list_enhanced = []
+    for model_name in model_list_names:
+        try:
+            from backend.server.static_config import get_model_info
+            model_info = get_model_info(model_name)
+            model_list_enhanced.append({
+                "name": model_name,
+                "num_layers": model_info.num_layers,
+            })
+        except Exception as e:
+            logger.warning(f"Failed to get model info for {model_name}: {e}")
+            model_list_enhanced.append({
+                "name": model_name,
+                "num_layers": 0,
+            })
+    
     return JSONResponse(
         content={
             "type": "model_list",
-            "data": get_model_list(),
+            "data": model_list_enhanced,
         },
         status_code=200,
     )

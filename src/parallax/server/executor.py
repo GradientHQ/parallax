@@ -100,6 +100,9 @@ class Executor:
         # Backend
         self.device = get_current_device()
         logger.debug(f"Executor initializing on device: {self.device}")
+        
+        # Shutdown flag for clean exit
+        self._should_stop = False
 
         # Sharded Model
         if self.device == "cuda":
@@ -1122,7 +1125,7 @@ class Executor:
         logger.debug(
             f"Executor for layers [{self.start_layer}, {self.end_layer}) starting run loop..."
         )
-        while True:
+        while not self._should_stop:
             # 1. Ingest new requests from the http frontend
             if self.is_first_peer:
                 http_requests = self.recv_requests_from_http()
@@ -1213,18 +1216,29 @@ class Executor:
                         release_cuda_request(self.running_batch, req.request_id)
                     else:
                         self.kv_cache_manager.release_request(req.request_id)
+        
+        logger.info("✅ Executor run_loop exited cleanly (stop flag set)")
 
     def run_loop_in_background(self):
         """Run the executor loop in the background."""
 
     def shutdown(self):
         """Shuts down the executor."""
+        # Prevent duplicate shutdown calls
+        if self._should_stop:
+            logger.debug("Executor already shutting down, skipping duplicate call")
+            return
+        
         logger.debug("Executor shutting down...")
-        self.recv_from_peer_socket.close()
-        self.send_to_peer_socket.close()
-        self.recv_from_ipc_socket.close()
-        self.send_to_ipc_socket.close()
-        self.zmq_context.term()
+        self._should_stop = True  # Signal run_loop to exit
+        try:
+            self.recv_from_peer_socket.close()
+            self.send_to_peer_socket.close()
+            self.recv_from_ipc_socket.close()
+            self.send_to_ipc_socket.close()
+            self.zmq_context.term()
+        except Exception as e:
+            logger.debug(f"Error closing sockets (may already be closed): {e}")
         logger.debug("Executor shutdown complete.")
 
 

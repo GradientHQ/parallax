@@ -1,6 +1,6 @@
 import threading
 import time
-from typing import List
+from typing import List, Optional, Tuple
 
 from lattica import Lattica
 
@@ -47,6 +47,9 @@ class SchedulerManage:
         self.lattica = None
         self.stubs = {}
         self.is_local_network = False
+        # Cache for status to reduce frequent logging
+        self._status_cache: Optional[Tuple[str, float]] = None
+        self._status_cache_ttl = 1.0  # 1 second TTL
 
     def run(self, model_name, init_nodes_num, is_local_network=True):
         """
@@ -112,11 +115,15 @@ class SchedulerManage:
         return [self.build_node_info(node) for node in self.scheduler.nodes]
 
     def build_node_info(self, node):
+        layer_info = None
+        if node.start_layer is not None and node.end_layer is not None:
+            layer_info = f"{node.start_layer}-{node.end_layer}"
         return {
             "node_id": node.node_id,
             "status": NODE_STATUS_AVAILABLE if node.is_active else NODE_STATUS_WAITING,
             "gpu_name": node.hardware.gpu_name,
             "gpu_memory": node.hardware.memory_gb,
+            "layers": layer_info,
         }
 
     def _start_scheduler(self, model_name, init_nodes_num):
@@ -131,7 +138,14 @@ class SchedulerManage:
         self.init_nodes_num = init_nodes_num
 
         model_info = get_model_info(model_name)
-        self.scheduler = Scheduler(model_info, [], min_nodes_bootstrapping=init_nodes_num)
+        # Increase heartbeat_timeout to 300s (5 min) to avoid false positives during inference
+        # The default 60s is too short when nodes are busy with request processing
+        self.scheduler = Scheduler(
+            model_info, 
+            [], 
+            min_nodes_bootstrapping=init_nodes_num,
+            heartbeat_timeout=300.0
+        )
 
         # Run the scheduler's event/dispatch loops in background so the process
         # can continue to serve RPCs and HTTP traffic.
@@ -239,18 +253,32 @@ class SchedulerManage:
     def get_schedule_status(self):
         """
         Return whether a full pipeline has been allocated across joined nodes.
+        Uses caching to reduce frequent logging.
         """
         if self.scheduler is None:
-            logger.debug("SchedulerManage status queried: waiting (scheduler not initialized)")
+            if self._status_cache is None or time.time() - self._status_cache[1] > self._status_cache_ttl:
+                logger.debug("SchedulerManage status queried: waiting (scheduler not initialized)")
+                self._status_cache = (NODE_STATUS_WAITING, time.time())
             return NODE_STATUS_WAITING
 
+        # Check cache first
+        current_time = time.time()
+        if self._status_cache is not None and current_time - self._status_cache[1] <= self._status_cache_ttl:
+            return self._status_cache[0]
+
+        # Calculate new status
         # todo rebalance status
         status = (
             NODE_STATUS_AVAILABLE
             if self.scheduler.layer_allocator.has_full_active_pipeline()
             else NODE_STATUS_WAITING
         )
+        
+        # Log every time (when cache expired, about once per second)
         logger.debug(f"SchedulerManage status queried: {status}")
+        
+        # Update cache
+        self._status_cache = (status, current_time)
         return status
 
     def get_call_url_by_node_id(self, node_id):

@@ -59,10 +59,15 @@ class RPCConnectionHandler(ConnectionHandler):
 
     @rpc_method
     def node_leave(self, message):
-        logger.debug(f"receive node_leave request: {message}")
+        is_rebalance_leave = message.get("is_rebalance_leave", False)
+        node_id = message.get("node_id", "unknown")
+        logger.debug(f"receive node_leave request from {node_id}, is_rebalance_leave={is_rebalance_leave}")
+        logger.debug(f"Full message: {message}")
         try:
             node = self.build_node(message)
-            self.scheduler.enqueue_leave(node.node_id)
+            # Check if this is a rebalance-triggered leave (to avoid cascading rebalances)
+            logger.info(f"Node {node.node_id} leaving (is_rebalance_leave={is_rebalance_leave})")
+            self.scheduler.enqueue_leave(node.node_id, is_rebalance_leave=is_rebalance_leave)
             return {}
         except Exception as e:
             logger.exception(f"node_leave error: {e}")
@@ -80,7 +85,9 @@ class RPCConnectionHandler(ConnectionHandler):
                 new_rtt_to_nodes=node.rtt_to_nodes,
                 is_active=node.is_active,
             )
-            return {}
+            # Return current layer allocation to node
+            layer_allocation = self.get_layer_allocation(node.node_id)
+            return layer_allocation if layer_allocation else {}
         except Exception as e:
             logger.exception(f"node_update error: {e}")
             return {}
@@ -140,12 +147,21 @@ class RPCConnectionHandler(ConnectionHandler):
         list_node_allocations = self.scheduler.list_node_allocations()
         for node_id, start_layer, end_layer in list_node_allocations:
             if current_node_id == node_id:
-                return {
+                result = {
                     "node_id": node_id,
                     "model_name": self.scheduler.model_info.model_name,
                     "start_layer": start_layer,
                     "end_layer": end_layer,
                 }
+                # Add restart flag if rebalance is needed
+                if self.scheduler._rebalance_restart_needed:
+                    result["needs_restart"] = True
+                    result["rebalance_reason"] = self.scheduler._rebalance_reason
+                    logger.info(
+                        f"Sending restart signal to node {current_node_id}: "
+                        f"layers [{start_layer}, {end_layer}), reason: {self.scheduler._rebalance_reason}"
+                    )
+                return result
         return {}
 
     def build_node(self, node_json: dict):
