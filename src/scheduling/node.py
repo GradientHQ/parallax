@@ -189,7 +189,6 @@ class Node:
     load_compensator: float = 0.05
 
     rtt_to_nodes: Optional[Dict[str, float]] = None
-    rtt_getter: Optional[Callable[["Node", "Node"], float]] = None
 
     _force_max_concurrent_requests: bool = False
 
@@ -375,19 +374,17 @@ class Node:
         self.rtt_to_nodes[target_node_id] = rtt_ms
 
     def get_rtt_to(self, other: "Node") -> float:
-        """Get RTT to another node, measuring via `rtt_getter` if needed.
+        """Get RTT to another node from cached RTTs.
 
-        Falls back to 0.0 if no getter is provided and no cached RTT exists.
+        Returns:
+            RTT in milliseconds, or float("inf") if no cached RTT exists.
         """
-        if self == other:
-            return 0.0
-        if other.node_id in self.rtt_to_nodes:
-            return self.rtt_to_nodes[other.node_id]
-        if self.rtt_getter is None:
-            return 0.0
-        rtt_ms = float(self.rtt_getter(self, other))
-        self.update_rtt(other.node_id, rtt_ms)
-        return rtt_ms
+        if self.rtt_to_nodes is None:
+            return float("inf")
+        if other.node_id not in self.rtt_to_nodes:
+            logger.warning("Cannot find RTT from node %s to node %s", self.node_id, other.node_id)
+            return float("inf")
+        return self.rtt_to_nodes[other.node_id]
 
     def hosts_layer(self, layer_id: int) -> bool:
         """Return True if this node hosts the given layer id.

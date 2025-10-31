@@ -198,7 +198,7 @@ class Scheduler:
         if layer_latency_ms is not None:
             node.set_layer_latency_ms(layer_latency_ms)
         if new_rtt_to_nodes is not None:
-            node.rtt_to_nodes.update(new_rtt_to_nodes)
+            node.rtt_to_nodes = new_rtt_to_nodes
         if is_active is not None:
             node.is_active = is_active
         node.last_heartbeat = time.time()
@@ -422,7 +422,7 @@ class Scheduler:
                 req = self._request_queue.get(timeout=poll_interval)
                 if req is None:
                     continue
-                path, _ = self.request_router.find_optimal_path(self.nodes, self.num_layers)
+                path, ring_rtt = self.request_router.find_optimal_path(self.nodes, self.num_layers)
                 req.routing_table = path
                 for node_id in path:
                     n = self.node_id_to_node[node_id]
