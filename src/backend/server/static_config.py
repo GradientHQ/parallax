@@ -52,7 +52,6 @@ MODELS = {
     "deepseek-ai/DeepSeek-V2": "deepseek-ai/DeepSeek-V2",
     "MiniMaxAI/MiniMax-M2": "mlx-community/MiniMax-M2-4bit",
     "zai-org/GLM-4.6": "mlx-community/GLM-4.6-4bit",
-    "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
 }
 
 logger = logging.getLogger(__name__)

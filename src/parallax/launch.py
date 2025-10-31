@@ -49,8 +49,6 @@ if __name__ == "__main__":
 
         logger.debug(f"executor_input_addr: {args.executor_input_ipc}")
         logger.debug(f"executor_output_addr: {args.executor_output_ipc}")
-        # Hard code for mlx-community models
-        logger.debug(f"self.model_path before mlx check: {args.model_path}")
         if args.scheduler_addr is None:
             if args.log_level != "DEBUG":
                 display_parallax_join(args.model_path)
@@ -103,8 +101,6 @@ if __name__ == "__main__":
             args.end_layer = gradient_server.block_end_index
             args.model_path = gradient_server.model_name
             # Hard code for mlx-community models
-
-            logger.debug(f"self.model_path after mlx check: {args.model_path}")
             logger.debug(
                 f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}"
             )
