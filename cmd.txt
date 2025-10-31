@@ -1,9 +1,0 @@
-cd code/gradient/parallax && source .venv/bin/activate && export HF_ENDPOINT=https://hf-mirror.com
-
-parallax run -m Qwen/Qwen3-0.6B -n 2 --log-level DEBUG | tee test_logs/scheduler.log
-
-parallax join --port 4000 --node-chat-port 4002 --log-level DEBUG | tee test_logs/node1.log
-
-parallax join --port 5000 --node-chat-port 5002 --log-level DEBUG | tee test_logs/node2.log
-
-parallax join --port 6000 --node-chat-port 6002 --log-level DEBUG | tee test_logs/node3.log
