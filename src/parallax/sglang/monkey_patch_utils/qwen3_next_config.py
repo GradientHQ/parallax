@@ -15,6 +15,7 @@ class HybridLayerType(enum.Enum):
     mamba2 = "mamba"
 
 
+## overwirite due to pipeline parallelism
 @property
 def monkey_patch_linear_layer_ids(self):
     """Return linear-attention layer ids restricted to the PP slice.
@@ -29,11 +30,12 @@ def monkey_patch_linear_layer_ids(self):
         and i >= self.start_layer
         and i < self.end_layer
     ]
-    # If no matching layer id, return at least [-1]
-    # just for pp
+    ## If no matching layer id, return at least [-1]
+    ## It is for memory pool calcuate tokens
     return lst if lst else [-1]
 
 
+## overwirite due to pipeline parallelism
 @property
 def monkey_patch_full_attention_layer_ids(self):
     """Return full-attention layer ids restricted to the PP slice.
@@ -48,8 +50,8 @@ def monkey_patch_full_attention_layer_ids(self):
         and i >= self.start_layer
         and i < self.end_layer
     ]
-    # If no matching layer id, return at least [-1]
-    # just for pp
+    ## If no matching layer id, return at least [-1]
+    ## It is for memory pool calcuate tokens
     return lst if lst else [-1]
 
 

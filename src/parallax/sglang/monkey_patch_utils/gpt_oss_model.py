@@ -1,5 +1,7 @@
-import math
+## This is a patch file for sglang GPT-OSS model to support loading mxFP4 MoE experts weights
 
+import math
+import torch
 from sglang.srt.distributed import (
     get_moe_expert_parallel_rank,
     get_moe_expert_parallel_world_size,
@@ -43,6 +45,9 @@ def _parallax_load_mxfp4_experts_weights(self, weights):
     moe_ep_rank_end = (moe_ep_rank + 1) * moe_num_local_experts
 
     for name, weight in weights:
+        ############################################################################
+        ## TODO: remove when sglang code support pipeline parallelism
+        ## This is a patch code for sgalng
         layer_id = get_layer_id(name)
         if (
             layer_id is not None
@@ -50,6 +55,8 @@ def _parallax_load_mxfp4_experts_weights(self, weights):
             and (layer_id < self.model.start_layer or layer_id >= self.model.end_layer)
         ):
             continue
+        ## End of patch
+        ############################################################################
         weight = weight.cuda()
 
         if "gate_up_proj_blocks" in name:

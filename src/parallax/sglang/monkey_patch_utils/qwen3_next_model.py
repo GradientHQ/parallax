@@ -11,6 +11,7 @@ _is_cuda = is_cuda()
 
 
 # ---- Minimal method-level monkey patch to reuse sglang source ----
+# Due to Qwen3NextModel not support pipeline parallelism (PP) natively
 def apply_qwen3_next_monkey_patch():
     """Apply minimal monkey patches to sglang's qwen3_next to support PP without copying code.
 
