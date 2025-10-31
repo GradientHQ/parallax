@@ -139,6 +139,7 @@ class Executor:
                 "kv_block_size": kv_block_size,
                 "max_num_tokens_per_batch": max_num_tokens_per_batch,
                 "dtype": dtype,
+                "moe_runner_backend": moe_runner_backend,
             }
 
             self.model_runner, self.config, self.tokenizer = initialize_cuda_model_runner(
@@ -146,7 +147,7 @@ class Executor:
             )
             self.running_batch = None
             self.cur_batch = None
-            if self == "sglang":
+            if self.backend_type == "sglang":
                 self.running_batch = CudaScheduleBatch(reqs=[], batch_is_full=False)
 
         else:

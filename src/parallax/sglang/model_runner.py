@@ -539,7 +539,7 @@ def apply_parallax_monkey_patch():
 
 
 def initialize_sgl_model_runner(
-    original_model_path: str,
+    model_repo: str,
     start_layer: int,
     end_layer: int,
     kv_cache_memory_fraction: float,
@@ -557,7 +557,7 @@ def initialize_sgl_model_runner(
       - tokenizer: tokenizer driven by mlx-lm
     """
     apply_parallax_monkey_patch()
-    model_path = get_model_path(original_model_path)[0]
+    model_path = get_model_path(model_repo)[0]
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")
@@ -578,7 +578,7 @@ def initialize_sgl_model_runner(
         kv_block_size = 1
 
     server_args = form_sgl_server_args(
-        original_model_path,
+        model_repo,
         dtype,
         attention_backend,
         kv_block_size,
@@ -589,7 +589,7 @@ def initialize_sgl_model_runner(
     if (quantization_config := config.get("quantization_config", None)) is not None:
         quant_method = quantization_config.get("quant_method")
     model_config = ModelConfig(
-        model_path=original_model_path,
+        model_path=model_repo,
         model_override_args="{}",
         dtype=dtype,
         quantization=quant_method,
