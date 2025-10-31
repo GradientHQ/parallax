@@ -240,6 +240,8 @@ class Scheduler:
     def checking_node_heartbeat(self) -> None:
         """Check the heartbeat of all nodes."""
         for node in self.nodes:
+            if not node.is_active:
+                continue
             if time.time() - node.last_heartbeat > self.heartbeat_timeout:
                 logger.debug(f"Node {node.node_id} heartbeat timeout")
                 self.leave(node.node_id)

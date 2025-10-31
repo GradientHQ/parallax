@@ -10,29 +10,28 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # P2P configuration
+    # Lattica configuration
     parser.add_argument("--initial-peers", nargs="+", default=[], help="List of initial DHT peers")
-
     parser.add_argument("--relay-servers", nargs="+", default=[], help="List of relay DHT peers")
-
     parser.add_argument(
         "--announce-maddrs", nargs="+", default=[], help="List of multiaddresses to announce"
     )
-
-    parser.add_argument("--dht-port", type=int, default=None, help="Port for DHT communication")
-
-    parser.add_argument("--host-maddrs", type=str, default=None, help="Multiaddress to host")
-
+    parser.add_argument("--tcp-port", type=int, default=0, help="Port for Lattica TCP listening")
+    parser.add_argument("--udp-port", type=int, default=0, help="Port for Lattica UDP listening")
     parser.add_argument("--dht-prefix", type=str, default="gradient", help="Prefix for DHT keys")
 
-    parser.add_argument("--public-ip", type=str, default=None, help="Public IP address to announce")
-
-    parser.add_argument("--port", type=int, default=5000, help="Port to listen on")
-
+    # Scheduler configuration
+    parser.add_argument("--host", type=str, default="localhost", help="Host to listen on")
+    parser.add_argument("--port", type=int, default=3001, help="Port to listen on")
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Log level",
+    )
     parser.add_argument("--model-name", type=str, default=None, help="Model name")
-
     parser.add_argument("--init-nodes-num", type=int, default=None, help="Number of initial nodes")
-
     parser.add_argument(
         "--is-local-network", type=bool, default=True, help="Whether to use local network"
     )

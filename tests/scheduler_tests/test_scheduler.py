@@ -18,6 +18,7 @@ def _build_node(node_id: str, model: ModelInfo, *, tflops: float, mem_gb: float)
         gpu_name="",
         memory_gb=mem_gb,
         memory_bandwidth_gbps=1000.0,
+        device="cuda",
     )
     n = Node(node_id=node_id, hardware=hw, model_info=model)
     # Ensure latency estimation uses a defined speedup

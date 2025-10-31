@@ -9,3 +9,4 @@ build/
 .venv
 .DS_Store
 *.key
+.cache

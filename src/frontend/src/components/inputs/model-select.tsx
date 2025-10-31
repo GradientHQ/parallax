@@ -9,13 +9,15 @@ import {
   styled,
   Typography,
 } from '@mui/material';
-import { useCluster, type ModelInfo } from '../../services';
+import { useCluster, useHost, type ModelInfo } from '../../services';
 import { useRefCallback } from '../../hooks';
 import { useAlertDialog } from '../mui';
 import { IconRestore } from '@tabler/icons-react';
 
-
-const ModelSelectRoot = styled(Select)<{ ownerState: ModelSelectProps }>(({ theme, ownerState }) => {
+const ModelSelectRoot = styled(Select)<{ ownerState: ModelSelectProps }>(({
+  theme,
+  ownerState,
+}) => {
   const { spacing, typography, palette } = theme;
   const { variant = 'outlined' } = ownerState;
 
@@ -99,6 +101,7 @@ export interface ModelSelectProps {
 }
 
 export const ModelSelect: FC<ModelSelectProps> = ({ variant = 'outlined' }) => {
+  const [{ type: hostType }] = useHost();
   const [
     {
       modelName,
@@ -133,25 +136,25 @@ export const ModelSelect: FC<ModelSelectProps> = ({ variant = 'outlined' }) => {
     <>
       <ModelSelectRoot
         ownerState={{ variant }}
+        readOnly={hostType === 'node'}
         input={variant === 'outlined' ? <OutlinedInput /> : <InputBase />}
         value={modelName}
         onChange={onChange}
-        renderValue={(value) => {
+        renderValue={(value: unknown) => {
           const model = modelInfoList.find((m) => m.name === value);
-          if (!model) return undefined;
+          if (!model) return value as string;
 
-          return variant === 'outlined' ? (
-            <ValueRow>
-              <ModelLogo src={model.logoUrl} />
-              <Stack gap={0.25}>
-                <ModelDisplayName>{model.displayName}</ModelDisplayName>
-                <ModelName>{model.name}</ModelName>
-              </Stack>
-            </ValueRow>
-          ) : (
-            model.name
-          );
+          return variant === 'outlined' ?
+              <ValueRow>
+                <ModelLogo src={model.logoUrl} />
+                <Stack gap={0.25}>
+                  <ModelDisplayName>{model.displayName}</ModelDisplayName>
+                  <ModelName>{model.name}</ModelName>
+                </Stack>
+              </ValueRow>
+            : model.name;
         }}
+        IconComponent={hostType === 'node' ? () => null : undefined}
       >
         {modelInfoList.map((model) => renderOption(model))}
       </ModelSelectRoot>

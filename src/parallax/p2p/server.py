@@ -209,6 +209,8 @@ class GradientServer:
         model_name: Optional[str] = None,
         max_batch_size: Optional[int] = None,
         max_sequence_length: Optional[int] = None,
+        param_hosting_ratio: float = 0.65,
+        kv_cache_ratio: float = 0.25,
     ):
         self.recv_from_peer_addr = recv_from_peer_addr
         self.send_to_peer_addr = send_to_peer_addr
@@ -226,6 +228,8 @@ class GradientServer:
         self.model_name = model_name
         self.max_batch_size = max_batch_size
         self.max_sequence_length = max_sequence_length
+        self.param_hosting_ratio = param_hosting_ratio
+        self.kv_cache_ratio = kv_cache_ratio
         self.prefix_id = f"{dht_prefix}_announce"
         self.lattica = None
         self.routing_table = None
@@ -266,9 +270,22 @@ class GradientServer:
 
         if len(self.initial_peers) > 0:
             logger.info(f"Using initial peers: {self.initial_peers}")
-            self.lattica.with_bootstraps(self.initial_peers)
+            self.lattica.with_bootstraps(self.initial_peers).with_mdns(False)
 
         self.lattica.build()
+
+        if len(self.relay_servers) > 0:
+            try:
+                is_symmetric_nat = self.lattica.is_symmetric_nat()
+                if is_symmetric_nat is None:
+                    logger.warning("Failed to get is symmetric NAT, skip")
+                elif is_symmetric_nat:
+                    logger.error(
+                        "Your network NAT type is symmetric, relay does not work on this type of NAT, see https://en.wikipedia.org/wiki/Network_address_translation"
+                    )
+                    exit(1)
+            except Exception as e:
+                logger.exception(f"Error in is symmetric NAT: {e}")
 
         if self.scheduler_addr == "auto":
             self.scheduler_peer_id = None
@@ -300,13 +317,13 @@ class GradientServer:
 
         if self.scheduler_addr is not None:  # central scheduler mode
             try:
-                self.scheduler_stub = RPCConnectionHandler(self.lattica, None).get_stub(
+                self.scheduler_stub = RPCConnectionHandler(self.lattica, None, None).get_stub(
                     self.scheduler_peer_id
                 )
                 node_info = self.get_node_info()
                 if node_info == {}:
                     logger.error("Failed to get node info, try again after 10 seconds")
-                    del self.lattica
+                    self.lattica.close()
                     self.lattica = None
                     time.sleep(10)
                     return self.run()
@@ -354,8 +371,7 @@ class GradientServer:
         """Find available servers in the DHT network"""
         # Find all announced blocks
         server_blocks = []
-        block_announced_key = f"{self.dht_prefix}_announce"
-        block_servers = self.lattica.get(block_announced_key)
+        block_servers = self.lattica.get(self.prefix_id)
         if block_servers is None:
             return []
         for peer_id, value in block_servers.value.items():
@@ -610,8 +626,8 @@ class GradientServer:
         info = {
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
-            "kv_cache_ratio": 0.25,
-            "param_hosting_ratio": 0.65,
+            "kv_cache_ratio": self.kv_cache_ratio,
+            "param_hosting_ratio": self.param_hosting_ratio,
             "max_concurrent_requests": self.max_batch_size,
             "max_sequence_length": (
                 1024 if self.max_sequence_length is None else self.max_sequence_length
@@ -643,6 +659,8 @@ class GradientServer:
             self.announcer.join()
         if self.routing_table_updater is not None:
             self.routing_table_updater.join()
+        if self.lattica is not None:
+            self.lattica.close()
 
 
 def launch_p2p_server(
@@ -652,9 +670,9 @@ def launch_p2p_server(
     pp_start_layer: int,
     pp_end_layer: int,
     hidden_layers: int,
-    dht_port: Optional[int],
+    tcp_port: int,
+    udp_port: int,
     dht_prefix: str,
-    host_maddrs: Optional[List[str]],
     announce_maddrs: List[str],
     http_port: Optional[int],
     notify_url: str,
@@ -663,15 +681,9 @@ def launch_p2p_server(
     model_name: Optional[str],
     max_batch_size: Optional[int] = None,
     max_sequence_length: Optional[int] = None,
+    param_hosting_ratio: float = 0.65,
+    kv_cache_ratio: float = 0.25,
 ):
-    if dht_port is not None:
-        assert host_maddrs is None, "You can't use --dht-port and --host-maddrs at the same time"
-    else:
-        dht_port = 0
-    if host_maddrs is None:
-        host_maddrs = [f"/ip4/0.0.0.0/tcp/{dht_port}", f"/ip4/0.0.0.0/udp/{dht_port}/quic-v1"]
-
-    # Run the server in a separate thread to keep the main thread free for event loop
     server = GradientServer(
         recv_from_peer_addr=recv_from_peer_addr,
         send_to_peer_addr=send_to_peer_addr,
@@ -682,13 +694,15 @@ def launch_p2p_server(
         block_end_index=pp_end_layer,
         hidden_layers=hidden_layers,
         dht_prefix=dht_prefix,
-        host_maddrs=host_maddrs,
+        host_maddrs=[f"/ip4/0.0.0.0/tcp/{tcp_port}", f"/ip4/0.0.0.0/udp/{udp_port}/quic-v1"],
         announce_maddrs=announce_maddrs,
         http_port=http_port,
         notify_url=notify_url,
         model_name=model_name,
         max_batch_size=max_batch_size,
         max_sequence_length=max_sequence_length,
+        param_hosting_ratio=param_hosting_ratio,
+        kv_cache_ratio=kv_cache_ratio,
     )
     # Start the server
     thread = threading.Thread(target=server.run, daemon=True)

@@ -8,7 +8,7 @@ name = "parallax"
 version = "0.0.1"
 description = "Decentralised pipeline-parallel LLM serving with Sglang + MLX-LM + Lattica"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 packages = [
   { include = "parallax", from = "src" },
   { include = "scheduling", from = "src" },
@@ -28,9 +28,10 @@ dependencies = [
   "uvloop",
   "fastapi",
   "pydantic",
+  "py-machineid",
   "protobuf==6.31.1",
   "dijkstar==2.6.0",
-  "lattica==1.0.4",
+  "lattica==1.0.9",
 ]
 
 [project.scripts]
@@ -47,7 +48,7 @@ mac = [
 gpu = [
   "mlx-lm==0.28.0",
   "mlx[cpu]==0.29.1",
-  "sglang[all]==0.5.2",
+  "sglang[all]==0.5.4.post1",
 ]
 
 benchmark = [

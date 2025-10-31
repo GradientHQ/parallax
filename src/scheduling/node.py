@@ -35,6 +35,7 @@ class NodeHardwareInfo:
     gpu_name: str
     memory_gb: float
     memory_bandwidth_gbps: float
+    device: str
 
 
 @dataclass
@@ -294,9 +295,19 @@ class Node:
             available_memory_bytes,
             self.model_info.decoder_layer_io_bytes(roofline=False),
         )
-        return floor(
-            available_memory_bytes / self.model_info.decoder_layer_io_bytes(roofline=False)
-        )
+        if self.hardware.device == "mlx":
+            # For mlx, consider mlx bit factor
+            return floor(
+                available_memory_bytes
+                / (
+                    self.model_info.decoder_layer_io_bytes(roofline=False)
+                    * self.model_info.mlx_bit_factor
+                )
+            )
+        else:
+            return floor(
+                available_memory_bytes / self.model_info.decoder_layer_io_bytes(roofline=False)
+            )
 
     @property
     def per_decoder_layer_kv_cache_memory(self) -> Optional[int]:

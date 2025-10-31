@@ -105,8 +105,9 @@ class HTTPHandler:
         self.recv_from_executor = get_zmq_socket(context, zmq.PULL, executor_output_ipc_name, True)
         self.processing_requests: Dict[str, HTTPRequestInfo] = {}
         # Load tokenizer for separate detokenizers
-        model_path, _ = get_model_path(model_path_str)
+        model_path = get_model_path(model_path_str)[0]
         config = load_config(model_path)
+        self.model_path_str = model_path_str
         self.tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
         self.detokenizer_class, self.tokenmap = load_detokenizer(model_path, self.tokenizer)
 
@@ -168,6 +169,8 @@ class HTTPHandler:
         if is_first:
             role = "assistant"
             content = ""
+            if "minimax-m2" in self.model_path_str.lower():
+                content = "<think>"
         elif is_last:
             role = None
             content = None
@@ -188,7 +191,11 @@ class HTTPHandler:
                     "matched_stop": request_info.matched_stop,
                 },
             ],
-            "usage": None,
+            "usage": {
+                "prompt_tokens": request_info.prompt_tokens,
+                "total_tokens": request_info.prompt_tokens + request_info.completion_tokens,
+                "completion_tokens": request_info.completion_tokens,
+            },
         }
         choice = response["choices"][0]
         choice["delta"] = {"role": role, "content": content}
@@ -234,7 +241,6 @@ class HTTPHandler:
                 "prompt_tokens": request_info.prompt_tokens,
                 "total_tokens": request_info.prompt_tokens + request_info.completion_tokens,
                 "completion_tokens": request_info.completion_tokens,
-                "prompt_tokens_details": None,
             },
         }
         choice = response["choices"][0]
@@ -256,6 +262,7 @@ class HTTPHandler:
 
             request_info = self.processing_requests[rid]
             request_info.update_time = time.time()
+            request_info.prompt_tokens = recv_dict["prompt_tokens"]
             next_token_id = recv_dict["next_token_id"]
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
@@ -341,11 +348,18 @@ async def v1_chat_completions(raw_request: fastapi.Request):
         request_json = await raw_request.json()
     except Exception as e:
         return create_error_response("Invalid request body, error: ", str(e))
-    request_id = str(uuid.uuid4())
-    request_json["rid"] = request_id
+
+    # Check if request_json has "rid", otherwise generate new one
+    request_id = request_json.get("rid")
+    if request_id is None:
+        request_id = str(uuid.uuid4())
+        request_json["rid"] = request_id
+
     app.state.http_handler.create_request(request_json)
     app.state.http_handler.send_request(request_json)
     req = app.state.http_handler.processing_requests.get(request_id)
+    if req is None:
+        return create_error_response("Request not found", "RequestNotFoundError")
     is_stream = req.stream
 
     if is_stream:

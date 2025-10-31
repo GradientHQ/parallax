@@ -1,17 +1,3 @@
-# coding=utf-8
-# Copyright 2024 The Qwen team, Alibaba Group and the HuggingFace Inc. team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 """Qwen3Hybrid model configuration"""
 
 import enum
@@ -31,10 +17,51 @@ class HybridLayerType(enum.Enum):
 
 @property
 def monkey_patch_linear_layer_ids(self):
-    return [
+    """Return linear-attention layer ids restricted to the PP slice.
+
+    This is intended to be bound as a property on
+    `sglang.srt.configs.qwen3_next.Qwen3NextConfig`.
+    """
+    lst = [
         i
         for i, type_value in enumerate(self.layers_block_type)
         if type_value == HybridLayerType.linear_attention.value
         and i >= self.start_layer
         and i < self.end_layer
     ]
+    # If no matching layer id, return at least [-1]
+    # just for pp
+    return lst if lst else [-1]
+
+
+@property
+def monkey_patch_full_attention_layer_ids(self):
+    """Return full-attention layer ids restricted to the PP slice.
+
+    This is intended to be bound as a property on
+    `sglang.srt.configs.qwen3_next.Qwen3NextConfig`.
+    """
+    lst = [
+        i
+        for i, type_value in enumerate(self.layers_block_type)
+        if type_value == HybridLayerType.full_attention.value
+        and i >= self.start_layer
+        and i < self.end_layer
+    ]
+    # If no matching layer id, return at least [-1]
+    # just for pp
+    return lst if lst else [-1]
+
+
+def apply_qwen3_next_config_monkey_patch():
+    """Bind monkey-patch helpers to the upstream Qwen3NextConfig class.
+
+    We attach the two helpers above as properties so callers can access
+    `config.linear_layer_ids` / `config.full_attention_layer_ids` the same
+    way upstream expects.
+    """
+
+    import sglang.srt.configs.qwen3_next as s
+
+    s.Qwen3NextConfig.linear_layer_ids = monkey_patch_linear_layer_ids
+    s.Qwen3NextConfig.full_attention_layer_ids = monkey_patch_full_attention_layer_ids
