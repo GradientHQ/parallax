@@ -564,10 +564,16 @@ class GradientServer:
                     # Announce the range ID
                     try:
                         if self.scheduler_peer_id is not None:
-                            response_future = self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                            response_future = self.scheduler_stub.node_update(
+                                self.get_node_info(is_update=True)
+                            )
                             # Get the response result
-                            response = response_future.result(timeout=30) if hasattr(response_future, 'result') else response_future
-                            
+                            response = (
+                                response_future.result(timeout=30)
+                                if hasattr(response_future, "result")
+                                else response_future
+                            )
+
                             # Print layer allocation information
                             if response and isinstance(response, dict):
                                 start_layer = response.get("start_layer")
