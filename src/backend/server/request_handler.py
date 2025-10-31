@@ -104,7 +104,6 @@ class RequestHandler:
                 async def stream_generator():
                     response = stub.chat_completion(request_data)
                     first_token_time = None
-                    second_to_last_chunk = None
                     last_chunk = None
                     last_token_time = None
                     try:
@@ -113,13 +112,15 @@ class RequestHandler:
                             last_token_time = time.time()
                             if first_token_time is None:
                                 first_token_time = last_token_time
-                            second_to_last_chunk = last_chunk
-                            last_chunk = chunk
+                            if chunk is not None and not chunk.decode("utf-8").startswith(
+                                "data: [DONE]"
+                            ):
+                                last_chunk = chunk
                             yield chunk
                     finally:
-                        if second_to_last_chunk is not None:
+                        if last_chunk is not None:
                             tps, ttft, input_tokens, output_tokens = get_request_metrics(
-                                second_to_last_chunk, start_time, first_token_time, last_token_time
+                                last_chunk, start_time, first_token_time, last_token_time
                             )
                             if (
                                 tps is not None
@@ -128,7 +129,7 @@ class RequestHandler:
                                 and output_tokens is not None
                             ):
                                 logger.info(
-                                    f"TPS: {tps:.2f} |  TTFT: {ttft} ms | Output tokens: {output_tokens} | Input tokens: {input_tokens}"
+                                    f"Request ID: {request_id} | TPS: {tps:.2f} |  TTFT: {ttft} ms | Output tokens: {output_tokens} | Input tokens: {input_tokens}"
                                 )
                         logger.debug(f"client disconnected for {request_id}")
                         response.cancel()
