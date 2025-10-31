@@ -90,6 +90,8 @@ class RequestHandler:
                 status_code=429,
             )
 
+        # Add request_id and routing_table to request_data
+        request_data["rid"] = str(request_id)
         request_data["routing_table"] = routing_table
         stub = self.get_stub(routing_table[0])
         is_stream = request_data.get("stream", False)

@@ -102,6 +102,9 @@ importers:
       '@gradient-network/prettier-config':
         specifier: ^0.0.1
         version: 0.0.1(prettier@3.6.2)
+      '@types/node':
+        specifier: ^22.18.12
+        version: 22.18.12
       '@types/react':
         specifier: ^19.1.10
         version: 19.1.13
@@ -110,7 +113,7 @@ importers:
         version: 19.1.9(@types/react@19.1.13)
       '@vitejs/plugin-react-swc':
         specifier: ^4.0.0
-        version: 4.1.0(vite@7.1.5)
+        version: 4.1.0(vite@7.1.5(@types/node@22.18.12))
       eslint:
         specifier: ^9.33.0
         version: 9.35.0
@@ -134,7 +137,7 @@ importers:
         version: 8.44.0(eslint@9.35.0)(typescript@5.8.3)
       vite:
         specifier: ^7.1.2
-        version: 7.1.5
+        version: 7.1.5(@types/node@22.18.12)
 
 packages:
 
@@ -963,6 +966,9 @@ packages:
 
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
+
+  '@types/node@22.18.12':
+    resolution: {integrity: sha512-BICHQ67iqxQGFSzfCFTT7MRQ5XcBjG5aeKh5Ok38UBbPe5fxTyE+aHFxwVrGyr8GNlqFMLKD1D3P2K/1ks8tog==}
 
   '@types/parse-json@4.0.2':
     resolution: {integrity: sha512-dISoDXWWQwUquiKsyZ4Ng+HX2KsPL7LyHKHQwgGFEA3IaKac4Obd+h2a/a6waisAoepJlBcx9paWqjA8/HVjCw==}
@@ -2106,6 +2112,9 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  undici-types@6.21.0:
+    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
+
   unified@11.0.5:
     resolution: {integrity: sha512-xKvGhPWw3k84Qjh8bI3ZeJjqnyadK+GEFtazSfZv/rKeTkTjOJho6mFqh2SM96iIcZokxiOpg78GazTSg8+KHA==}
 
@@ -2955,6 +2964,10 @@ snapshots:
 
   '@types/ms@2.1.0': {}
 
+  '@types/node@22.18.12':
+    dependencies:
+      undici-types: 6.21.0
+
   '@types/parse-json@4.0.2': {}
 
   '@types/prop-types@15.7.15': {}
@@ -3070,11 +3083,11 @@ snapshots:
 
   '@ungap/structured-clone@1.3.0': {}
 
-  '@vitejs/plugin-react-swc@4.1.0(vite@7.1.5)':
+  '@vitejs/plugin-react-swc@4.1.0(vite@7.1.5(@types/node@22.18.12))':
     dependencies:
       '@rolldown/pluginutils': 1.0.0-beta.35
       '@swc/core': 1.13.5
-      vite: 7.1.5
+      vite: 7.1.5(@types/node@22.18.12)
     transitivePeerDependencies:
       - '@swc/helpers'
 
@@ -4438,6 +4451,8 @@ snapshots:
 
   typescript@5.8.3: {}
 
+  undici-types@6.21.0: {}
+
   unified@11.0.5:
     dependencies:
       '@types/unist': 3.0.3
@@ -4504,7 +4519,7 @@ snapshots:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
 
-  vite@7.1.5:
+  vite@7.1.5(@types/node@22.18.12):
     dependencies:
       esbuild: 0.25.9
       fdir: 6.5.0(picomatch@4.0.3)
@@ -4513,6 +4528,7 @@ snapshots:
       rollup: 4.50.2
       tinyglobby: 0.2.15
     optionalDependencies:
+      '@types/node': 22.18.12
       fsevents: 2.3.3
 
   web-namespaces@2.0.1: {}

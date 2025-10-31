@@ -2,7 +2,7 @@ r"""Benchmark online serving throughput.
 Adapted from vLLM: https://github.com/vllm-project/vllm/blob/v0.7.2/benchmarks/benchmark_serving.py
 
 On the server side (parallax scheduler with oAI API server), run
-    python src/backend/main.py --dht-port 31328 --port 31328 --init-nodes-num 1
+    python src/backend/main.py --port 31328 --init-nodes-num 1
 
 On the worker side (parallax worker nodes),
     1. Get `scheduler-addr` get from scheduler launching output

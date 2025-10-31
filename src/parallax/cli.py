@@ -8,38 +8,49 @@ bash scripts.
 """
 
 import argparse
+import base64
+import json
 import os
 import signal
 import subprocess
 import sys
-from pathlib import Path
 
-from common.static_config import get_relay_params
+import machineid
+import requests
+
+from common.file_util import get_project_root
+from common.version_check import get_current_version
+from parallax.server.server_info import HardwareInfo
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger("parallax.cli")
 
+PUBLIC_INITIAL_PEERS = [
+    "/dns4/bootstrap-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb",
+    "/dns4/bootstrap-lattica.gradient.network/tcp/18080/p2p/12D3KooWJHXvu8TWkFn6hmSwaxdCLy4ZzFwr4u5mvF9Fe2rMmFXb",
+    "/dns4/bootstrap-lattica-us.gradient.network/udp/18080/quic-v1/p2p/12D3KooWFD8NoyHfmVxLVCocvXJBjwgE9RZ2bgm2p5WAWQax4FoQ",
+    "/dns4/bootstrap-lattica-us.gradient.network/tcp/18080/p2p/12D3KooWFD8NoyHfmVxLVCocvXJBjwgE9RZ2bgm2p5WAWQax4FoQ",
+    "/dns4/bootstrap-lattica-eu.gradient.network/udp/18080/quic-v1/p2p/12D3KooWCNuEF4ro95VA4Lgq4NvjdWfJFoTcvWsBA7Z6VkBByPtN",
+    "/dns4/bootstrap-lattica-eu.gradient.network/tcp/18080/p2p/12D3KooWCNuEF4ro95VA4Lgq4NvjdWfJFoTcvWsBA7Z6VkBByPtN",
+]
+
+PUBLIC_RELAY_SERVERS = [
+    "/dns4/relay-lattica.gradient.network/udp/18080/quic-v1/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
+    "/dns4/relay-lattica.gradient.network/tcp/18080/p2p/12D3KooWDaqDAsFupYvffBDxjHHuWmEAJE4sMDCXiuZiB8aG8rjf",
+    "/dns4/relay-lattica-us.gradient.network/udp/18080/quic-v1/p2p/12D3KooWHMXi6SCfaQzLcFt6Th545EgRt4JNzxqmDeLs1PgGm3LU",
+    "/dns4/relay-lattica-us.gradient.network/tcp/18080/p2p/12D3KooWHMXi6SCfaQzLcFt6Th545EgRt4JNzxqmDeLs1PgGm3LU",
+    "/dns4/relay-lattica-eu.gradient.network/udp/18080/quic-v1/p2p/12D3KooWRAuR7rMNA7Yd4S1vgKS6akiJfQoRNNexTtzWxYPiWfG5",
+    "/dns4/relay-lattica-eu.gradient.network/tcp/18080/p2p/12D3KooWRAuR7rMNA7Yd4S1vgKS6akiJfQoRNNexTtzWxYPiWfG5",
+]
+
 
 def check_python_version():
     """Check if Python version is 3.11 or higher."""
-    if sys.version_info < (3, 11):
+    if sys.version_info < (3, 11) or sys.version_info >= (3, 14):
         print(
-            f"Error: Python 3.11 or higher is required. Current version is {sys.version_info.major}.{sys.version_info.minor}."
+            f"Error: Python 3.11 or higher and less than 3.14 is required. Current version is {sys.version_info.major}.{sys.version_info.minor}."
         )
         sys.exit(1)
-
-
-def get_project_root():
-    """Get the project root directory."""
-    # Search for the project root by looking for pyproject.toml in parent directories
-    current_dir = Path(__file__).parent
-    while current_dir != current_dir.parent:
-        if (current_dir / "pyproject.toml").exists():
-            return current_dir
-        current_dir = current_dir.parent
-
-    # If not found, fallback to current working directory
-    return Path.cwd()
 
 
 def _flag_present(args_list: list[str], flag_names: list[str]) -> bool:
@@ -154,8 +165,20 @@ def _execute_with_graceful_shutdown(cmd: list[str], env: dict[str, str] | None =
         sys.exit(0)
 
 
+def _get_relay_params():
+    return [
+        "--relay-servers",
+        *PUBLIC_RELAY_SERVERS,
+        "--initial-peers",
+        *PUBLIC_INITIAL_PEERS,
+    ]
+
+
 def run_command(args, passthrough_args: list[str] | None = None):
     """Run the scheduler (equivalent to scripts/start.sh)."""
+    if not args.skip_upload:
+        update_package_info()
+
     check_python_version()
 
     project_root = get_project_root()
@@ -168,8 +191,6 @@ def run_command(args, passthrough_args: list[str] | None = None):
     # Build the command to run the backend main.py
     passthrough_args = passthrough_args or []
     cmd = [sys.executable, str(backend_main)]
-    if not _flag_present(passthrough_args, ["--dht-port"]):
-        cmd.extend(["--dht-port", "5001"])
     if not _flag_present(passthrough_args, ["--port"]):
         cmd.extend(["--port", "3001"])
 
@@ -179,7 +200,7 @@ def run_command(args, passthrough_args: list[str] | None = None):
     if args.init_nodes_num:
         cmd.extend(["--init-nodes-num", str(args.init_nodes_num)])
     if args.use_relay:
-        cmd.extend(get_relay_params())
+        cmd.extend(_get_relay_params())
 
     # Append any passthrough args (unrecognized by this CLI) directly to the command
     if passthrough_args:
@@ -190,6 +211,9 @@ def run_command(args, passthrough_args: list[str] | None = None):
 
 def join_command(args, passthrough_args: list[str] | None = None):
     """Join a distributed cluster (equivalent to scripts/join.sh)."""
+    if not args.skip_upload:
+        update_package_info()
+
     check_python_version()
 
     project_root = get_project_root()
@@ -223,7 +247,7 @@ def join_command(args, passthrough_args: list[str] | None = None):
         args.scheduler_addr != "auto" and not str(args.scheduler_addr).startswith("/")
     ):
         logger.info("Using public relay servers")
-        cmd.extend(get_relay_params())
+        cmd.extend(_get_relay_params())
 
     # Append any passthrough args (unrecognized by this CLI) directly to the command
     if passthrough_args:
@@ -231,6 +255,86 @@ def join_command(args, passthrough_args: list[str] | None = None):
 
     logger.info(f"Scheduler address: {args.scheduler_addr}")
     _execute_with_graceful_shutdown(cmd, env=env)
+
+
+def collect_machine_info():
+    """Collect machine information."""
+    version = get_current_version()
+    device_uuid = str(machineid.id())
+    try:
+        hw = HardwareInfo.detect()
+        return {
+            "uuid": device_uuid,
+            "version": version,
+            "gpu": hw.chip,
+        }
+    except Exception:
+        return {
+            "uuid": device_uuid,
+            "version": version,
+            "gpu": "unknown",
+        }
+
+
+def update_package_info():
+    """Update package information."""
+    usage_info = collect_machine_info()
+
+    try:
+        package_info = load_package_info()
+        if (
+            package_info is not None
+            and package_info["uuid"] == usage_info["uuid"]
+            and package_info["version"] == usage_info["version"]
+            and package_info["gpu"] == usage_info["gpu"]
+        ):
+            return
+
+        save_package_info(usage_info)
+    except Exception:
+        pass
+
+
+def load_package_info():
+    """Load package information."""
+    try:
+        project_root = get_project_root()
+        if not (project_root / ".cache" / "tmp_key.txt").exists():
+            return None
+        with open(project_root / ".cache" / "tmp_key.txt", "r") as f:
+            return json.loads(reversible_decode_string(f.read()))
+    except Exception:
+        return None
+
+
+def save_package_info(usage_info: dict):
+    """Save package information."""
+    project_root = get_project_root()
+    os.makedirs(project_root / ".cache", exist_ok=True)
+    with open(project_root / ".cache" / "tmp_key.txt", "w") as f:
+        f.write(reversible_encode_string(json.dumps(usage_info)))
+
+    upload_package_info(usage_info)
+
+
+def upload_package_info(usage_info: dict):
+    post_url = "https://chatbe-dev.gradient.network/api/v1/parallax/upload"
+    headers = {
+        "Content-Type": "application/json",
+    }
+    try:
+        requests.post(post_url, headers=headers, json=usage_info, timeout=5)
+        return
+    except Exception:
+        return
+
+
+def reversible_encode_string(s: str) -> str:
+    return base64.urlsafe_b64encode(s.encode("utf-8")).decode("utf-8")
+
+
+def reversible_decode_string(encoded: str) -> str:
+    return base64.urlsafe_b64decode(encoded.encode("utf-8")).decode("utf-8")
 
 
 def main():
@@ -260,6 +364,9 @@ Examples:
     run_parser.add_argument(
         "-r", "--use-relay", action="store_true", help="Use public relay servers"
     )
+    run_parser.add_argument(
+        "-u", "--skip-upload", action="store_true", help="Skip upload package info"
+    )
 
     # Add 'join' command parser
     join_parser = subparsers.add_parser(
@@ -274,6 +381,9 @@ Examples:
     )
     join_parser.add_argument(
         "-r", "--use-relay", action="store_true", help="Use public relay servers"
+    )
+    join_parser.add_argument(
+        "-u", "--skip-upload", action="store_true", help="Skip upload package info"
     )
 
     # Accept unknown args and pass them through to the underlying python command
