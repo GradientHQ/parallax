@@ -4,10 +4,10 @@
   </p>
 
 <p style="font-size: 1.3em; font-weight: 600; margin-bottom: 10px;">Trusted by Partners</p>
-<img src="docs/images/qwen.png" alt="Qwen" height="40" style="margin: 0 20px;">
-<img src="docs/images/sglang.png" alt="SGLang" height="40" style="margin: 0 20px;">
-<img src="docs/images/kimi.png" alt="Kimi" height="42" style="margin: 0 20px;">
-<img src="docs/images/minimax.png" alt="Minimax" height="45" style="margin: 0 10px;">
+<img src="docs/images/qwen.avif" alt="Qwen" height="24" style="margin: 0 20px;">
+<img src="docs/images/sglang.png" alt="SGLang" height="20" style="margin: 0 20px;">
+<img src="docs/images/kimi.png" alt="Kimi" height="21" style="margin: 0 20px;">
+<img src="docs/images/minimax.png" alt="Minimax" height="22" style="margin: 0 10px;">
 
 [![license](https://img.shields.io/github/license/GradientHQ/parallax.svg)](https://github.com/GradientHQ/parallax/tree/main/LICENSE)
 [![issue resolution](https://img.shields.io/github/issues-closed-raw/GradientHQ/parallax)](https://github.com/GradientHQ/parallax/issues)
