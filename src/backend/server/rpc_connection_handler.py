@@ -80,7 +80,9 @@ class RPCConnectionHandler(ConnectionHandler):
                 new_rtt_to_nodes=node.rtt_to_nodes,
                 is_active=node.is_active,
             )
-            return {}
+            # Return current layer allocation to node
+            layer_allocation = self.get_layer_allocation(node.node_id)
+            return layer_allocation if layer_allocation else {}
         except Exception as e:
             logger.exception(f"node_update error: {e}")
             return {}
