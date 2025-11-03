@@ -580,14 +580,16 @@ class GradientServer:
                                 end_layer = response.get("end_layer")
                                 model_name = response.get("model_name")
                                 if start_layer is not None and end_layer is not None:
-                                    logger.info(
+                                    logger.debug(
                                         f"Heartbeat: Node {self.lattica.peer_id()}... "
                                         f"Model: {model_name}, Layers: [{start_layer}, {end_layer})"
                                     )
                                 else:
-                                    logger.debug(f"Heartbeat response: {response}")
+                                    logger.warning(f"Heartbeat response: {response}")
                             else:
-                                logger.debug(f"Heartbeat: No layer allocation received yet")
+                                logger.warning(
+                                    f"Heartbeat: No layer allocation received yet, response: {response}"
+                                )
                         else:
                             self.lattica.store(
                                 key=self.prefix_id,
