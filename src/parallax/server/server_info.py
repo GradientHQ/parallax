@@ -67,6 +67,7 @@ class AppleSiliconHardwareInfo(HardwareInfo):
         "M2": 7.1,
         "M2 Pro": 11.36,
         "M2 Max": 26.98,
+        "M2 Ultra": 53.96,
         "M3": 7.1,
         "M3 Pro": 9.94,
         "M3 Max": 28.4,

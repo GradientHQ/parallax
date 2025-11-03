@@ -1,12 +1,22 @@
 <div align="center">
   <p align="center">
     <img src="docs/images/parallax.png" width="720">
+    <div align="center">
+      <p style="font-size: 1.3em; font-weight: 600; margin-bottom: 10px;">Trusted by Partners</p>
+      <img src="docs/images/qwen.avif" alt="Qwen" height="30" style="margin: 0 20px;">
+      <img src="docs/images/sglang.png" alt="SGLang" height="28" style="margin: 0 20px;">
+      <img src="docs/images/kimi.png" alt="Kimi" height="30" style="margin: 0 20px;">
+      <img src="docs/images/minimax.png" alt="Minimax" height="30" style="margin: 0 10px;">
+    </div>
   </p>
-</div>
 
 [![license](https://img.shields.io/github/license/GradientHQ/parallax.svg)](https://github.com/GradientHQ/parallax/tree/main/LICENSE)
 [![issue resolution](https://img.shields.io/github/issues-closed-raw/GradientHQ/parallax)](https://github.com/GradientHQ/parallax/issues)
 [![open issues](https://img.shields.io/github/issues-raw/GradientHQ/parallax)](https://github.com/GradientHQ/parallax/issues)
+
+<a href="https://www.producthunt.com/products/parallax-by-gradient?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_source=badge-parallax&#0045;by&#0045;gradient" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1030922&theme=light&period=daily&t=1761986433128" alt="Parallax&#0032;by&#0032;Gradient - Host&#0032;LLMs&#0032;across&#0032;devices&#0032;sharing&#0032;GPU&#0032;to&#0032;make&#0032;your&#0032;AI&#0032;go&#0032;brrr | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
+
+</div>
 
 | [**Gradient**](https://gradient.network)
 | [**Blog**](https://gradient.network/blog/parallax-the-sovereign-ai-os)
@@ -15,6 +25,7 @@
 | [**Arxiv**](https://arxiv.org/pdf/2509.26182v1)
 
 ## News
+- [2025/10] 🔥 Parallax won #1 Product of The Day on Product Hunt!
 - [2025/10] 🔥 Parallax version 0.0.1 has been released!
 
 ## About
