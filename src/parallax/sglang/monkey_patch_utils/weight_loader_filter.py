@@ -3,6 +3,11 @@ Monkey patch for SGLang/vLLM weight loader to filter safetensors files based on 
 
 This reduces I/O and memory usage by only loading weight files that contain layers
 in the [pp_start_layer, pp_end_layer) range.
+
+Usage:
+    1. Call apply_weight_loader_filter_patch() during initialization
+    2. Call set_layer_range_for_filtering() before loading model weights
+    3. Model weights will be automatically filtered based on the layer range
 """
 
 import json
@@ -21,24 +26,15 @@ def filter_weight_files_by_layer_range(
     is_first_shard: bool,
     is_last_shard: bool,
 ) -> List[str]:
-    """
-    Filter weight files based on layer range using model.safetensors.index.json.
+    """Filter weight files to only those containing layers in the specified range.
 
-    Args:
-        model_path: Path to the model directory
-        weight_files: List of all weight file paths
-        pp_start_layer: Starting layer index (inclusive)
-        pp_end_layer: Ending layer index (exclusive)
-        is_first_shard: Whether this is the first shard (needs embedding)
-        is_last_shard: Whether this is the last shard (needs lm_head and norm)
-
-    Returns:
-        Filtered list of weight files containing only relevant layers
+    Supports both safetensors (.safetensors) and PyTorch (.bin/.pt) formats.
     """
+    # Try safetensors index first
     index_file = model_path / "model.safetensors.index.json"
 
     if not index_file.exists():
-        logger.debug(f"No index file found at {index_file}, will load all weight files")
+        logger.debug(f"No index file found at {model_path}, will load all weight files")
         return weight_files
 
     try:
@@ -52,29 +48,21 @@ def filter_weight_files_by_layer_range(
 
         needed_files: Set[str] = set()
 
-        # Check which files contain layers/weights we need
         for key, filename in weight_map.items():
             should_include = False
 
-            # Check for embedding layer (first shard)
             if is_first_shard and "embed_tokens" in key:
                 should_include = True
                 logger.debug(f"Including {filename} for embedding layer: {key}")
 
-            # Check for lm_head and norm (last shard)
             if is_last_shard:
                 if "model.norm" in key or "lm_head" in key:
                     should_include = True
                     logger.debug(f"Including {filename} for lm_head/norm: {key}")
 
-            # Check for decoder layers in range
-            # Common patterns: "model.layers.0.", "layers.0.", "model.decoder.layers.0."
             if "layers." in key:
                 try:
-                    # Try to extract layer number from key
                     parts = key.split(".")
-
-                    # Find the "layers" index and get the next part as layer number
                     for i, part in enumerate(parts):
                         if part == "layers" and i + 1 < len(parts):
                             layer_idx = int(parts[i + 1])
@@ -83,16 +71,13 @@ def filter_weight_files_by_layer_range(
                                 logger.debug(f"Including {filename} for layer {layer_idx}: {key}")
                             break
                 except (ValueError, IndexError):
-                    # If we can't parse the layer number, include it to be safe
                     logger.debug(f"Could not parse layer number from {key}, including to be safe")
                     should_include = True
 
             if should_include:
-                # Convert relative filename to full path
                 full_path = str(model_path / filename)
                 needed_files.add(full_path)
 
-        # Filter weight_files to only include needed ones
         if needed_files:
             filtered_files = [wf for wf in weight_files if wf in needed_files]
             logger.info(
@@ -113,83 +98,68 @@ def filter_weight_files_by_layer_range(
         return weight_files
 
 
+_layer_range_cache = {}
+
+
+def set_layer_range_for_filtering(pp_start_layer: int, pp_end_layer: int, is_last_shard: bool):
+    global _layer_range_cache
+    _layer_range_cache["pp_start_layer"] = pp_start_layer
+    _layer_range_cache["pp_end_layer"] = pp_end_layer
+    _layer_range_cache["is_last_shard"] = is_last_shard
+    logger.info(
+        f"Set layer range for weight filtering: [{pp_start_layer}, {pp_end_layer}), "
+        f"is_last={is_last_shard}"
+    )
+
+
 def apply_weight_loader_filter_patch():
-    """
-    Apply monkey patch to filter weight files before loading.
+    from sglang.srt.model_loader import weight_utils
 
-    This patches the get_model_filenames function in vLLM/SGLang to filter
-    out weight files that don't contain layers in the current shard's range.
-    """
-    try:
-        from sglang.srt.model_loader import weight_utils
-        from sglang.srt.distributed import get_pp_group
+    original_safetensors_iterator = weight_utils.safetensors_weights_iterator
 
-        original_get_model_filenames = weight_utils.get_model_filenames
+    def patched_safetensors_weights_iterator(
+        hf_weights_files: List[str],
+        is_all_weights_sharded: bool = False,
+        decryption_key: Optional[str] = None,
+        disable_mmap: bool = False,
+    ):
+        filtered_files = _filter_weight_files_by_cache(hf_weights_files)
+        return original_safetensors_iterator(
+            filtered_files, is_all_weights_sharded, decryption_key, disable_mmap
+        )
 
-        def patched_get_model_filenames(model_name_or_path: str, **kwargs):
-            """Patched version that filters weight files by layer range."""
-            # Get original file list
-            weight_files = original_get_model_filenames(model_name_or_path, **kwargs)
+    def _filter_weight_files_by_cache(hf_weights_files: List[str]) -> List[str]:
+        global _layer_range_cache
 
-            # Try to get PP group info
-            try:
-                pp_group = get_pp_group()
-                if pp_group is None:
-                    logger.debug("No PP group found, skipping weight file filtering")
-                    return weight_files
+        pp_start_layer = _layer_range_cache.get("pp_start_layer")
+        pp_end_layer = _layer_range_cache.get("pp_end_layer")
+        is_last_shard = _layer_range_cache.get("is_last_shard", False)
 
-                pp_start_layer = getattr(pp_group, "pp_start_layer", None)
-                pp_end_layer = getattr(pp_group, "pp_end_layer", None)
+        if pp_start_layer is None or pp_end_layer is None:
+            logger.debug("No layer range set, loading all weight files")
+            return hf_weights_files
 
-                if pp_start_layer is None or pp_end_layer is None:
-                    logger.debug(
-                        f"PP layer range not set (start={pp_start_layer}, end={pp_end_layer}), "
-                        "skipping weight file filtering"
-                    )
-                    return weight_files
+        if not hf_weights_files:
+            return hf_weights_files
 
-                model_path = Path(model_name_or_path)
-                is_first_shard = pp_start_layer == 0
+        model_path = Path(hf_weights_files[0]).parent
+        is_first_shard = pp_start_layer == 0
 
-                # We need to know the total number of layers to determine if this is the last shard
-                # For now, we'll assume if end_layer is very large, it's the last shard
-                # A more robust solution would read the config file
-                is_last_shard = False
-                try:
-                    config_file = model_path / "config.json"
-                    if config_file.exists():
-                        with open(config_file, "r") as f:
-                            config = json.load(f)
-                            num_hidden_layers = config.get("num_hidden_layers", 0)
-                            is_last_shard = pp_end_layer >= num_hidden_layers
-                except Exception as e:
-                    logger.debug(f"Could not determine if last shard: {e}")
+        logger.info(
+            f"Filtering weight files for layers [{pp_start_layer}, {pp_end_layer}), "
+            f"is_first={is_first_shard}, is_last={is_last_shard}"
+        )
 
-                logger.info(
-                    f"Filtering weight files for shard: layers [{pp_start_layer}, {pp_end_layer}), "
-                    f"is_first={is_first_shard}, is_last={is_last_shard}"
-                )
+        filtered_files = filter_weight_files_by_layer_range(
+            model_path=model_path,
+            weight_files=hf_weights_files,
+            pp_start_layer=pp_start_layer,
+            pp_end_layer=pp_end_layer,
+            is_first_shard=is_first_shard,
+            is_last_shard=is_last_shard,
+        )
 
-                filtered_files = filter_weight_files_by_layer_range(
-                    model_path=model_path,
-                    weight_files=weight_files,
-                    pp_start_layer=pp_start_layer,
-                    pp_end_layer=pp_end_layer,
-                    is_first_shard=is_first_shard,
-                    is_last_shard=is_last_shard,
-                )
+        return filtered_files
 
-                return filtered_files
-
-            except Exception as e:
-                logger.warning(f"Error in weight file filtering: {e}, using all files")
-                return weight_files
-
-        # Apply the patch
-        weight_utils.get_model_filenames = patched_get_model_filenames
-        logger.info("Applied weight loader filter patch")
-
-    except ImportError as e:
-        logger.warning(f"Could not import SGLang weight_utils, skipping patch: {e}")
-    except Exception as e:
-        logger.error(f"Failed to apply weight loader filter patch: {e}")
+    weight_utils.safetensors_weights_iterator = patched_safetensors_weights_iterator
+    logger.debug("Applied weight loader filter patch to safetensors and pt weight iterators")

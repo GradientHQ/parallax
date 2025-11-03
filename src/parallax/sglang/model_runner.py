@@ -67,6 +67,16 @@ class ParallaxModelRunner(SGLModelRunner):
         """Add pp_start_layer and pp_end_layer for decentralized model"""
         self.pp_start_layer = pp_start_layer
         self.pp_end_layer = pp_end_layer
+
+        # Set layer range for weight file filtering before model loading
+        from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
+            set_layer_range_for_filtering,
+        )
+
+        num_hidden_layers = model_config.hf_config.num_hidden_layers
+        is_last_shard = pp_end_layer >= num_hidden_layers
+        set_layer_range_for_filtering(pp_start_layer, pp_end_layer, is_last_shard)
+
         super().__init__(
             model_config=model_config,
             mem_fraction_static=mem_fraction_static,
