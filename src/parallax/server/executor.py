@@ -1268,42 +1268,26 @@ class Executor:
 
         time.sleep(0.1)  # Give run_loop a moment to exit gracefully
 
-        # Clean up all pending requests in scheduler
-        if hasattr(self, "scheduler") and self.scheduler:
-            try:
-                all_requests = [req for _, _, _, req in self.scheduler._request_queue] + list(
-                    self.scheduler._running_requests.values()
-                )
-                for req in all_requests:
-                    try:
-                        self.scheduler.evict_request(req.request_id, RequestStatus.CANCELLED)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+        try:
+            all_requests = [req for _, _, _, req in self.scheduler._request_queue] + list(
+                self.scheduler._running_requests.values()
+            )
+            for req in all_requests:
+                try:
+                    self.scheduler.evict_request(req.request_id, RequestStatus.CANCELLED)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
-        # Close all sockets and terminate context
-        sockets = [
-            getattr(self, attr, None)
-            for attr in [
-                "recv_from_peer_socket",
-                "send_to_peer_socket",
-                "recv_from_ipc_socket",
-                "send_to_ipc_socket",
-            ]
-        ]
-        for socket in sockets:
-            try:
-                if socket:
-                    socket.close()
-            except Exception:
-                pass
-
-        if hasattr(self, "zmq_context") and self.zmq_context:
-            try:
-                self.zmq_context.term()
-            except Exception:
-                pass
+        try:
+            self.recv_from_peer_socket.close()
+            self.send_to_peer_socket.close()
+            self.recv_from_ipc_socket.close()
+            self.send_to_ipc_socket.close()
+            self.zmq_context.term()
+        except Exception as e:
+            logger.debug(f"Error closing sockets (may already be closed): {e}")
 
         logger.debug("Executor shutdown complete.")
 
