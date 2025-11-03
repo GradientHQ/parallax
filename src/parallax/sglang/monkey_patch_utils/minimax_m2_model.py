@@ -1,3 +1,5 @@
+## This is a patch file for sglang MiniMax M2 model to support pipeline parallelism
+
 import logging
 from typing import Iterable, Optional, Set, Tuple
 
@@ -139,12 +141,16 @@ def apply_minimax_m2_monkey_patch():
 
         if isinstance(hidden_states, PPProxyTensors):
             return hidden_states
-
+        ##########################################################################
+        ## TODO: remove when sglang code support pipeline parallelism
+        ## This is a patch code for sgalng
         pp_group = getattr(self, "pp_group", None) or get_pp_group()
         if pp_group.is_last_rank:
             return self.logits_processor(input_ids, hidden_states, self.lm_head, forward_batch)
         else:
             return hidden_states
+        ## End of patch
+        ##########################################################################
 
     m2_module.MiniMaxM2ForCausalLM.__init__ = pp_init
     m2_module.MiniMaxM2ForCausalLM.forward = pp_forward
