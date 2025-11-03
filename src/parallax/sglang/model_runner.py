@@ -34,7 +34,6 @@ from sglang.srt.utils import (
     monkey_patch_p2p_access_check,
 )
 
-from parallax.sglang.monkey_patch import apply_parallax_sglang_monkey_patch
 from parallax.utils.tokenizer_utils import load_tokenizer
 
 logger = logging.getLogger(__name__)
