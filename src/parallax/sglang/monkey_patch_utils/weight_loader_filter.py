@@ -32,6 +32,8 @@ def filter_weight_files_by_layer_range(
         needed_files: Set[str] = set()
 
         for key, filename in weight_map.items():
+            if filename in needed_files:
+                continue
             should_include = False
 
             if is_first_shard and "embed_tokens" in key:
