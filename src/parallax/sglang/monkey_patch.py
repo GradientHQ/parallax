@@ -17,6 +17,9 @@ from parallax.sglang.monkey_patch_utils.qwen3_next_model import (
 from parallax.sglang.monkey_patch_utils.triton_backend import (
     apply_triton_backend_init_monkey_patch,
 )
+from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
+    apply_weight_loader_filter_patch,
+)
 
 
 ## Here is some patch func for sglang
@@ -29,3 +32,4 @@ def apply_parallax_sglang_monkey_patch():
     apply_glm4_moe_monkey_patch()
     apply_triton_backend_init_monkey_patch()
     apply_model_parallel_monkey_patch()
+    apply_weight_loader_filter_patch()

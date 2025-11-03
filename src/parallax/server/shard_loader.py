@@ -157,10 +157,6 @@ class MLXModelLoader:
         if not weight_files:
             weight_files = glob.glob(str(model_path / "weight*.safetensors"))
 
-        # Sort weight files by name for consistent loading order
-        weight_files = sorted(weight_files)
-
-        # Filter weight files based on layer range using index file
         index_file = model_path / "model.safetensors.index.json"
         if index_file.exists():
             import json
@@ -171,7 +167,6 @@ class MLXModelLoader:
             weight_map = index_data.get("weight_map", {})
             needed_files = set()
 
-            # Check which files contain layers we need
             for key, filename in weight_map.items():
                 if filename in needed_files:
                     continue
@@ -193,14 +188,8 @@ class MLXModelLoader:
                 if should_include:
                     full_path = str(model_path / filename)
                     needed_files.add(full_path)
-
-            # Filter weight_files to only include needed ones
             if needed_files:
                 weight_files = [wf for wf in weight_files if wf in needed_files]
-                logger.info(
-                    f"Filtered to {len(weight_files)} weight files (out of {len(glob.glob(str(model_path / 'model*.safetensors')))} total) "
-                    f"for layers [{current_start_layer}, {current_end_layer})"
-                )
             else:
                 logger.warning("No relevant weight files found in index, will scan all files")
 
