@@ -26,8 +26,8 @@ from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
 ## Hopefully, when sglang support pipeline parallelism natively, we can remove these patches
 def apply_parallax_sglang_monkey_patch():
     apply_model_parallel_monkey_patch()
-    apply_weight_loader_filter_patch()
     apply_triton_backend_init_monkey_patch()
+    apply_weight_loader_filter_patch()
     apply_qwen3_next_monkey_patch()
     apply_qwen3_next_config_monkey_patch()
     apply_gpt_oss_monkey_patch()
