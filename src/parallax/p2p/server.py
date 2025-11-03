@@ -247,6 +247,7 @@ class GradientServer:
         self.announcer = None
         self.connection_handler = None
         self.stop_event = threading.Event()
+        self._layer_allocation_changed = False
 
     def build_lattica(self):
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs)
@@ -584,6 +585,26 @@ class GradientServer:
                                         f"Heartbeat: Node {self.lattica.peer_id()}... "
                                         f"Model: {model_name}, Layers: [{start_layer}, {end_layer})"
                                     )
+                                    # Check if layer allocation changed
+                                    if (
+                                        start_layer != self.block_start_index
+                                        or end_layer != self.block_end_index
+                                    ):
+                                        logger.warning(
+                                            f"Layer allocation changed! "
+                                            f"Current: [{self.block_start_index}, {self.block_end_index}) -> "
+                                            f"New: [{start_layer}, {end_layer})"
+                                        )
+                                        # Update layer allocation
+                                        self.block_start_index = start_layer
+                                        self.block_end_index = end_layer
+                                        if model_name:
+                                            self.model_name = model_name
+                                        # Set flag to trigger executor reload
+                                        self._layer_allocation_changed = True
+                                        logger.info(
+                                            "Layer allocation updated. Executor will reload on next check."
+                                        )
                                 else:
                                     logger.warning(f"Heartbeat response: {response}")
                             else:

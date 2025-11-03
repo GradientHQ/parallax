@@ -97,6 +97,8 @@ class Executor:
         # GPU/SGLang Specialized Configs
         attention_backend: Optional[str] = "torch_native",
         moe_runner_backend: Optional[str] = "auto",
+        # Optional gradient server for layer reallocation detection
+        gradient_server: Optional[Any] = None,
     ):
         # Backend
         self.device = get_current_device()
@@ -144,6 +146,10 @@ class Executor:
         self.finished_batch = []
         self.start_layer = start_layer
         self.end_layer = end_layer
+        self._should_stop = False  # Flag to gracefully stop the executor
+        self.gradient_server = (
+            gradient_server  # Reference to gradient server for layer reallocation detection
+        )
 
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
@@ -279,9 +285,9 @@ class Executor:
             )
 
     @classmethod
-    def create_from_args(cls, args: argparse.Namespace):
+    def create_from_args(cls, args: argparse.Namespace, gradient_server=None):
         """Create executor from command line arguments."""
-        return cls(**create_executor_config(args))
+        return cls(**create_executor_config(args, gradient_server))
 
     def recv_requests_from_http(self) -> List[Request]:
         """Receives requests from http frontend"""
@@ -1144,7 +1150,8 @@ class Executor:
         logger.debug(
             f"Executor for layers [{self.start_layer}, {self.end_layer}) starting run loop..."
         )
-        while True:
+        self._should_stop = False
+        while not self._should_stop:
             # 1. Ingest new requests from the http frontend
             if self.is_first_peer:
                 http_requests = self.recv_requests_from_http()
@@ -1160,6 +1167,14 @@ class Executor:
                     [b"abort", abort_request_to_proto(self.finished_batch).SerializeToString()]
                 )
                 self.finished_batch = []
+
+            # Check for layer reallocation signal (before batch processing)
+            if self.gradient_server is not None and self.gradient_server._layer_allocation_changed:
+                logger.info(
+                    "Layer reallocation detected. Stopping executor to reload with new layers."
+                )
+                self._should_stop = True
+                break
 
             # 4. Admit requests into running set up to capacity, then form batch
             self.scheduler.admit_requests()
@@ -1249,15 +1264,52 @@ class Executor:
     def shutdown(self):
         """Shuts down the executor."""
         logger.debug("Executor shutting down...")
-        self.recv_from_peer_socket.close()
-        self.send_to_peer_socket.close()
-        self.recv_from_ipc_socket.close()
-        self.send_to_ipc_socket.close()
-        self.zmq_context.term()
+        self._should_stop = True
+        import time
+
+        time.sleep(0.1)  # Give run_loop a moment to exit gracefully
+
+        # Clean up all pending requests in scheduler
+        if hasattr(self, "scheduler") and self.scheduler:
+            try:
+                all_requests = [req for _, _, _, req in self.scheduler._request_queue] + list(
+                    self.scheduler._running_requests.values()
+                )
+                for req in all_requests:
+                    try:
+                        self.scheduler.evict_request(req.request_id, RequestStatus.CANCELLED)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # Close all sockets and terminate context
+        sockets = [
+            getattr(self, attr, None)
+            for attr in [
+                "recv_from_peer_socket",
+                "send_to_peer_socket",
+                "recv_from_ipc_socket",
+                "send_to_ipc_socket",
+            ]
+        ]
+        for socket in sockets:
+            try:
+                if socket:
+                    socket.close()
+            except Exception:
+                pass
+
+        if hasattr(self, "zmq_context") and self.zmq_context:
+            try:
+                self.zmq_context.term()
+            except Exception:
+                pass
+
         logger.debug("Executor shutdown complete.")
 
 
-def create_executor_config(args: argparse.Namespace):
+def create_executor_config(args: argparse.Namespace, gradient_server=None):
     """Create executor configuration from command line arguments."""
 
     config = {
@@ -1280,5 +1332,6 @@ def create_executor_config(args: argparse.Namespace):
         "executor_output_ipc_addr": args.executor_output_ipc,
         "attention_backend": args.attention_backend,
         "moe_runner_backend": args.moe_runner_backend,
+        "gradient_server": gradient_server,
     }
     return config
