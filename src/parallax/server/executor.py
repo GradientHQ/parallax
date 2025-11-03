@@ -147,9 +147,8 @@ class Executor:
         self.start_layer = start_layer
         self.end_layer = end_layer
         self._should_stop = False  # Flag to gracefully stop the executor
-        self.gradient_server = (
-            gradient_server  # Reference to gradient server for layer reallocation detection
-        )
+        # Reference to gradient server for layer reallocation detection
+        self.gradient_server = gradient_server
 
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
