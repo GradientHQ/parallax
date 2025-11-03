@@ -250,14 +250,43 @@ class Scheduler:
     def join(self, node: Node, bootstrap: bool = False) -> None:
         """Add a node to allocation and refresh plan and materialized nodes."""
         logger.debug(
-            "Joining node %s (kv_ratio=%.2f, param_ratio=%.2f)",
+            "Joining node %s (kv_ratio=%.2f, param_ratio=%.2f, manual_assignment=%s)",
             node.node_id,
             node.kv_cache_ratio,
             node.param_hosting_ratio,
+            node.manual_layer_assignment,
         )
         self.layer_allocator.declare(node)
-        if not bootstrap:
+
+        # Manual layer assignment bypasses bootstrap waiting
+        if node.manual_layer_assignment:
+            # Manual layer assignment: use the layers specified by the node
+            if node.start_layer is None or node.end_layer is None:
+                raise ValueError(
+                    f"Node {node.node_id} has manual_layer_assignment=True "
+                    f"but start_layer ({node.start_layer}) or end_layer ({node.end_layer}) is None"
+                )
+            logger.info(
+                f"Manual layer assignment for node {node.node_id}: "
+                f"layers [{node.start_layer}, {node.end_layer})"
+            )
+            # Directly allocate the specified layers without automatic assignment
+            self.layer_allocator.allocate(node, node.start_layer, node.end_layer)
+
+            # Check if manual allocations now cover the full pipeline
+            if self.layer_allocator.has_full_pipeline():
+                if not self._bootstrapped:
+                    logger.info(
+                        "Manual layer assignments have established a full pipeline; "
+                        "marking scheduler as bootstrapped"
+                    )
+                    self._bootstrapped = True
+                    self._bootstrapped_event.set()
+        elif not bootstrap:
+            # Automatic layer assignment (only after bootstrap)
             self.layer_allocator.join(node)
+        # If bootstrap=True and not manual, node is only declared (allocation deferred to bootstrap())
+
         # Notify waiters that node count changed
         with self._node_count_cv:
             self._node_count_cv.notify_all()
@@ -470,6 +499,7 @@ class Scheduler:
     def _process_joins(self) -> None:
         """Handle pending join events, honoring bootstrap state for assignment."""
         joined_any = False
+        had_manual_assignment = False
         while True:
             try:
                 node = self._pending_joins.get_nowait()
@@ -477,14 +507,18 @@ class Scheduler:
                 break
             # During bootstrap (no full pipeline yet), only declare nodes; no dynamic assignment.
             # After bootstrap, allow dynamic light-weight joins.
+            # Exception: manual layer assignments are processed immediately regardless of bootstrap state.
             self.join(node, bootstrap=not self._bootstrapped_event.is_set())
             joined_any = True
+            if node.manual_layer_assignment:
+                had_manual_assignment = True
 
         # If we are not bootstrapped (e.g., after a leave-triggered rebalance) and
         # new nodes just joined, attempt a greedy bootstrap immediately when we have
         # enough nodes. If it doesn't produce a full pipeline, we'll try again on
         # subsequent joins.
-        if joined_any and not self._bootstrapped_event.is_set():
+        # Skip bootstrap if manual assignments were used (they handle bootstrapping internally).
+        if joined_any and not self._bootstrapped_event.is_set() and not had_manual_assignment:
             if len(self.nodes) >= self.min_nodes_bootstrapping:
                 try:
                     ok = self.bootstrap()
