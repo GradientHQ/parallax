@@ -657,9 +657,6 @@ class GradientServer:
             info["current_requests"] = metrics.get("current_requests", 0)
             if metrics.get("layer_latency_ms") is not None:
                 info["layer_latency_ms"] = metrics.get("layer_latency_ms")
-
-            logger.debug(f"start_index: {self.block_start_index}")
-            logger.debug(f"end_index: {self.block_end_index}")
             # In update mode, always include current allocation
             if not self.manual_layer_assignment:
                 info["start_layer"] = self.block_start_index
