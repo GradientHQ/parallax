@@ -157,6 +157,56 @@ class MLXModelLoader:
         if not weight_files:
             weight_files = glob.glob(str(model_path / "weight*.safetensors"))
 
+        # Sort weight files by name for consistent loading order
+        weight_files = sorted(weight_files)
+
+        # Filter weight files based on layer range using index file
+        index_file = model_path / "model.safetensors.index.json"
+        if index_file.exists():
+            import json
+
+            with open(index_file, "r") as f:
+                index_data = json.load(f)
+
+            weight_map = index_data.get("weight_map", {})
+            needed_files = set()
+
+            # Check which files contain layers we need
+            for key, filename in weight_map.items():
+                if filename in needed_files:
+                    continue
+                should_include = False
+                if model_shard.is_first_shard and "embed_tokens" in key:
+                    should_include = True
+                elif model_shard.is_last_shard:
+                    if "model.norm" in key or "lm_head" in key:
+                        should_include = True
+                    elif config.get("tie_word_embeddings", False) and "embed_tokens" in key:
+                        should_include = True
+
+                if "model.layers." in key:
+                    parts = key.split(".")
+                    layer_idx = int(parts[2])
+                    if current_start_layer <= layer_idx < current_end_layer:
+                        should_include = True
+
+                if should_include:
+                    full_path = str(model_path / filename)
+                    needed_files.add(full_path)
+
+            # Filter weight_files to only include needed ones
+            if needed_files:
+                weight_files = [wf for wf in weight_files if wf in needed_files]
+                logger.info(
+                    f"Filtered to {len(weight_files)} weight files (out of {len(glob.glob(str(model_path / 'model*.safetensors')))} total) "
+                    f"for layers [{current_start_layer}, {current_end_layer})"
+                )
+            else:
+                logger.warning("No relevant weight files found in index, will scan all files")
+
+        else:
+            logger.debug("No index file found, will scan all weight files")
+
         if not weight_files and strict:
             raise FileNotFoundError(f"No safetensors found in {model_path}")
 
@@ -248,10 +298,10 @@ class MLXModelLoader:
                 prefixed = f"model.{p}"
                 if prefixed in qcfg:
                     override = qcfg[prefixed]
-                    if isinstance(override, dict):
-                        logger.debug(
-                            f"[quantize] Using override for '{prefixed}' (mapped to '{p}'): bits={override.get('bits')} group_size={override.get('group_size')}"
-                        )
+                    # if isinstance(override, dict):
+                    #     logger.debug(
+                    #         f"[quantize] Using override for '{prefixed}' (mapped to '{p}'): bits={override.get('bits')} group_size={override.get('group_size')}"
+                    #     )
                     return override
                 if not hasattr(m, "to_quantized"):
                     return False
