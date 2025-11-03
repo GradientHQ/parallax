@@ -209,6 +209,8 @@ class GradientServer:
         model_name: Optional[str] = None,
         max_batch_size: Optional[int] = None,
         max_sequence_length: Optional[int] = None,
+        param_hosting_ratio: float = 0.65,
+        kv_cache_ratio: float = 0.25,
     ):
         self.recv_from_peer_addr = recv_from_peer_addr
         self.send_to_peer_addr = send_to_peer_addr
@@ -226,6 +228,8 @@ class GradientServer:
         self.model_name = model_name
         self.max_batch_size = max_batch_size
         self.max_sequence_length = max_sequence_length
+        self.param_hosting_ratio = param_hosting_ratio
+        self.kv_cache_ratio = kv_cache_ratio
         self.prefix_id = f"{dht_prefix}_announce"
         self.lattica = None
         self.routing_table = None
@@ -622,8 +626,8 @@ class GradientServer:
         info = {
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
-            "kv_cache_ratio": 0.25,
-            "param_hosting_ratio": 0.65,
+            "kv_cache_ratio": self.kv_cache_ratio,
+            "param_hosting_ratio": self.param_hosting_ratio,
             "max_concurrent_requests": self.max_batch_size,
             "max_sequence_length": (
                 1024 if self.max_sequence_length is None else self.max_sequence_length
@@ -677,6 +681,8 @@ def launch_p2p_server(
     model_name: Optional[str],
     max_batch_size: Optional[int] = None,
     max_sequence_length: Optional[int] = None,
+    param_hosting_ratio: float = 0.65,
+    kv_cache_ratio: float = 0.25,
 ):
     server = GradientServer(
         recv_from_peer_addr=recv_from_peer_addr,
@@ -695,6 +701,8 @@ def launch_p2p_server(
         model_name=model_name,
         max_batch_size=max_batch_size,
         max_sequence_length=max_sequence_length,
+        param_hosting_ratio=param_hosting_ratio,
+        kv_cache_ratio=kv_cache_ratio,
     )
     # Start the server
     thread = threading.Thread(target=server.run, daemon=True)
