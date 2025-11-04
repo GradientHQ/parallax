@@ -187,16 +187,60 @@ def apply_weight_loader_filter_patch():
     except ImportError:
         logger.debug("safetensors module not available for patching")
 
-    # Patch json.load to intercept index file reading
+    # Patch json.load to intercept and modify index file content
     import json
     import builtins
 
     original_open = builtins.open
+    original_json_load = json.load
 
-    def patched_open(file, mode="r", *args, **kwargs):
-        result = original_open(file, mode, *args, **kwargs)
-        if isinstance(file, str) and file.endswith(".index.json"):
-            logger.debug(f"patched_open called for index file: {file}")
+    def patched_json_load(fp, *args, **kwargs):
+        result = original_json_load(fp, *args, **kwargs)
+
+        # Check if this is a safetensors index file
+        if isinstance(result, dict) and "weight_map" in result:
+            logger.debug(
+                f"Intercepted safetensors index file with {len(result.get('weight_map', {}))} weight mappings"
+            )
+
+            global _layer_range_cache
+            if _layer_range_cache.get("pp_start_layer") is not None:
+                # Get all weight files from the index
+                weight_map = result.get("weight_map", {})
+                all_files = list(set(weight_map.values()))
+
+                logger.debug(f"Index contains {len(all_files)} unique weight files")
+
+                # We need to get the model path from somewhere
+                # Try to infer it from the file pointer
+                try:
+                    file_path = fp.name
+                    model_path = Path(file_path).parent
+
+                    # Build full paths
+                    full_paths = [str(model_path / f) for f in all_files]
+
+                    # Filter files
+                    filtered_paths = _filter_weight_files_by_cache(full_paths)
+                    filtered_files = [Path(f).name for f in filtered_paths]
+
+                    logger.debug(
+                        f"Filtered index from {len(all_files)} to {len(filtered_files)} files: {filtered_files}"
+                    )
+
+                    # Rebuild weight_map with only filtered files
+                    new_weight_map = {
+                        key: value for key, value in weight_map.items() if value in filtered_files
+                    }
+
+                    result["weight_map"] = new_weight_map
+                    logger.debug(
+                        f"Modified weight_map from {len(weight_map)} to {len(new_weight_map)} entries"
+                    )
+
+                except Exception as e:
+                    logger.warning(f"Failed to filter index file: {e}")
+
         return result
 
-    builtins.open = patched_open
+    json.load = patched_json_load
