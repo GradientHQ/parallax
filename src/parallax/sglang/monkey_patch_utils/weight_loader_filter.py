@@ -143,17 +143,20 @@ def apply_weight_loader_filter_patch():
 
     os.listdir = patched_listdir
 
-    # Patch Path.glob
+    # Patch Path.glob and Path.rglob
     from pathlib import Path as PathlibPath
 
     original_path_glob = PathlibPath.glob
+    original_path_rglob = PathlibPath.rglob
 
     def patched_path_glob(self, pattern):
         files = list(original_path_glob(self, pattern))
-        logger.debug(f"patched_path_glob called: pattern={pattern}, num_files={len(files)}")
+        logger.debug(
+            f"patched_path_glob called: self={self}, pattern={pattern}, num_files={len(files)}"
+        )
 
         if files and any(str(f).endswith((".safetensors", ".bin", ".pt")) for f in files):
-            logger.debug(f"Found weight files in Path.glob")
+            logger.debug(f"Found {len(files)} weight files in Path.glob, filtering...")
             global _layer_range_cache
             if _layer_range_cache.get("pp_start_layer") is not None:
                 str_files = [
@@ -171,7 +174,33 @@ def apply_weight_loader_filter_patch():
 
         return iter(files)
 
+    def patched_path_rglob(self, pattern):
+        files = list(original_path_rglob(self, pattern))
+        logger.debug(
+            f"patched_path_rglob called: self={self}, pattern={pattern}, num_files={len(files)}"
+        )
+
+        if files and any(str(f).endswith((".safetensors", ".bin", ".pt")) for f in files):
+            logger.debug(f"Found {len(files)} weight files in Path.rglob, filtering...")
+            global _layer_range_cache
+            if _layer_range_cache.get("pp_start_layer") is not None:
+                str_files = [
+                    str(f) for f in files if str(f).endswith((".safetensors", ".bin", ".pt"))
+                ]
+                if str_files:
+                    filtered_strs = _filter_weight_files_by_cache(str_files)
+                    filtered_paths = [PathlibPath(f) for f in filtered_strs]
+                    # Keep non-weight files
+                    result = [
+                        f for f in files if not str(f).endswith((".safetensors", ".bin", ".pt"))
+                    ] + filtered_paths
+                    logger.debug(f"Filtered Path.rglob from {len(files)} to {len(result)} files")
+                    return iter(result)
+
+        return iter(files)
+
     PathlibPath.glob = patched_path_glob
+    PathlibPath.rglob = patched_path_rglob
 
     # Patch safetensors.torch.load_file to intercept actual file loading
     try:
