@@ -9,8 +9,7 @@ import numpy as np
 import psutil
 import torch
 import zmq
-from huggingface_hub import hf_hub_download
-
+from mlx_lm.utils import get_model_path, load_config
 
 def is_cuda_available():
     """Check backend supports cuda"""
@@ -271,16 +270,7 @@ def combine_padding_and_causal_masks(
     return causal_mask + padding_mask_float
 
 
-def load_model_config_only(name: str) -> dict:
-    local_path = Path(name)
-    if local_path.exists():
-        config_path = local_path / "config.json"
-        with open(config_path, "r") as f:
-            return json.load(f)
-
-    config_file = hf_hub_download(repo_id=name, filename="config.json")
-    with open(config_file, "r") as f:
-        return json.load(f)
-
-    config = _load_config_only(model_name)
+def fetch_model_from_hf(name: str):
+    model_path = get_model_path(name)[0]
+    config = load_config(model_path)
     return config

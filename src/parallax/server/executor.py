@@ -127,7 +127,7 @@ class Executor:
             logger.debug(
                 f"CUDA model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
             )
-            self.tp_group = self.model_runner.tp_group()
+            self.tp_group = self.model_runner.tp_group
             self.tp_cpu_group = self.tp_group.cpu_group
             # SGL KV Cache Manager is already initialized in ScheduleBatch
             # TODO: Replace ScheduleBatch to Parallax inflight batch

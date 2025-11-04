@@ -13,6 +13,7 @@ python src/parallax/launch.py \
     --end-layer 28
 """
 
+import argparse
 import multiprocessing
 import os
 import tempfile
@@ -23,7 +24,7 @@ from parallax.p2p.server import ServerState, launch_p2p_server
 from parallax.server.executor import Executor
 from parallax.server.http_server import launch_http_server
 from parallax.server.server_args import parse_args
-from parallax.utils.utils import get_current_device, load_model_config_only
+from parallax.utils.utils import get_current_device, fetch_model_from_hf
 from parallax_utils.ascii_anime import display_parallax_join
 from parallax_utils.logging_config import get_logger, set_log_level
 
@@ -47,13 +48,8 @@ MLX_MODEL_NAME_MAP = {
 
 def run_executor_process(args):
     """Run executor as a subprocess"""
-    try:
-        executor = Executor.create_from_args(args)
-        executor.run_loop()
-    except Exception as e:
-        logger.exception(e)
-    finally:
-        executor.shutdown()
+    executor = Executor.create_from_args(args)
+    executor.run_loop()
 
 
 if __name__ == "__main__":
@@ -61,6 +57,7 @@ if __name__ == "__main__":
 
     gradient_server = None
     http_server_process = None
+    executor_process_pool = []
     try:
         args = parse_args()
         set_log_level(args.log_level)
@@ -88,11 +85,11 @@ if __name__ == "__main__":
                 display_parallax_join(args.model_path)
             check_latest_release()
 
+            config = fetch_model_from_hf(args.model_path)
             # only launch http server on head node
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
 
-            config = load_model_config_only(args.model_path)
             launch_p2p_server(
                 initial_peers=args.initial_peers,
                 scheduler_addr=args.scheduler_addr,
@@ -151,18 +148,18 @@ if __name__ == "__main__":
                 display_parallax_join(args.model_path)
             check_latest_release()
 
+            fetch_model_from_hf(args.model_path)
             # only launch http server on head node
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
 
-        executor_process_pool = []
         tp_rank_range = range(args.tp_size)
         for tp_rank in tp_rank_range:
-            args.tp_rank = tp_rank
-            # executor = Executor.create_from_args(args)
+            args_copy = argparse.Namespace(**vars(args))
+            args_copy.tp_rank = tp_rank
             proc = multiprocessing.Process(
                 target=run_executor_process,
-                args=args,
+                args=(args_copy,),
             )
             proc.start()
             executor_process_pool.append(proc)
