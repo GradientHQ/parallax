@@ -54,7 +54,13 @@ def _filter_weight_files_by_cache(hf_weights_files: List[str]) -> List[str]:
 
     model_path = Path(hf_weights_files[0]).parent
     is_first_shard = pp_start_layer == 0
-    is_last_shard = pp_end_layer >= num_hidden_layers
+    is_last_shard = num_hidden_layers is not None and pp_end_layer >= num_hidden_layers
+
+    logger.debug(
+        f"Filtering weight files: start_layer={pp_start_layer}, end_layer={pp_end_layer}, "
+        f"is_first_shard={is_first_shard}, is_last_shard={is_last_shard}, "
+        f"input_files={len(hf_weights_files)}"
+    )
 
     filtered_files = filter_weight_files_by_layer_range(
         model_path=model_path,
@@ -65,6 +71,9 @@ def _filter_weight_files_by_cache(hf_weights_files: List[str]) -> List[str]:
         is_last_shard=is_last_shard,
     )
 
+    logger.debug(
+        f"Filtered to {len(filtered_files)} files: {[Path(f).name for f in filtered_files]}"
+    )
     return filtered_files
 
 
@@ -75,17 +84,27 @@ def apply_weight_loader_filter_patch():
 
     def patched_glob(pathname, **kwargs):
         files = original_glob(pathname, **kwargs)
+        logger.debug(
+            f"patched_glob called: pathname={pathname}, num_files={len(files) if isinstance(files, list) else 'N/A'}"
+        )
+
         if (
             isinstance(files, list)
             and files
             and any(f.endswith((".safetensors", ".bin", ".pt")) for f in files)
         ):
-
+            logger.debug(f"Found weight files, checking layer range cache...")
             # Filter if we have layer range set
             global _layer_range_cache
             if _layer_range_cache.get("pp_start_layer") is not None:
+                logger.debug(
+                    f"Layer range set: start={_layer_range_cache.get('pp_start_layer')}, end={_layer_range_cache.get('pp_end_layer')}"
+                )
                 filtered = _filter_weight_files_by_cache(files)
+                logger.debug(f"Filtered from {len(files)} to {len(filtered)} weight files")
                 return filtered
+            else:
+                logger.debug("Layer range not set, loading all weight files")
 
         return files
 
