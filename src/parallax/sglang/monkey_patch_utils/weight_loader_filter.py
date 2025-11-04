@@ -1,7 +1,8 @@
-import json
 import logging
 from pathlib import Path
-from typing import List, Set
+from typing import List
+
+from parallax.utils.weight_filter_utils import filter_weight_files_by_layer_range as shared_filter
 
 logger = logging.getLogger(__name__)
 
@@ -14,65 +15,15 @@ def filter_weight_files_by_layer_range(
     is_first_shard: bool,
     is_last_shard: bool,
 ) -> List[str]:
-    index_file = model_path / "model.safetensors.index.json"
-
-    if not index_file.exists():
-        logger.debug(f"No index file found at {model_path}, will load all weight files")
-        return weight_files
-
-    try:
-        with open(index_file, "r") as f:
-            index_data = json.load(f)
-
-        weight_map = index_data.get("weight_map", {})
-        if not weight_map:
-            logger.warning("weight_map is empty in index file, will load all weight files")
-            return weight_files
-
-        needed_files: Set[str] = set()
-
-        for key, filename in weight_map.items():
-            if filename in needed_files:
-                continue
-            should_include = False
-
-            if is_first_shard and "embed_tokens" in key:
-                should_include = True
-
-            if is_last_shard:
-                if "model.norm" in key or "lm_head" in key:
-                    should_include = True
-
-            if "layers." in key:
-                try:
-                    parts = key.split(".")
-                    for i, part in enumerate(parts):
-                        if part == "layers" and i + 1 < len(parts):
-                            layer_idx = int(parts[i + 1])
-                            if pp_start_layer <= layer_idx < pp_end_layer:
-                                should_include = True
-                            break
-                except (ValueError, IndexError):
-                    # Could not parse layer number, include to be safe
-                    should_include = True
-
-            if should_include:
-                full_path = str(model_path / filename)
-                needed_files.add(full_path)
-
-        if needed_files:
-            filtered_files = [wf for wf in weight_files if wf in needed_files]
-            return filtered_files
-        else:
-            logger.warning(
-                f"No relevant weight files found in index for layers [{pp_start_layer}, {pp_end_layer}), "
-                "will load all files"
-            )
-            return weight_files
-
-    except Exception as e:
-        logger.warning(f"Failed to filter weight files using index file: {e}, will load all files")
-        return weight_files
+    return shared_filter(
+        model_path=model_path,
+        weight_files=weight_files,
+        start_layer=pp_start_layer,
+        end_layer=pp_end_layer,
+        is_first_shard=is_first_shard,
+        is_last_shard=is_last_shard,
+        config={},
+    )
 
 
 _layer_range_cache = {}

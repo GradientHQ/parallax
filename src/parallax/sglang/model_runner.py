@@ -240,7 +240,19 @@ def initialize_sgl_model_runner(
       - tokenizer: tokenizer driven by mlx-lm
     """
     apply_parallax_sglang_monkey_patch()
-    model_path = get_model_path(original_model_path)[0]
+
+    # Use selective download for GPU models to save bandwidth and disk space
+    from parallax.utils.selective_download import get_model_path_with_selective_download
+
+    logger.info(
+        f"Downloading model with selective weight files for layers [{start_layer}, {end_layer})"
+    )
+    model_path = get_model_path_with_selective_download(
+        original_model_path,
+        start_layer=start_layer,
+        end_layer=end_layer,
+    )
+
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")
