@@ -109,3 +109,94 @@ def apply_weight_loader_filter_patch():
         return files
 
     glob_module.glob = patched_glob
+
+    # Patch os.listdir
+    import os
+
+    original_listdir = os.listdir
+
+    def patched_listdir(path):
+        files = original_listdir(path)
+        logger.debug(f"patched_listdir called: path={path}, num_files={len(files)}")
+
+        # Convert to full paths for filtering
+        if any(f.endswith((".safetensors", ".bin", ".pt")) for f in files):
+            logger.debug(f"Found weight files in listdir")
+            global _layer_range_cache
+            if _layer_range_cache.get("pp_start_layer") is not None:
+                full_paths = [
+                    os.path.join(path, f)
+                    for f in files
+                    if f.endswith((".safetensors", ".bin", ".pt"))
+                ]
+                if full_paths:
+                    filtered_paths = _filter_weight_files_by_cache(full_paths)
+                    filtered_names = [os.path.basename(f) for f in filtered_paths]
+                    # Keep non-weight files
+                    result = [
+                        f for f in files if not f.endswith((".safetensors", ".bin", ".pt"))
+                    ] + filtered_names
+                    logger.debug(f"Filtered listdir from {len(files)} to {len(result)} files")
+                    return result
+
+        return files
+
+    os.listdir = patched_listdir
+
+    # Patch Path.glob
+    from pathlib import Path as PathlibPath
+
+    original_path_glob = PathlibPath.glob
+
+    def patched_path_glob(self, pattern):
+        files = list(original_path_glob(self, pattern))
+        logger.debug(f"patched_path_glob called: pattern={pattern}, num_files={len(files)}")
+
+        if files and any(str(f).endswith((".safetensors", ".bin", ".pt")) for f in files):
+            logger.debug(f"Found weight files in Path.glob")
+            global _layer_range_cache
+            if _layer_range_cache.get("pp_start_layer") is not None:
+                str_files = [
+                    str(f) for f in files if str(f).endswith((".safetensors", ".bin", ".pt"))
+                ]
+                if str_files:
+                    filtered_strs = _filter_weight_files_by_cache(str_files)
+                    filtered_paths = [PathlibPath(f) for f in filtered_strs]
+                    # Keep non-weight files
+                    result = [
+                        f for f in files if not str(f).endswith((".safetensors", ".bin", ".pt"))
+                    ] + filtered_paths
+                    logger.debug(f"Filtered Path.glob from {len(files)} to {len(result)} files")
+                    return iter(result)
+
+        return iter(files)
+
+    PathlibPath.glob = patched_path_glob
+
+    # Patch safetensors.torch.load_file to intercept actual file loading
+    try:
+        import safetensors.torch
+
+        original_load_file = safetensors.torch.load_file
+
+        def patched_load_file(filename, *args, **kwargs):
+            logger.debug(f"patched_load_file called: filename={filename}")
+            return original_load_file(filename, *args, **kwargs)
+
+        safetensors.torch.load_file = patched_load_file
+    except ImportError:
+        logger.debug("safetensors module not available for patching")
+
+    # Patch json.load to intercept index file reading
+    import json
+    import builtins
+
+    original_open = builtins.open
+
+    def patched_open(file, mode="r", *args, **kwargs):
+        result = original_open(file, mode, *args, **kwargs)
+        if isinstance(file, str) and file.endswith(".index.json"):
+            logger.debug(f"patched_open called for index file: {file}")
+        return result
+
+    builtins.open = patched_open
