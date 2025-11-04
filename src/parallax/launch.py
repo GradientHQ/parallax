@@ -18,8 +18,6 @@ import os
 import tempfile
 import threading
 
-from mlx_lm.utils import get_model_path, load_config
-
 from common.version_check import check_latest_release
 from parallax.p2p.server import ServerState, launch_p2p_server
 from parallax.server.executor import Executor
@@ -59,17 +57,14 @@ if __name__ == "__main__":
             # only launch http server on head node
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
-            # Load config to get num_hidden_layers without creating executor
-            model_path = get_model_path(args.model_path)[0]
-            config = load_config(model_path)
-            hidden_layers = config.get("num_hidden_layers")
+            executor = Executor.create_from_args(args)
             launch_p2p_server(
                 initial_peers=args.initial_peers,
                 scheduler_addr=args.scheduler_addr,
                 relay_servers=args.relay_servers,
                 pp_start_layer=args.start_layer,
                 pp_end_layer=args.end_layer,
-                hidden_layers=hidden_layers,
+                hidden_layers=executor.config.get("num_hidden_layers"),
                 tcp_port=args.tcp_port,
                 udp_port=args.udp_port,
                 dht_prefix=args.dht_prefix,
@@ -84,6 +79,9 @@ if __name__ == "__main__":
                 param_hosting_ratio=args.param_hosting_ratio,
                 kv_cache_ratio=args.kv_cache_ratio,
             )
+            if gradient_server is not None:
+                gradient_server.status = ServerState.READY
+            executor.run_loop()
         else:
             gradient_server = launch_p2p_server(
                 initial_peers=args.initial_peers,
@@ -123,53 +121,67 @@ if __name__ == "__main__":
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
 
-        # Main execution loop with layer reallocation support
-        while True:
-            try:
-                executor = Executor.create_from_args(args, gradient_server=gradient_server)
-                if gradient_server is not None:
-                    gradient_server.status = ServerState.READY
+            # Main execution loop with layer reallocation support
+            while True:
+                try:
+                    executor = Executor.create_from_args(args, gradient_server=gradient_server)
+                    if gradient_server is not None:
+                        gradient_server.status = ServerState.READY
 
-                executor.run_loop()
+                    executor.run_loop()
 
-                # Check if layer allocation changed (executor exited due to reallocation)
-                if gradient_server is not None and gradient_server._layer_allocation_changed:
-                    logger.warning(
-                        "Layer allocation changed! Reloading executor with new layers..."
-                    )
-                    executor.shutdown()
+                    # Check if layer allocation changed (executor exited due to reallocation)
+                    if gradient_server is not None and gradient_server._layer_allocation_changed:
+                        logger.warning(
+                            "Layer allocation changed! Reloading executor with new layers..."
+                        )
+                        executor.shutdown()
 
-                    if args.start_layer == 0:
-                        stop_http_server(http_server_process)
+                        if args.start_layer == 0:
+                            stop_http_server(http_server_process)
+                            http_server_process = None
                         if gradient_server.block_start_index == 0:
                             http_server_process = launch_http_server(args)
 
-                    # Update args with new layer allocation
-                    args.start_layer = gradient_server.block_start_index
-                    args.end_layer = gradient_server.block_end_index
-                    if gradient_server.model_name:
-                        args.model_path = gradient_server.model_name
+                        # Update args with new layer allocation
+                        args.start_layer = gradient_server.block_start_index
+                        args.end_layer = gradient_server.block_end_index
+                        if gradient_server.model_name:
+                            args.model_path = gradient_server.model_name
 
-                    logger.info(
-                        f"Creating new executor with layers [{args.start_layer}, {args.end_layer})"
-                    )
-                    gradient_server._layer_allocation_changed = False
-                    continue  # Create new executor in next iteration
-                else:
-                    break  # Normal exit
-            except KeyboardInterrupt:
-                logger.debug("Received interrupt signal, shutting down...")
-                break
-            except Exception as e:
-                logger.exception(f"Executor error: {e}")
-                # If layer allocation changed, try to reload
-                if gradient_server is not None and gradient_server._layer_allocation_changed:
-                    logger.info("Attempting to reload executor after error...")
-                    if executor is not None:
-                        executor.shutdown()
-                    continue
-                else:
-                    raise
+                        logger.info(
+                            f"Creating new executor with layers [{args.start_layer}, {args.end_layer})"
+                        )
+
+                        # Restart http_server if restarting worker includes layer 0
+                        if args.start_layer == 0:
+                            # Stop old http_server if exists
+                            if old_start_layer == 0:
+                                stop_http_server(http_server_process)
+                            # Start new http_server
+                            http_server_process = launch_http_server(args)
+                        elif old_start_layer == 0 and args.start_layer != 0:
+                            # Stop http_server if we no longer have layer 0
+                            stop_http_server(http_server_process)
+                            http_server_process = None
+
+                        gradient_server._layer_allocation_changed = False
+                        continue  # Create new executor in next iteration
+                    else:
+                        break  # Normal exit
+                except KeyboardInterrupt:
+                    logger.debug("Received interrupt signal, shutting down...")
+                    break
+                except Exception as e:
+                    logger.exception(f"Executor error: {e}")
+                    # If layer allocation changed, try to reload
+                    if gradient_server is not None and gradient_server._layer_allocation_changed:
+                        logger.info("Attempting to reload executor after error...")
+                        if executor is not None:
+                            executor.shutdown()
+                        continue
+                    else:
+                        raise
     except KeyboardInterrupt:
         logger.debug("Received interrupt signal, shutting down...")
     except Exception as e:
