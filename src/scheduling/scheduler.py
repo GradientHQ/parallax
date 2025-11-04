@@ -302,14 +302,44 @@ class Scheduler:
         self.layer_allocator.leave(node_id)
         if self.layer_allocator.should_global_rebalance():
             logger.debug("Global rebalance triggered due to node leave")
-            # TODO: send a signal to the nodes to stop running requests
-            #       and re-assign start/end layers so nodes can re-shard
-            self._bootstrapped = False
-            self._bootstrapped_event.clear()
-            for n in self.nodes:
-                if n.start_layer is not None and n.end_layer is not None:
-                    self.layer_allocator.deallocate(n)
-            self.layer_allocator.global_allocation()
+
+            # Check if all remaining nodes are manual
+            all_manual = all(n.manual_layer_assignment for n in self.nodes)
+            if all_manual:
+                logger.debug("All nodes are manual assignment, skipping global rebalance")
+            else:
+                # TODO: send a signal to the nodes to stop running requests
+                #       and re-assign start/end layers so nodes can re-shard
+                self._bootstrapped = False
+                self._bootstrapped_event.clear()
+
+                # Separate manual and automatic nodes
+                manual_nodes = []
+                for n in self.nodes:
+                    if n.manual_layer_assignment:
+                        logger.debug(
+                            f"Preserving manual node {n.node_id}: [{n.start_layer}, {n.end_layer})"
+                        )
+                        manual_nodes.append(n)
+                    elif n.start_layer is not None and n.end_layer is not None:
+                        self.layer_allocator.deallocate(n)
+
+                # Temporarily remove manual nodes from allocator
+                for n in manual_nodes:
+                    if n in self.layer_allocator.nodes:
+                        self.layer_allocator.nodes.remove(n)
+
+                # Reallocate only automatic nodes
+                self.layer_allocator.global_allocation()
+
+                # Add manual nodes back to allocator
+                for n in manual_nodes:
+                    if n not in self.layer_allocator.nodes:
+                        self.layer_allocator.nodes.append(n)
+                # Re-sort after adding back manual nodes
+                self.layer_allocator.nodes.sort(
+                    key=lambda node: node.get_decoder_layer_capacity(), reverse=True
+                )
         with self._node_count_cv:
             self._node_count_cv.notify_all()
 
