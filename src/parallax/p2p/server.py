@@ -248,6 +248,7 @@ class GradientServer:
         self.announcer = None
         self.connection_handler = None
         self.stop_event = threading.Event()
+        logger.debug(f"manual_layer_assignment: {self.manual_layer_assignment}")
 
     def build_lattica(self):
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs)
