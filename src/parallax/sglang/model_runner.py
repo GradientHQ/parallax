@@ -36,6 +36,9 @@ from sglang.srt.utils import (
 
 from parallax.sglang.monkey_patch import apply_parallax_sglang_monkey_patch
 from parallax.utils.tokenizer_utils import load_tokenizer
+from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
+    set_layer_range_for_filtering,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,15 +70,8 @@ class ParallaxModelRunner(SGLModelRunner):
         """Add pp_start_layer and pp_end_layer for decentralized model"""
         self.pp_start_layer = pp_start_layer
         self.pp_end_layer = pp_end_layer
-
-        # Set layer range for weight file filtering before model loading
-        from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
-            set_layer_range_for_filtering,
-        )
-
         num_hidden_layers = model_config.hf_config.num_hidden_layers
-        is_last_shard = pp_end_layer >= num_hidden_layers
-        set_layer_range_for_filtering(pp_start_layer, pp_end_layer, is_last_shard)
+        set_layer_range_for_filtering(pp_start_layer, pp_end_layer, num_hidden_layers)
 
         super().__init__(
             model_config=model_config,

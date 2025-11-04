@@ -31,11 +31,11 @@ def filter_weight_files_by_layer_range(
 _layer_range_cache = {}
 
 
-def set_layer_range_for_filtering(pp_start_layer: int, pp_end_layer: int, is_last_shard: bool):
+def set_layer_range_for_filtering(pp_start_layer: int, pp_end_layer: int, num_hidden_layers: int):
     global _layer_range_cache
     _layer_range_cache["pp_start_layer"] = pp_start_layer
     _layer_range_cache["pp_end_layer"] = pp_end_layer
-    _layer_range_cache["is_last_shard"] = is_last_shard
+    _layer_range_cache["num_hidden_layers"] = num_hidden_layers
 
 
 def _filter_weight_files_by_cache(hf_weights_files: List[str]) -> List[str]:
@@ -43,7 +43,7 @@ def _filter_weight_files_by_cache(hf_weights_files: List[str]) -> List[str]:
 
     pp_start_layer = _layer_range_cache.get("pp_start_layer")
     pp_end_layer = _layer_range_cache.get("pp_end_layer")
-    is_last_shard = _layer_range_cache.get("is_last_shard", False)
+    num_hidden_layers = _layer_range_cache.get("num_hidden_layers")
 
     if pp_start_layer is None or pp_end_layer is None:
         logger.debug("No layer range set, loading all weight files")
@@ -54,6 +54,7 @@ def _filter_weight_files_by_cache(hf_weights_files: List[str]) -> List[str]:
 
     model_path = Path(hf_weights_files[0]).parent
     is_first_shard = pp_start_layer == 0
+    is_last_shard = pp_end_layer >= num_hidden_layers
 
     filtered_files = filter_weight_files_by_layer_range(
         model_path=model_path,
