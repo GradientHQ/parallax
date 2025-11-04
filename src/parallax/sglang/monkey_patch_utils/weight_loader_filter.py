@@ -122,8 +122,10 @@ def apply_weight_loader_filter_patch():
         weight_files = [f for f in files if f.endswith((".safetensors", ".bin", ".pt"))]
 
         if weight_files:
-            logger.debug(
-                f"patched_listdir: path={path}, total_files={len(files)}, weight_files={len(weight_files)}"
+            logger.info(
+                f"patched_listdir found weight files: path={path}, "
+                f"total={len(files)}, weight_files={len(weight_files)}, "
+                f"first_files={weight_files[:5]}"
             )
 
             global _layer_range_cache
@@ -140,8 +142,8 @@ def apply_weight_loader_filter_patch():
                         f for f in files if not f.endswith((".safetensors", ".bin", ".pt"))
                     ] + filtered_names
 
-                    logger.debug(
-                        f"Filtered listdir: {len(weight_files)} → {len(filtered_names)} weight files"
+                    logger.info(
+                        f"✂️ Filtered listdir: {len(weight_files)} → {len(filtered_names)} weight files: {filtered_names}"
                     )
                     return result
                 except Exception as e:
