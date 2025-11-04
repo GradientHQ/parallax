@@ -138,8 +138,7 @@ if __name__ == "__main__":
                         executor.shutdown()
 
                         if args.start_layer == 0:
-                            stop_http_server(http_server_process)
-                            http_server_process = None
+                            http_server_process = stop_http_server(http_server_process)
                         if gradient_server.block_start_index == 0:
                             http_server_process = launch_http_server(args)
 
@@ -152,18 +151,6 @@ if __name__ == "__main__":
                         logger.info(
                             f"Creating new executor with layers [{args.start_layer}, {args.end_layer})"
                         )
-
-                        # Restart http_server if restarting worker includes layer 0
-                        if args.start_layer == 0:
-                            # Stop old http_server if exists
-                            if old_start_layer == 0:
-                                stop_http_server(http_server_process)
-                            # Start new http_server
-                            http_server_process = launch_http_server(args)
-                        elif old_start_layer == 0 and args.start_layer != 0:
-                            # Stop http_server if we no longer have layer 0
-                            stop_http_server(http_server_process)
-                            http_server_process = None
 
                         gradient_server._layer_allocation_changed = False
                         continue  # Create new executor in next iteration
