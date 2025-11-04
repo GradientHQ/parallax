@@ -240,6 +240,7 @@ class GradientServer:
         self.rtt_last_update = 0
         self.rtt_update_interval = 60
         self.status = ServerState.JOINING
+        self.manual_layer_assignment = block_end_index is not None and block_start_index is not None
 
         self.scheduler_stub = None
         self.scheduler_peer_id = None
@@ -327,6 +328,10 @@ class GradientServer:
                     self.lattica = None
                     time.sleep(10)
                     return self.run()
+
+                if self.manual_layer_assignment:
+                    node_info["manual_layer_assignment"] = True
+
                 response = self.scheduler_stub.node_join(node_info)
                 response = response.result(timeout=300)
                 if response == {}:
@@ -335,8 +340,9 @@ class GradientServer:
 
                 logger.info(f"Join scheduler response: {response}")
 
-                self.block_start_index = response.get("start_layer")
-                self.block_end_index = response.get("end_layer")
+                if not self.manual_layer_assignment:
+                    self.block_start_index = response.get("start_layer")
+                    self.block_end_index = response.get("end_layer")
                 self.model_name = response.get("model_name")
 
                 # Publish executor metrics to backend on each update
@@ -662,13 +668,24 @@ class GradientServer:
             "is_active": self.status == ServerState.READY,
         }
 
+        # For manual layer assignment, always include start_layer and end_layer
+        if self.manual_layer_assignment:
+            info["start_layer"] = self.block_start_index
+            info["end_layer"] = self.block_end_index
+            logger.info(
+                f"Manual assignment: sending start_layer={self.block_start_index}, "
+                f"end_layer={self.block_end_index}"
+            )
+
         if is_update:
             metrics = get_metrics()
             info["current_requests"] = metrics.get("current_requests", 0)
             if metrics.get("layer_latency_ms") is not None:
                 info["layer_latency_ms"] = metrics.get("layer_latency_ms")
-            info["start_layer"] = self.block_start_index
-            info["end_layer"] = self.block_end_index
+            # In update mode, always include current allocation
+            if not self.manual_layer_assignment:
+                info["start_layer"] = self.block_start_index
+                info["end_layer"] = self.block_end_index
 
         return info
 
