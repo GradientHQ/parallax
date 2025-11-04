@@ -602,8 +602,12 @@ class GradientServer:
                                             self.model_name = model_name
                                         # Set flag to trigger executor reload
                                         self._layer_allocation_changed = True
+                                        # Set status to INITIALIZING to prevent scheduler from sending requests
+                                        # during rebalancing
+                                        self.status = ServerState.INITIALIZING
                                         logger.info(
-                                            "Layer allocation updated. Executor will reload on next check."
+                                            "Layer allocation updated. Executor will reload on next check. "
+                                            "Status set to INITIALIZING to prevent new requests."
                                         )
                                 else:
                                     logger.warning(f"Heartbeat response: {response}")
