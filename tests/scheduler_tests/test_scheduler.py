@@ -4,8 +4,7 @@ Minimal tests for the Scheduler orchestrator.
 
 from __future__ import annotations
 
-from scheduling.model_info import ModelInfo
-from scheduling.node import Node, NodeHardwareInfo, RequestSignal
+from scheduling.node import RequestSignal
 from scheduling.scheduler import Scheduler
 
 from .test_utils import build_model_info, build_node, set_rtt_from_coords
