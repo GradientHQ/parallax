@@ -86,7 +86,7 @@ if __name__ == "__main__":
                 relay_servers=args.relay_servers,
                 pp_start_layer=args.start_layer,
                 pp_end_layer=args.end_layer,
-                hidden_layers=executor.config.get("num_hidden_layers"),
+                hidden_layers=None,
                 tcp_port=args.tcp_port,
                 udp_port=args.udp_port,
                 dht_prefix=args.dht_prefix,
