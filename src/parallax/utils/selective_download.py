@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Optional
 
 from huggingface_hub import hf_hub_download, snapshot_download
-from huggingface_hub.utils import HfHubHTTPError
 
 logger = logging.getLogger(__name__)
 

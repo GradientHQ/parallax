@@ -102,7 +102,9 @@ class MLXModelLoader:
             A tuple containing the loaded sharded MLX model and its configuration dictionary.
         """
         if use_selective_download and self.start_layer is not None and self.end_layer is not None:
-            from parallax.utils.selective_download import get_model_path_with_selective_download
+            from parallax.utils.selective_download import (
+                get_model_path_with_selective_download,
+            )
 
             logger.info(
                 f"Using selective download for layers [{self.start_layer}, {self.end_layer})"
@@ -176,7 +178,9 @@ class MLXModelLoader:
         weight_files = sorted(weight_files)
 
         # Use shared utility to filter weight files
-        from parallax.utils.weight_filter_utils import filter_weight_files_by_layer_range
+        from parallax.utils.weight_filter_utils import (
+            filter_weight_files_by_layer_range,
+        )
 
         weight_files = filter_weight_files_by_layer_range(
             model_path=model_path,
