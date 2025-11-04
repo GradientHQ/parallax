@@ -751,7 +751,10 @@ def launch_p2p_server(
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
 
-    while server.block_start_index is None:
+    # Wait for layer allocation and model_name to be set
+    while server.block_start_index is None or (
+        scheduler_addr is not None and server.model_name is None
+    ):
         time.sleep(1)
 
     return server
