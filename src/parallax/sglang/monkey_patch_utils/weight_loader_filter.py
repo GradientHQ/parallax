@@ -117,27 +117,35 @@ def apply_weight_loader_filter_patch():
 
     def patched_listdir(path):
         files = original_listdir(path)
-        logger.debug(f"patched_listdir called: path={path}, num_files={len(files)}")
 
-        # Convert to full paths for filtering
-        if any(f.endswith((".safetensors", ".bin", ".pt")) for f in files):
-            logger.debug(f"Found weight files in listdir")
+        # Check if this directory contains weight files
+        weight_files = [f for f in files if f.endswith((".safetensors", ".bin", ".pt"))]
+
+        if weight_files:
+            logger.debug(
+                f"patched_listdir: path={path}, total_files={len(files)}, weight_files={len(weight_files)}"
+            )
+
             global _layer_range_cache
             if _layer_range_cache.get("pp_start_layer") is not None:
-                full_paths = [
-                    os.path.join(path, f)
-                    for f in files
-                    if f.endswith((".safetensors", ".bin", ".pt"))
-                ]
-                if full_paths:
+                # Build full paths for filtering
+                full_paths = [os.path.join(path, f) for f in weight_files]
+
+                try:
                     filtered_paths = _filter_weight_files_by_cache(full_paths)
                     filtered_names = [os.path.basename(f) for f in filtered_paths]
-                    # Keep non-weight files
+
+                    # Keep non-weight files + filtered weight files
                     result = [
                         f for f in files if not f.endswith((".safetensors", ".bin", ".pt"))
                     ] + filtered_names
-                    logger.debug(f"Filtered listdir from {len(files)} to {len(result)} files")
+
+                    logger.debug(
+                        f"Filtered listdir: {len(weight_files)} → {len(filtered_names)} weight files"
+                    )
                     return result
+                except Exception as e:
+                    logger.warning(f"Error filtering listdir: {e}, returning all files")
 
         return files
 
@@ -273,3 +281,35 @@ def apply_weight_loader_filter_patch():
         return result
 
     json.load = patched_json_load
+
+    # Patch huggingface_hub.hf_hub_download to prevent downloading unwanted files
+    try:
+        from huggingface_hub import hf_hub_download as original_hf_hub_download
+
+        def patched_hf_hub_download(
+            repo_id, filename, *args, subfolder=None, repo_type=None, **kwargs
+        ):
+            # Check if this is a weight file download
+            if filename and filename.endswith((".safetensors", ".bin", ".pt")):
+                logger.debug(
+                    f"patched_hf_hub_download called: repo_id={repo_id}, filename={filename}"
+                )
+
+                global _layer_range_cache
+                if _layer_range_cache.get("pp_start_layer") is not None:
+                    # Get model path to check if file should be filtered
+                    # We need to check if this file is needed for our layer range
+                    # For now, just log and let it through
+                    logger.warning(
+                        f"Weight file download requested: {filename} - this should have been filtered!"
+                    )
+
+            return original_hf_hub_download(
+                repo_id, filename, *args, subfolder=subfolder, repo_type=repo_type, **kwargs
+            )
+
+        import huggingface_hub
+
+        huggingface_hub.hf_hub_download = patched_hf_hub_download
+    except ImportError:
+        logger.debug("huggingface_hub not available for patching")
