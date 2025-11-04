@@ -63,14 +63,14 @@ class RequestHandler:
             except Exception as e:
                 logger.exception(f"get_routing_table error: {e}")
                 return JSONResponse(
-                    content={"error": "Routing table not found"},
+                    content={"error": "Get routing table error"},
                     status_code=500,
                 )
 
             # None -> scheduler has not set yet; treat as hard error (no waiting here)
             if routing_table is None:
                 return JSONResponse(
-                    content={"error": "Routing not ready"},
+                    content={"error": "Routing pipelines not ready"},
                     status_code=503,
                 )
 
@@ -89,7 +89,7 @@ class RequestHandler:
         # If still empty after retries, return 429 Too Many Requests
         if routing_table is not None and len(routing_table) == 0:
             return JSONResponse(
-                content={"error": "All pipelines are busy. Please retry later."},
+                content={"error": "All pipelines are busy or not ready. Please retry later."},
                 status_code=429,
             )
 
