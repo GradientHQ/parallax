@@ -88,13 +88,6 @@ def get_model_path_with_selective_download(
     start_layer: Optional[int] = None,
     end_layer: Optional[int] = None,
 ) -> Path:
-    path = Path(model_path_or_repo)
-
-    if path.exists():
-        logger.debug(f"Using local model path: {path}")
-        return path
-
-    logger.debug(f"Treating as Hugging Face repo: {model_path_or_repo}")
     return selective_model_download(
         repo_id=model_path_or_repo,
         start_layer=start_layer,
