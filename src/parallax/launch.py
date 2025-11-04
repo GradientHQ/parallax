@@ -23,7 +23,7 @@ from mlx_lm.utils import get_model_path, load_config
 from common.version_check import check_latest_release
 from parallax.p2p.server import ServerState, launch_p2p_server
 from parallax.server.executor import Executor
-from parallax.server.http_server import launch_http_server
+from parallax.server.http_server import launch_http_server, stop_http_server
 from parallax.server.server_args import parse_args
 from parallax_utils.ascii_anime import display_parallax_join
 from parallax_utils.logging_config import get_logger, set_log_level
@@ -139,6 +139,11 @@ if __name__ == "__main__":
                     )
                     executor.shutdown()
 
+                    if args.start_layer == 0:
+                        stop_http_server(http_server_process)
+                        if gradient_server.block_start_index == 0:
+                            http_server_process = launch_http_server(args)
+
                     # Update args with new layer allocation
                     args.start_layer = gradient_server.block_start_index
                     args.end_layer = gradient_server.block_end_index
@@ -172,20 +177,8 @@ if __name__ == "__main__":
     finally:
         t = None
         if http_server_process is not None:
-
-            def terminate_http_server_process(process):
-                logger.debug("Terminating HTTP server process...")
-                try:
-                    process.kill()
-                    process.join()
-                except Exception as e:
-                    logger.error(f"Failed to terminate HTTP server process: {e}")
-
-            if http_server_process is not None:
-                t = threading.Thread(
-                    target=terminate_http_server_process, args=(http_server_process,)
-                )
-                t.start()
+            t = threading.Thread(target=stop_http_server, args=(http_server_process,))
+            t.start()
         if gradient_server is not None:
             gradient_server.shutdown()
         if executor is not None:

@@ -472,3 +472,28 @@ def launch_http_server(args):
     process = mp.Process(target=http_server.run)
     process.start()
     return process
+
+
+def stop_http_server(http_server_process):
+    """
+    Stop HTTP server process if it exists.
+    """
+    if http_server_process is not None:
+        logger.info("Stopping HTTP server process...")
+        try:
+            http_server_process.kill()
+            http_server_process.join()
+        except Exception as e:
+            logger.error(f"Failed to terminate HTTP server process: {e}")
+        return None
+    return http_server_process
+
+
+def restart_http_server(args, http_server_process):
+    """
+    Restart HTTP server with new args.
+    Stops the old server if it exists and starts a new one.
+    """
+    http_server_process = stop_http_server(http_server_process)
+    logger.info("Restarting HTTP server...")
+    return launch_http_server(args)
