@@ -324,6 +324,10 @@ docker rmi <image_id>      # Remove Parallax images
 
 For Windows, simply go to Control Panel → Programs → Uninstall a program, find "Gradient" in the list, and uninstall it.
 
+## Contributing
+
+We warmly welcome contributions of all kinds! For guidelines on how to get involved, please refer to our [Contributing Guide](./docs/CONTRIBUTING.md).
+
 ## Supported Models
 
 |              | Provider     | HuggingFace Collection  |  Blog  | Description |
