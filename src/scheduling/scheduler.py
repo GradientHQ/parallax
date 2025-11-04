@@ -303,43 +303,27 @@ class Scheduler:
         if self.layer_allocator.should_global_rebalance():
             logger.debug("Global rebalance triggered due to node leave")
 
-            # Check if all remaining nodes are manual
-            all_manual = all(n.manual_layer_assignment for n in self.nodes)
-            if all_manual:
+            # Count manual vs automatic nodes
+            manual_count = sum(1 for n in self.nodes if n.manual_layer_assignment)
+            total_count = len(self.nodes)
+            logger.debug(
+                f"Node count: {manual_count} manual, {total_count - manual_count} automatic"
+            )
+            if manual_count == total_count:
                 logger.debug("All nodes are manual assignment, skipping global rebalance")
+            elif manual_count > 0:
+                logger.error(
+                    f"Mixed assignment detected ({manual_count} manual, {total_count - manual_count} automatic); skipping rebalance"
+                )
             else:
-                # TODO: send a signal to the nodes to stop running requests
-                #       and re-assign start/end layers so nodes can re-shard
+                # All nodes are automatic, proceed with rebalance
                 self._bootstrapped = False
                 self._bootstrapped_event.clear()
-
-                # Separate manual and automatic nodes
-                manual_nodes = []
                 for n in self.nodes:
-                    if n.manual_layer_assignment:
-                        logger.debug(
-                            f"Preserving manual node {n.node_id}: [{n.start_layer}, {n.end_layer})"
-                        )
-                        manual_nodes.append(n)
-                    elif n.start_layer is not None and n.end_layer is not None:
+                    if n.start_layer is not None and n.end_layer is not None:
                         self.layer_allocator.deallocate(n)
-
-                # Temporarily remove manual nodes from allocator
-                for n in manual_nodes:
-                    if n in self.layer_allocator.nodes:
-                        self.layer_allocator.nodes.remove(n)
-
-                # Reallocate only automatic nodes
                 self.layer_allocator.global_allocation()
 
-                # Add manual nodes back to allocator
-                for n in manual_nodes:
-                    if n not in self.layer_allocator.nodes:
-                        self.layer_allocator.nodes.append(n)
-                # Re-sort after adding back manual nodes
-                self.layer_allocator.nodes.sort(
-                    key=lambda node: node.get_decoder_layer_capacity(), reverse=True
-                )
         with self._node_count_cv:
             self._node_count_cv.notify_all()
 
