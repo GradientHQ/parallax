@@ -33,7 +33,7 @@ def should_include_weight_key(
     return False
 
 
-def filter_weight_files_by_layer_range(
+def filter_weight_files_by_layer_range_for_load(
     model_path: Path,
     weight_files: List[str],
     start_layer: int,
@@ -69,6 +69,8 @@ def filter_weight_files_by_layer_range(
     needed_files: Set[str] = set()
 
     for key, filename in weight_map.items():
+        if filename in needed_files:
+            continue
         if should_include_weight_key(
             key=key,
             start_layer=start_layer,
@@ -99,7 +101,7 @@ def filter_weight_files_by_layer_range(
     return filtered_files
 
 
-def determine_needed_weight_files(
+def determine_needed_weight_files_for_download(
     model_path: Path,
     start_layer: int,
     end_layer: int,
@@ -140,6 +142,8 @@ def determine_needed_weight_files(
     needed_files: Set[str] = set()
 
     for key, filename in weight_map.items():
+        if filename in needed_files:
+            continue
         if should_include_weight_key(
             key=key,
             start_layer=start_layer,

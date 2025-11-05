@@ -5,14 +5,33 @@ from typing import Optional
 from huggingface_hub import hf_hub_download, snapshot_download
 
 logger = logging.getLogger(__name__)
+from parallax.utils.weight_filter_utils import (
+    determine_needed_weight_files_for_download,
+)
+
+EXCLUDE_WEIGHT_PATTERNS = [
+    "*.safetensors",
+    "*.bin",
+    "*.pt",
+    "*.pth",
+    "pytorch_model*.bin",
+    "model*.safetensors",
+    "weight*.safetensors",
+]
 
 
-def determine_needed_weight_files(model_path: Path, start_layer: int, end_layer: int):
-    from parallax.utils.weight_filter_utils import (
-        determine_needed_weight_files as determine_files,
+def download_metadata_only(
+    repo_id: str,
+    cache_dir: Optional[str] = None,
+    force_download: bool = False,
+) -> Path:
+    path = snapshot_download(
+        repo_id=repo_id,
+        cache_dir=cache_dir,
+        ignore_patterns=EXCLUDE_WEIGHT_PATTERNS,
+        force_download=force_download,
     )
-
-    return determine_files(model_path, start_layer, end_layer)
+    return Path(path)
 
 
 def selective_model_download(
@@ -24,28 +43,17 @@ def selective_model_download(
 ) -> Path:
     logger.debug(f"Downloading model metadata for {repo_id}")
 
-    ignore_patterns = [
-        "*.safetensors",
-        "*.bin",
-        "*.pt",
-        "*.pth",
-        "pytorch_model*.bin",
-        "model*.safetensors",
-    ]
-
-    model_path = snapshot_download(
+    model_path = download_metadata_only(
         repo_id=repo_id,
         cache_dir=cache_dir,
-        ignore_patterns=ignore_patterns,
         force_download=force_download,
     )
-    model_path = Path(model_path)
     logger.debug(f"Downloaded model metadata to {model_path}")
 
     if start_layer is not None and end_layer is not None:
         logger.debug(f"Determining required weight files for layers [{start_layer}, {end_layer})")
 
-        needed_weight_files = determine_needed_weight_files(
+        needed_weight_files = determine_needed_weight_files_for_download(
             model_path=model_path,
             start_layer=start_layer,
             end_layer=end_layer,

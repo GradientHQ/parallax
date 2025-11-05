@@ -2,31 +2,9 @@ import logging
 from pathlib import Path
 from typing import List
 
-from parallax.utils.weight_filter_utils import (
-    filter_weight_files_by_layer_range as shared_filter,
-)
+from parallax.utils.weight_filter_utils import filter_weight_files_by_layer_range
 
 logger = logging.getLogger(__name__)
-
-
-def filter_weight_files_by_layer_range(
-    model_path: Path,
-    weight_files: List[str],
-    pp_start_layer: int,
-    pp_end_layer: int,
-    is_first_shard: bool,
-    is_last_shard: bool,
-) -> List[str]:
-    return shared_filter(
-        model_path=model_path,
-        weight_files=weight_files,
-        start_layer=pp_start_layer,
-        end_layer=pp_end_layer,
-        is_first_shard=is_first_shard,
-        is_last_shard=is_last_shard,
-        config={},
-    )
-
 
 _layer_range_cache = {}
 

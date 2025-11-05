@@ -179,10 +179,10 @@ class MLXModelLoader:
 
         # Use shared utility to filter weight files
         from parallax.utils.weight_filter_utils import (
-            filter_weight_files_by_layer_range,
+            filter_weight_files_by_layer_range_for_load,
         )
 
-        weight_files = filter_weight_files_by_layer_range(
+        weight_files = filter_weight_files_by_layer_range_for_load(
             model_path=model_path,
             weight_files=weight_files,
             start_layer=current_start_layer,

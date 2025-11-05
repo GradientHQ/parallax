@@ -30,10 +30,11 @@ import zmq
 import zmq.asyncio
 from fastapi.responses import ORJSONResponse, StreamingResponse
 from mlx_lm.tokenizer_utils import StreamingDetokenizer
-from mlx_lm.utils import get_model_path, load_config
+from mlx_lm.utils import load_config
 from pydantic import BaseModel
 from starlette.datastructures import State
 
+from parallax.utils.selective_download import download_metadata_only
 from parallax.utils.tokenizer_utils import load_detokenizer, load_tokenizer
 from parallax.utils.utils import get_zmq_socket
 from parallax_utils.logging_config import get_logger
@@ -104,8 +105,16 @@ class HTTPHandler:
         self.send_to_executor = get_zmq_socket(context, zmq.PUSH, executor_input_ipc_name, True)
         self.recv_from_executor = get_zmq_socket(context, zmq.PULL, executor_output_ipc_name, True)
         self.processing_requests: Dict[str, HTTPRequestInfo] = {}
-        # Load tokenizer for separate detokenizers
-        model_path = get_model_path(model_path_str)[0]
+
+        # Load tokenizer for separate detokenizers.
+        # Important: avoid triggering full weight downloads here.
+        # Only download metadata/config/tokenizer files.
+        from pathlib import Path
+
+        if Path(model_path_str).exists():
+            model_path = Path(model_path_str)
+        else:
+            model_path = download_metadata_only(model_path_str)
         config = load_config(model_path)
         self.model_path_str = model_path_str
         self.tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
