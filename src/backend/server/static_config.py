@@ -30,7 +30,7 @@ MODELS = {
     "Qwen/Qwen3-14B-FP8": "Qwen/Qwen3-14B-FP8",
     "Qwen/Qwen3-32B": "Qwen/Qwen3-32B",
     "Qwen/Qwen3-32B-FP8": "Qwen/Qwen3-32B-FP8",
-    "Qwen/Qwen3-30B-A3B": "Qwen/Qwen3-30B-A3B",
+    "Qwen/Qwen3-30B-A3B": "Qwen/Qwen3-30B-A3B-MLX-8bit",
     "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
     "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8": "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8",
     "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8": "mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit",

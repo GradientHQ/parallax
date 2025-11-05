@@ -143,7 +143,7 @@ def apply_weight_loader_filter_patch():
                     ] + filtered_names
 
                     logger.info(
-                        f"✂️ Filtered listdir: {len(weight_files)} → {len(filtered_names)} weight files: {filtered_names}"
+                        f"Filtered listdir: {len(weight_files)} → {len(filtered_names)} weight files: {filtered_names}"
                     )
                     return result
                 except Exception as e:
