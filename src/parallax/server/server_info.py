@@ -74,6 +74,7 @@ class AppleSiliconHardwareInfo(HardwareInfo):
         "M4": 8.52,
         "M4 Pro": 17.04,
         "M4 Max": 34.08,
+        "M5": 10.27,
     }
 
     @classmethod
