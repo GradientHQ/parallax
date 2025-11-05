@@ -35,10 +35,10 @@ from sglang.srt.utils import (
 )
 
 from parallax.sglang.monkey_patch import apply_parallax_sglang_monkey_patch
-from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
     set_layer_range_for_filtering,
 )
+from parallax.utils.tokenizer_utils import load_tokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +269,7 @@ def initialize_sgl_model_runner(
         kv_block_size = 1
 
     server_args = form_sgl_server_args(
-        original_model_path,
+        str(model_path),
         dtype,
         attention_backend,
         kv_block_size,
@@ -280,7 +280,7 @@ def initialize_sgl_model_runner(
     if (quantization_config := config.get("quantization_config", None)) is not None:
         quant_method = quantization_config.get("quant_method")
     model_config = ModelConfig(
-        model_path=original_model_path,
+        model_path=str(model_path),
         model_override_args="{}",
         dtype=dtype,
         quantization=quant_method,
