@@ -4,33 +4,18 @@ Minimal tests for the Scheduler orchestrator.
 
 from __future__ import annotations
 
-from scheduling.model_info import ModelInfo
-from scheduling.node import Node, NodeHardwareInfo, RequestSignal
+from scheduling.node import RequestSignal
 from scheduling.scheduler import Scheduler
 
-from .test_utils import build_model_info
-
-
-def _build_node(node_id: str, model: ModelInfo, *, tflops: float, mem_gb: float) -> Node:
-    hw = NodeHardwareInfo(
-        node_id=node_id,
-        tflops_fp16=tflops,
-        gpu_name="",
-        memory_gb=mem_gb,
-        memory_bandwidth_gbps=1000.0,
-        device="cuda",
-    )
-    n = Node(node_id=node_id, hardware=hw, model_info=model)
-    # Ensure latency estimation uses a defined speedup
-    setattr(n, "quantization_speedup", 1.0)
-    return n
+from .test_utils import build_model_info, build_node, set_rtt_from_coords
 
 
 def test_scheduler_initialize_and_dispatch():
     """Allocate, then enqueue one request and dispatch it."""
     model = build_model_info(12)
-    n1 = _build_node("a100-0", model, tflops=312.0, mem_gb=80.0)
-    n2 = _build_node("a100-1", model, tflops=312.0, mem_gb=80.0)
+    n1 = build_node("a100-0", model, tflops=312.0, mem_gb=80.0, x=0, y=0)
+    n2 = build_node("a100-1", model, tflops=312.0, mem_gb=80.0, x=1, y=0)
+    set_rtt_from_coords([n1, n2])
 
     sched = Scheduler(model, [n1, n2], strategy="greedy", min_nodes_bootstrapping=1)
     sched.layer_allocator.global_allocation()
@@ -54,12 +39,13 @@ def test_scheduler_initialize_and_dispatch():
 def test_scheduler_join_and_leave():
     """New node can join and be assigned; leave removes it and may rebalance."""
     model = build_model_info(12)
-    n1 = _build_node("a100-0", model, tflops=312.0, mem_gb=80.0)
-    n2 = _build_node("a100-1", model, tflops=312.0, mem_gb=80.0)
+    n1 = build_node("a100-0", model, tflops=312.0, mem_gb=80.0, x=0, y=0)
+    n2 = build_node("a100-1", model, tflops=312.0, mem_gb=80.0, x=1, y=0)
+    set_rtt_from_coords([n1, n2])
     sched = Scheduler(model, [n1, n2], strategy="greedy", min_nodes_bootstrapping=1)
 
     # Join a new node
-    n3 = _build_node("rtx4090-x", model, tflops=82.6, mem_gb=24.0)
+    n3 = build_node("rtx4090-x", model, tflops=82.6, mem_gb=24.0, x=0, y=1)
     sched.join(n3)
     assert n3.start_layer is not None and n3.end_layer is not None
 
@@ -72,7 +58,7 @@ def test_scheduler_bootstrap_wait_and_dynamic_events():
     """Scheduler waits for min nodes, bootstraps, then handles join/leave events."""
     model = build_model_info(12)
     # Start with no nodes assigned yet; bootstrap needs 2
-    n1 = _build_node("a100-0", model, tflops=312.0, mem_gb=80.0)
+    n1 = build_node("a100-0", model, tflops=312.0, mem_gb=80.0, x=0, y=0)
     sched = Scheduler(model, [], strategy="dp", min_nodes_bootstrapping=2)
 
     # Enqueue one join; should not bootstrap yet (insufficient nodes)
@@ -83,15 +69,17 @@ def test_scheduler_bootstrap_wait_and_dynamic_events():
     assert not sched.layer_allocator.has_full_pipeline()
 
     # Add second node and process join; now bootstrap should succeed
-    n2 = _build_node("5090-1", model, tflops=165.0, mem_gb=32.0)
+    n2 = build_node("5090-1", model, tflops=165.0, mem_gb=32.0, x=1, y=0)
     sched.enqueue_join(n2)
     sched._process_joins()  # type: ignore[attr-defined]
+    # RTTs are needed for DP routing strategy
+    set_rtt_from_coords(sched.nodes)
     ok = sched.bootstrap()
     assert ok
     assert sched.layer_allocator.has_full_pipeline()
 
     # Dynamic join after bootstrap should assign immediately
-    n3 = _build_node("rtx4090-x", model, tflops=82.6, mem_gb=24.0)
+    n3 = build_node("rtx4090-x", model, tflops=82.6, mem_gb=24.0, x=0, y=1)
     sched.enqueue_join(n3)
     sched._process_joins()  # type: ignore[attr-defined]
     assert n3.start_layer is not None and n3.end_layer is not None
@@ -124,7 +112,8 @@ def test_scheduler_single_node_leave_then_rejoin_reassigns_layers():
     model = build_model_info(12)
 
     # Start with a single capable node and bootstrap successfully
-    n1 = _build_node("solo-0", model, tflops=312.0, mem_gb=80.0)
+    n1 = build_node("solo-0", model, tflops=312.0, mem_gb=80.0, x=0, y=0)
+    set_rtt_from_coords([n1])
     sched = Scheduler(model, [n1], strategy="dp", min_nodes_bootstrapping=1)
     ok = sched.bootstrap()
     assert ok
@@ -136,7 +125,7 @@ def test_scheduler_single_node_leave_then_rejoin_reassigns_layers():
     assert not sched.layer_allocator.has_full_pipeline()
 
     # Re-join the (same) node id; scheduler should re-assign layers
-    n1_rejoin = _build_node("solo-0", model, tflops=312.0, mem_gb=80.0)
+    n1_rejoin = build_node("solo-0", model, tflops=312.0, mem_gb=80.0, x=0, y=0)
     sched.enqueue_join(n1_rejoin)
     sched._process_joins()  # type: ignore[attr-defined]
 

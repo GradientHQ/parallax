@@ -131,16 +131,21 @@ def compute_rtts_from_coords(nodes: Iterable[Node]) -> Dict[Tuple[str, str], flo
 
 
 def set_rtt_from_coords(nodes: List[Node]) -> None:
-    """Attach an RTT getter to each node based on their coordinates."""
-    rtts = compute_rtts_from_coords(nodes)
+    """Populate `rtt_to_nodes` on each node based on their coordinates."""
+    all_rtts = compute_rtts_from_coords(nodes)
+    node_map = {n.node_id: n for n in nodes}
+    ids = list(node_map.keys())
 
-    def getter(src: Node, dst: Node) -> float:
-        if src.node_id == dst.node_id:
-            return 0.0
-        return rtts.get((src.node_id, dst.node_id), 200.0)
-
-    for n in nodes:
-        n.rtt_getter = getter
+    for aid in ids:
+        node_a = node_map[aid]
+        if node_a.rtt_to_nodes is None:
+            node_a.rtt_to_nodes = {}
+        for bid in ids:
+            if aid == bid:
+                continue
+            rtt = all_rtts.get((aid, bid))
+            if rtt is not None:
+                node_a.rtt_to_nodes[bid] = rtt
 
 
 def geo_rtt_provider(positions: Dict[str, Tuple[float, float]]):

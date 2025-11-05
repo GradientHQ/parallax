@@ -21,7 +21,7 @@ import threading
 from common.version_check import check_latest_release
 from parallax.p2p.server import ServerState, launch_p2p_server
 from parallax.server.executor import Executor
-from parallax.server.http_server import launch_http_server
+from parallax.server.http_server import launch_http_server, stop_http_server
 from parallax.server.server_args import parse_args
 from parallax_utils.ascii_anime import display_parallax_join
 from parallax_utils.logging_config import get_logger, set_log_level
@@ -79,6 +79,9 @@ if __name__ == "__main__":
                 param_hosting_ratio=args.param_hosting_ratio,
                 kv_cache_ratio=args.kv_cache_ratio,
             )
+            if gradient_server is not None:
+                gradient_server.status = ServerState.READY
+            executor.run_loop()
         else:
             gradient_server = launch_p2p_server(
                 initial_peers=args.initial_peers,
@@ -117,11 +120,55 @@ if __name__ == "__main__":
             # only launch http server on head node
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
-            executor = Executor.create_from_args(args)
 
-        if gradient_server is not None:
-            gradient_server.status = ServerState.READY
-        executor.run_loop()
+            # Main execution loop with layer reallocation support
+            while True:
+                try:
+                    executor = Executor.create_from_args(args, gradient_server=gradient_server)
+                    if gradient_server is not None:
+                        gradient_server.status = ServerState.READY
+
+                    executor.run_loop()
+
+                    # Check if layer allocation changed (executor exited due to reallocation)
+                    if gradient_server is not None and gradient_server._layer_allocation_changed:
+                        logger.warning(
+                            "Layer allocation changed! Reloading executor with new layers..."
+                        )
+                        executor.shutdown()
+
+                        if args.start_layer == 0:
+                            http_server_process = stop_http_server(http_server_process)
+                        if gradient_server.block_start_index == 0:
+                            http_server_process = launch_http_server(args)
+
+                        # Update args with new layer allocation
+                        args.start_layer = gradient_server.block_start_index
+                        args.end_layer = gradient_server.block_end_index
+                        if gradient_server.model_name:
+                            args.model_path = gradient_server.model_name
+
+                        logger.info(
+                            f"Creating new executor with layers [{args.start_layer}, {args.end_layer})"
+                        )
+
+                        gradient_server._layer_allocation_changed = False
+                        continue  # Create new executor in next iteration
+                    else:
+                        break  # Normal exit
+                except KeyboardInterrupt:
+                    logger.debug("Received interrupt signal, shutting down...")
+                    break
+                except Exception as e:
+                    logger.exception(f"Executor error: {e}")
+                    # If layer allocation changed, try to reload
+                    if gradient_server is not None and gradient_server._layer_allocation_changed:
+                        logger.info("Attempting to reload executor after error...")
+                        if executor is not None:
+                            executor.shutdown()
+                        continue
+                    else:
+                        raise
     except KeyboardInterrupt:
         logger.debug("Received interrupt signal, shutting down...")
     except Exception as e:
@@ -129,20 +176,8 @@ if __name__ == "__main__":
     finally:
         t = None
         if http_server_process is not None:
-
-            def terminate_http_server_process(process):
-                logger.debug("Terminating HTTP server process...")
-                try:
-                    process.kill()
-                    process.join()
-                except Exception as e:
-                    logger.error(f"Failed to terminate HTTP server process: {e}")
-
-            if http_server_process is not None:
-                t = threading.Thread(
-                    target=terminate_http_server_process, args=(http_server_process,)
-                )
-                t.start()
+            t = threading.Thread(target=stop_http_server, args=(http_server_process,))
+            t.start()
         if gradient_server is not None:
             gradient_server.shutdown()
         if executor is not None:

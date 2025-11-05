@@ -249,6 +249,7 @@ class GradientServer:
         self.connection_handler = None
         self.stop_event = threading.Event()
         logger.debug(f"manual_layer_assignment: {self.manual_layer_assignment}")
+        self._layer_allocation_changed = False
 
     def build_lattica(self):
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs)
@@ -591,6 +592,30 @@ class GradientServer:
                                         f"Heartbeat: Node {self.lattica.peer_id()}... "
                                         f"Model: {model_name}, Layers: [{start_layer}, {end_layer})"
                                     )
+                                    # Check if layer allocation changed
+                                    if (
+                                        start_layer != self.block_start_index
+                                        or end_layer != self.block_end_index
+                                    ):
+                                        logger.warning(
+                                            f"Layer allocation changed! "
+                                            f"Current: [{self.block_start_index}, {self.block_end_index}) -> "
+                                            f"New: [{start_layer}, {end_layer})"
+                                        )
+                                        # Update layer allocation
+                                        self.block_start_index = start_layer
+                                        self.block_end_index = end_layer
+                                        if model_name:
+                                            self.model_name = model_name
+                                        # Set flag to trigger executor reload
+                                        self._layer_allocation_changed = True
+                                        # Set status to INITIALIZING to prevent scheduler from sending requests
+                                        # during rebalancing
+                                        self.status = ServerState.INITIALIZING
+                                        logger.info(
+                                            "Layer allocation updated. Executor will reload on next check. "
+                                            "Status set to INITIALIZING to prevent new requests."
+                                        )
                                 else:
                                     logger.warning(f"Heartbeat response: {response}")
                             else:
