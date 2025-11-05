@@ -2,7 +2,9 @@ import logging
 from pathlib import Path
 from typing import List
 
-from parallax.utils.weight_filter_utils import filter_weight_files_by_layer_range_for_load
+from parallax.utils.weight_filter_utils import (
+    filter_weight_files_by_layer_range_for_load,
+)
 
 logger = logging.getLogger(__name__)
 
