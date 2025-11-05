@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import List
 
-from parallax.utils.weight_filter_utils import filter_weight_files_by_layer_range
+from parallax.utils.weight_filter_utils import filter_weight_files_by_layer_range_for_load
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def _filter_weight_files_by_cache(hf_weights_files: List[str]) -> List[str]:
     is_first_shard = pp_start_layer == 0
     is_last_shard = pp_end_layer >= num_hidden_layers
 
-    filtered_files = filter_weight_files_by_layer_range(
+    filtered_files = filter_weight_files_by_layer_range_for_load(
         model_path=model_path,
         weight_files=hf_weights_files,
         pp_start_layer=pp_start_layer,
