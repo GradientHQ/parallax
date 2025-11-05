@@ -569,6 +569,7 @@ class GradientServer:
             try:
                 while not self.stop_event.is_set():
                     # Announce the range ID
+                    should_sleep = True
                     try:
                         if self.scheduler_peer_id is not None:
                             response_future = self.scheduler_stub.node_update(
@@ -615,6 +616,8 @@ class GradientServer:
                                             "Layer allocation updated. Executor will reload on next check. "
                                             "Status set to INITIALIZING to prevent new requests."
                                         )
+                                        # Skip sleep to immediately send next heartbeat with new status
+                                        should_sleep = False
                                 else:
                                     logger.warning(f"Heartbeat response: {response}")
                             else:
@@ -636,7 +639,8 @@ class GradientServer:
                             f"Failed to announce {self.prefix_id}_{self.lattica.peer_id()}: {e}"
                         )
 
-                    time.sleep(10)
+                    if should_sleep:
+                        time.sleep(10)
             except Exception as e:
                 logger.exception(f"Module announcer thread error: {e}")
 
