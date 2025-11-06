@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--gpu_backend",
+        "--gpu-backend",
         type=str,
         default="sglang",
         choices=["sglang", "vllm"],
