@@ -65,14 +65,23 @@ async def scheduler_init(raw_request: Request):
 @app.post("/weight/refit")
 async def weight_refit(raw_request: Request):
     request_data = await raw_request.json()
-    scheduler_manage.weight_refit(request_data)
-    return JSONResponse(
-        content={
-            "type": "weight_refit",
-            "data": None,
-        },
-        status_code=200,
-    )
+    status = scheduler_manage.weight_refit(request_data)
+    if status:
+        return JSONResponse(
+            content={
+                "type": "weight_refit",
+                "data": None,
+            },
+            status_code=200,
+        )
+    else:
+        return JSONResponse(
+            content={
+                "type": "weight_refit",
+                "data": "Sever not ready",
+            },
+            status_code=500,
+        )
 
 
 @app.get("/node/join/command")

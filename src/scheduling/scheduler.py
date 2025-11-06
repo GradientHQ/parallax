@@ -105,6 +105,10 @@ class Scheduler:
         )
         self._node_assigned_request_count: Dict[str, int] = {}
 
+        # Weight refit
+        self.refit_request = {}
+        self.refit_set = set()
+
         # Eager bootstrap for initial allocation if enough nodes are present
         try:
             if len(self.nodes) >= self.min_nodes_bootstrapping:

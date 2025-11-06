@@ -47,10 +47,6 @@ class SchedulerManage:
         self.stubs = {}
         self.is_local_network = False
 
-        # For weight refit
-        self.refit_request = {}
-        self.refit_set = set()
-
 
     def run(self, model_name, init_nodes_num, is_local_network=True):
         """
@@ -79,8 +75,11 @@ class SchedulerManage:
         """
         Trigger weight refit on every nodes.
         """
-        self.refit_request = request_data
-        self.refit_set = set()
+        if self.scheduler is None:
+            return False
+        self.scheduler.refit_request = request_data
+        self.scheduler.refit_set = set()
+        return True
 
     def is_running(self):
         """
