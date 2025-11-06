@@ -200,6 +200,7 @@ class BaseLayerAllocator:
             if layer_id in self.layer_to_load:
                 self.layer_to_load[layer_id].remove_node(node)
         node.clear_layer_allocation()
+        node.is_active = False
         self._update_layer_loads_heap()
 
     def declare(self, node: Node) -> None:

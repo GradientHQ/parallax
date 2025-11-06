@@ -204,6 +204,7 @@ class Scheduler:
 
         return self.layer_allocator.has_full_pipeline()
 
+    # Warm-up and re-shard
     def _run_warmup_and_truncate(self) -> None:
         """Run a brief warm-up to detect truncation points and shrink shards.
 
