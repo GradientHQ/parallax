@@ -39,8 +39,8 @@ def _filter_weight_files_by_cache(hf_weights_files: List[str]) -> List[str]:
     filtered_files = filter_weight_files_by_layer_range_for_load(
         model_path=model_path,
         weight_files=hf_weights_files,
-        pp_start_layer=pp_start_layer,
-        pp_end_layer=pp_end_layer,
+        start_layer=pp_start_layer,
+        end_layer=pp_end_layer,
         is_first_shard=is_first_shard,
         is_last_shard=is_last_shard,
     )
