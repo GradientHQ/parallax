@@ -25,6 +25,11 @@ def download_metadata_only(
     cache_dir: Optional[str] = None,
     force_download: bool = False,
 ) -> Path:
+    # If a local path is provided, return it directly without contacting HF Hub
+    local_path = Path(repo_id)
+    if local_path.exists():
+        return local_path
+
     path = snapshot_download(
         repo_id=repo_id,
         cache_dir=cache_dir,
@@ -41,14 +46,21 @@ def selective_model_download(
     cache_dir: Optional[str] = None,
     force_download: bool = False,
 ) -> Path:
-    logger.debug(f"Downloading model metadata for {repo_id}")
-
-    model_path = download_metadata_only(
-        repo_id=repo_id,
-        cache_dir=cache_dir,
-        force_download=force_download,
-    )
-    logger.debug(f"Downloaded model metadata to {model_path}")
+    # Handle local model directory
+    local_path = Path(repo_id)
+    if local_path.exists():
+        model_path = local_path
+        logger.debug(f"Using local model path: {model_path}")
+        is_remote = False
+    else:
+        logger.debug(f"Downloading model metadata for {repo_id}")
+        model_path = download_metadata_only(
+            repo_id=repo_id,
+            cache_dir=cache_dir,
+            force_download=force_download,
+        )
+        logger.debug(f"Downloaded model metadata to {model_path}")
+        is_remote = True
 
     if start_layer is not None and end_layer is not None:
         logger.debug(f"Determining required weight files for layers [{start_layer}, {end_layer})")
@@ -59,34 +71,42 @@ def selective_model_download(
             end_layer=end_layer,
         )
 
-        if not needed_weight_files:
-            logger.debug("Could not determine specific weight files, downloading all")
+        if is_remote:
+            if not needed_weight_files:
+                logger.debug("Could not determine specific weight files, downloading all")
+                snapshot_download(
+                    repo_id=repo_id,
+                    cache_dir=cache_dir,
+                    force_download=force_download,
+                )
+            else:
+                # Step 3: Download only the needed weight files
+                logger.info(f"Downloading {len(needed_weight_files)} weight files")
+
+                for weight_file in needed_weight_files:
+                    logger.debug(f"Downloading {weight_file}")
+                    hf_hub_download(
+                        repo_id=repo_id,
+                        filename=weight_file,
+                        cache_dir=cache_dir,
+                        force_download=force_download,
+                    )
+
+                logger.debug(f"Downloaded weight files for layers [{start_layer}, {end_layer})")
+        else:
+            # Local path: skip any downloads
+            logger.debug("Local model path detected; skipping remote weight downloads")
+    else:
+        # No layer range specified
+        if is_remote:
+            logger.debug("No layer range specified, downloading all model files")
             snapshot_download(
                 repo_id=repo_id,
                 cache_dir=cache_dir,
                 force_download=force_download,
             )
         else:
-            # Step 3: Download only the needed weight files
-            logger.info(f"Downloading {len(needed_weight_files)} weight files")
-
-            for weight_file in needed_weight_files:
-                logger.debug(f"Downloading {weight_file}")
-                hf_hub_download(
-                    repo_id=repo_id,
-                    filename=weight_file,
-                    cache_dir=cache_dir,
-                    force_download=force_download,
-                )
-
-            logger.debug(f"Downloaded weight files for layers [{start_layer}, {end_layer})")
-    else:
-        logger.debug("No layer range specified, downloading all model files")
-        snapshot_download(
-            repo_id=repo_id,
-            cache_dir=cache_dir,
-            force_download=force_download,
-        )
+            logger.debug("No layer range specified and using local path; nothing to download")
 
     return model_path
 
