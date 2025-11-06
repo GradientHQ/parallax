@@ -184,12 +184,12 @@ class ModelInfo:
                 ffn_params *= self.num_local_experts
             kv_cache_size = 0
 
-        logger.debug(
-            "Model Info ffn_params=%d, kv_cache_size=%d, attention_params=%d",
-            ffn_params,
-            kv_cache_size,
-            attention_params,
-        )
+        # logger.debug(
+        #     "Model Info ffn_params=%d, kv_cache_size=%d, attention_params=%d",
+        #     ffn_params,
+        #     kv_cache_size,
+        #     attention_params,
+        # )
         return round(ffn_params + kv_cache_size + attention_params)
 
     def lm_head_flops(self, target_seq_len: int = 1) -> int:

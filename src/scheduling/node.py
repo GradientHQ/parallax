@@ -280,11 +280,11 @@ class Node:
             if not (include_input_embed and self.model_info.tie_embedding):
                 available_memory_bytes -= self.model_info.embedding_io_bytes
 
-        logger.debug(
-            "Node available_memory_bytes=%d, decoder_layer_io_bytes=%d",
-            available_memory_bytes,
-            self.model_info.decoder_layer_io_bytes(roofline=False),
-        )
+        # logger.debug(
+        #     "Node available_memory_bytes=%d, decoder_layer_io_bytes=%d",
+        #     available_memory_bytes,
+        #     self.model_info.decoder_layer_io_bytes(roofline=False),
+        # )
         if self.hardware.device == "mlx":
             # For mlx, consider mlx bit factor
             return floor(

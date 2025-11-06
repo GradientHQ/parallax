@@ -216,6 +216,7 @@ class BaseLayerAllocator:
         logger.debug("Joining node dynamically: %s", node.node_id)
         self.declare(node)
         lightest_layer = self.get_lightest_layer()
+        logger.debug("Lightest layer: %s", lightest_layer)
         if lightest_layer is None:
             raise ValueError("No layers to assign")
 

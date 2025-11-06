@@ -309,7 +309,13 @@ class Scheduler:
             for n in self.nodes:
                 if n.start_layer is not None and n.end_layer is not None:
                     self.layer_allocator.deallocate(n)
-            self.layer_allocator.global_allocation()
+            success = self.layer_allocator.global_allocation()
+            if not success:
+                logger.warning("Global rebalance failed to produce a full pipeline")
+            else:
+                logger.debug("Global rebalance completed successfully")
+                self._bootstrapped = True
+                self._bootstrapped_event.set()
         with self._node_count_cv:
             self._node_count_cv.notify_all()
 
