@@ -185,7 +185,7 @@ class Node:
     current_requests: int = 0
 
     # todo upload is_active
-    is_active: bool = False
+    is_active: bool = True
     last_heartbeat: float = 0.0
     # Will be updated by node broadcasting
     # otherwise, use roofline performance model to estimate
