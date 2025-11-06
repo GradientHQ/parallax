@@ -283,11 +283,17 @@ def initialize_vllm_model_runner(
     dtype: str = "float16",
     **kwargs,
 ) -> Tuple[ParallaxVLLMModelRunner, Dict, Any]:
+    from parallax.utils.selective_download import get_model_path_with_selective_download
     logger.info(
         f"Initializing vLLM model runner for {model_repo}, " f"layers=[{start_layer}, {end_layer})"
     )
 
-    model_path = get_model_path(model_repo)[0]
+    model_path = get_model_path_with_selective_download(
+        model_repo,
+        start_layer=start_layer,
+        end_layer=end_layer,
+    )
+
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")
@@ -332,8 +338,8 @@ def initialize_vllm_model_runner(
         )
 
     model_config = ModelConfig(
-        model=model_repo,
-        tokenizer=model_repo,
+        model=model_path,
+        tokenizer=model_path,
         tokenizer_mode="auto",
         trust_remote_code=True,
         dtype=dtype,

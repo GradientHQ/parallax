@@ -246,7 +246,7 @@ def initialize_sgl_model_runner(
         f"Downloading model with selective weight files for layers [{start_layer}, {end_layer})"
     )
     model_path = get_model_path_with_selective_download(
-        original_model_path,
+        model_repo,
         start_layer=start_layer,
         end_layer=end_layer,
     )
