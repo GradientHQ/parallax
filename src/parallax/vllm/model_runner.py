@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import importlib
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import vllm
 import torch
 from transformers import AutoConfig, AutoTokenizer
@@ -16,6 +16,7 @@ from vllm.config import (
     SchedulerConfig,
     VllmConfig,
 )
+from vllm.distributed.parallel_state import GroupCoordinator as VLLMGroupCoordinator
 from vllm.v1.core.kv_cache_manager import KVCacheManager
 from vllm.v1.core.kv_cache_utils import (
     generate_scheduler_kv_cache_config,
@@ -25,12 +26,54 @@ from vllm.v1.core.kv_cache_utils import (
 )
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheGroupSpec, KVCacheTensor
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+from vllm.sequence import IntermediateTensors
 from parallax.utils.tokenizer_utils import load_tokenizer
 
 from parallax_utils.logging_config import get_logger
 from mlx_lm.utils import get_model_path, load_config
 
 logger = get_logger(__name__)
+
+
+class ParallaxVLLMGroupCoordinator(VLLMGroupCoordinator):
+    """
+    Parallax version of vLLM's GroupCoordinator.
+    Override is_first_rank and is_last_rank to use layer ranges instead of process ranks.
+    """
+    
+    def __init__(
+        self,
+        group_ranks: List[List[int]],
+        local_rank: int,
+        torch_distributed_backend: Union[str, torch.distributed.Backend],
+        use_device_communicator: bool,
+        use_message_queue_broadcaster: bool = False,
+        group_name: Optional[str] = None,
+        pp_start_layer: int = 0,
+        pp_end_layer: int = 0,
+        num_hidden_layers: int = 0,
+    ):
+        super().__init__(
+            group_ranks=group_ranks,
+            local_rank=local_rank,
+            torch_distributed_backend=torch_distributed_backend,
+            use_device_communicator=use_device_communicator,
+            use_message_queue_broadcaster=use_message_queue_broadcaster,
+            group_name=group_name,
+        )
+        self.pp_start_layer = pp_start_layer
+        self.pp_end_layer = pp_end_layer
+        self.num_hidden_layers = num_hidden_layers
+    
+    @property
+    def is_first_rank(self) -> bool:
+        """Return whether this is the first pipeline stage based on layer range."""
+        return self.pp_start_layer == 0
+    
+    @property
+    def is_last_rank(self) -> bool:
+        """Return whether this is the last pipeline stage based on layer range."""
+        return self.pp_end_layer >= self.num_hidden_layers
 
 
 def _create_kv_cache_config_from_specs(
@@ -301,14 +344,17 @@ def initialize_vllm_model_runner(
     num_hidden_layers = getattr(config, "num_hidden_layers", 28)
     is_first_peer = start_layer == 0
     is_last_peer = end_layer == num_hidden_layers
-    virtual_pp_size = 2 if not (is_first_peer and is_last_peer) else 1
+    
+    # For single process, always use pp_size=1
+    virtual_pp_size = 1
 
     import vllm.distributed.parallel_state as parallel_state
     import os
 
     if not parallel_state.model_parallel_is_initialized():
-        logger.info("Initializing vLLM distributed environment...")
+        logger.info(f"Initializing vLLM distributed environment...")
 
+        # Set environment variables for distributed initialization
         if "RANK" not in os.environ:
             os.environ["RANK"] = "0"
         if "WORLD_SIZE" not in os.environ:
@@ -322,14 +368,47 @@ def initialize_vllm_model_runner(
 
         try:
             parallel_state.init_distributed_environment()
+            
+            # Initialize with pp_size=1 for single process
             parallel_state.initialize_model_parallel(
                 tensor_model_parallel_size=1,
-                pipeline_model_parallel_size=virtual_pp_size,
+                pipeline_model_parallel_size=1,
             )
-            logger.info(f"vLLM distributed environment initialized with pp_size={virtual_pp_size}")
+            
+            # Monkey patch the PP group with our custom Parallax coordinator
+            # that uses layer ranges to determine is_first_rank/is_last_rank
+            original_pp_group = parallel_state._PP
+            if original_pp_group is not None:
+                # Get backend from device_group (torch is already imported at module level)
+                import torch.distributed
+                backend = torch.distributed.get_backend(original_pp_group.device_group)
+                
+                # Create a Parallax PP group coordinator
+                # Need to wrap ranks in a list of lists for group_ranks parameter
+                parallax_pp_group = ParallaxVLLMGroupCoordinator(
+                    group_ranks=[original_pp_group.ranks],
+                    local_rank=original_pp_group.local_rank,
+                    torch_distributed_backend=backend,
+                    use_device_communicator=original_pp_group.use_device_communicator,
+                    use_message_queue_broadcaster=(original_pp_group.mq_broadcaster is not None),
+                    group_name="pp",
+                    pp_start_layer=start_layer,
+                    pp_end_layer=end_layer,
+                    num_hidden_layers=num_hidden_layers,
+                )
+                # Replace the PP group
+                parallel_state._PP = parallax_pp_group
+                logger.info(
+                    f"Replaced vLLM PP group with Parallax coordinator: "
+                    f"is_first_rank={parallax_pp_group.is_first_rank}, "
+                    f"is_last_rank={parallax_pp_group.is_last_rank}"
+                )
+            
+            logger.info(f"vLLM distributed environment initialized")
         except Exception as e:
             logger.warning(f"Failed to initialize distributed environment: {e}")
-            logger.info("Continuing without distributed initialization...")
+            logger.error(f"vLLM distributed initialization failed. Error: {e}")
+            raise
 
     if end_layer > num_hidden_layers:
         raise ValueError(
@@ -338,8 +417,8 @@ def initialize_vllm_model_runner(
         )
 
     model_config = ModelConfig(
-        model=model_path,
-        tokenizer=model_path,
+        model=str(model_path),
+        tokenizer=str(model_path),
         tokenizer_mode="auto",
         trust_remote_code=True,
         dtype=dtype,

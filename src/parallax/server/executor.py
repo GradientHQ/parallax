@@ -407,26 +407,45 @@ class Executor:
         # Prepare PP proxy tensors (common for both backends when not first peer)
         pp_proxy_tensors = None
         if not self.is_first_peer:
-            hidden_states = torch.cat(
-                [
-                    (
-                        req.hidden_states
-                        if req.hidden_states.ndim == 2
-                        else req.hidden_states.unsqueeze(0)
-                    )
-                    for req in batched_requests
-                ],
-                dim=0,
-            )
+            # Concatenate hidden states from all requests
+            # For vLLM, we need to flatten to (total_tokens, hidden_size)
+            # For SGLang, we keep the batch dimension
+            hidden_states_list = []
+            for req in batched_requests:
+                hs = req.hidden_states
+                if hs.ndim == 2:
+                    # Already (seq_len, hidden_size) or (1, hidden_size)
+                    hidden_states_list.append(hs)
+                elif hs.ndim == 3:
+                    # (1, seq_len, hidden_size) -> (seq_len, hidden_size)
+                    hidden_states_list.append(hs.squeeze(0))
+                else:
+                    # (hidden_size,) -> (1, hidden_size)
+                    hidden_states_list.append(hs.unsqueeze(0))
+            
+            # Concatenate along sequence dimension to get (total_tokens, hidden_size)
+            hidden_states = torch.cat(hidden_states_list, dim=0)
+            
+            # Create residual tensor with same shape
             residual = torch.zeros(
                 hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
             )
-            pp_proxy_tensors = PPProxyTensors(
-                {
+            
+            if self.backend_type == "vllm":
+                # For vLLM, pass directly as IntermediateTensors
+                from vllm.sequence import IntermediateTensors
+                pp_proxy_tensors = IntermediateTensors({
                     "hidden_states": hidden_states,
                     "residual": residual,
-                }
-            )
+                })
+            else:
+                # For SGLang, use PPProxyTensors
+                pp_proxy_tensors = PPProxyTensors(
+                    {
+                        "hidden_states": hidden_states,
+                        "residual": residual,
+                    }
+                )
             logger.debug(f"PP Proxy: hidden_states shape: {hidden_states.shape}")
 
         # Prepare lengths (common for both backends)
@@ -479,26 +498,45 @@ class Executor:
         # Prepare PP proxy tensors (common for both backends when not first peer)
         pp_proxy_tensors = None
         if not self.is_first_peer:
-            hidden_states = torch.cat(
-                [
-                    (
-                        req.hidden_states
-                        if req.hidden_states.ndim == 2
-                        else req.hidden_states.unsqueeze(0)
-                    )
-                    for req in batched_requests
-                ],
-                dim=0,
-            )
+            # Concatenate hidden states from all requests
+            # For vLLM, we need to flatten to (total_tokens, hidden_size)
+            # For SGLang, we keep the batch dimension
+            hidden_states_list = []
+            for req in batched_requests:
+                hs = req.hidden_states
+                if hs.ndim == 2:
+                    # Already (seq_len, hidden_size) or (1, hidden_size)
+                    hidden_states_list.append(hs)
+                elif hs.ndim == 3:
+                    # (1, seq_len, hidden_size) -> (seq_len, hidden_size)
+                    hidden_states_list.append(hs.squeeze(0))
+                else:
+                    # (hidden_size,) -> (1, hidden_size)
+                    hidden_states_list.append(hs.unsqueeze(0))
+            
+            # Concatenate along sequence dimension to get (total_tokens, hidden_size)
+            hidden_states = torch.cat(hidden_states_list, dim=0)
+            
+            # Create residual tensor with same shape
             residual = torch.zeros(
                 hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
             )
-            pp_proxy_tensors = PPProxyTensors(
-                {
+            
+            if self.backend_type == "vllm":
+                # For vLLM, pass directly as IntermediateTensors
+                from vllm.sequence import IntermediateTensors
+                pp_proxy_tensors = IntermediateTensors({
                     "hidden_states": hidden_states,
                     "residual": residual,
-                }
-            )
+                })
+            else:
+                # For SGLang, use PPProxyTensors
+                pp_proxy_tensors = PPProxyTensors(
+                    {
+                        "hidden_states": hidden_states,
+                        "residual": residual,
+                    }
+                )
             logger.debug(f"PP Proxy: hidden_states shape: {hidden_states.shape}")
 
         # Prepare lengths (common for both backends)
@@ -1092,13 +1130,13 @@ class Executor:
             ), "pp_proxy_tensors should be in cuda prepared inputs"
             scheduler_output = prepared_inputs["scheduler_output"]
             pp_proxy_tensors = prepared_inputs["pp_proxy_tensors"]
-            intermediate_tensors = None
-            if pp_proxy_tensors is not None:
-                # Convert SGLang's PPProxyTensors to vLLM's IntermediateTensors
-                from vllm.sequence import IntermediateTensors
-
-                intermediate_tensors = IntermediateTensors(pp_proxy_tensors.tensors)
+            # For vLLM, pp_proxy_tensors is already an IntermediateTensors object
+            intermediate_tensors = pp_proxy_tensors if pp_proxy_tensors is not None else None
+            if intermediate_tensors is not None:
                 logger.debug(f"vLLM: Using intermediate_tensors for PP (non-first peer)")
+                
+            # Import IntermediateTensors for type checking
+            from vllm.sequence import IntermediateTensors
 
             # Execute model with vLLM
             output = self.model_runner.execute_model(
@@ -1125,14 +1163,22 @@ class Executor:
                     return torch.tensor(sampled_token_ids, dtype=torch.int64)
             else:
                 # Intermediate peer: return hidden states for next peer
-                if hasattr(output, "hidden_states") and output.hidden_states is not None:
+                # vLLM with Parallax PP should return IntermediateTensors
+                if isinstance(output, IntermediateTensors):
+                    # Got IntermediateTensors from monkey-patched forward
+                    if "hidden_states" in output.tensors:
+                        return output.tensors["hidden_states"]
+                    else:
+                        # Return the full IntermediateTensors (might be just hidden_states tensor)
+                        return output
+                elif hasattr(output, "hidden_states") and output.hidden_states is not None:
                     return output.hidden_states
                 elif hasattr(output, "tensors") and "hidden_states" in output.tensors:
-                    # Handle IntermediateTensors case
                     return output.tensors["hidden_states"]
                 else:
                     raise RuntimeError(
                         "vLLM backend: expected hidden_states in output for PP, but got None. "
+                        f"Output type: {type(output)}, is_last_peer={self.is_last_peer}. "
                         "This typically means the model runner is not configured for pipeline parallelism."
                     )
 
