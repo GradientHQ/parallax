@@ -151,59 +151,6 @@ class Scheduler:
         """List the allocations of all nodes."""
         return self.layer_allocator.list_node_allocations()
 
-    def _try_adjust_allocations_to_form_pipeline(self) -> bool:
-        """Try to form a full pipeline by adjusting existing node allocations, avoiding global reallocation.
-        Applicable when: after a node leaves, remaining nodes have overlapping coverage but non-contiguous allocations.
-        Example: node-2: [0,22), node-1: [14,28) -> can be adjusted to node-2: [0,14), node-1: [14,28)
-        """
-        # Collect and sort nodes with allocations
-        nodes = sorted(
-            [n for n in self.nodes if n.start_layer is not None and n.end_layer is not None],
-            key=lambda n: n.start_layer,
-        )
-        if not nodes or nodes[0].start_layer != 0:
-            return False
-
-        num_layers = self.model_info.num_layers
-        current_pos = 0
-        adjustments = []
-
-        # Build continuous path and compute adjustments
-        for i, node in enumerate(nodes):
-            if current_pos >= num_layers:
-                break
-            if node.start_layer > current_pos:
-                return False  # Gap exists, cannot recover
-
-            # Skip nodes that don't cover current_pos
-            if node.end_layer <= current_pos:
-                continue
-
-            new_end = min(
-                node.end_layer,
-                nodes[i + 1].start_layer if i + 1 < len(nodes) else num_layers,
-                num_layers,
-            )
-            if new_end > current_pos:
-                adjustments.append((node, current_pos, new_end))
-                current_pos = new_end
-
-        if current_pos < num_layers:
-            return False
-
-        # Apply adjustments
-        if adjustments:
-            logger.debug("Adjusting allocations to form continuous pipeline")
-            for node, new_start, new_end in adjustments:
-                if node.start_layer != new_start or node.end_layer != new_end:
-                    logger.debug(
-                        f"  {node.node_id}: [{node.start_layer}, {node.end_layer}) -> [{new_start}, {new_end})"
-                    )
-                    self.layer_allocator.deallocate(node)
-                    self.layer_allocator.allocate(node, new_start, new_end)
-
-        return self.layer_allocator.has_full_pipeline()
-
     # Warm-up and re-shard
     def _run_warmup_and_truncate(self) -> None:
         """Run a brief warm-up to detect truncation points and shrink shards.
@@ -354,7 +301,7 @@ class Scheduler:
         )
         self.layer_allocator.leave(node_id)
         if self.layer_allocator.should_global_rebalance():
-            logger.debug("Reallocation needed due to node leave, attempting adjustment first")
+            logger.debug("Global rebalance triggered due to node leave")
 
             # Count manual vs automatic nodes
             manual_count = sum(1 for n in self.nodes if n.manual_layer_assignment)
@@ -369,27 +316,19 @@ class Scheduler:
                     f"Mixed assignment detected ({manual_count} manual, {total_count - manual_count} automatic); skipping rebalance"
                 )
             else:
-                # All nodes are automatic, try to recover pipeline through adjustment first
-                # This avoids unnecessary global reallocation when nodes have overlapping coverage
-                if self._try_adjust_allocations_to_form_pipeline():
-                    logger.info(
-                        "Pipeline recovered through allocation adjustment, skipping global rebalance"
-                    )
+                # All nodes are automatic, proceed with rebalance
+                self._bootstrapped = False
+                self._bootstrapped_event.clear()
+                for n in self.nodes:
+                    if n.start_layer is not None and n.end_layer is not None:
+                        self.layer_allocator.deallocate(n)
+                success = self.layer_allocator.global_allocation()
+                if not success:
+                    logger.warning("Global rebalance failed to produce a full pipeline")
                 else:
-                    # If adjustment failed, proceed with full global rebalance
-                    logger.debug("Allocation adjustment failed, proceeding with global rebalance")
-                    self._bootstrapped = False
-                    self._bootstrapped_event.clear()
-                    for n in self.nodes:
-                        if n.start_layer is not None and n.end_layer is not None:
-                            self.layer_allocator.deallocate(n)
-                    success = self.layer_allocator.global_allocation()
-                    if not success:
-                        logger.warning("Global rebalance failed to produce a full pipeline")
-                    else:
-                        logger.debug("Global rebalance completed successfully")
-                        self._bootstrapped = True
-                        self._bootstrapped_event.set()
+                    logger.debug("Global rebalance completed successfully")
+                    self._bootstrapped = True
+                    self._bootstrapped_event.set()
 
         with self._node_count_cv:
             self._node_count_cv.notify_all()
