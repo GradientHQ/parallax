@@ -103,6 +103,8 @@ class Request:
         self.routing_table = routing_table
         self.sampling_params = sampling_params or SamplingParams()
         self.abort = False
+        self.ready_for_next_step = False
+        self.last_updated_time: Optional[float] = None
 
     @property
     def is_finished(self) -> bool:

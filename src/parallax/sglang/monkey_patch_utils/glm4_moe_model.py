@@ -1,3 +1,5 @@
+## This is a patch file for sglang glm4_moe model to support pipeline parallelism
+
 import logging
 from typing import Iterable, Optional, Tuple
 
@@ -52,6 +54,9 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]],
     params_dict = dict(self.named_parameters())
     weight_names = []
     for name, loaded_weight in weights:
+        ############################################################################
+        ## TODO: remove when sglang code support pipeline parallelism
+        ## This is a patch code for sgalng
         if "lm_head" in name:
             pp_group = getattr(self, "pp_group", None) or get_pp_group()
             if not pp_group.is_last_rank:
@@ -64,6 +69,8 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]],
             and (layer_id < self.model.start_layer or layer_id >= self.model.end_layer)
         ):
             continue
+        ## End of patch
+        ############################################################################
         weight_names.append(name)
 
         if not is_nextn:
@@ -182,12 +189,15 @@ def apply_glm4_moe_monkey_patch():
 
         if isinstance(hidden_states, PPProxyTensors):
             return hidden_states
-
+        ################################################################################
+        ## Patch for PP: only last PP rank compute logits
         pp_group = getattr(self, "pp_group", None) or get_pp_group()
         if pp_group.is_last_rank:
             return self.logits_processor(input_ids, hidden_states, self.lm_head, forward_batch)
         else:
             return hidden_states
+        ## End of patch
+        ################################################################################
 
     glm4_moe_module.Glm4MoeForCausalLM.forward = pp_forward
     glm4_moe_module.Glm4MoeForCausalLM.load_weights = monkey_patch_load_weights

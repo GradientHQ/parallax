@@ -80,7 +80,9 @@ class RPCConnectionHandler(ConnectionHandler):
                 new_rtt_to_nodes=node.rtt_to_nodes,
                 is_active=node.is_active,
             )
-            return {}
+            # Return current layer allocation to node
+            layer_allocation = self.get_layer_allocation(node.node_id)
+            return layer_allocation
         except Exception as e:
             logger.exception(f"node_update error: {e}")
             return {}
@@ -140,12 +142,18 @@ class RPCConnectionHandler(ConnectionHandler):
         list_node_allocations = self.scheduler.list_node_allocations()
         for node_id, start_layer, end_layer in list_node_allocations:
             if current_node_id == node_id:
-                return {
-                    "node_id": node_id,
-                    "model_name": self.scheduler.model_info.model_name,
-                    "start_layer": start_layer,
-                    "end_layer": end_layer,
-                }
+                node = self.scheduler.node_id_to_node.get(node_id)
+                if node:
+                    return {
+                        "node_id": node_id,
+                        "model_name": (
+                            node.model_info.model_name
+                            if node.hardware.device != "mlx"
+                            else node.model_info.mlx_model_name
+                        ),
+                        "start_layer": start_layer,
+                        "end_layer": end_layer,
+                    }
         return {}
 
     def build_node(self, node_json: dict):
@@ -158,6 +166,7 @@ class RPCConnectionHandler(ConnectionHandler):
             max_concurrent_requests=node_json.get("max_concurrent_requests"),
             max_sequence_length=node_json.get("max_sequence_length"),
             is_active=node_json.get("is_active", True),
+            manual_layer_assignment=node_json.get("manual_layer_assignment", False),
         )
         if node_json.get("start_layer", None) is not None:
             node.start_layer = node_json.get("start_layer")
@@ -177,10 +186,12 @@ class RPCConnectionHandler(ConnectionHandler):
         gpu_name = hardware_json.get("gpu_name")
         memory_gb = hardware_json.get("memory_gb")
         memory_bandwidth_gbps = hardware_json.get("memory_bandwidth_gbps")
+        device = hardware_json.get("device")
         return NodeHardwareInfo(
             node_id=node_id,
             tflops_fp16=tflops_fp16,
             gpu_name=gpu_name,
             memory_gb=memory_gb,
             memory_bandwidth_gbps=memory_bandwidth_gbps,
+            device=device,
         )

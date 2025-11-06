@@ -53,6 +53,28 @@ def test_optimal_path_single_node():
     assert latency == pytest.approx(float(n.layer_latency_ms), rel=1e-6)
 
 
+def test_optimal_path_missing_rtt():
+    """If RTT is missing between two nodes in a path, it should be invalid."""
+    num_layers = 12
+    model = build_model(num_layers)
+    n1 = build_node("n1", model, tflops=200.0, x=0.0, y=0.0)
+    n2 = build_node("n2", model, tflops=200.0, x=1.0, y=0.0)
+    n1.set_layer_allocation(0, 6)
+    n2.set_layer_allocation(6, 12)
+    nodes = [n1, n2]
+    set_rtt_from_coords(nodes)
+
+    # Manually remove the RTT info between n1 and n2
+    if n2.node_id in n1.rtt_to_nodes:
+        del n1.rtt_to_nodes[n2.node_id]
+
+    router = DynamicProgrammingRouting()
+    node_ids, latency = router.find_optimal_path(nodes, num_layers)
+
+    assert node_ids == []
+    assert latency == float("inf")
+
+
 @pytest.mark.parametrize(
     "num_layers,segments,expected_path",
     [

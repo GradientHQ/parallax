@@ -209,6 +209,8 @@ class GradientServer:
         model_name: Optional[str] = None,
         max_batch_size: Optional[int] = None,
         max_sequence_length: Optional[int] = None,
+        param_hosting_ratio: float = 0.65,
+        kv_cache_ratio: float = 0.25,
     ):
         self.recv_from_peer_addr = recv_from_peer_addr
         self.send_to_peer_addr = send_to_peer_addr
@@ -226,6 +228,8 @@ class GradientServer:
         self.model_name = model_name
         self.max_batch_size = max_batch_size
         self.max_sequence_length = max_sequence_length
+        self.param_hosting_ratio = param_hosting_ratio
+        self.kv_cache_ratio = kv_cache_ratio
         self.prefix_id = f"{dht_prefix}_announce"
         self.lattica = None
         self.routing_table = None
@@ -236,6 +240,7 @@ class GradientServer:
         self.rtt_last_update = 0
         self.rtt_update_interval = 60
         self.status = ServerState.JOINING
+        self.manual_layer_assignment = block_end_index is not None and block_start_index is not None
 
         self.scheduler_stub = None
         self.scheduler_peer_id = None
@@ -243,6 +248,8 @@ class GradientServer:
         self.announcer = None
         self.connection_handler = None
         self.stop_event = threading.Event()
+        logger.debug(f"manual_layer_assignment: {self.manual_layer_assignment}")
+        self._layer_allocation_changed = False
 
     def build_lattica(self):
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs)
@@ -323,6 +330,10 @@ class GradientServer:
                     self.lattica = None
                     time.sleep(10)
                     return self.run()
+
+                if self.manual_layer_assignment:
+                    node_info["manual_layer_assignment"] = True
+
                 response = self.scheduler_stub.node_join(node_info)
                 response = response.result(timeout=300)
                 if response == {}:
@@ -331,8 +342,9 @@ class GradientServer:
 
                 logger.info(f"Join scheduler response: {response}")
 
-                self.block_start_index = response.get("start_layer")
-                self.block_end_index = response.get("end_layer")
+                if not self.manual_layer_assignment:
+                    self.block_start_index = response.get("start_layer")
+                    self.block_end_index = response.get("end_layer")
                 self.model_name = response.get("model_name")
 
                 # Publish executor metrics to backend on each update
@@ -560,7 +572,56 @@ class GradientServer:
                     # Announce the range ID
                     try:
                         if self.scheduler_peer_id is not None:
-                            self.scheduler_stub.node_update(self.get_node_info(is_update=True))
+                            response_future = self.scheduler_stub.node_update(
+                                self.get_node_info(is_update=True)
+                            )
+                            # Get the response result
+                            response = (
+                                response_future.result(timeout=30)
+                                if hasattr(response_future, "result")
+                                else response_future
+                            )
+
+                            # Print layer allocation information
+                            if response and isinstance(response, dict):
+                                start_layer = response.get("start_layer")
+                                end_layer = response.get("end_layer")
+                                model_name = response.get("model_name")
+                                if start_layer is not None and end_layer is not None:
+                                    logger.debug(
+                                        f"Heartbeat: Node {self.lattica.peer_id()}... "
+                                        f"Model: {model_name}, Layers: [{start_layer}, {end_layer})"
+                                    )
+                                    # Check if layer allocation changed
+                                    if (
+                                        start_layer != self.block_start_index
+                                        or end_layer != self.block_end_index
+                                    ):
+                                        logger.warning(
+                                            f"Layer allocation changed! "
+                                            f"Current: [{self.block_start_index}, {self.block_end_index}) -> "
+                                            f"New: [{start_layer}, {end_layer})"
+                                        )
+                                        # Update layer allocation
+                                        self.block_start_index = start_layer
+                                        self.block_end_index = end_layer
+                                        if model_name:
+                                            self.model_name = model_name
+                                        # Set flag to trigger executor reload
+                                        self._layer_allocation_changed = True
+                                        # Set status to INITIALIZING to prevent scheduler from sending requests
+                                        # during rebalancing
+                                        self.status = ServerState.INITIALIZING
+                                        logger.info(
+                                            "Layer allocation updated. Executor will reload on next check. "
+                                            "Status set to INITIALIZING to prevent new requests."
+                                        )
+                                else:
+                                    logger.warning(f"Heartbeat response: {response}")
+                            else:
+                                logger.warning(
+                                    f"Heartbeat: No layer allocation received yet, response: {response}"
+                                )
                         else:
                             self.lattica.store(
                                 key=self.prefix_id,
@@ -622,8 +683,8 @@ class GradientServer:
         info = {
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
-            "kv_cache_ratio": 0.25,
-            "param_hosting_ratio": 0.65,
+            "kv_cache_ratio": self.kv_cache_ratio,
+            "param_hosting_ratio": self.param_hosting_ratio,
             "max_concurrent_requests": self.max_batch_size,
             "max_sequence_length": (
                 1024 if self.max_sequence_length is None else self.max_sequence_length
@@ -633,13 +694,24 @@ class GradientServer:
             "is_active": self.status == ServerState.READY,
         }
 
+        # For manual layer assignment, always include start_layer and end_layer
+        if self.manual_layer_assignment:
+            info["start_layer"] = self.block_start_index
+            info["end_layer"] = self.block_end_index
+            logger.info(
+                f"Manual assignment: sending start_layer={self.block_start_index}, "
+                f"end_layer={self.block_end_index}"
+            )
+
         if is_update:
             metrics = get_metrics()
             info["current_requests"] = metrics.get("current_requests", 0)
             if metrics.get("layer_latency_ms") is not None:
                 info["layer_latency_ms"] = metrics.get("layer_latency_ms")
-            info["start_layer"] = self.block_start_index
-            info["end_layer"] = self.block_end_index
+            # In update mode, always include current allocation
+            if not self.manual_layer_assignment:
+                info["start_layer"] = self.block_start_index
+                info["end_layer"] = self.block_end_index
 
         return info
 
@@ -677,6 +749,8 @@ def launch_p2p_server(
     model_name: Optional[str],
     max_batch_size: Optional[int] = None,
     max_sequence_length: Optional[int] = None,
+    param_hosting_ratio: float = 0.65,
+    kv_cache_ratio: float = 0.25,
 ):
     server = GradientServer(
         recv_from_peer_addr=recv_from_peer_addr,
@@ -695,12 +769,17 @@ def launch_p2p_server(
         model_name=model_name,
         max_batch_size=max_batch_size,
         max_sequence_length=max_sequence_length,
+        param_hosting_ratio=param_hosting_ratio,
+        kv_cache_ratio=kv_cache_ratio,
     )
     # Start the server
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
 
-    while server.block_start_index is None:
+    # Wait for layer allocation and model_name to be set
+    while server.block_start_index is None or (
+        scheduler_addr is not None and server.model_name is None
+    ):
         time.sleep(1)
 
     return server

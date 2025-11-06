@@ -239,6 +239,7 @@ def join_command(args, passthrough_args: list[str] | None = None):
         cmd.extend(["--max-batch-size", "8"])
     if not _flag_present(passthrough_args, ["--kv-block-size"]):
         cmd.extend(["--kv-block-size", "1024"])
+
     # The scheduler address is now taken directly from the parsed arguments.
     cmd.extend(["--scheduler-addr", args.scheduler_addr])
 

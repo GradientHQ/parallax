@@ -61,6 +61,20 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--param-hosting-ratio",
+        type=float,
+        default=0.65,
+        help="Ratio of GPU memory to use for parameter hosting",
+    )
+
+    parser.add_argument(
+        "--kv-cache-ratio",
+        type=float,
+        default=0.25,
+        help="Ratio of GPU memory to use for KV cache",
+    )
+
+    parser.add_argument(
         "--start-layer",
         type=int,
         default=None,
@@ -124,6 +138,13 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--scheduler-wait-ms", type=int, default=500, help="Scheduler wait time in milliseconds"
+    )
+
+    parser.add_argument(
+        "--request-timeout-s",
+        type=int,
+        default=600,
+        help="Per-request timeout in seconds before automatic abort",
     )
 
     # GPU/SGLang specialized configuration
@@ -220,6 +241,9 @@ def validate_args(args: argparse.Namespace) -> None:
 
     if args.scheduler_wait_ms < 0:
         raise ValueError("scheduler_wait_ms must be non-negative")
+
+    if getattr(args, "request_timeout_s", None) is not None and args.request_timeout_s <= 0:
+        raise ValueError("request_timeout_s must be positive")
 
     # Validate supported dtypes
     dtype_list = [

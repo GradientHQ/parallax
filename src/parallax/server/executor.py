@@ -82,6 +82,7 @@ class Executor:
         prefill_priority: int = 0,
         micro_batch_ratio: int = 2,
         scheduler_wait_ms: int = 500,
+        request_timeout_s: Optional[int] = 600,
         # Metrics Configs
         layer_latency_update_every: int = 4096,
         # KV Cache Configs
@@ -98,6 +99,8 @@ class Executor:
         # GPU/SGLang Specialized Configs
         attention_backend: Optional[str] = "torch_native",
         moe_runner_backend: Optional[str] = "auto",
+        # Optional gradient server for layer reallocation detection
+        gradient_server: Optional[Any] = None,
     ):
         # Backend
         self.device = get_current_device()
@@ -167,6 +170,9 @@ class Executor:
         self.finished_batch = []
         self.start_layer = start_layer
         self.end_layer = end_layer
+        self._should_stop = False  # Flag to gracefully stop the executor
+        # Reference to gradient server for layer reallocation detection
+        self.gradient_server = gradient_server
 
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
@@ -266,6 +272,8 @@ class Executor:
             micro_batch_ratio=micro_batch_ratio,
             is_first_peer=self.is_first_peer,
             tokenizer=self.tokenizer,
+            kv_cache_manager=self.kv_cache_manager if self.device == "mlx" else None,
+            request_timeout_s=request_timeout_s,
         )
         logger.debug(
             f"Scheduler initialized (max_batch_size={max_batch_size}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"
@@ -300,9 +308,9 @@ class Executor:
             )
 
     @classmethod
-    def create_from_args(cls, args: argparse.Namespace):
+    def create_from_args(cls, args: argparse.Namespace, gradient_server=None):
         """Create executor from command line arguments."""
-        return cls(**create_executor_config(args))
+        return cls(**create_executor_config(args, gradient_server))
 
     def recv_requests_from_http(self) -> List[Request]:
         """Receives requests from http frontend"""
@@ -851,13 +859,7 @@ class Executor:
                     req, IntermediateRequest
                 ), "Non-first peers must receive IntermediateRequests."
                 if req.is_finished or req.hidden_states is None:
-                    self.scheduler.evict_request(req.request_id, req.status)
-                    if self.backend_type == "sglang":
-                        release_sglang_request(self.running_batch, req.request_id)
-                    elif self.backend_type == "vllm":
-                        from parallax.vllm.batch_info import release_vllm_request
-
-                        release_vllm_request(self.model_runner, req.request_id)
+                    self._release_and_evict_request(req.request_id)
                     if not self.is_last_peer:
                         self.finished_batch.append(req)
                 else:
@@ -880,8 +882,6 @@ class Executor:
             # or IntermediateRequests from the last peer.
             for req in requests:
                 if isinstance(req, InitialRequest):
-                    if not self.kv_cache_manager.has_request(req.request_id):
-                        self.kv_cache_manager.add_request(req, req.total_length)
                     self.scheduler.enque_request(req)
                 elif isinstance(req, IntermediateRequest):
                     original_req = self.scheduler.get_running_request(req.request_id)
@@ -951,14 +951,12 @@ class Executor:
                         f"kv cache manager has {self.kv_cache_manager.tokens_in_cache} tokens, "
                         f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
                     )
-                    self.scheduler.evict_request(req.request_id, req.status)
+                    self.scheduler.evict_request(req.request_id)
                     if not self.is_last_peer:
                         self.finished_batch.append(req)
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
-                    if not self.kv_cache_manager.has_request(req.request_id):
-                        self.kv_cache_manager.add_request(req, req.total_length)
 
     def _prepare_next_single_request(self, request: Request, hidden_states: Any) -> Request:
         """Handle request state changes both inter and intra peers.
@@ -1210,7 +1208,7 @@ class Executor:
             ]
         # k_caches shape: (num_layers, B, num_kv_heads, L_padded, head_dim)
         logger.debug(
-            f"Processed batch with {len(prepared_inputs['requests'])} requests, "
+            f"Processing batch with {len(prepared_inputs['requests'])} requests, "
             f"request status: {prepared_inputs['requests'][0].status}, "
             f"hidden_states shape: {hidden_states.shape}, "
             f"k_caches shape: {k_caches.shape}, "
@@ -1269,12 +1267,41 @@ class Executor:
         )
         return ret
 
+    def _release_and_evict_request(self, rid: str):
+        """Release per-request resources and evict from scheduler. Best-effort, never raises."""
+        # Release resources
+        if self.device == "cuda":
+            try:
+                if self.backend_type == "vllm":
+                    from parallax.vllm.batch_info import release_vllm_request
+
+                    release_vllm_request(self.model_runner, rid)
+                elif self.backend_type == "sglang":
+                    from parallax.sglang.batch_info import release_sglang_request
+
+                    release_sglang_request(self.running_batch, rid)
+            except Exception:
+                pass
+        else:
+            try:
+                if hasattr(self, "kv_cache_manager") and self.kv_cache_manager is not None:
+                    self.kv_cache_manager.release_request(rid)
+            except Exception:
+                pass
+
+        # Evict from scheduler
+        try:
+            self.scheduler.evict_request(rid)
+        except Exception:
+            pass
+
     def run_loop(self):
         """The main loop of the executor."""
         logger.debug(
             f"Executor for layers [{self.start_layer}, {self.end_layer}) starting run loop..."
         )
-        while True:
+        self._should_stop = False
+        while not self._should_stop:
             # 1. Ingest new requests from the http frontend
             if self.is_first_peer:
                 http_requests = self.recv_requests_from_http()
@@ -1291,12 +1318,33 @@ class Executor:
                 )
                 self.finished_batch = []
 
-            # 4. Check if we should form a batch
-            if not self.scheduler.should_dispatch():
-                time.sleep(0.01)  # prevent busy waiting
-                continue
+            # Check for layer reallocation signal (before batch processing)
+            if self.gradient_server is not None and self.gradient_server._layer_allocation_changed:
+                logger.info(
+                    "Layer reallocation detected. Stopping executor to reload with new layers."
+                )
+                self._should_stop = True
+                break
 
-            # 5. Form a batch from the scheduler's queue
+            # 4. Admit requests into running set up to capacity, then form batch
+            self.scheduler.admit_requests()
+            # 4.1 Check for request timeouts and abort timed out requests
+            try:
+                timed_out_reqs = self.scheduler.get_timed_out_requests()
+                if timed_out_reqs:
+                    for req in timed_out_reqs:
+                        rid = req.request_id
+                        logger.warning(
+                            f"Request {rid} exceeded timeout ({req.timeout_s}s). Aborting and releasing resources."
+                        )
+                        self._release_and_evict_request(rid)
+
+                        # Notify downstream peers to abort if this peer is the first peer in a pipeline
+                        if self.is_first_peer and not self.is_last_peer:
+                            self.finished_batch.append(req)
+            except Exception:
+                # Non-fatal; continue serving
+                pass
             batch_to_process = self.scheduler.form_batch()
             if not batch_to_process:
                 continue
@@ -1358,20 +1406,7 @@ class Executor:
                 logger.exception(f"Error processing batch: {e}")
                 # Naive error handling: release and evict all requests in the batch
                 for req in batch_to_process:
-                    self.scheduler.evict_request(req.request_id, req.status)
-                    if self.device == "cuda":
-                        if self.backend_type == "vllm":
-                            from parallax.vllm.batch_info import release_vllm_request
-
-                            release_vllm_request(self.model_runner, req.request_id)
-                        elif self.backend_type == "sglang":
-                            from parallax.sglang.batch_info import (
-                                release_sglang_request,
-                            )
-
-                            release_sglang_request(self.running_batch, req.request_id)
-                    else:
-                        self.kv_cache_manager.release_request(req.request_id)
+                    self._release_and_evict_request(req.request_id)
 
     def run_loop_in_background(self):
         """Run the executor loop in the background."""
@@ -1379,15 +1414,35 @@ class Executor:
     def shutdown(self):
         """Shuts down the executor."""
         logger.debug("Executor shutting down...")
-        self.recv_from_peer_socket.close()
-        self.send_to_peer_socket.close()
-        self.recv_from_ipc_socket.close()
-        self.send_to_ipc_socket.close()
-        self.zmq_context.term()
+        self._should_stop = True
+        import time
+        time.sleep(0.1)  # Give run_loop a moment to exit gracefully
+
+        try:
+            all_requests = [req for _, _, _, req in self.scheduler._request_queue] + list(
+                self.scheduler._running_requests.values()
+            )
+            for req in all_requests:
+                try:
+                    self.scheduler.evict_request(req.request_id, RequestStatus.CANCELLED)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        try:
+            self.recv_from_peer_socket.close()
+            self.send_to_peer_socket.close()
+            self.recv_from_ipc_socket.close()
+            self.send_to_ipc_socket.close()
+            self.zmq_context.term()
+        except Exception as e:
+            logger.debug(f"Error closing sockets (may already be closed): {e}")
+
         logger.debug("Executor shutdown complete.")
 
 
-def create_executor_config(args: argparse.Namespace):
+def create_executor_config(args: argparse.Namespace, gradient_server=None):
     """Create executor configuration from command line arguments."""
 
     config = {
@@ -1411,5 +1466,6 @@ def create_executor_config(args: argparse.Namespace):
         "executor_output_ipc_addr": args.executor_output_ipc,
         "attention_backend": args.attention_backend,
         "moe_runner_backend": args.moe_runner_backend,
+        "gradient_server": gradient_server,
     }
     return config

@@ -48,6 +48,7 @@ def test_decode_pipeline_multiple_steps(start_layer, end_layer, num_decode_steps
     ]
 
     executor_peer1._handle_input_requests(initial_requests)
+    executor_peer1.scheduler.admit_requests()
     prefill_batch_p1 = executor_peer1.scheduler.form_batch()
     prefill_inputs_p1 = executor_peer1._prepare_batch_inputs(prefill_batch_p1)
     assert prefill_inputs_p1 is not None, "Failed to prepare batch inputs"
@@ -62,6 +63,7 @@ def test_decode_pipeline_multiple_steps(start_layer, end_layer, num_decode_steps
     # send to next peer
 
     executor_peer2._handle_input_requests(prefill_reqs_p2)
+    executor_peer2.scheduler.admit_requests()
     prefill_batch_p2 = executor_peer2.scheduler.form_batch()
     prefill_inputs_p2 = executor_peer2._prepare_batch_inputs(prefill_batch_p2)
     assert prefill_inputs_p2 is not None, "Failed to prepare batch inputs"
@@ -82,6 +84,7 @@ def test_decode_pipeline_multiple_steps(start_layer, end_layer, num_decode_steps
         executor_peer1._handle_input_requests(feedback_reqs)
 
         # 3. Peer 1: form and process decode batch
+        executor_peer1.scheduler.admit_requests()
         decode_batch_p1 = executor_peer1.scheduler.form_batch()
         decode_inputs_p1 = executor_peer1._prepare_batch_inputs(decode_batch_p1)
         assert decode_inputs_p1 is not None, "Failed to prepare batch inputs"
@@ -99,6 +102,7 @@ def test_decode_pipeline_multiple_steps(start_layer, end_layer, num_decode_steps
 
         # 5. Peer 2: process decode batch to get next tokens
         executor_peer2._handle_input_requests(decode_reqs_p2)
+        executor_peer2.scheduler.admit_requests()
         decode_batch_p2 = executor_peer2.scheduler.form_batch()
         decode_inputs_p2 = executor_peer2._prepare_batch_inputs(decode_batch_p2)
         assert decode_inputs_p2 is not None, "Failed to prepare batch inputs"
