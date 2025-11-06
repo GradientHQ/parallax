@@ -354,7 +354,7 @@ class Scheduler:
         )
         self.layer_allocator.leave(node_id)
         if self.layer_allocator.should_global_rebalance():
-            logger.debug("Global rebalance triggered due to node leave")
+            logger.debug("Reallocation needed due to node leave, attempting adjustment first")
 
             # Count manual vs automatic nodes
             manual_count = sum(1 for n in self.nodes if n.manual_layer_assignment)

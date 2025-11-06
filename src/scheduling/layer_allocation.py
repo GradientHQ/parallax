@@ -530,14 +530,12 @@ class BaseLayerAllocator:
 
         return end_layer
 
-    def _check_pipeline_exists(self, active_only: bool = False) -> bool:
-        """Check if there exists at least one pipeline covering [0, num_total_layers).
+    def has_full_pipeline(self, active_only: bool = False) -> bool:
+        """Return True if there exists at least one pipeline covering [0, num_total_layers).
 
-        Args:
-            active_only: If True, only consider active nodes.
-
-        Returns:
-            True if a complete pipeline exists, False otherwise.
+        Checks whether we can chain contiguous node allocations starting at 0 to reach L.
+        This requires that there exists at least one node starting at layer 0 and a chain
+        of contiguous node ranges that reaches num_total_layers.
         """
         total_layers = self.num_total_layers
 
@@ -570,24 +568,6 @@ class BaseLayerAllocator:
             head.end_layer and can_reach_target(head.end_layer)
             for head in start_to_nodes.get(0, [])
         )
-
-    def has_full_pipeline(self) -> bool:
-        """Return True if there exists at least one pipeline covering [0, num_total_layers).
-
-        Checks whether we can chain contiguous node allocations starting at 0 to reach L.
-        This requires that there exists at least one node starting at layer 0 and a chain
-        of contiguous node ranges that reaches num_total_layers.
-        """
-        return self._check_pipeline_exists(active_only=False)
-
-    def has_full_active_pipeline(self) -> bool:
-        """Return True if there exists at least one active pipeline covering [0, num_total_layers).
-
-        Checks whether we can chain contiguous active node allocations starting at 0 to reach L.
-        This requires that there exists at least one active node starting at layer 0 and a chain
-        of contiguous node ranges that reaches num_total_layers.
-        """
-        return self._check_pipeline_exists(active_only=True)
 
     def layer_replication_stats(self) -> Tuple[int, int, float]:
         """Return (min, max, avg) number of nodes hosting each layer.
