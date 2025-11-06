@@ -302,20 +302,28 @@ class Scheduler:
         self.layer_allocator.leave(node_id)
         if self.layer_allocator.should_global_rebalance():
             logger.debug("Global rebalance triggered due to node leave")
-            # TODO: send a signal to the nodes to stop running requests
-            #       and re-assign start/end layers so nodes can re-shard
-            self._bootstrapped = False
-            self._bootstrapped_event.clear()
-            for n in self.nodes:
-                if n.start_layer is not None and n.end_layer is not None:
-                    self.layer_allocator.deallocate(n)
-            success = self.layer_allocator.global_allocation()
-            if not success:
-                logger.warning("Global rebalance failed to produce a full pipeline")
+
+            # Count manual vs automatic nodes
+            manual_count = sum(1 for n in self.nodes if n.manual_layer_assignment)
+            total_count = len(self.nodes)
+            logger.debug(
+                f"Node count: {manual_count} manual, {total_count - manual_count} automatic"
+            )
+            if manual_count == total_count:
+                logger.debug("All nodes are manual assignment, skipping global rebalance")
+            elif manual_count > 0:
+                logger.error(
+                    f"Mixed assignment detected ({manual_count} manual, {total_count - manual_count} automatic); skipping rebalance"
+                )
             else:
-                logger.debug("Global rebalance completed successfully")
-                self._bootstrapped = True
-                self._bootstrapped_event.set()
+                # All nodes are automatic, proceed with rebalance
+                self._bootstrapped = False
+                self._bootstrapped_event.clear()
+                for n in self.nodes:
+                    if n.start_layer is not None and n.end_layer is not None:
+                        self.layer_allocator.deallocate(n)
+                self.layer_allocator.global_allocation()
+
         with self._node_count_cv:
             self._node_count_cv.notify_all()
 

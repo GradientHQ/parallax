@@ -11,7 +11,7 @@ import random
 import sglang
 import sglang.srt.distributed.parallel_state
 import torch
-from mlx_lm.utils import get_model_path, load_config
+from mlx_lm.utils import load_config
 from sglang.srt.configs.model_config import ModelConfig
 from sglang.srt.distributed import (
     get_tp_group,
@@ -35,6 +35,9 @@ from sglang.srt.utils import (
 )
 
 from parallax.sglang.monkey_patch import apply_parallax_sglang_monkey_patch
+from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
+    set_layer_range_for_filtering,
+)
 from parallax.utils.tokenizer_utils import load_tokenizer
 
 logger = logging.getLogger(__name__)
@@ -67,6 +70,9 @@ class ParallaxModelRunner(SGLModelRunner):
         """Add pp_start_layer and pp_end_layer for decentralized model"""
         self.pp_start_layer = pp_start_layer
         self.pp_end_layer = pp_end_layer
+        num_hidden_layers = model_config.hf_config.num_hidden_layers
+        set_layer_range_for_filtering(pp_start_layer, pp_end_layer, num_hidden_layers)
+
         super().__init__(
             model_config=model_config,
             mem_fraction_static=mem_fraction_static,
@@ -230,7 +236,19 @@ def initialize_sgl_model_runner(
       - tokenizer: tokenizer driven by mlx-lm
     """
     apply_parallax_sglang_monkey_patch()
-    model_path = get_model_path(original_model_path)[0]
+
+    # Use selective download for GPU models to save bandwidth and disk space
+    from parallax.utils.selective_download import get_model_path_with_selective_download
+
+    logger.info(
+        f"Downloading model with selective weight files for layers [{start_layer}, {end_layer})"
+    )
+    model_path = get_model_path_with_selective_download(
+        original_model_path,
+        start_layer=start_layer,
+        end_layer=end_layer,
+    )
+
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")
@@ -251,7 +269,7 @@ def initialize_sgl_model_runner(
         kv_block_size = 1
 
     server_args = form_sgl_server_args(
-        original_model_path,
+        str(model_path),
         dtype,
         attention_backend,
         kv_block_size,
@@ -262,7 +280,7 @@ def initialize_sgl_model_runner(
     if (quantization_config := config.get("quantization_config", None)) is not None:
         quant_method = quantization_config.get("quant_method")
     model_config = ModelConfig(
-        model_path=original_model_path,
+        model_path=str(model_path),
         model_override_args="{}",
         dtype=dtype,
         quantization=quant_method,
