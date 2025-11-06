@@ -62,6 +62,18 @@ async def scheduler_init(raw_request: Request):
         status_code=200,
     )
 
+@app.post("/weight/refit")
+async def weight_refit(raw_request: Request):
+    request_data = await raw_request.json()
+    scheduler_manage.weight_refit(request_data)
+    return JSONResponse(
+        content={
+            "type": "weight_refit",
+            "data": None,
+        },
+        status_code=200,
+    )
+
 
 @app.get("/node/join/command")
 async def node_join_command():

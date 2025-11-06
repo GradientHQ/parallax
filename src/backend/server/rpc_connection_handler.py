@@ -74,7 +74,12 @@ class RPCConnectionHandler(ConnectionHandler):
                 new_rtt_to_nodes=node.rtt_to_nodes,
                 is_active=node.is_active,
             )
-            return {}
+            res = {}
+            if self.scheduler.refit_request:
+                if node.node_id not in self.scheduler.refit_set:
+                    res = self.scheduler.refit_request
+                    self.scheduler.refit_set.add(node.node_id)
+            return res
         except Exception as e:
             logger.exception(f"node_update error: {e}")
             return {}
