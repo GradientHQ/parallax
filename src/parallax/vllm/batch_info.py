@@ -184,7 +184,13 @@ def form_vllm_batch_decode(
     for req in batched_requests:
         req_ids.append(req.request_id)
         resumed_from_preemption.append(False)
-        new_token_ids.append([])
+        output_ids = getattr(req, "output_ids", None) or []
+        if output_ids:
+            last_token = output_ids[-1]
+            new_token_ids.append([last_token])
+        else:
+            new_token_ids.append([])
+        
         resumed_req_token_ids.append([])
 
         sampling_params = transform_sampling_params_to_vllm(req.sampling_params)
@@ -192,7 +198,10 @@ def form_vllm_batch_decode(
 
         prompt_ids = getattr(req, "input_ids", None) or []
         output_ids = getattr(req, "output_ids", None) or []
-        computed_token_count = len(prompt_ids) + len(output_ids)
+        if output_ids:
+            computed_token_count = len(prompt_ids) + len(output_ids) - 1
+        else:
+            computed_token_count = len(prompt_ids)
         vllm_req.num_computed_tokens = computed_token_count
 
         new_blocks = kv_cache_manager.allocate_slots(
