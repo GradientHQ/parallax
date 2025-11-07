@@ -99,6 +99,7 @@ class Executor:
         # Tensor Parallel Configs
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
+        nccl_port: Optional[int] = 4001,
     ):
         # Backend
         self.device = get_current_device()
@@ -123,6 +124,7 @@ class Executor:
                 moe_runner_backend,
                 tp_rank,
                 tp_size,
+                nccl_port,
             )
             logger.debug(
                 f"CUDA model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
@@ -823,10 +825,10 @@ class Executor:
 
     def _handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
-        if len(requests) > 0:
-            logger.debug(f"Handling {len(requests)} requests.")
         if not requests:
             return
+        if len(requests) > 0:
+            logger.debug(f"Handling {len(requests)} requests.")
 
         if self.device == "cuda":
             self._handle_cuda_input_requests(requests)
@@ -1290,5 +1292,6 @@ def create_executor_config(args: argparse.Namespace):
         "moe_runner_backend": args.moe_runner_backend,
         "tp_rank": args.tp_rank,
         "tp_size": args.tp_size,
+        "nccl_port": args.nccl_port,
     }
     return config

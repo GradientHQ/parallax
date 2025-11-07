@@ -505,6 +505,7 @@ def monkey_patch_glm4_moe_model():
 def form_sgl_server_args(
     model_path: str,
     dtype: str = "bfloat16",
+    tp_size: int = 1,
     attention_backend: str = "flashinfer",
     kv_block_size: int = 64,
     moe_runner_backend="auto",
@@ -517,6 +518,7 @@ def form_sgl_server_args(
         page_size=kv_block_size,
         mem_fraction_static=0.85,
         moe_runner_backend=moe_runner_backend,
+        tp_size=tp_size,
     )
     return sgl_server_args
 
@@ -548,6 +550,7 @@ def initialize_sgl_model_runner(
     moe_runner_backend: str,
     tp_rank: int,
     tp_size: int,
+    nccl_port: int,
 ):
     """
     Creates a SGL ModelRunner object.
@@ -561,7 +564,6 @@ def initialize_sgl_model_runner(
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")
-    nccl_port = random.randint(4000, 5000)
 
     # Handling mxfp4 arguments
     quant_method = config.get("quant_method", None)
@@ -580,6 +582,7 @@ def initialize_sgl_model_runner(
     server_args = form_sgl_server_args(
         original_model_path,
         dtype,
+        tp_size,
         attention_backend,
         kv_block_size,
         moe_runner_backend,

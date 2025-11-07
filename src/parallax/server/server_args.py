@@ -153,6 +153,10 @@ def parse_args() -> argparse.Namespace:
     # Tensor parallel configuration
     parser.add_argument("--tp-size", type=int, default=1, help="Tensor parallel size")
 
+    parser.add_argument(
+        "--nccl-port", type=int, default=4001, help="The port for NCCL distributed environment setup."
+    )
+
     # Logging and debugging
     parser.add_argument(
         "--log-level",
