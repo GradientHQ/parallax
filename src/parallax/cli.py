@@ -47,7 +47,7 @@ PUBLIC_RELAY_SERVERS = [
 def check_python_version():
     """Check if Python version is 3.11 or higher."""
     if sys.version_info < (3, 11) or sys.version_info >= (3, 14):
-        print(
+        logger.info(
             f"Error: Python 3.11 or higher and less than 3.14 is required. Current version is {sys.version_info.major}.{sys.version_info.minor}."
         )
         sys.exit(1)
@@ -185,7 +185,7 @@ def run_command(args, passthrough_args: list[str] | None = None):
     backend_main = project_root / "src" / "backend" / "main.py"
 
     if not backend_main.exists():
-        print(f"Error: Backend main.py not found at {backend_main}")
+        logger.info(f"Error: Backend main.py not found at {backend_main}")
         sys.exit(1)
 
     # Build the command to run the backend main.py
@@ -201,7 +201,7 @@ def run_command(args, passthrough_args: list[str] | None = None):
         cmd.extend(["--init-nodes-num", str(args.init_nodes_num)])
     if args.use_relay:
         cmd.extend(_get_relay_params())
-        print(
+        logger.info(
             "Using public relay server to help nodes and the scheduler establish a connection (remote mode). Your IP address will be reported to the relay server to help establish the connection."
         )
 
@@ -223,7 +223,7 @@ def join_command(args, passthrough_args: list[str] | None = None):
     launch_script = project_root / "src" / "parallax" / "launch.py"
 
     if not launch_script.exists():
-        print(f"Error: Launch script not found at {launch_script}")
+        logger.info(f"Error: Launch script not found at {launch_script}")
         sys.exit(1)
 
     # Set environment variable for the subprocess
@@ -251,7 +251,7 @@ def join_command(args, passthrough_args: list[str] | None = None):
         args.scheduler_addr != "auto" and not str(args.scheduler_addr).startswith("/")
     ):
         cmd.extend(_get_relay_params())
-        print(
+        logger.info(
             "Using public relay server to help nodes and the scheduler establish a connection (remote mode). Your IP address will be reported to the relay server to help establish the connection."
         )
 
@@ -271,7 +271,7 @@ def chat_command(args, passthrough_args: list[str] | None = None):
     launch_script = project_root / "src" / "parallax" / "launch_chat.py"
 
     if not launch_script.exists():
-        print(f"Error: Launch chat script not found at {launch_script}")
+        logger.info(f"Error: Launch chat script not found at {launch_script}")
         sys.exit(1)
 
     # Build the command to run the launch_chat.py script
@@ -285,7 +285,7 @@ def chat_command(args, passthrough_args: list[str] | None = None):
         args.scheduler_addr != "auto" and not str(args.scheduler_addr).startswith("/")
     ):
         cmd.extend(_get_relay_params())
-        print(
+        logger.info(
             "Using public relay server to help chat client and the scheduler establish a connection (remote mode). Your IP address will be reported to the relay server to help establish the connection."
         )
 
