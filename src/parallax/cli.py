@@ -18,10 +18,10 @@ import sys
 import machineid
 import requests
 
-from common.file_util import get_project_root
-from common.version_check import get_current_version
 from parallax.server.server_info import HardwareInfo
+from parallax_utils.file_util import get_project_root
 from parallax_utils.logging_config import get_logger
+from parallax_utils.version_check import get_current_version
 
 logger = get_logger("parallax.cli")
 
@@ -201,6 +201,9 @@ def run_command(args, passthrough_args: list[str] | None = None):
         cmd.extend(["--init-nodes-num", str(args.init_nodes_num)])
     if args.use_relay:
         cmd.extend(_get_relay_params())
+        print(
+            "Using public relay server to help nodes and the scheduler establish a connection (remote mode). Your IP address will be reported to the relay server to help establish the connection."
+        )
 
     # Append any passthrough args (unrecognized by this CLI) directly to the command
     if passthrough_args:
@@ -247,8 +250,10 @@ def join_command(args, passthrough_args: list[str] | None = None):
     if args.use_relay or (
         args.scheduler_addr != "auto" and not str(args.scheduler_addr).startswith("/")
     ):
-        logger.info("Using public relay servers")
         cmd.extend(_get_relay_params())
+        print(
+            "Using public relay server to help nodes and the scheduler establish a connection (remote mode). Your IP address will be reported to the relay server to help establish the connection."
+        )
 
     # Append any passthrough args (unrecognized by this CLI) directly to the command
     if passthrough_args:
@@ -279,8 +284,10 @@ def chat_command(args, passthrough_args: list[str] | None = None):
     if args.use_relay or (
         args.scheduler_addr != "auto" and not str(args.scheduler_addr).startswith("/")
     ):
-        logger.info("Using public relay servers")
         cmd.extend(_get_relay_params())
+        print(
+            "Using public relay server to help chat client and the scheduler establish a connection (remote mode). Your IP address will be reported to the relay server to help establish the connection."
+        )
 
     # Append any passthrough args (unrecognized by this CLI) directly to the command
     if passthrough_args:

@@ -178,6 +178,9 @@ Open http://localhost:3001 and you should see the setup interface.
 
 Select your desired node and model config and click continue.
 
+> **Note:**
+When running in remote mode, Parallax will use a public relay server to help establish connections between the scheduler and nodes. The public relay server will receive the IP information of both the scheduler and the nodes in order to facilitate this connection.
+
 #### Step 3: Connect your nodes
 
 Copy the generated join command line to your node and run. For remote connection, you can find your scheduler-address in the scheduler logs.

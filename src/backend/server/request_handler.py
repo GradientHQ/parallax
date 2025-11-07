@@ -7,8 +7,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from backend.server.constants import NODE_STATUS_AVAILABLE
-from common.request_metrics import get_request_metrics
 from parallax_utils.logging_config import get_logger
+from parallax_utils.request_metrics import get_request_metrics
 
 logger = get_logger(__name__)
 
