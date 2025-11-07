@@ -302,6 +302,14 @@ class Executor:
             src=self.tp_group.ranks[0],
         )
         return broadcast_result
+    
+    def _join_requests(self, left_reqs: List[Request], right_reqs: List[Request]):
+        """Merge two request lists"""
+        if not left_reqs:
+            return right_reqs
+        if not right_reqs:
+            return left_reqs
+        return left_reqs + right_reqs
 
     def recv_requests_from_http(self) -> List[Request]:
         """Receives requests from http frontend"""
@@ -327,10 +335,7 @@ class Executor:
                     logger.exception(f"Error receiving http request: {e}")
         else:
             recv_reqs = None
-        if self.tp_size > 1:
-            recv_reqs = self._tensor_parallel_broadcast_byobj(recv_reqs)
-        if recv_reqs:
-            logger.debug(f"Received {len(recv_reqs)} HTTP requests")
+
         return recv_reqs
 
     def recv_requests_from_peer(self) -> List[Request]:
@@ -390,10 +395,7 @@ class Executor:
                     logger.exception(f"Error receiving or deserializing request: {e}")
         else:
             recv_reqs = None
-        if self.tp_size > 1:
-            recv_reqs = self._tensor_parallel_broadcast_byobj(recv_reqs)
-        if recv_reqs:
-            logger.debug(f"Received {len(recv_reqs)} peer requests")
+
         return recv_reqs
 
     def _prepare_cuda_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
@@ -827,8 +829,10 @@ class Executor:
 
     def _handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
-        if not requests:
+        if self.tp_rank == 0 and not requests:
             return
+        if self.tp_size > 1:
+            requests = self._tensor_parallel_broadcast_byobj(requests)
         if len(requests) > 0:
             logger.debug(f"Handling {len(requests)} requests.")
 
@@ -1030,8 +1034,6 @@ class Executor:
         else:
             batched_requests = None
 
-        if self.tp_size > 1:
-            batched_requests = self._tensor_parallel_broadcast_byobj(batched_requests)
         return batched_requests
 
     def _process_batch_cuda(
@@ -1168,31 +1170,33 @@ class Executor:
             # 1. Ingest new requests from the http frontend
             if self.is_first_peer:
                 http_requests = self.recv_requests_from_http()
-                self._handle_input_requests(http_requests)
 
             # 2. Ingest new requests from the RPC server
             incoming_requests = self.recv_requests_from_peer()
-            self._handle_input_requests(incoming_requests)
 
-            # 3. Send finished batch to next peer
+            # 3. Merge requests and handle requests
+            received_requests = self._join_requests(http_requests, incoming_requests)
+            self._handle_input_requests(received_requests)
+
+            # 4. Send finished batch to next peer
             if len(self.finished_batch) > 0 and self.is_first_peer and self.tp_rank == 0:
                 self.send_to_peer_socket.send_multipart(
                     [b"abort", abort_request_to_proto(self.finished_batch).SerializeToString()]
                 )
                 self.finished_batch = []
 
-            # 4. Check if we should form a batch
+            # 5. Check if we should form a batch
             if not self.scheduler.should_dispatch():
                 time.sleep(0.01)  # prevent busy waiting
                 continue
 
-            # 5. Form a batch from the scheduler's queue
+            # 6. Form a batch from the scheduler's queue
             batch_to_process = self.scheduler.form_batch()
             if not batch_to_process:
                 continue
             logger.debug(f"Formed batch with {len(batch_to_process)} requests.")
 
-            # 6. Process the batch
+            # 7. Process the batch
             try:
                 prepared_inputs_dict = self._prepare_batch_inputs(batch_to_process)
 
@@ -1220,15 +1224,15 @@ class Executor:
                                     self._decode_steps_since_metric = 0
                             except Exception:
                                 pass
-                        # 7. Prepare requests for the next stage in the pipeline
+                        # 8. Prepare requests for the next stage in the pipeline
                         next_batch = self._prepare_next_batch_requests(
                             requests=prepared_inputs["requests"],
                             hidden_states=output,
                             lengths=prepared_inputs["lengths"],
                         )
 
-                        # 8. Dispatch to the appropriate destination
-                        if self.is_last_peer and self.is_first_peer:
+                        # 9. Dispatch to the appropriate destination
+                        if self.is_last_peer and self.is_first_peer and self.tp_rank == 0:
                             # Single node: handle locally
                             self._handle_input_requests(next_batch)
                         elif self.tp_rank == 0:
