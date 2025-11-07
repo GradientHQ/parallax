@@ -1,7 +1,5 @@
 """Utility functions."""
 
-import json
-from pathlib import Path
 from typing import List
 
 import mlx.core as mx
@@ -10,6 +8,7 @@ import psutil
 import torch
 import zmq
 from mlx_lm.utils import get_model_path, load_config
+
 
 def is_cuda_available():
     """Check backend supports cuda"""

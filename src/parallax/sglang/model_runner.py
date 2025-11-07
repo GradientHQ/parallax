@@ -6,7 +6,6 @@ arguments needed by decentralized inference.
 
 import logging
 import os
-import random
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sglang

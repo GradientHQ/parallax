@@ -24,7 +24,7 @@ from parallax.p2p.server import ServerState, launch_p2p_server
 from parallax.server.executor import Executor
 from parallax.server.http_server import launch_http_server
 from parallax.server.server_args import parse_args
-from parallax.utils.utils import get_current_device, fetch_model_from_hf
+from parallax.utils.utils import fetch_model_from_hf, get_current_device
 from parallax_utils.ascii_anime import display_parallax_join
 from parallax_utils.logging_config import get_logger, set_log_level
 
@@ -58,6 +58,7 @@ def run_executor_process(args):
     finally:
         executor.shutdown()
 
+
 def terminate_subprocess(process):
     """Kill a subprocess"""
     logger.debug("Terminating subprocess...")
@@ -66,6 +67,7 @@ def terminate_subprocess(process):
         process.join()
     except Exception as e:
         logger.error(f"Failed to terminate subprocess: {e}")
+
 
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)
@@ -190,15 +192,11 @@ if __name__ == "__main__":
     finally:
         thread_pool = []
         for executor_proc in executor_procs:
-            t = threading.Thread(
-                target=terminate_subprocess, args=(executor_proc,)
-            )
+            t = threading.Thread(target=terminate_subprocess, args=(executor_proc,))
             t.start()
             thread_pool.append(t)
         if http_server_process is not None:
-            t = threading.Thread(
-                target=terminate_subprocess, args=(http_server_process,)
-            )
+            t = threading.Thread(target=terminate_subprocess, args=(http_server_process,))
             t.start()
             thread_pool.append(t)
         if gradient_server is not None:

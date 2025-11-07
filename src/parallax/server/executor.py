@@ -302,7 +302,7 @@ class Executor:
             src=self.tp_group.ranks[0],
         )
         return broadcast_result
-    
+
     def _join_requests(self, left_reqs: List[Request], right_reqs: List[Request]):
         """Merge two request lists"""
         if not left_reqs:
