@@ -48,9 +48,24 @@ MLX_MODEL_NAME_MAP = {
 
 def run_executor_process(args):
     """Run executor as a subprocess"""
-    executor = Executor.create_from_args(args)
-    executor.run_loop()
+    try:
+        executor = Executor.create_from_args(args)
+        executor.run_loop()
+    except KeyboardInterrupt:
+        logger.debug("Received interrupt signal, shutting down...")
+    except Exception as e:
+        logger.exception(e)
+    finally:
+        executor.shutdown()
 
+def terminate_subprocess(process):
+    """Kill a subprocess"""
+    logger.debug("Terminating subprocess...")
+    try:
+        process.kill()
+        process.join()
+    except Exception as e:
+        logger.error(f"Failed to terminate subprocess: {e}")
 
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)
@@ -173,23 +188,20 @@ if __name__ == "__main__":
     except Exception as e:
         logger.exception(e)
     finally:
-        t = None
+        thread_pool = []
+        for executor_proc in executor_procs:
+            t = threading.Thread(
+                target=terminate_subprocess, args=(executor_proc,)
+            )
+            t.start()
+            thread_pool.append(t)
         if http_server_process is not None:
-
-            def terminate_http_server_process(process):
-                logger.debug("Terminating HTTP server process...")
-                try:
-                    process.kill()
-                    process.join()
-                except Exception as e:
-                    logger.error(f"Failed to terminate HTTP server process: {e}")
-
-            if http_server_process is not None:
-                t = threading.Thread(
-                    target=terminate_http_server_process, args=(http_server_process,)
-                )
-                t.start()
+            t = threading.Thread(
+                target=terminate_subprocess, args=(http_server_process,)
+            )
+            t.start()
+            thread_pool.append(t)
         if gradient_server is not None:
             gradient_server.shutdown()
-        if t is not None:
+        for t in thread_pool:
             t.join()

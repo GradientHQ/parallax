@@ -295,12 +295,13 @@ class Executor:
         """Wrapper for broadcast pyobject in TP group"""
         from sglang.srt.utils import broadcast_pyobj
 
-        broadcast_pyobj(
+        broadcast_result = broadcast_pyobj(
             broadcast_obj,
             self.tp_group.rank,
             self.tp_cpu_group,
             src=self.tp_group.ranks[0],
         )
+        return broadcast_result
 
     def recv_requests_from_http(self) -> List[Request]:
         """Receives requests from http frontend"""
@@ -327,7 +328,7 @@ class Executor:
         else:
             recv_reqs = None
         if self.tp_size > 1:
-            self._tensor_parallel_broadcast_byobj(recv_reqs)
+            recv_reqs = self._tensor_parallel_broadcast_byobj(recv_reqs)
         if recv_reqs:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
         return recv_reqs
@@ -390,7 +391,7 @@ class Executor:
         else:
             recv_reqs = None
         if self.tp_size > 1:
-            self._tensor_parallel_broadcast_byobj(recv_reqs)
+            recv_reqs = self._tensor_parallel_broadcast_byobj(recv_reqs)
         if recv_reqs:
             logger.debug(f"Received {len(recv_reqs)} peer requests")
         return recv_reqs
@@ -795,17 +796,18 @@ class Executor:
                         self.scheduler.enque_request(original_req)
 
                     # detokenize and send to http server
-                    req_dict = {
-                        "prompt_tokens": len(req.input_ids),
-                        "next_token_id": req.next_token_id,
-                        "rid": req.request_id,
-                    }
-                    if req.next_token_id == self.tokenizer.eos_token_id:
-                        req_dict["eos"] = True
-                    if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
-                        req_dict["length"] = True
-                    if hasattr(self, "send_to_ipc_socket"):
-                        self.send_to_ipc_socket.send_pyobj(req_dict)
+                    if self.tp_rank == 0:
+                        req_dict = {
+                            "prompt_tokens": len(req.input_ids),
+                            "next_token_id": req.next_token_id,
+                            "rid": req.request_id,
+                        }
+                        if req.next_token_id == self.tokenizer.eos_token_id:
+                            req_dict["eos"] = True
+                        if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
+                            req_dict["length"] = True
+                        if hasattr(self, "send_to_ipc_socket"):
+                            self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:
                     raise TypeError(f"First peer received unexpected request type: {type(req)}")
         else:
@@ -878,17 +880,18 @@ class Executor:
                         self.scheduler.enque_request(original_req)
 
                     # detokenize and send to http server
-                    req_dict = {
-                        "prompt_tokens": len(req.input_ids),
-                        "next_token_id": req.next_token_id,
-                        "rid": req.request_id,
-                    }
-                    if req.next_token_id == self.tokenizer.eos_token_id:
-                        req_dict["eos"] = True
-                    if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
-                        req_dict["length"] = True
-                    if hasattr(self, "send_to_ipc_socket"):
-                        self.send_to_ipc_socket.send_pyobj(req_dict)
+                    if self.tp_rank == 0:
+                        req_dict = {
+                            "prompt_tokens": len(req.input_ids),
+                            "next_token_id": req.next_token_id,
+                            "rid": req.request_id,
+                        }
+                        if req.next_token_id == self.tokenizer.eos_token_id:
+                            req_dict["eos"] = True
+                        if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
+                            req_dict["length"] = True
+                        if hasattr(self, "send_to_ipc_socket"):
+                            self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:
                     raise TypeError(f"First peer received unexpected request type: {type(req)}")
 
@@ -1028,7 +1031,7 @@ class Executor:
             batched_requests = None
 
         if self.tp_size > 1:
-            self._tensor_parallel_broadcast_byobj(batched_requests)
+            batched_requests = self._tensor_parallel_broadcast_byobj(batched_requests)
         return batched_requests
 
     def _process_batch_cuda(
