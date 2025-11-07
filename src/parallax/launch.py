@@ -57,7 +57,7 @@ if __name__ == "__main__":
 
     gradient_server = None
     http_server_process = None
-    executor_process_pool = []
+    executor_procs = []
     try:
         args = parse_args()
         set_log_level(args.log_level)
@@ -162,34 +162,34 @@ if __name__ == "__main__":
                 args=(args_copy,),
             )
             proc.start()
-            executor_process_pool.append(proc)
+            executor_procs.append(proc)
 
         if gradient_server is not None:
             gradient_server.status = ServerState.READY
+        for executor_process in executor_procs:
+            executor_process.join()
     except KeyboardInterrupt:
         logger.debug("Received interrupt signal, shutting down...")
     except Exception as e:
         logger.exception(e)
     finally:
-        thread_pool = []
-
-        def terminate_subprocess(process):
-            logger.debug("Terminating subprocess...")
-            try:
-                process.kill()
-                process.join()
-            except Exception as e:
-                logger.error(f"Failed to terminate subprocess: {e}")
-
+        t = None
         if http_server_process is not None:
-            t = threading.Thread(target=terminate_subprocess, args=(http_server_process,))
-            thread_pool.append(t)
-            t.start()
+
+            def terminate_http_server_process(process):
+                logger.debug("Terminating HTTP server process...")
+                try:
+                    process.kill()
+                    process.join()
+                except Exception as e:
+                    logger.error(f"Failed to terminate HTTP server process: {e}")
+
+            if http_server_process is not None:
+                t = threading.Thread(
+                    target=terminate_http_server_process, args=(http_server_process,)
+                )
+                t.start()
         if gradient_server is not None:
             gradient_server.shutdown()
-        for executor_process in executor_process_pool:
-            t = threading.Thread(target=terminate_subprocess, args=(executor_process,))
-            thread_pool.append(t)
-            t.start()
-        for t in thread_pool:
+        if t is not None:
             t.join()
