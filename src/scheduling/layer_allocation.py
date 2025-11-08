@@ -200,6 +200,7 @@ class BaseLayerAllocator:
             if layer_id in self.layer_to_load:
                 self.layer_to_load[layer_id].remove_node(node)
         node.clear_layer_allocation()
+        node.is_active = False
         self._update_layer_loads_heap()
 
     def declare(self, node: Node) -> None:
@@ -216,6 +217,7 @@ class BaseLayerAllocator:
         logger.debug("Joining node dynamically: %s", node.node_id)
         self.declare(node)
         lightest_layer = self.get_lightest_layer()
+        logger.debug("Lightest layer: %s", lightest_layer)
         if lightest_layer is None:
             raise ValueError("No layers to assign")
 
@@ -529,39 +531,44 @@ class BaseLayerAllocator:
 
         return end_layer
 
-    def has_full_pipeline(self) -> bool:
+    def has_full_pipeline(self, active_only: bool = False) -> bool:
         """Return True if there exists at least one pipeline covering [0, num_total_layers).
 
         Checks whether we can chain contiguous node allocations starting at 0 to reach L.
+        This requires that there exists at least one node starting at layer 0 and a chain
+        of contiguous node ranges that reaches num_total_layers.
         """
         total_layers = self.num_total_layers
-        layer_count: Dict[int, int] = {}
-        for _, (s, e) in self.node_allocation.items():
-            if s is None or e is None:
-                continue
-            for layer in range(s, e):
-                layer_count[layer] = layer_count.get(layer, 0) + 1
 
-        for layer in range(total_layers):
-            if layer not in layer_count or layer_count[layer] == 0:
-                return False
-        return True
-
-    def has_full_active_pipeline(self) -> bool:
-        """Return True if there exists at least one active pipeline covering [0, num_total_layers)."""
-        total_layers = self.num_total_layers
-        layer_count: Dict[int, int] = {}
+        # Build index of nodes by start_layer
+        start_to_nodes: Dict[int, List[Node]] = {}
         for node_id, (s, e) in self.node_allocation.items():
-            if self.node_id_to_node[node_id].is_active is False:
-                continue
             if s is None or e is None:
                 continue
-            for layer in range(s, e):
-                layer_count[layer] = layer_count.get(layer, 0) + 1
-        for layer in range(total_layers):
-            if layer not in layer_count or layer_count[layer] == 0:
-                return False
-        return True
+            node = self.node_id_to_node.get(node_id)
+            if node is None or (active_only and not node.is_active):
+                continue
+            start_to_nodes.setdefault(s, []).append(node)
+
+        # Must have at least one node starting at layer 0
+        if not start_to_nodes.get(0):
+            return False
+
+        # DFS to check if we can reach total_layers from any head node
+        def can_reach_target(current_end: int) -> bool:
+            if current_end >= total_layers:
+                return current_end == total_layers
+
+            for nxt in start_to_nodes.get(current_end, []):
+                if nxt.end_layer and nxt.end_layer > current_end:
+                    if can_reach_target(nxt.end_layer):
+                        return True
+            return False
+
+        return any(
+            head.end_layer and can_reach_target(head.end_layer)
+            for head in start_to_nodes.get(0, [])
+        )
 
     def layer_replication_stats(self) -> Tuple[int, int, float]:
         """Return (min, max, avg) number of nodes hosting each layer.

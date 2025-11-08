@@ -2,7 +2,7 @@ import json
 import math
 import os
 
-from common.file_util import get_project_root
+from parallax_utils.file_util import get_project_root
 
 
 class HexColorPrinter:

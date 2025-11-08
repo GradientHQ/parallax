@@ -13,10 +13,10 @@ from backend.server.request_handler import RequestHandler
 from backend.server.scheduler_manage import SchedulerManage
 from backend.server.server_args import parse_args
 from backend.server.static_config import get_model_list, get_node_join_command
-from common.file_util import get_project_root
-from common.version_check import check_latest_release
 from parallax_utils.ascii_anime import display_parallax_run
+from parallax_utils.file_util import get_project_root
 from parallax_utils.logging_config import get_logger, set_log_level
+from parallax_utils.version_check import check_latest_release
 
 app = FastAPI()
 

@@ -85,7 +85,7 @@ class MLXModelLoader:
                 logger.warning(f"Failed to load model from {model_file}: {e}")
 
     def load(
-        self, lazy: bool = False, strict: bool = True
+        self, lazy: bool = False, strict: bool = True, use_selective_download: bool = True
     ) -> Tuple[nn.Module, Dict[str, Any], Any]:
         """
         Loads the specified model shard by loading only the necessary weights
@@ -96,10 +96,27 @@ class MLXModelLoader:
                          into memory. Defaults to False.
             strict (bool): If True, raises an exception if weights do not match.
                            Defaults to True.
+            use_selective_download (bool): If True, only download necessary weight files
+                                          from Hugging Face. Defaults to True.
         Returns:
             A tuple containing the loaded sharded MLX model and its configuration dictionary.
         """
-        model_path = get_model_path(self.model_path_str)[0]
+        if use_selective_download and self.start_layer is not None and self.end_layer is not None:
+            from parallax.utils.selective_download import (
+                get_model_path_with_selective_download,
+            )
+
+            logger.info(
+                f"Using selective download for layers [{self.start_layer}, {self.end_layer})"
+            )
+            model_path = get_model_path_with_selective_download(
+                self.model_path_str,
+                start_layer=self.start_layer,
+                end_layer=self.end_layer,
+            )
+        else:
+            model_path = get_model_path(self.model_path_str)[0]
+
         config = load_config(model_path)
         tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
 
@@ -157,6 +174,24 @@ class MLXModelLoader:
         if not weight_files:
             weight_files = glob.glob(str(model_path / "weight*.safetensors"))
 
+        # Sort weight files by name for consistent loading order
+        weight_files = sorted(weight_files)
+
+        # Use shared utility to filter weight files
+        from parallax.utils.weight_filter_utils import (
+            filter_weight_files_by_layer_range_for_load,
+        )
+
+        weight_files = filter_weight_files_by_layer_range_for_load(
+            model_path=model_path,
+            weight_files=weight_files,
+            start_layer=current_start_layer,
+            end_layer=current_end_layer,
+            is_first_shard=model_shard.is_first_shard,
+            is_last_shard=model_shard.is_last_shard,
+            config=config,
+        )
+
         if not weight_files and strict:
             raise FileNotFoundError(f"No safetensors found in {model_path}")
 
@@ -165,8 +200,11 @@ class MLXModelLoader:
         shard_weights = {}
         layer_key_prefix = "model.layers"  # Common prefix
 
-        for wf in weight_files:
-            # For bf16 models, we need torch tensors as a bridge
+        for file_idx, wf in enumerate(weight_files):
+            logger.debug(
+                f"Scanning weight file {file_idx + 1}/{len(weight_files)}: {pathlib.Path(wf).name}"
+            )
+
             with safetensors.safe_open(wf, framework="pt") as f:
                 for key in f.keys():
                     is_needed = False
@@ -215,7 +253,7 @@ class MLXModelLoader:
                         shard_weights[remapped_key] = mx.array(f.get_tensor(key))
 
         if (quantization := config.get("quantization", None)) is not None:
-            logger.info("Model is quantized. Applying quantization parameters...")
+            logger.debug("Model is quantized. Applying quantization parameters...")
 
             def class_predicate(p, m):
                 # Handle custom per-layer quantizations from the config
@@ -232,10 +270,6 @@ class MLXModelLoader:
                 prefixed = f"model.{p}"
                 if prefixed in qcfg:
                     override = qcfg[prefixed]
-                    if isinstance(override, dict):
-                        logger.debug(
-                            f"[quantize] Using override for '{prefixed}' (mapped to '{p}'): bits={override.get('bits')} group_size={override.get('group_size')}"
-                        )
                     return override
                 if not hasattr(m, "to_quantized"):
                     return False

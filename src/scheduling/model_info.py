@@ -23,6 +23,7 @@ class ModelInfo:
     """
 
     model_name: str
+    mlx_model_name: str
     head_size: int
     hidden_dim: int
     intermediate_dim: int
@@ -37,6 +38,7 @@ class ModelInfo:
     tie_embedding: bool = False
     # Default int8
     param_bytes_per_element: float = 1
+    mlx_param_bytes_per_element: float = 1
     cache_bytes_per_element: int = 1
     embedding_bytes_per_element: int = 1
 
@@ -69,6 +71,10 @@ class ModelInfo:
     def k_dim(self) -> int:
         """Return key head dim."""
         return self.num_kv_heads * self.head_size_k
+
+    @property
+    def mlx_bit_factor(self) -> float:
+        return self.mlx_param_bytes_per_element / self.param_bytes_per_element
 
     @property
     def embedding_io_bytes(self) -> int:
@@ -178,12 +184,6 @@ class ModelInfo:
                 ffn_params *= self.num_local_experts
             kv_cache_size = 0
 
-        logger.debug(
-            "Model Info ffn_params=%d, kv_cache_size=%d, attention_params=%d",
-            ffn_params,
-            kv_cache_size,
-            attention_params,
-        )
         return round(ffn_params + kv_cache_size + attention_params)
 
     def lm_head_flops(self, target_seq_len: int = 1) -> int:

@@ -1,4 +1,5 @@
 import json
+import time
 from typing import Dict
 
 import aiohttp
@@ -7,6 +8,7 @@ from starlette.concurrency import iterate_in_threadpool
 
 from backend.server.constants import NODE_STATUS_AVAILABLE
 from parallax_utils.logging_config import get_logger
+from parallax_utils.request_metrics import get_request_metrics
 
 logger = get_logger(__name__)
 
@@ -38,6 +40,7 @@ class RequestHandler:
         return self.stubs[node_id]
 
     async def _forward_request(self, request_data: Dict, request_id: str, received_ts: int):
+        start_time = time.time()
         logger.debug(f"Forwarding request {request_id}; stream={request_data.get('stream', False)}")
         if (
             self.scheduler_manage is None
@@ -60,14 +63,14 @@ class RequestHandler:
             except Exception as e:
                 logger.exception(f"get_routing_table error: {e}")
                 return JSONResponse(
-                    content={"error": "Routing table not found"},
+                    content={"error": "Get routing table error"},
                     status_code=500,
                 )
 
             # None -> scheduler has not set yet; treat as hard error (no waiting here)
             if routing_table is None:
                 return JSONResponse(
-                    content={"error": "Routing not ready"},
+                    content={"error": "Routing pipelines not ready"},
                     status_code=503,
                 )
 
@@ -86,7 +89,7 @@ class RequestHandler:
         # If still empty after retries, return 429 Too Many Requests
         if routing_table is not None and len(routing_table) == 0:
             return JSONResponse(
-                content={"error": "All pipelines are busy. Please retry later."},
+                content={"error": "All pipelines are busy or not ready. Please retry later."},
                 status_code=429,
             )
 
@@ -100,11 +103,34 @@ class RequestHandler:
 
                 async def stream_generator():
                     response = stub.chat_completion(request_data)
+                    first_token_time = None
+                    last_chunk = None
+                    last_token_time = None
                     try:
                         iterator = iterate_in_threadpool(response)
                         async for chunk in iterator:
+                            last_token_time = time.time()
+                            if first_token_time is None:
+                                first_token_time = last_token_time
+                            if chunk is not None and not chunk.decode("utf-8").startswith(
+                                "data: [DONE]"
+                            ):
+                                last_chunk = chunk
                             yield chunk
                     finally:
+                        if last_chunk is not None:
+                            tps, ttft, input_tokens, output_tokens = get_request_metrics(
+                                last_chunk, start_time, first_token_time, last_token_time
+                            )
+                            if (
+                                tps is not None
+                                and ttft is not None
+                                and input_tokens is not None
+                                and output_tokens is not None
+                            ):
+                                logger.info(
+                                    f"Request ID: {request_id} | TPS: {tps:.2f} |  TTFT: {ttft} ms | Output tokens: {output_tokens} | Input tokens: {input_tokens}"
+                                )
                         logger.debug(f"client disconnected for {request_id}")
                         response.cancel()
 

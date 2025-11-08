@@ -1,12 +1,22 @@
 <div align="center">
   <p align="center">
     <img src="docs/images/parallax.png" width="720">
+    <div align="center">
+      <p style="font-size: 1.3em; font-weight: 600; margin-bottom: 10px;">Trusted by Partners</p>
+      <img src="docs/images/qwen.avif" alt="Qwen" height="30" style="margin: 0 20px;">
+      <img src="docs/images/sglang.png" alt="SGLang" height="28" style="margin: 0 20px;">
+      <img src="docs/images/kimi.png" alt="Kimi" height="30" style="margin: 0 20px;">
+      <img src="docs/images/minimax.png" alt="Minimax" height="30" style="margin: 0 10px;">
+    </div>
   </p>
-</div>
 
 [![license](https://img.shields.io/github/license/GradientHQ/parallax.svg)](https://github.com/GradientHQ/parallax/tree/main/LICENSE)
 [![issue resolution](https://img.shields.io/github/issues-closed-raw/GradientHQ/parallax)](https://github.com/GradientHQ/parallax/issues)
 [![open issues](https://img.shields.io/github/issues-raw/GradientHQ/parallax)](https://github.com/GradientHQ/parallax/issues)
+
+<a href="https://www.producthunt.com/products/parallax-by-gradient?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_source=badge-parallax&#0045;by&#0045;gradient" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1030922&theme=light&period=daily&t=1761986433128" alt="Parallax&#0032;by&#0032;Gradient - Host&#0032;LLMs&#0032;across&#0032;devices&#0032;sharing&#0032;GPU&#0032;to&#0032;make&#0032;your&#0032;AI&#0032;go&#0032;brrr | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
+
+</div>
 
 | [**Gradient**](https://gradient.network)
 | [**Blog**](https://gradient.network/blog/parallax-the-sovereign-ai-os)
@@ -15,6 +25,7 @@
 | [**Arxiv**](https://arxiv.org/pdf/2509.26182v1)
 
 ## News
+- [2025/10] 🔥 Parallax won #1 Product of The Day on Product Hunt!
 - [2025/10] 🔥 Parallax version 0.0.1 has been released!
 
 ## About
@@ -75,6 +86,18 @@ Next time to re-activate this virtual environment, run ```source ./venv/bin/acti
 ```sh
 pip install -e '.[dev]'
 ```
+
+**Note for macOS users regarding network permissions**
+
+On macOS, you need to allow your terminal or IDE (such as Terminal, iTerm2, VS Code, Cursor, etc.) access to the local network in order for Parallax to work correctly. If the application prompts you for network access the first time you run Parallax, click "Allow." If you have already denied access, follow these steps to enable it:
+
+1. Open System Settings from the Apple menu.
+2. Click on Privacy & Security in the sidebar.
+3. Click on Local Network.
+4. For each app listed, turn the ability to access your local network on or off using the toggle switch.
+
+This will ensure Parallax has the proper network permissions for local communication.
+
 
 ### Windows Application
 [Click here](https://github.com/GradientHQ/parallax_win_cli/releases/latest/download/Parallax_Win_Setup.exe) to get latest Windows installer.
@@ -137,6 +160,11 @@ parallax run
 parallax run
 ```
 
+To allow the API to be accessible from other machines, add the argument `--host 0.0.0.0` when launching scheduler.
+```sh
+parallax run --host 0.0.0.0
+```
+
 When running `parallax run` for the first time or after an update, some basic info (like version and gpu name) might be sent to help improve the project. To disable this, use the `-u` flag:
 ```sh
 parallax run -u
@@ -149,6 +177,9 @@ Open http://localhost:3001 and you should see the setup interface.
 ![Model select](docs/images/node_config.png)
 
 Select your desired node and model config and click continue.
+
+> **Note:**
+When running in remote mode, Parallax will use a public relay server to help establish connections between the scheduler and nodes. The public relay server will receive the IP information of both the scheduler and the nodes in order to facilitate this connection.
 
 #### Step 3: Connect your nodes
 
@@ -192,6 +223,11 @@ parallax chat -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
 ```
 
 After launching, visit [http://localhost:3002](http://localhost:3002) in your browser to use the chat interface.
+
+To allow the API to be accessible from other machines, add the argument `--host 0.0.0.0` when launching chat interface.
+```sh
+parallax chat --host 0.0.0.0
+```
 
 ### Without frontend
 #### Step 1: Launch scheduler
@@ -290,6 +326,10 @@ docker rmi <image_id>      # Remove Parallax images
 ```
 
 For Windows, simply go to Control Panel → Programs → Uninstall a program, find "Gradient" in the list, and uninstall it.
+
+## Contributing
+
+We warmly welcome contributions of all kinds! For guidelines on how to get involved, please refer to our [Contributing Guide](./docs/CONTRIBUTING.md).
 
 ## Supported Models
 
