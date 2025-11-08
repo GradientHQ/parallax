@@ -18,7 +18,6 @@ Executor handles
 """
 
 import argparse
-import random
 import time
 from typing import Any, Dict, List, Optional
 
@@ -112,21 +111,12 @@ class Executor:
         # Sharded Model
         if self.device == "cuda":
             from sglang.srt.managers.schedule_batch import ScheduleBatch
-            from sglang.srt.utils.common import is_port_available
 
             from parallax.sglang.model_runner import initialize_sgl_model_runner
+
             logger.debug(
                 f"Initializing CUDA model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
             )
-            if nccl_port is None:
-                nccl_port = random.randint(3100, 4000)
-                while True:
-                    if is_port_available(nccl_port):
-                        break
-                    if nccl_port < 60000:
-                        nccl_port += 42
-                    else:
-                        nccl_port -= 43
             self.model_runner, self.config, self.tokenizer = initialize_sgl_model_runner(
                 model_repo,
                 start_layer,
@@ -286,23 +276,24 @@ class Executor:
         )
 
         # Communication Related
-        self.zmq_context = zmq.Context()
-        if recv_from_peer_addr:
-            self.recv_from_peer_socket = get_zmq_socket(
-                self.zmq_context, zmq.PULL, recv_from_peer_addr, bind=False
-            )
-        if send_to_peer_addr:
-            self.send_to_peer_socket = get_zmq_socket(
-                self.zmq_context, zmq.PUSH, send_to_peer_addr, bind=False
-            )
-        if executor_input_ipc_addr:
-            self.recv_from_ipc_socket = get_zmq_socket(
-                self.zmq_context, zmq.PULL, executor_input_ipc_addr, bind=False
-            )
-        if executor_output_ipc_addr:
-            self.send_to_ipc_socket = get_zmq_socket(
-                self.zmq_context, zmq.PUSH, executor_output_ipc_addr, bind=False
-            )
+        if self.tp_rank == 0:
+            self.zmq_context = zmq.Context()
+            if recv_from_peer_addr:
+                self.recv_from_peer_socket = get_zmq_socket(
+                    self.zmq_context, zmq.PULL, recv_from_peer_addr, bind=False
+                )
+            if send_to_peer_addr:
+                self.send_to_peer_socket = get_zmq_socket(
+                    self.zmq_context, zmq.PUSH, send_to_peer_addr, bind=False
+                )
+            if executor_input_ipc_addr:
+                self.recv_from_ipc_socket = get_zmq_socket(
+                    self.zmq_context, zmq.PULL, executor_input_ipc_addr, bind=False
+                )
+            if executor_output_ipc_addr:
+                self.send_to_ipc_socket = get_zmq_socket(
+                    self.zmq_context, zmq.PUSH, executor_output_ipc_addr, bind=False
+                )
 
     @classmethod
     def create_from_args(cls, args: argparse.Namespace, gradient_server=None):
@@ -1337,11 +1328,12 @@ class Executor:
             pass
 
         try:
-            self.recv_from_peer_socket.close()
-            self.send_to_peer_socket.close()
-            self.recv_from_ipc_socket.close()
-            self.send_to_ipc_socket.close()
-            self.zmq_context.term()
+            if self.tp_rank == 0:
+                self.recv_from_peer_socket.close()
+                self.send_to_peer_socket.close()
+                self.recv_from_ipc_socket.close()
+                self.send_to_ipc_socket.close()
+                self.zmq_context.term()
         except Exception as e:
             logger.debug(f"Error closing sockets (may already be closed): {e}")
 
