@@ -1282,21 +1282,22 @@ class Executor:
                         )
 
                         # 8. Dispatch to the appropriate destination
-                        if self.is_last_peer and self.is_first_peer and self.tp_rank == 0:
-                            # Single node: handle locally
-                            self._handle_input_requests(next_batch)
-                        elif self.tp_rank == 0:
-                            # Send output to next peer
-                            self.send_to_peer_socket.send_multipart(
-                                [
-                                    b"forward",
-                                    request_to_proto(next_batch, self.device).SerializeToString(),
-                                ]
-                            )
-                            logger.debug(
-                                f"Processed batch of type {batch_type} with {len(next_batch)} requests "
-                                f"in {(time.time() - start_time) * 1000:.3f} ms"
-                            )
+                        if self.tp_rank == 0:
+                            if self.is_last_peer and self.is_first_peer:
+                                # Single node: handle locally
+                                self._handle_input_requests(next_batch)
+                            else:
+                                # Send output to next peer
+                                self.send_to_peer_socket.send_multipart(
+                                    [
+                                        b"forward",
+                                        request_to_proto(next_batch, self.device).SerializeToString(),
+                                    ]
+                                )
+                                logger.debug(
+                                    f"Processed batch of type {batch_type} with {len(next_batch)} requests "
+                                    f"in {(time.time() - start_time) * 1000:.3f} ms"
+                                )
 
             except Exception as e:
                 logger.exception(f"Error processing batch: {e}")
