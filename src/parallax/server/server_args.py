@@ -178,7 +178,7 @@ def parse_args() -> argparse.Namespace:
         "--nccl-port",
         type=int,
         default=None,
-        help="The port for NCCL distributed environment setup.",
+        help="The port for NCCL distributed environment setup",
     )
 
     # Logging and debugging
