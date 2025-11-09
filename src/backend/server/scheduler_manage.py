@@ -91,6 +91,9 @@ class SchedulerManage:
             return None
         return self.lattica.peer_id()
 
+    def need_more_nodes(self):
+        return self.scheduler.need_more_nodes() if self.scheduler else False
+
     def get_cluster_status(self):
         return {
             "type": "cluster_status",
@@ -102,6 +105,7 @@ class SchedulerManage:
                     self.get_peer_id(), self.is_local_network
                 ),
                 "node_list": self.get_node_list(),
+                "need_more_nodes": self.need_more_nodes(),
             },
         }
 
