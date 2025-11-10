@@ -31,10 +31,10 @@ const Stack = styled(MuiStack)(({ theme }) => {
 export default function PageJoin() {
   const [
     {
-      clusterInfo: { status: clusterStatus, initNodesNumber },
+      modelInfo,
+      clusterInfo: { status: clusterStatus, initNodesNumber, needMoreNodes },
       nodeInfoList,
     },
-    { setNetworkType, setInitNodesNumber, setModelName },
   ] = useCluster();
 
   const isError = useMemo(() => {
@@ -92,6 +92,13 @@ export default function PageJoin() {
             <Alert key='info' severity='info' variant='standard'>
               If your nodes cannot connect properly, retry the above join command to restart the
               server.
+            </Alert>
+          )}
+
+          {!!modelInfo && modelInfo.vram > 0 && needMoreNodes && (
+            <Alert key='vram-warning' severity='warning' variant='standard'>
+              Your selected model requires more nodes. To host this model, we suggest you to have a
+              total VRAM size of {modelInfo.vram} GB.
             </Alert>
           )}
 

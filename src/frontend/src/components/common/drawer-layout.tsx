@@ -89,8 +89,8 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
 
   const [
     {
-      modelName,
-      clusterInfo: { status: clusterStatus },
+      modelInfo,
+      clusterInfo: { status: clusterStatus, needMoreNodes },
     },
   ] = useCluster();
 
@@ -143,6 +143,28 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
       openRebalancing();
     }
   }, [clusterStatus, openRebalancing]);
+
+  const [dialogNeedMoreNodes, { open: openDialogNeedMoreNodes }] = useAlertDialog({
+    color: 'primary',
+    title: '',
+    content: (
+      <>
+        <Typography variant='body1'>
+          Your selected model requires more nodes.
+          {(!!modelInfo
+            && modelInfo.vram > 0
+            && `To host this model, we suggest you to have a total VRAM size of ${modelInfo.vram} GB.`)
+            || ''}
+        </Typography>
+      </>
+    ),
+    confirmLabel: 'Finish',
+  });
+  useEffect(() => {
+    if (needMoreNodes) {
+      openDialogNeedMoreNodes();
+    }
+  }, [needMoreNodes, openDialogNeedMoreNodes]);
 
   const [dialogFailed, { open: openFailed }] = useAlertDialog({
     color: 'primary',
@@ -334,6 +356,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
       {dialogWaiting}
       {dialogRebalancing}
       {dialogFailed}
+      {dialogNeedMoreNodes}
     </DrawerLayoutRoot>
   );
 };

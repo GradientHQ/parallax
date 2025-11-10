@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
+  Alert,
   Button,
   ButtonGroup,
   FormControl,
@@ -22,8 +23,8 @@ import { useRefCallback } from '../hooks';
 
 export default function PageSetup() {
   const [
-    { networkType, initNodesNumber, modelName, modelInfoList },
-    { setNetworkType, setInitNodesNumber, setModelName, init },
+    { networkType, initNodesNumber, modelInfo },
+    { setNetworkType, setInitNodesNumber, init },
   ] = useCluster();
 
   const navigate = useNavigate();
@@ -107,6 +108,12 @@ export default function PageSetup() {
         </Stack>
 
         <ModelSelect />
+
+        {!!modelInfo && modelInfo.vram > 0 && (
+          <Alert key='vram-warning' severity='warning' variant='standard'>
+            To host this model, we suggest you to have a total VRAM size of {modelInfo.vram} GB.
+          </Alert>
+        )}
       </Stack>
 
       <Stack direction='row' justifyContent='flex-end' alignItems='center' gap={2}>
