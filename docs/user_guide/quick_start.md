@@ -1,6 +1,8 @@
 ## Getting Started
 
-We will walk through you the easiest way to quickly set up your own AI cluster
+We will walk through you the easiest way to quickly set up your own AI cluster.
+
+If you have not installed Parallax yet, please refer to the [installation guide](./install.md) and follow the instructions.
 
 ### With Frontend
 
@@ -22,7 +24,7 @@ To allow the API to be accessible from other machines, add the argument `--host 
 parallax run --host 0.0.0.0
 ```
 
-When running `parallax run` for the first time or after an update, some basic info (like version and gpu name) might be sent to help improve the project. To disable this, use the `-u` flag:
+When running `parallax run` for the first time or after an update, the code version info might be sent to help improve the project. To disable this, use the `-u` flag:
 ```sh
 parallax run -u
 ```
@@ -55,7 +57,7 @@ parallax join -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu
 
 You should see your nodes start to show up with their status. Wait until all nodes are successfully connected, and you will automatically be directed to the chat interface.
 
-When running `parallax join` for the first time or after an update, some basic info (like version and gpu name) might be sent to help improve the project. To disable this, use the `-u` flag:
+When running `parallax join` for the first time or after an update, the code version info might be sent to help improve the project. To disable this, use the `-u` flag:
 ```sh
 parallax join -u
 ```
@@ -164,22 +166,3 @@ curl --location 'http://localhost:3000/v1/chat/completions' --header 'Content-Ty
 }'
 
 ```
-### Uninstalling Parallax
-
-For macOS or Linux, if you've installed Parallax via pip and want to uninstall it, you can use the following command:
-
-```sh
-pip uninstall parallax
-```
-
-For Docker installations, remove Parallax images and containers using standard Docker commands:
-
-```sh
-docker ps -a               # List running containers
-docker stop <container_id> # Stop running containers
-docker rm <container_id>   # Remove stopped containers
-docker images              # List Docker images
-docker rmi <image_id>      # Remove Parallax images
-```
-
-For Windows, simply go to Control Panel → Programs → Uninstall a program, find "Gradient" in the list, and uninstall it.
