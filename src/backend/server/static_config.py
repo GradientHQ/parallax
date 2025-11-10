@@ -83,9 +83,6 @@ def get_model_info(model_name):
 
     config = _load_config_only(model_name)
 
-    # get quant method
-    # logger.info(f"Loading model config from {model_name}")
-
     quant_method = config.get("quant_method", None)
     quantization_config = config.get("quantization_config", None)
     if quant_method is None and quantization_config is not None:
@@ -95,11 +92,13 @@ def get_model_info(model_name):
         param_bytes_per_element = 2
     elif quant_method == "fp8":
         param_bytes_per_element = 1
-    elif quant_method in ("mxfp4", "int4", "awq", "gptq"):
+    elif quant_method in ("mxfp4", "int4", "awq", "gptq", "compressed-tensors"):
         param_bytes_per_element = 0.5
     else:
         param_bytes_per_element = 1
-        logger.warning(f"model_name:{model_name} quant_method {quant_method} not supported")
+        logger.warning(
+            f"model_name:{model_name} quant_method {quant_method} not supported in get_model_info method"
+        )
 
     mlx_param_bytes_per_element = param_bytes_per_element
     mlx_model_name = MODELS.get(model_name, model_name)
@@ -165,6 +164,8 @@ def get_model_list():
 
 
 def estimate_vram_gb_required(model_info):
+    if model_info is None:
+        return 0
     return (
         (
             model_info.embedding_io_bytes
