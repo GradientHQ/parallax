@@ -19,12 +19,18 @@ Executor handles
 
 import argparse
 import time
+from http import HTTPStatus
 from typing import Any, Dict, List, Optional
 
 import mlx.core as mx
 import torch
 import zmq
 from mlx_lm.server import convert_chat, process_message_content
+
+try:  # pragma: no cover - jinja2 is an optional dependency during tests
+    from jinja2 import TemplateError
+except Exception:  # pragma: no cover
+    TemplateError = None
 
 from parallax.p2p.message_util import (
     abort_request_to_proto,
@@ -309,6 +315,7 @@ class Executor:
                 break
             except Exception as e:
                 logger.exception(f"Error receiving http request: {e}")
+                self._notify_http_request_error(raw_request, e)
         if recv_reqs:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
         return recv_reqs
@@ -730,6 +737,34 @@ class Executor:
         if "routing_table" in raw_request:
             req.routing_table = raw_request["routing_table"]
         return req
+
+    def _notify_http_request_error(self, raw_request: Optional[Dict], error: Exception):
+        """Best-effort notification to HTTP server when request parsing fails."""
+        if not hasattr(self, "send_to_ipc_socket") or self.send_to_ipc_socket is None:
+            return
+        if not isinstance(raw_request, dict):
+            return
+        rid = raw_request.get("rid")
+        if rid is None:
+            return
+
+        is_template_error = TemplateError is not None and isinstance(error, TemplateError)
+        status = (
+            HTTPStatus.BAD_REQUEST
+            if isinstance(error, ValueError) or is_template_error
+            else HTTPStatus.INTERNAL_SERVER_ERROR
+        )
+        payload = {
+            "type": "error",
+            "rid": rid,
+            "error": str(error),
+            "error_type": error.__class__.__name__,
+            "status_code": status.value,
+        }
+        try:
+            self.send_to_ipc_socket.send_pyobj(payload)
+        except Exception:  # pragma: no cover - best effort notification
+            logger.debug("Failed to send error notification to HTTP handler", exc_info=True)
 
     def _handle_cuda_input_requests(self, requests: List[Request]):
         """

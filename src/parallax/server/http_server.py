@@ -84,6 +84,9 @@ class HTTPRequestInfo:
     # Queue for streaming tokens one by one
     token_queue: Optional[asyncio.Queue] = field(default=None, repr=False)
     detokenizer: StreamingDetokenizer = None
+    error_message: Optional[str] = None
+    error_type: Optional[str] = None
+    error_status: HTTPStatus = HTTPStatus.BAD_REQUEST
 
 
 class HTTPHandler:
@@ -170,6 +173,8 @@ class HTTPHandler:
                 logger.warning(f"Client disconnected for streaming request {rid}.")
                 self.abort_request(rid)
                 self.release_request(rid)
+            elif req_info:
+                self.release_request(rid)
 
     def _generate_stream_chunk(self, rid, token, is_first=False, is_last=False):
         """Generates a SSE chunk for a single token."""
@@ -211,6 +216,19 @@ class HTTPHandler:
         response_json = json.dumps(response, separators=(",", ":"))
         return f"data: {response_json}\n\n".encode()
 
+    def _generate_error_stream_chunk(self, rid, error_payload: Dict[str, str]):
+        """Generates a SSE chunk representing an error."""
+        request_info = self.processing_requests[rid]
+        response = {
+            "id": rid,
+            "object": request_info.object,
+            "model": request_info.model,
+            "created": request_info.create_time,
+            "error": error_payload,
+        }
+        response_json = json.dumps(response, separators=(",", ":"))
+        return f"data: {response_json}\n\n".encode()
+
     async def generate_stream_response(self, rid):
         """Generates a streaming response by consuming from a token queue."""
         # Send first chunk with role
@@ -224,6 +242,9 @@ class HTTPHandler:
             token = await request_info.token_queue.get()
             if token is None:  # End of stream sentinel
                 break
+            if isinstance(token, dict) and token.get("type") == "error":
+                yield self._generate_error_stream_chunk(rid, token.get("payload", {}))
+                continue
             yield self._generate_stream_chunk(rid, token)
 
         # Send final chunk with finish reason
@@ -261,12 +282,45 @@ class HTTPHandler:
         }
         return response
 
+    async def _handle_executor_error(self, rid: str, recv_dict: Dict):
+        """Handles error notifications sent from the executor process."""
+        request_info = self.processing_requests.get(rid)
+        if request_info is None:
+            return
+
+        message = recv_dict.get("error", "Unknown error")
+        err_type = recv_dict.get("error_type", "InternalServerError")
+        status_code = recv_dict.get("status_code", HTTPStatus.BAD_REQUEST.value)
+        try:
+            status = HTTPStatus(status_code)
+        except ValueError:
+            status = HTTPStatus.BAD_REQUEST
+
+        request_info.error_message = message
+        request_info.error_type = err_type
+        request_info.error_status = status
+        request_info.finish_reason = "error"
+        request_info.is_finish = True
+
+        if request_info.stream and request_info.token_queue is not None:
+            payload = {
+                "message": message,
+                "type": err_type,
+                "code": status.value,
+            }
+            await request_info.token_queue.put({"type": "error", "payload": payload})
+            await request_info.token_queue.put(None)
+
     async def _handle_loop(self):
         """The event loop that handles returned requests"""
         while True:
             recv_dict = await self.recv_from_executor.recv_pyobj()
             rid = recv_dict["rid"]
             if rid not in self.processing_requests:
+                continue
+
+            if recv_dict.get("type") == "error":
+                await self._handle_executor_error(rid, recv_dict)
                 continue
 
             request_info = self.processing_requests[rid]
@@ -401,6 +455,15 @@ async def v1_chat_completions(raw_request: fastapi.Request):
                 is_finish = req.is_finish
                 if is_finish:
                     break
+            if req.error_message:
+                response = create_error_response(
+                    req.error_message,
+                    req.error_type or "InternalServerError",
+                    status_code=req.error_status,
+                )
+                app.state.http_handler.release_request(request_id)
+                return response
+
             response = app.state.http_handler.generate_non_stream_response(request_id)
             app.state.http_handler.release_request(request_id)
             return ORJSONResponse(status_code=200, content=response)
