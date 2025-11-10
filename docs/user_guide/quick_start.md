@@ -130,6 +130,9 @@ curl --location 'http://localhost:3001/v1/chat/completions' --header 'Content-Ty
 }'
 ```
 
+> **Note:**
+For models such as Qwen3 and gpt-oss, the "reasoning" (or "thinking") feature is enabled by default. To disable it, add `"chat_template_kwargs": {"enable_thinking": false}` to your request payload.
+
 ### Skipping Scheduler
 Developers can start Parallax backend engine without a scheduler. Pipeline parallel start/end layers should be set manually.
 An example of serving Qwen3-0.6B with 2-nodes:
