@@ -28,7 +28,6 @@ dependencies = [
   "uvloop",
   "fastapi",
   "pydantic",
-  "py-machineid",
   "protobuf==6.31.1",
   "dijkstar==2.6.0",
   "lattica==1.0.9",

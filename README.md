@@ -165,7 +165,7 @@ To allow the API to be accessible from other machines, add the argument `--host 
 parallax run --host 0.0.0.0
 ```
 
-When running `parallax run` for the first time or after an update, some basic info (like version and gpu name) might be sent to help improve the project. To disable this, use the `-u` flag:
+When running `parallax run` for the first time or after an update, the code version info might be sent to help improve the project. To disable this, use the `-u` flag:
 ```sh
 parallax run -u
 ```
