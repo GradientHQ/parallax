@@ -14,7 +14,6 @@ import os
 import signal
 import subprocess
 import sys
-from types import NoneType
 
 import requests
 
@@ -302,7 +301,7 @@ def update_package_info():
 
     try:
         package_info = load_package_info()
-        if package_info is not NoneType and package_info["version"] == version:
+        if package_info is not None and package_info["version"] == version:
             return
 
         save_package_info({"version": version})
