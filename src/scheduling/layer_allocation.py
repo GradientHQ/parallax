@@ -112,6 +112,10 @@ class BaseLayerAllocator:
 
         self.layer_to_load: Dict[int, LayerLoad] = {}
         self.node_id_to_node: Dict[str, Node] = {}
+        # Sync dict with initial nodes; prevents declare() from adding duplicates
+        # when allocate_left_over_nodes() processes unallocated nodes
+        for node in self.nodes:
+            self.node_id_to_node[node.node_id] = node
 
         # Pipeline endpoints for routing
         self.embedding_node_ids: List[str] = []
