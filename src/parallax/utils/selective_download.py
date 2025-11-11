@@ -20,6 +20,24 @@ EXCLUDE_WEIGHT_PATTERNS = [
 ]
 
 
+def _file_exists_check(file_path: Path) -> bool:
+    """Check if a file exists, following symlinks to verify the actual target exists."""
+    if not file_path.exists():
+        return False
+
+    # If it's a symlink, check if the target exists
+    if file_path.is_symlink():
+        try:
+            target = file_path.resolve(strict=True)
+            return target.exists()
+        except (OSError, RuntimeError):
+            # Symlink is broken (target doesn't exist)
+            return False
+
+    # Regular file, just check if it exists
+    return file_path.exists()
+
+
 def download_metadata_only(
     repo_id: str,
     cache_dir: Optional[str] = None,
@@ -41,8 +59,33 @@ def download_metadata_only(
             force_download=False,
             local_files_only=True,
         )
+
+        model_path = Path(path)
+
+        # Verify that essential files (config.json and tokenizer files) exist
+        # Use _file_exists_check to handle symlinks properly
+        config_file = model_path / "config.json"
+        tokenizer_files = [
+            model_path / "tokenizer.json",
+            model_path / "tokenizer_config.json",
+            model_path / "vocab.json",  # Some models use vocab.json
+        ]
+
+        if not _file_exists_check(config_file):
+            logger.debug(f"config.json not found in local cache for {repo_id}")
+            raise FileNotFoundError("config.json missing from cache")
+
+        # Check if at least one tokenizer file exists
+        if not any(_file_exists_check(tf) for tf in tokenizer_files):
+            logger.debug(
+                f"Tokenizer files not found in local cache for {repo_id}. "
+                f"Attempting to download from Hugging Face..."
+            )
+            raise FileNotFoundError("Tokenizer files missing from cache")
+
         logger.debug(f"Successfully loaded metadata from local cache for {repo_id}")
-        return Path(path)
+
+        return model_path
     except Exception as e:
         # If local cache fails, try to download from Hugging Face
         logger.info(
@@ -116,8 +159,20 @@ def selective_model_download(
                         local_files_only=True,
                     )
                     logger.debug(f"Successfully loaded all files from local cache for {repo_id}")
+
+                    # Verify that weight files actually exist in cache (check symlink targets)
+                    weight_files = list(model_path.glob("model*.safetensors"))
+                    if not weight_files:
+                        weight_files = list(model_path.glob("weight*.safetensors"))
+                    # Check if any weight file actually exists (following symlinks)
+                    if not weight_files or not any(_file_exists_check(wf) for wf in weight_files):
+                        logger.debug(
+                            f"Weight files not found in local cache for {repo_id}. "
+                            f"Attempting to download from Hugging Face..."
+                        )
+                        raise FileNotFoundError("Weight files missing from cache")
                 except Exception as e:
-                    logger.info(
+                    logger.debug(
                         f"Failed to load all files from local cache for {repo_id}: {e}. "
                         f"Attempting to download from Hugging Face..."
                     )
@@ -127,6 +182,7 @@ def selective_model_download(
                         force_download=force_download,
                         local_files_only=False,
                     )
+
             else:
                 # Step 3: Download only the needed weight files
                 logger.info(f"Downloading {len(needed_weight_files)} weight files")
@@ -172,9 +228,22 @@ def selective_model_download(
                     force_download=False,
                     local_files_only=True,
                 )
+
+                # Verify that weight files actually exist in cache (check symlink targets)
+                weight_files = list(model_path.glob("model*.safetensors"))
+                if not weight_files:
+                    weight_files = list(model_path.glob("weight*.safetensors"))
+                # Check if any weight file actually exists (following symlinks)
+                if not weight_files or not any(_file_exists_check(wf) for wf in weight_files):
+                    logger.debug(
+                        f"Weight files not found in local cache for {repo_id}. "
+                        f"Attempting to download from Hugging Face..."
+                    )
+                    raise FileNotFoundError("Weight files missing from cache")
+
                 logger.debug(f"Successfully loaded all files from local cache for {repo_id}")
             except Exception as e:
-                logger.info(
+                logger.debug(
                     f"Failed to load all files from local cache for {repo_id}: {e}. "
                     f"Attempting to download from Hugging Face..."
                 )
