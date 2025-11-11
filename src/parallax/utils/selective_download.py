@@ -24,6 +24,7 @@ def download_metadata_only(
     repo_id: str,
     cache_dir: Optional[str] = None,
     force_download: bool = False,
+    local_files_only: bool = False,
 ) -> Path:
     # If a local path is provided, return it directly without contacting HF Hub
     local_path = Path(repo_id)
@@ -35,6 +36,7 @@ def download_metadata_only(
         cache_dir=cache_dir,
         ignore_patterns=EXCLUDE_WEIGHT_PATTERNS,
         force_download=force_download,
+        local_files_only=local_files_only,
     )
     return Path(path)
 
@@ -45,6 +47,7 @@ def selective_model_download(
     end_layer: Optional[int] = None,
     cache_dir: Optional[str] = None,
     force_download: bool = False,
+    local_files_only: bool = False,
 ) -> Path:
     # Handle local model directory
     local_path = Path(repo_id)
@@ -58,6 +61,7 @@ def selective_model_download(
             repo_id=repo_id,
             cache_dir=cache_dir,
             force_download=force_download,
+            local_files_only=local_files_only,
         )
         logger.debug(f"Downloaded model metadata to {model_path}")
         is_remote = True
@@ -78,6 +82,7 @@ def selective_model_download(
                     repo_id=repo_id,
                     cache_dir=cache_dir,
                     force_download=force_download,
+                    local_files_only=local_files_only,
                 )
             else:
                 # Step 3: Download only the needed weight files
@@ -90,6 +95,7 @@ def selective_model_download(
                         filename=weight_file,
                         cache_dir=cache_dir,
                         force_download=force_download,
+                        local_files_only=local_files_only,
                     )
 
                 logger.debug(f"Downloaded weight files for layers [{start_layer}, {end_layer})")
@@ -104,6 +110,7 @@ def selective_model_download(
                 repo_id=repo_id,
                 cache_dir=cache_dir,
                 force_download=force_download,
+                local_files_only=local_files_only,
             )
         else:
             logger.debug("No layer range specified and using local path; nothing to download")
@@ -115,9 +122,11 @@ def get_model_path_with_selective_download(
     model_path_or_repo: str,
     start_layer: Optional[int] = None,
     end_layer: Optional[int] = None,
+    local_files_only: bool = False,
 ) -> Path:
     return selective_model_download(
         repo_id=model_path_or_repo,
         start_layer=start_layer,
         end_layer=end_layer,
+        local_files_only=local_files_only,
     )

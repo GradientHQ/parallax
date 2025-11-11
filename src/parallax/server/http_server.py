@@ -98,6 +98,7 @@ class HTTPHandler:
         executor_input_ipc_name,
         executor_output_ipc_name,
         model_path_str,
+        use_hfcache: bool = False,
     ):
         self.asyncio_tasks = set()
         # Init inter-process communication
@@ -114,9 +115,10 @@ class HTTPHandler:
         if Path(model_path_str).exists():
             model_path = Path(model_path_str)
         else:
-            model_path = download_metadata_only(model_path_str)
+            model_path = download_metadata_only(model_path_str, local_files_only=use_hfcache)
         config = load_config(model_path)
         self.model_path_str = model_path_str
+        self.use_hfcache = use_hfcache
         self.tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
         self.detokenizer_class, self.tokenmap = load_detokenizer(model_path, self.tokenizer)
 
@@ -338,13 +340,18 @@ app = fastapi.FastAPI(
 
 
 async def init_app_states(
-    state: State, executor_input_ipc: str, executor_output_ipc: str, model_path: str
+    state: State,
+    executor_input_ipc: str,
+    executor_output_ipc: str,
+    model_path: str,
+    use_hfcache: bool = False,
 ):
     """Init FastAPI app states, including http handler, etc."""
     state.http_handler = HTTPHandler(
         executor_input_ipc,
         executor_output_ipc,
         model_path,
+        use_hfcache,
     )
 
 
@@ -433,6 +440,7 @@ class ParallaxHttpServer:
         self.executor_input_ipc_name = args.executor_input_ipc
         self.executor_output_ipc_name = args.executor_output_ipc
         self.model_path = args.model_path
+        self.use_hfcache = args.use_hfcache
 
     async def run_uvicorn(self):
         """
@@ -467,6 +475,7 @@ class ParallaxHttpServer:
                 self.executor_input_ipc_name,
                 self.executor_output_ipc_name,
                 self.model_path,
+                self.use_hfcache,
             )
         )
         asyncio.run(self.run_tasks())

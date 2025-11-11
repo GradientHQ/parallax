@@ -231,6 +231,7 @@ def initialize_sgl_model_runner(
     tp_rank: int,
     tp_size: int,
     nccl_port: int,
+    use_hfcache: bool = False,
 ):
     """
     Creates a SGL ModelRunner object.
@@ -251,6 +252,7 @@ def initialize_sgl_model_runner(
         original_model_path,
         start_layer=start_layer,
         end_layer=end_layer,
+        local_files_only=use_hfcache,
     )
 
     config = load_config(model_path)

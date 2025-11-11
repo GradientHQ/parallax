@@ -63,7 +63,7 @@ NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
 NODE_JOIN_COMMAND_PUBLIC_NETWORK = """parallax join -s {scheduler_addr} """
 
 
-def get_model_info(model_name):
+def get_model_info(model_name, use_hfcache: bool = False):
     def _load_config_only(name: str) -> dict:
         local_path = Path(name)
         if local_path.exists():
@@ -74,7 +74,9 @@ def get_model_info(model_name):
         # Hugging Face only – download just config.json
         from huggingface_hub import hf_hub_download  # type: ignore
 
-        config_file = hf_hub_download(repo_id=name, filename="config.json")
+        config_file = hf_hub_download(
+            repo_id=name, filename="config.json", local_files_only=use_hfcache
+        )
         with open(config_file, "r") as f:
             return json.load(f)
 

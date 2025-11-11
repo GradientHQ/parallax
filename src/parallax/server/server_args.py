@@ -192,6 +192,13 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
 
+    parser.add_argument(
+        "--use-hfcache",
+        action="store_true",
+        default=False,
+        help="Use local Hugging Face cache only (no network download)",
+    )
+
     args = parser.parse_args()
 
     # Validate arguments
