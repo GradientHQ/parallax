@@ -23,7 +23,12 @@ import { useRefCallback } from '../hooks';
 
 export default function PageSetup() {
   const [
-    { networkType, initNodesNumber, modelInfo },
+    {
+      networkType,
+      initNodesNumber,
+      modelInfo,
+      clusterInfo: { status: clusterStatus },
+    },
     { setNetworkType, setInitNodesNumber, init },
   ] = useCluster();
 
@@ -32,12 +37,17 @@ export default function PageSetup() {
   const [loading, setLoading] = useState(false);
 
   const onContinue = useRefCallback(async () => {
+    if (clusterStatus === 'idle' || clusterStatus === 'failed') {
     setLoading(true);
     Promise.resolve()
       .then(() => init())
       .then(() => navigate('/join'))
       .catch((e) => console.error(e))
       .finally(() => setLoading(false));
+      return;
+    } else {
+      navigate('/join');
+    }
   });
 
   return (
