@@ -52,11 +52,17 @@ class DynamicProgrammingRouting(RequestRoutingStrategy):
       minimum-latency node sequence and total latency.
     """
 
-    def find_turning_points(self, nodes: List[Node], num_layers: int) -> List[Tuple[str, int, str]]:
+    @staticmethod
+    def find_turning_points(nodes: List[Node], num_layers: int) -> List[Tuple[str, int, str]]:
         """Find shard truncation points via layer-level DP.
 
         DP state is (layer l, node i that hosts l). Node cost uses the node's
         per-layer latency proxy; edge cost uses RTT between nodes.
+
+        This is a static method that can be called directly without creating an instance:
+        DynamicProgrammingRouting.find_turning_points(nodes, num_layers)
+
+        It can also be called via an instance, which will work due to Python's method resolution.
         """
         if num_layers <= 0 or not nodes:
             return []

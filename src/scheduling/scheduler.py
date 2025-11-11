@@ -116,25 +116,51 @@ class Scheduler:
             pass
 
     # Orchestration helpers
-    def bootstrap(self) -> bool:
-        """Bootstrapping: first-time layer allocation and optional warm-up.
+    def bootstrap(self, *, clear_existing: bool = False, skip_warmup: bool = False) -> bool:
+        """Bootstrapping:
+        This method can be used for both initial bootstrapping and global rebalancing.
+        When clear_existing=True, it first deallocates all existing allocations before
+        performing global allocation (rebalancing behavior). When clear_existing=False,
+        it performs allocation on top of existing state (initial bootstrapping behavior).
 
-        Returns True if a full pipeline was established; False otherwise.
+        Args:
+            clear_existing: If True, deallocate all existing allocations before reallocating.
+                This is used for global rebalancing. Default is False.
+            skip_warmup: If True, skip the warm-up and truncate step. Default is False.
+
+        Returns:
+            True if a full pipeline was established; False otherwise.
         """
-        if len(self.nodes) < self.min_nodes_bootstrapping:
+        # Check node count only for initial bootstrapping (not rebalancing)
+        if not clear_existing and len(self.nodes) < self.min_nodes_bootstrapping:
             logger.debug(
                 f"Bootstrapping deferred: have {len(self.nodes)} nodes; need >= {self.min_nodes_bootstrapping}"
             )
             return False
-        logger.debug("Bootstrapping layer allocator")
+
+        # Clear existing allocations if this is a rebalance
+        if clear_existing:
+            logger.debug("Performing global rebalance (clearing existing allocations)")
+            self._bootstrapped = False
+            self._bootstrapped_event.clear()
+            for n in self.nodes:
+                if n.start_layer is not None and n.end_layer is not None:
+                    self.layer_allocator.deallocate(n)
+        else:
+            logger.debug("Bootstrapping layer allocator")
+
+        # Perform global allocation
         success = self.layer_allocator.global_allocation()
         if not success:
-            logger.warning("Bootstrapping failed to produce a full pipeline")
+            logger.warning("Global allocation failed to produce a full pipeline")
             return False
+
         assignments = self.list_node_allocations()
         logger.debug(f"Layer allocator assignments: {assignments}")
+
         # Optional warm-up to find turning points and truncate node ranges
-        if self.request_warm_up_for_reshard > 0:
+        # Skip warmup for rebalancing scenarios (can be overridden with skip_warmup=False)
+        if not skip_warmup and self.request_warm_up_for_reshard > 0:
             self._run_warmup_and_truncate()
             assignments = self.list_node_allocations()
             logger.debug(f"Layer allocator assignments after turn-point warm-up: {assignments}")
@@ -142,9 +168,11 @@ class Scheduler:
         if not self.layer_allocator.has_full_pipeline():
             logger.warning("Bootstrapping failed to produce a full pipeline")
             return False
+
         self._bootstrapped = True
         self._bootstrapped_event.set()
-        logger.debug("Bootstrapping completed successfully; full pipeline established")
+        action = "rebalance" if clear_existing else "bootstrapping"
+        logger.debug(f"{action.capitalize()} completed successfully; full pipeline established")
         return True
 
     def list_node_allocations(self) -> List[Tuple[str, int, int]]:
@@ -178,18 +206,11 @@ class Scheduler:
             override_warmup_count if override_warmup_count > 0 else self.request_warm_up_for_reshard
         )
 
-        # Always use DP router for finding turning points, regardless of current router type
-        # This is because turning points detection requires layer-level DP analysis
-        dp_router = DynamicProgrammingRouting()
-
         agg_turns: Dict[Tuple[str, int, str], int] = {}
         for _ in range(warmup_count):
-            turns = dp_router.find_turning_points(nodes_list, num_layers)
+            turns = DynamicProgrammingRouting.find_turning_points(nodes_list, num_layers)
             for t in turns:
                 agg_turns[t] = agg_turns.get(t, 0) + 1
-
-        if not agg_turns:
-            return
 
         # Apply truncation for consistently observed turning points
         # Note: Must use layer_allocator.allocate/deallocate to properly update
@@ -201,12 +222,10 @@ class Scheduler:
             start, end = node.start_layer, node.end_layer
             if kind == "tail":
                 if layer_idx < end:
-                    self.layer_allocator.deallocate(node)
-                    self.layer_allocator.allocate(node, start, layer_idx)
+                    self.layer_allocator.reallocate(node, start, layer_idx)
             elif kind == "head":
                 if layer_idx > start:
-                    self.layer_allocator.deallocate(node)
-                    self.layer_allocator.allocate(node, layer_idx, end)
+                    self.layer_allocator.reallocate(node, layer_idx, end)
 
     def update_node_info(
         self,
@@ -317,20 +336,11 @@ class Scheduler:
             self._node_count_cv.notify_all()
 
     def _perform_global_rebalance(self) -> None:
-        """Perform global rebalancing: deallocate all nodes and reallocate."""
-        logger.debug("Performing global rebalance")
-        self._bootstrapped = False
-        self._bootstrapped_event.clear()
-        for n in self.nodes:
-            if n.start_layer is not None and n.end_layer is not None:
-                self.layer_allocator.deallocate(n)
-        success = self.layer_allocator.global_allocation()
-        if not success:
-            logger.warning("Global rebalance failed to produce a full pipeline")
-        else:
-            logger.debug("Global rebalance completed successfully")
-            self._bootstrapped = True
-            self._bootstrapped_event.set()
+        """Perform global rebalancing: deallocate all nodes and reallocate.
+
+        This is a convenience wrapper around bootstrap(clear_existing=True, skip_warmup=True).
+        """
+        self.bootstrap(clear_existing=True, skip_warmup=True)
 
     def leave(self, node_id: str) -> None:
         """Remove a node from allocation and refresh plan and materialized nodes."""
@@ -364,13 +374,13 @@ class Scheduler:
                     )
                     self._run_warmup_and_truncate(override_warmup_count=1)
                     if not self.layer_allocator.has_full_pipeline():
-                        self._perform_global_rebalance()
+                        self.bootstrap(clear_existing=True, skip_warmup=True)
                     else:
                         logger.debug(
                             "Pipeline recovered through warmup and truncate, skipping global rebalance"
                         )
                 else:
-                    self._perform_global_rebalance()
+                    self.bootstrap(clear_existing=True, skip_warmup=True)
 
         with self._node_count_cv:
             self._node_count_cv.notify_all()

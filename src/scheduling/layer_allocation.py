@@ -203,6 +203,11 @@ class BaseLayerAllocator:
         node.is_active = False
         self._update_layer_loads_heap()
 
+    def reallocate(self, node: Node, start_layer: int, end_layer: int) -> None:
+        """Reallocate a node to a specific layer range."""
+        self.deallocate(node)
+        self.allocate(node, start_layer, end_layer)
+
     def declare(self, node: Node) -> None:
         """Declare a node to the allocator."""
         if node.node_id not in self.node_id_to_node:
