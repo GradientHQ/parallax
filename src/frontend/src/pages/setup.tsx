@@ -38,12 +38,12 @@ export default function PageSetup() {
 
   const onContinue = useRefCallback(async () => {
     if (clusterStatus === 'idle' || clusterStatus === 'failed') {
-    setLoading(true);
-    Promise.resolve()
-      .then(() => init())
-      .then(() => navigate('/join'))
-      .catch((e) => console.error(e))
-      .finally(() => setLoading(false));
+      setLoading(true);
+      Promise.resolve()
+        .then(() => init())
+        .then(() => navigate('/join'))
+        .catch((e) => console.error(e))
+        .finally(() => setLoading(false));
       return;
     } else {
       navigate('/join');
@@ -121,11 +121,13 @@ export default function PageSetup() {
 
         {!!modelInfo && modelInfo.vram > 0 && (
           <Alert key='vram-warning' severity='warning' variant='standard'>
-            {[
-              `You’ll need a `,
-              <strong>{`minimum of ${modelInfo.vram} GB of total VRAM`}</strong>,
-              ` to host this model.`,
-            ]}
+            <Typography variant='inherit'>
+              {[
+                `You’ll need a `,
+                <strong>{`minimum of ${modelInfo.vram} GB of total VRAM`}</strong>,
+                ` to host this model.`,
+              ]}
+            </Typography>
           </Alert>
         )}
       </Stack>

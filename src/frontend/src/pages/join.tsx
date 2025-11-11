@@ -97,12 +97,14 @@ export default function PageJoin() {
 
           {!!modelInfo && modelInfo.vram > 0 && needMoreNodes && (
             <Alert key='vram-warning' severity='warning' variant='standard'>
-              {[
-                `Your selected model requires more nodes.`,
-                `You’ll need a `,
-                <strong>{`minimum of ${modelInfo.vram} GB of total VRAM`}</strong>,
-                ` to host this model.`,
-              ]}
+              <Typography variant='inherit'>
+                {[
+                  `Your selected model requires more nodes.`,
+                  `You’ll need a `,
+                  <strong>{`minimum of ${modelInfo.vram} GB of total VRAM`}</strong>,
+                  ` to host this model.`,
+                ]}
+              </Typography>
             </Alert>
           )}
 
