@@ -1,11 +1,10 @@
-
 from __future__ import annotations
 
 import importlib
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-import vllm
+
 import torch
-from transformers import AutoConfig, AutoTokenizer
+from mlx_lm.utils import load_config
 from vllm.config import (
     CacheConfig,
     CompilationConfig,
@@ -26,11 +25,9 @@ from vllm.v1.core.kv_cache_utils import (
 )
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheGroupSpec, KVCacheTensor
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
-from vllm.sequence import IntermediateTensors
-from parallax.utils.tokenizer_utils import load_tokenizer
 
+from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax_utils.logging_config import get_logger
-from mlx_lm.utils import get_model_path, load_config
 
 logger = get_logger(__name__)
 
@@ -40,7 +37,7 @@ class ParallaxVLLMGroupCoordinator(VLLMGroupCoordinator):
     Parallax version of vLLM's GroupCoordinator.
     Override is_first_rank and is_last_rank to use layer ranges instead of process ranks.
     """
-    
+
     def __init__(
         self,
         group_ranks: List[List[int]],
@@ -64,12 +61,12 @@ class ParallaxVLLMGroupCoordinator(VLLMGroupCoordinator):
         self.pp_start_layer = pp_start_layer
         self.pp_end_layer = pp_end_layer
         self.num_hidden_layers = num_hidden_layers
-    
+
     @property
     def is_first_rank(self) -> bool:
         """Return whether this is the first pipeline stage based on layer range."""
         return self.pp_start_layer == 0
-    
+
     @property
     def is_last_rank(self) -> bool:
         """Return whether this is the last pipeline stage based on layer range."""
@@ -98,7 +95,7 @@ def _create_kv_cache_config_from_specs(
 
     num_blocks = max(100, min(1000, int(max_blocks_by_memory * 0.8)))
 
-    logger.info(f"Calculated KV cache blocks: {num_blocks} (max possible: {max_blocks_by_memory})")
+    logger.debug(f"Calculated KV cache blocks: {num_blocks} (max possible: {max_blocks_by_memory})")
 
     tensor_size_bytes = page_size_bytes * num_blocks
 
@@ -171,7 +168,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         )
         available_memory = int(free_memory * memory_fraction)
 
-        logger.info(
+        logger.debug(
             f"Available GPU memory for KV cache: "
             f"{available_memory / (1024**3):.2f} GB "
             f"({memory_fraction:.1%} of {free_memory / (1024**3):.2f} GB)"
@@ -185,7 +182,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             )
             kv_cache_config = generate_scheduler_kv_cache_config(kv_cache_configs)
         else:
-            logger.info("Using fallback KV cache configuration")
+            logger.debug("Using fallback KV cache configuration")
 
             model = self.model
             hf_config = model.model.config
@@ -193,7 +190,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             hidden_size = getattr(hf_config, "hidden_size", 1024)
             head_size = hidden_size // num_attention_heads
 
-            from vllm.v1.kv_cache_interface import KVCacheGroupSpec, FullAttentionSpec
+            from vllm.v1.kv_cache_interface import FullAttentionSpec, KVCacheGroupSpec
 
             model_dtype = self.vllm_config.model_config.dtype
             if isinstance(model_dtype, str):
@@ -202,9 +199,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
                 model_dtype = STR_DTYPE_TO_TORCH_DTYPE.get(model_dtype, torch.float16)
 
             kv_cache_group = KVCacheGroupSpec(
-                layer_names=[
-                    f"model.layers.{i}" for i in range(self.start_layer, self.end_layer)
-                ],
+                layer_names=[f"model.layers.{i}" for i in range(self.start_layer, self.end_layer)],
                 kv_cache_spec=FullAttentionSpec(
                     block_size=self.cache_config.block_size,
                     num_kv_heads=num_attention_heads,
@@ -221,7 +216,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
                 kv_cache_memory_fraction=memory_fraction,
             )
 
-        logger.info(
+        logger.debug(
             f"KV cache config generated: "
             f"num_blocks={kv_cache_config.num_blocks}, "
             f"num_groups={len(kv_cache_config.kv_cache_groups)}"
@@ -230,7 +225,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         return kv_cache_config
 
     def initialize_kv_cache_manager(self, max_model_len: int) -> KVCacheManager:
-        logger.info("Initializing vLLM KVCacheManager...")
+        logger.debug("Initializing vLLM KVCacheManager...")
 
         if self.kv_cache_config is None:
             self.kv_cache_config = self._create_kv_cache_config()
@@ -278,7 +273,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
                 self.request_block_hasher = get_request_block_hasher(block_size, hash_fn)
                 logger.info("Initialized prefix cache block hasher with block_size=%d", block_size)
 
-        logger.info(
+        logger.debug(
             f"KVCacheManager initialized: block_size={kv_cache_manager.block_size}, "
             f"usage={kv_cache_manager.usage:.2%}"
         )
@@ -286,7 +281,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         return kv_cache_manager
 
     def load_model(self) -> None:
-        logger.info(f"Loading vLLM model with layers [{self.start_layer}, {self.end_layer})...")
+        logger.debug(f"Loading vLLM model with layers [{self.start_layer}, {self.end_layer})...")
 
         from vllm.distributed.utils import get_pp_indices
 
@@ -305,14 +300,14 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
 
         try:
             super().load_model()
-            logger.info(
+            logger.debug(
                 f"Successfully loaded {self.num_shard_layers} layers "
                 f"[{self.start_layer}:{self.end_layer}]"
             )
         finally:
             vllm.distributed.utils.get_pp_indices = original_get_pp_indices
 
-        logger.info("Model loaded successfully with partial layers")
+        logger.debug("Model loaded successfully with partial layers")
 
 
 def initialize_vllm_model_runner(
@@ -327,6 +322,7 @@ def initialize_vllm_model_runner(
     **kwargs,
 ) -> Tuple[ParallaxVLLMModelRunner, Dict, Any]:
     from parallax.utils.selective_download import get_model_path_with_selective_download
+
     logger.info(
         f"Initializing vLLM model runner for {model_repo}, " f"layers=[{start_layer}, {end_layer})"
     )
@@ -344,15 +340,16 @@ def initialize_vllm_model_runner(
     num_hidden_layers = getattr(config, "num_hidden_layers", 28)
     is_first_peer = start_layer == 0
     is_last_peer = end_layer == num_hidden_layers
-    
+
     # For single process, always use pp_size=1
     virtual_pp_size = 1
 
-    import vllm.distributed.parallel_state as parallel_state
     import os
 
+    import vllm.distributed.parallel_state as parallel_state
+
     if not parallel_state.model_parallel_is_initialized():
-        logger.info(f"Initializing vLLM distributed environment...")
+        logger.debug(f"Initializing vLLM distributed environment...")
 
         # Set environment variables for distributed initialization
         if "RANK" not in os.environ:
@@ -368,21 +365,22 @@ def initialize_vllm_model_runner(
 
         try:
             parallel_state.init_distributed_environment()
-            
+
             # Initialize with pp_size=1 for single process
             parallel_state.initialize_model_parallel(
                 tensor_model_parallel_size=1,
                 pipeline_model_parallel_size=1,
             )
-            
+
             # Monkey patch the PP group with our custom Parallax coordinator
             # that uses layer ranges to determine is_first_rank/is_last_rank
             original_pp_group = parallel_state._PP
             if original_pp_group is not None:
                 # Get backend from device_group (torch is already imported at module level)
                 import torch.distributed
+
                 backend = torch.distributed.get_backend(original_pp_group.device_group)
-                
+
                 # Create a Parallax PP group coordinator
                 # Need to wrap ranks in a list of lists for group_ranks parameter
                 parallax_pp_group = ParallaxVLLMGroupCoordinator(
@@ -398,13 +396,13 @@ def initialize_vllm_model_runner(
                 )
                 # Replace the PP group
                 parallel_state._PP = parallax_pp_group
-                logger.info(
+                logger.debug(
                     f"Replaced vLLM PP group with Parallax coordinator: "
                     f"is_first_rank={parallax_pp_group.is_first_rank}, "
                     f"is_last_rank={parallax_pp_group.is_last_rank}"
                 )
-            
-            logger.info(f"vLLM distributed environment initialized")
+
+            logger.debug(f"vLLM distributed environment initialized")
         except Exception as e:
             logger.warning(f"Failed to initialize distributed environment: {e}")
             logger.error(f"vLLM distributed initialization failed. Error: {e}")
@@ -481,7 +479,7 @@ def initialize_vllm_model_runner(
     model_runner.load_model()
     logger.info("vLLM model loaded successfully")
 
-    logger.info("Letting vLLM automatically generate KV cache configuration...")
+    logger.debug("Letting vLLM automatically generate KV cache configuration...")
 
     kv_cache_specs = model_runner.get_kv_cache_spec()
 
@@ -499,7 +497,10 @@ def initialize_vllm_model_runner(
         f"({kv_cache_memory_fraction:.1%} of {free_memory / (1024**3):.2f} GB)"
     )
 
-    from vllm.v1.core.kv_cache_utils import get_kv_cache_configs, generate_scheduler_kv_cache_config
+    from vllm.v1.core.kv_cache_utils import (
+        generate_scheduler_kv_cache_config,
+        get_kv_cache_configs,
+    )
 
     kv_cache_configs = get_kv_cache_configs(
         vllm_config=model_runner.vllm_config,
@@ -511,12 +512,12 @@ def initialize_vllm_model_runner(
 
     model_runner.kv_cache_config = kv_cache_config
 
-    logger.info("Initializing GPUModelRunner KV cache...")
+    logger.debug("Initializing GPUModelRunner KV cache...")
     model_runner.initialize_kv_cache(kv_cache_config)
-    logger.info("GPUModelRunner KV cache initialized successfully")
+    logger.debug("GPUModelRunner KV cache initialized successfully")
 
-    logger.info("Initializing KV Cache Manager...")
+    logger.debug("Initializing KV Cache Manager...")
     model_runner.initialize_kv_cache_manager(max_model_len=model_config.max_model_len)
-    logger.info("KV Cache Manager initialized successfully")
+    logger.debug("KV Cache Manager initialized successfully")
 
     return model_runner, config, tokenizer

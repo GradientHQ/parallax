@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -190,7 +189,7 @@ def form_vllm_batch_decode(
             new_token_ids.append([last_token])
         else:
             new_token_ids.append([])
-        
+
         resumed_req_token_ids.append([])
 
         sampling_params = transform_sampling_params_to_vllm(req.sampling_params)
