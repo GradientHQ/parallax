@@ -201,6 +201,7 @@ class GradientServer:
         block_start_index: int = 0,
         block_end_index: int = 1,
         hidden_layers: int = 128,
+        tp_size: int = 1,
         dht_prefix: str = "gradient",
         host_maddrs: List[str] = [],
         http_port: Optional[int] = None,
@@ -220,6 +221,7 @@ class GradientServer:
         self.block_start_index = block_start_index
         self.block_end_index = block_end_index
         self.hidden_layers = hidden_layers
+        self.tp_size = tp_size
         self.dht_prefix = dht_prefix
         self.host_maddrs = host_maddrs
         self.announce_maddrs = announce_maddrs
@@ -346,6 +348,7 @@ class GradientServer:
                     self.block_start_index = response.get("start_layer")
                     self.block_end_index = response.get("end_layer")
                 self.model_name = response.get("model_name")
+                self.tp_size = response.get("tp_size")
 
                 # Publish executor metrics to backend on each update
                 def _publish_metrics(_snapshot):
@@ -738,6 +741,7 @@ def launch_p2p_server(
     pp_start_layer: int,
     pp_end_layer: int,
     hidden_layers: int,
+    tp_size: int,
     tcp_port: int,
     udp_port: int,
     dht_prefix: str,
@@ -761,6 +765,7 @@ def launch_p2p_server(
         block_start_index=pp_start_layer,
         block_end_index=pp_end_layer,
         hidden_layers=hidden_layers,
+        tp_size=tp_size,
         dht_prefix=dht_prefix,
         host_maddrs=[f"/ip4/0.0.0.0/tcp/{tcp_port}", f"/ip4/0.0.0.0/udp/{udp_port}/quic-v1"],
         announce_maddrs=announce_maddrs,

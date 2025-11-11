@@ -115,6 +115,7 @@ class SchedulerManage:
         return {
             "node_id": node.node_id,
             "status": NODE_STATUS_AVAILABLE if node.is_active else NODE_STATUS_WAITING,
+            "gpu_num": node.hardware.num_chips,
             "gpu_name": node.hardware.gpu_name,
             "gpu_memory": node.hardware.memory_gb,
         }

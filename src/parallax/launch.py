@@ -79,6 +79,7 @@ if __name__ == "__main__":
                 pp_start_layer=args.start_layer,
                 pp_end_layer=args.end_layer,
                 hidden_layers=config.get("num_hidden_layers"),
+                tp_size=args.tp_size,
                 tcp_port=args.tcp_port,
                 udp_port=args.udp_port,
                 dht_prefix=args.dht_prefix,
@@ -119,6 +120,7 @@ if __name__ == "__main__":
                 pp_start_layer=args.start_layer,
                 pp_end_layer=args.end_layer,
                 hidden_layers=None,
+                tp_size=args.tp_size,
                 tcp_port=args.tcp_port,
                 udp_port=args.udp_port,
                 dht_prefix=args.dht_prefix,
@@ -136,6 +138,7 @@ if __name__ == "__main__":
             args.start_layer = gradient_server.block_start_index
             args.end_layer = gradient_server.block_end_index
             args.model_path = gradient_server.model_name
+            args.tp_size = gradient_server.tp_size
 
             logger.debug(
                 f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}"
