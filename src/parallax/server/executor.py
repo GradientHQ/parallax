@@ -422,22 +422,25 @@ class Executor:
                 else:
                     # (hidden_size,) -> (1, hidden_size)
                     hidden_states_list.append(hs.unsqueeze(0))
-            
+
             # Concatenate along sequence dimension to get (total_tokens, hidden_size)
             hidden_states = torch.cat(hidden_states_list, dim=0)
-            
+
             # Create residual tensor with same shape
             residual = torch.zeros(
                 hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
             )
-            
+
             if self.backend_type == "vllm":
                 # For vLLM, pass directly as IntermediateTensors
                 from vllm.sequence import IntermediateTensors
-                pp_proxy_tensors = IntermediateTensors({
-                    "hidden_states": hidden_states,
-                    "residual": residual,
-                })
+
+                pp_proxy_tensors = IntermediateTensors(
+                    {
+                        "hidden_states": hidden_states,
+                        "residual": residual,
+                    }
+                )
             else:
                 # For SGLang, use PPProxyTensors
                 pp_proxy_tensors = PPProxyTensors(
@@ -513,22 +516,25 @@ class Executor:
                 else:
                     # (hidden_size,) -> (1, hidden_size)
                     hidden_states_list.append(hs.unsqueeze(0))
-            
+
             # Concatenate along sequence dimension to get (total_tokens, hidden_size)
             hidden_states = torch.cat(hidden_states_list, dim=0)
-            
+
             # Create residual tensor with same shape
             residual = torch.zeros(
                 hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
             )
-            
+
             if self.backend_type == "vllm":
                 # For vLLM, pass directly as IntermediateTensors
                 from vllm.sequence import IntermediateTensors
-                pp_proxy_tensors = IntermediateTensors({
-                    "hidden_states": hidden_states,
-                    "residual": residual,
-                })
+
+                pp_proxy_tensors = IntermediateTensors(
+                    {
+                        "hidden_states": hidden_states,
+                        "residual": residual,
+                    }
+                )
             else:
                 # For SGLang, use PPProxyTensors
                 pp_proxy_tensors = PPProxyTensors(
@@ -1134,7 +1140,7 @@ class Executor:
             intermediate_tensors = pp_proxy_tensors if pp_proxy_tensors is not None else None
             if intermediate_tensors is not None:
                 logger.debug(f"vLLM: Using intermediate_tensors for PP (non-first peer)")
-                
+
             # Import IntermediateTensors for type checking
             from vllm.sequence import IntermediateTensors
 
@@ -1164,23 +1170,42 @@ class Executor:
             else:
                 # Intermediate peer: return hidden states for next peer
                 # vLLM with Parallax PP should return IntermediateTensors
+                def _merge_hidden_and_residual(hidden_tensor, residual_tensor):
+                    if hidden_tensor is None:
+                        return None
+                    if residual_tensor is not None:
+                        # vLLM separates residual connections; downstream peers expect the merged tensor.
+                        hidden_tensor = hidden_tensor + residual_tensor
+                    return hidden_tensor
+
                 if isinstance(output, IntermediateTensors):
-                    # Got IntermediateTensors from monkey-patched forward
-                    if "hidden_states" in output.tensors:
-                        return output.tensors["hidden_states"]
-                    else:
-                        # Return the full IntermediateTensors (might be just hidden_states tensor)
+                    tensors = output.tensors
+                    merged = _merge_hidden_and_residual(
+                        tensors.get("hidden_states"), tensors.get("residual")
+                    )
+                    if merged is not None:
+                        return merged
+                    # Return full object if hidden states are packed under a different key
+                    if tensors:
                         return output
                 elif hasattr(output, "hidden_states") and output.hidden_states is not None:
-                    return output.hidden_states
+                    residual = getattr(output, "residual", None)
+                    merged = _merge_hidden_and_residual(output.hidden_states, residual)
+                    if merged is not None:
+                        return merged
                 elif hasattr(output, "tensors") and "hidden_states" in output.tensors:
-                    return output.tensors["hidden_states"]
-                else:
-                    raise RuntimeError(
-                        "vLLM backend: expected hidden_states in output for PP, but got None. "
-                        f"Output type: {type(output)}, is_last_peer={self.is_last_peer}. "
-                        "This typically means the model runner is not configured for pipeline parallelism."
+                    tensors = output.tensors
+                    merged = _merge_hidden_and_residual(
+                        tensors.get("hidden_states"), tensors.get("residual")
                     )
+                    if merged is not None:
+                        return merged
+
+                raise RuntimeError(
+                    "vLLM backend: expected hidden_states in output for PP, but got None. "
+                    f"Output type: {type(output)}, is_last_peer={self.is_last_peer}. "
+                    "This typically means the model runner is not configured for pipeline parallelism."
+                )
 
         else:  # self.backend_type == "sglang"
             # ========== SGLang Backend ==========
@@ -1462,6 +1487,7 @@ class Executor:
         logger.debug("Executor shutting down...")
         self._should_stop = True
         import time
+
         time.sleep(0.1)  # Give run_loop a moment to exit gracefully
 
         try:
