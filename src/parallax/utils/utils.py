@@ -1,7 +1,5 @@
 """Utility functions."""
 
-import random
-import socket
 from typing import List
 
 import mlx.core as mx
@@ -9,7 +7,6 @@ import numpy as np
 import psutil
 import torch
 import zmq
-from mlx_lm.utils import get_model_path, load_config
 
 
 def is_cuda_available():
@@ -269,40 +266,3 @@ def combine_padding_and_causal_masks(
     padding_mask_float = (padding_mask - 1) * inf_value
     padding_mask_float = padding_mask_float.astype(dtype)
     return causal_mask + padding_mask_float
-
-
-def fetch_model_from_hf(name: str):
-    """Fetch model from huggingface and returns model config"""
-    model_path = get_model_path(name)[0]
-    config = load_config(model_path)
-    return config
-
-
-def is_port_available(port: int):
-    """
-    Copied from SGLang.
-    Return whether a port is available.
-    """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        try:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind(("", port))
-            s.listen(1)
-            return True
-        except socket.error:
-            return False
-        except OverflowError:
-            return False
-
-
-def initialize_nccl_port():
-    """Initialize nccl port for GPU"""
-    nccl_port = random.randint(4000, 5000)
-    while True:
-        if is_port_available(nccl_port):
-            break
-        if nccl_port < 60000:
-            nccl_port += 42
-        else:
-            nccl_port -= 43
-    return nccl_port
