@@ -184,7 +184,9 @@ if __name__ == "__main__":
                         # shutdown all executor processes
                         thread_pool = []
                         for executor_process in executor_subprocs:
-                            t = threading.Thread(target=stop_executor_process, args=(executor_process,))
+                            t = threading.Thread(
+                                target=stop_executor_process, args=(executor_process,)
+                            )
                             t.start()
                             thread_pool.append(t)
                         executor.shutdown()

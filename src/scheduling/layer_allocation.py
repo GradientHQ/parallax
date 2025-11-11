@@ -287,7 +287,9 @@ class BaseLayerAllocator:
         if len(layer_heap) < 2:
             return False
 
-        total_cluster_memory = sum((node.hardware.num_chips * node.hardware.memory_gb) for node in self.nodes)
+        total_cluster_memory = sum(
+            (node.hardware.num_chips * node.hardware.memory_gb) for node in self.nodes
+        )
 
         if total_cluster_memory == 0:
             raise ValueError("Total cluster memory is zero")
