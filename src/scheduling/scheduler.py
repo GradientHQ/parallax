@@ -335,13 +335,6 @@ class Scheduler:
         with self._node_count_cv:
             self._node_count_cv.notify_all()
 
-    def _perform_global_rebalance(self) -> None:
-        """Perform global rebalancing: deallocate all nodes and reallocate.
-
-        This is a convenience wrapper around bootstrap(clear_existing=True, skip_warmup=True).
-        """
-        self.bootstrap(clear_existing=True, skip_warmup=True)
-
     def leave(self, node_id: str) -> None:
         """Remove a node from allocation and refresh plan and materialized nodes."""
         if node_id not in self.layer_allocator.node_id_to_node:
