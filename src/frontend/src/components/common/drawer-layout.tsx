@@ -152,8 +152,11 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
         <Typography variant='body1'>
           Your selected model requires more nodes.
           {(!!modelInfo
-            && modelInfo.vram > 0
-            && `To host this model, we suggest you to have a total VRAM size of ${modelInfo.vram} GB.`)
+            && modelInfo.vram > 0 && [
+              `You’ll need a `,
+              <strong>{`minimum of ${modelInfo.vram} GB of total VRAM`}</strong>,
+              ` to host this model.`,
+            ])
             || ''}
         </Typography>
       </>

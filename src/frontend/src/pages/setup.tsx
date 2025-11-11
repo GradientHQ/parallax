@@ -111,7 +111,11 @@ export default function PageSetup() {
 
         {!!modelInfo && modelInfo.vram > 0 && (
           <Alert key='vram-warning' severity='warning' variant='standard'>
-            To host this model, we suggest you to have a total VRAM size of {modelInfo.vram} GB.
+            {[
+              `You’ll need a `,
+              <strong>{`minimum of ${modelInfo.vram} GB of total VRAM`}</strong>,
+              ` to host this model.`,
+            ]}
           </Alert>
         )}
       </Stack>

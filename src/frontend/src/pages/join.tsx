@@ -97,8 +97,12 @@ export default function PageJoin() {
 
           {!!modelInfo && modelInfo.vram > 0 && needMoreNodes && (
             <Alert key='vram-warning' severity='warning' variant='standard'>
-              Your selected model requires more nodes. To host this model, we suggest you to have a
-              total VRAM size of {modelInfo.vram} GB.
+              {[
+                `Your selected model requires more nodes.`,
+                `You’ll need a `,
+                <strong>{`minimum of ${modelInfo.vram} GB of total VRAM`}</strong>,
+                ` to host this model.`,
+              ]}
             </Alert>
           )}
 
