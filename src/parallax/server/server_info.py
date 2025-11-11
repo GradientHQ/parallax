@@ -32,7 +32,7 @@ class HardwareInfo:
     total_ram_gb: float
     chip: str
     tflops_fp16: float
-    num_chips: int
+    num_gpus: int
 
     def dumps(self) -> Dict[str, Any]:
         """Serializes the HardwareInfo object to a dictionary."""
@@ -100,7 +100,7 @@ class AppleSiliconHardwareInfo(HardwareInfo):
                 "Please add it to the _APPLE_PEAK_FP16 dictionary."
             ) from e
 
-        return cls(num_chips=1, total_ram_gb=round(total_gb, 1), chip=chip, tflops_fp16=flops)
+        return cls(num_gpus=1, total_ram_gb=round(total_gb, 1), chip=chip, tflops_fp16=flops)
 
 
 @dataclass
@@ -158,7 +158,7 @@ class NvidiaHardwareInfo(HardwareInfo):
 
         spec = cls._match_gpu_specs(name, total_vram_gb)
         return cls(
-            num_chips=device_count,
+            num_gpus=device_count,
             total_ram_gb=round(total_gb, 1),
             chip=name,
             tflops_fp16=float(spec["tflops_fp16"]),
@@ -182,7 +182,7 @@ def detect_node_hardware(node_id: Optional[str]) -> Dict[str, Any]:
         # Fallback to a conservative default
         return {
             "node_id": node_id,
-            "num_chips": 1,
+            "num_gpus": 1,
             "tflops_fp16": 50.0,
             "gpu_name": "Unknown",
             "memory_gb": 16.0,
@@ -193,7 +193,7 @@ def detect_node_hardware(node_id: Optional[str]) -> Dict[str, Any]:
     if isinstance(hw, NvidiaHardwareInfo):
         return {
             "node_id": node_id,
-            "num_chips": hw.num_chips,
+            "num_gpus": hw.num_gpus,
             "tflops_fp16": hw.tflops_fp16,
             "gpu_name": hw.chip,
             "memory_gb": hw.vram_gb,
@@ -205,7 +205,7 @@ def detect_node_hardware(node_id: Optional[str]) -> Dict[str, Any]:
         est_bandwidth = 100.0
         return {
             "node_id": node_id,
-            "num_chips": hw.num_chips,
+            "num_gpus": hw.num_gpus,
             "tflops_fp16": hw.tflops_fp16,
             "gpu_name": hw.chip,
             "memory_gb": hw.total_ram_gb,
@@ -215,7 +215,7 @@ def detect_node_hardware(node_id: Optional[str]) -> Dict[str, Any]:
     # Generic fallback
     return {
         "node_id": node_id,
-        "num_chips": hw.num_chips,
+        "num_gpus": hw.num_gpus,
         "tflops_fp16": hw.tflops_fp16,
         "gpu_name": "Unknown",
         "memory_gb": 16.0,

@@ -31,7 +31,7 @@ class NodeHardwareInfo:
     """
 
     node_id: str
-    num_chips: int
+    num_gpus: int
     tflops_fp16: float
     gpu_name: str
     memory_gb: float
@@ -273,7 +273,7 @@ class Node:
         Capacity is measured using the parameter memory budget on the device.
         """
         available_memory_bytes = floor(
-            self.hardware.num_chips
+            self.hardware.num_gpus
             * self.hardware.memory_gb
             * 1024
             * 1024
@@ -307,7 +307,7 @@ class Node:
             return None
         return floor(
             (
-                self.hardware.num_chips
+                self.hardware.num_gpus
                 * self.hardware.memory_gb
                 * 1024
                 * 1024

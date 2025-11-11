@@ -288,7 +288,7 @@ class BaseLayerAllocator:
             return False
 
         total_cluster_memory = sum(
-            (node.hardware.num_chips * node.hardware.memory_gb) for node in self.nodes
+            (node.hardware.num_gpus * node.hardware.memory_gb) for node in self.nodes
         )
 
         if total_cluster_memory == 0:

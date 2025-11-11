@@ -117,13 +117,13 @@ model = ModelInfo(  # instantiate with your model's parameters
 
 n0 = Node(
     node_id="node-0",
-    hardware=NodeHardwareInfo(node_id="node-0", tflops_fp16=180.0, num_chips=1, gpu_name="", memory_gb=80.0, memory_bandwidth_gbps=2039.0),
+    hardware=NodeHardwareInfo(node_id="node-0", tflops_fp16=180.0, num_gpus=1, gpu_name="", memory_gb=80.0, memory_bandwidth_gbps=2039.0),
     model_info=model,
 )
 
 n1 = Node(
     node_id="node-1",
-    hardware=NodeHardwareInfo(node_id="node-1", tflops_fp16=180.0, num_chips=1, gpu_name="", memory_gb=80.0, memory_bandwidth_gbps=2039.0),
+    hardware=NodeHardwareInfo(node_id="node-1", tflops_fp16=180.0, num_gpus=1, gpu_name="", memory_gb=80.0, memory_bandwidth_gbps=2039.0),
     model_info=model,
 )
 

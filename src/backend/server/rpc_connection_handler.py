@@ -153,7 +153,7 @@ class RPCConnectionHandler(ConnectionHandler):
                         ),
                         "start_layer": start_layer,
                         "end_layer": end_layer,
-                        "tp_size": node.hardware.num_chips,
+                        "tp_size": node.hardware.num_gpus,
                     }
         return {}
 
@@ -183,7 +183,7 @@ class RPCConnectionHandler(ConnectionHandler):
 
     def build_hardware(self, hardware_json):
         node_id = hardware_json.get("node_id")
-        num_chips = hardware_json.get("num_chips")
+        num_gpus = hardware_json.get("num_gpus")
         tflops_fp16 = hardware_json.get("tflops_fp16")
         gpu_name = hardware_json.get("gpu_name")
         memory_gb = hardware_json.get("memory_gb")
@@ -191,7 +191,7 @@ class RPCConnectionHandler(ConnectionHandler):
         device = hardware_json.get("device")
         return NodeHardwareInfo(
             node_id=node_id,
-            num_chips=num_chips,
+            num_gpus=num_gpus,
             tflops_fp16=tflops_fp16,
             gpu_name=gpu_name,
             memory_gb=memory_gb,
