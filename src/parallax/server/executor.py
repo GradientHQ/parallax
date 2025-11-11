@@ -147,6 +147,9 @@ class Executor:
                 "max_num_tokens_per_batch": max_num_tokens_per_batch,
                 "dtype": dtype,
                 "moe_runner_backend": moe_runner_backend,
+                "tp_rank": tp_rank,
+                "tp_size": tp_size,
+                "nccl_port": nccl_port,
             }
 
             self.model_runner, self.config, self.tokenizer = initialize_cuda_model_runner(
