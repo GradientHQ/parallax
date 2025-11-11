@@ -64,6 +64,8 @@ NODE_JOIN_COMMAND_PUBLIC_NETWORK = """parallax join -s {scheduler_addr} """
 
 
 def get_model_info(model_name):
+    logger.debug(f"Loading model config from {model_name}")
+
     def _load_config_only(name: str) -> dict:
         local_path = Path(name)
         if local_path.exists():
@@ -71,12 +73,28 @@ def get_model_info(model_name):
             with open(config_path, "r") as f:
                 return json.load(f)
 
-        # Hugging Face only – download just config.json
+        # Hugging Face – try local cache first, then download if needed
         from huggingface_hub import hf_hub_download  # type: ignore
 
-        config_file = hf_hub_download(repo_id=name, filename="config.json")
-        with open(config_file, "r") as f:
-            return json.load(f)
+        try:
+            # First attempt: try to use local cache (offline-first)
+            logger.debug(f"Attempting to load config.json from local cache for {name}")
+            config_file = hf_hub_download(
+                repo_id=name, filename="config.json", local_files_only=True
+            )
+            logger.debug(f"Successfully loaded config.json from local cache for {name}")
+            with open(config_file, "r") as f:
+                return json.load(f)
+        except Exception:
+            # If local cache fails, try to download from Hugging Face
+            logger.info(
+                f"Attempting to download config.json from Hugging Face {name} ... "
+                f"Failed to load config.json from local cache "
+            )
+            config_file = hf_hub_download(repo_id=name, filename="config.json")
+            logger.info(f"Successfully downloaded config.json from Hugging Face for {name}")
+            with open(config_file, "r") as f:
+                return json.load(f)
 
     config = _load_config_only(model_name)
 
