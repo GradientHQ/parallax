@@ -203,6 +203,7 @@ class ParallaxModelRunner(SGLModelRunner):
 def form_sgl_server_args(
     model_path: str,
     dtype: str = "bfloat16",
+    tp_size: int = 1,
     attention_backend: str = "flashinfer",
     kv_block_size: int = 64,
     moe_runner_backend="auto",
@@ -215,6 +216,7 @@ def form_sgl_server_args(
         page_size=kv_block_size,
         mem_fraction_static=0.85,
         moe_runner_backend=moe_runner_backend,
+        tp_size=tp_size,
     )
     return sgl_server_args
 
@@ -254,7 +256,13 @@ def initialize_sgl_model_runner(
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")
-    nccl_port = random.randint(4000, 5000)
+
+    # Extract TP-related parameters from kwargs or use defaults
+    tp_rank = kwargs.get("tp_rank", 0)
+    tp_size = kwargs.get("tp_size", 1)
+    nccl_port = kwargs.get("nccl_port", None)
+    if nccl_port is None:
+        nccl_port = random.randint(4000, 5000)
 
     # Handling mxfp4 arguments
     quant_method = config.get("quant_method", None)
@@ -273,6 +281,7 @@ def initialize_sgl_model_runner(
     server_args = form_sgl_server_args(
         str(model_path),
         dtype,
+        tp_size,
         attention_backend,
         kv_block_size,
         moe_runner_backend,
@@ -298,9 +307,9 @@ def initialize_sgl_model_runner(
     model_runner = ParallaxModelRunner(
         model_config=model_config,
         mem_fraction_static=kv_cache_memory_fraction,
-        gpu_id=0,
-        tp_rank=0,
-        tp_size=1,
+        gpu_id=tp_rank,  # Currently reuse tp_rank to only support TP.
+        tp_rank=tp_rank,
+        tp_size=tp_size,
         pp_rank=0,
         pp_size=1,
         moe_ep_rank=0,

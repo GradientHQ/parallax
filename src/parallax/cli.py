@@ -15,13 +15,11 @@ import signal
 import subprocess
 import sys
 
-import machineid
 import requests
 
-from common.file_util import get_project_root
-from common.version_check import get_current_version
-from parallax.server.server_info import HardwareInfo
+from parallax_utils.file_util import get_project_root
 from parallax_utils.logging_config import get_logger
+from parallax_utils.version_check import get_current_version
 
 logger = get_logger("parallax.cli")
 
@@ -47,7 +45,7 @@ PUBLIC_RELAY_SERVERS = [
 def check_python_version():
     """Check if Python version is 3.11 or higher."""
     if sys.version_info < (3, 11) or sys.version_info >= (3, 14):
-        print(
+        logger.info(
             f"Error: Python 3.11 or higher and less than 3.14 is required. Current version is {sys.version_info.major}.{sys.version_info.minor}."
         )
         sys.exit(1)
@@ -185,7 +183,7 @@ def run_command(args, passthrough_args: list[str] | None = None):
     backend_main = project_root / "src" / "backend" / "main.py"
 
     if not backend_main.exists():
-        print(f"Error: Backend main.py not found at {backend_main}")
+        logger.info(f"Error: Backend main.py not found at {backend_main}")
         sys.exit(1)
 
     # Build the command to run the backend main.py
@@ -201,6 +199,9 @@ def run_command(args, passthrough_args: list[str] | None = None):
         cmd.extend(["--init-nodes-num", str(args.init_nodes_num)])
     if args.use_relay:
         cmd.extend(_get_relay_params())
+        logger.info(
+            "Using public relay server to help nodes and the scheduler establish a connection (remote mode). Your IP address will be reported to the relay server to help establish the connection."
+        )
 
     # Append any passthrough args (unrecognized by this CLI) directly to the command
     if passthrough_args:
@@ -220,7 +221,7 @@ def join_command(args, passthrough_args: list[str] | None = None):
     launch_script = project_root / "src" / "parallax" / "launch.py"
 
     if not launch_script.exists():
-        print(f"Error: Launch script not found at {launch_script}")
+        logger.info(f"Error: Launch script not found at {launch_script}")
         sys.exit(1)
 
     # Set environment variable for the subprocess
@@ -247,8 +248,10 @@ def join_command(args, passthrough_args: list[str] | None = None):
     if args.use_relay or (
         args.scheduler_addr != "auto" and not str(args.scheduler_addr).startswith("/")
     ):
-        logger.info("Using public relay servers")
         cmd.extend(_get_relay_params())
+        logger.info(
+            "Using public relay server to help nodes and the scheduler establish a connection (remote mode). Your IP address will be reported to the relay server to help establish the connection."
+        )
 
     # Append any passthrough args (unrecognized by this CLI) directly to the command
     if passthrough_args:
@@ -266,7 +269,7 @@ def chat_command(args, passthrough_args: list[str] | None = None):
     launch_script = project_root / "src" / "parallax" / "launch_chat.py"
 
     if not launch_script.exists():
-        print(f"Error: Launch chat script not found at {launch_script}")
+        logger.info(f"Error: Launch chat script not found at {launch_script}")
         sys.exit(1)
 
     # Build the command to run the launch_chat.py script
@@ -279,8 +282,10 @@ def chat_command(args, passthrough_args: list[str] | None = None):
     if args.use_relay or (
         args.scheduler_addr != "auto" and not str(args.scheduler_addr).startswith("/")
     ):
-        logger.info("Using public relay servers")
         cmd.extend(_get_relay_params())
+        logger.info(
+            "Using public relay server to help chat client and the scheduler establish a connection (remote mode). Your IP address will be reported to the relay server to help establish the connection."
+        )
 
     # Append any passthrough args (unrecognized by this CLI) directly to the command
     if passthrough_args:
@@ -290,40 +295,16 @@ def chat_command(args, passthrough_args: list[str] | None = None):
     _execute_with_graceful_shutdown(cmd)
 
 
-def collect_machine_info():
-    """Collect machine information."""
-    version = get_current_version()
-    device_uuid = str(machineid.id())
-    try:
-        hw = HardwareInfo.detect()
-        return {
-            "uuid": device_uuid,
-            "version": version,
-            "gpu": hw.chip,
-        }
-    except Exception:
-        return {
-            "uuid": device_uuid,
-            "version": version,
-            "gpu": "unknown",
-        }
-
-
 def update_package_info():
     """Update package information."""
-    usage_info = collect_machine_info()
+    version = get_current_version()
 
     try:
         package_info = load_package_info()
-        if (
-            package_info is not None
-            and package_info["uuid"] == usage_info["uuid"]
-            and package_info["version"] == usage_info["version"]
-            and package_info["gpu"] == usage_info["gpu"]
-        ):
+        if package_info is not None and package_info["version"] == version:
             return
 
-        save_package_info(usage_info)
+        save_package_info({"version": version})
     except Exception:
         pass
 

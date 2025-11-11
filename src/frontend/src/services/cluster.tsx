@@ -37,6 +37,11 @@ export interface ModelInfo {
   readonly name: string;
   readonly displayName: string;
   readonly logoUrl: string;
+
+  /**
+   * The VRAM required for the model in GB.
+   */
+  readonly vram: number;
 }
 
 export type ClusterStatus = 'idle' | 'waiting' | 'available' | 'rebalancing' | 'failed';
@@ -47,6 +52,7 @@ export interface ClusterInfo {
   readonly modelName: string;
   readonly nodeJoinCommand: Readonly<Record<string, string>>;
   readonly initNodesNumber: number;
+  readonly needMoreNodes: boolean;
 }
 
 const INITIAL_CLUSTER_INFO: ClusterInfo = {
@@ -55,6 +61,7 @@ const INITIAL_CLUSTER_INFO: ClusterInfo = {
   modelName: '',
   nodeJoinCommand: {},
   initNodesNumber: 4,
+  needMoreNodes: false,
 };
 
 export type NodeStatus = 'waiting' | 'available' | 'failed';
@@ -74,6 +81,7 @@ export interface ClusterStates {
   readonly networkType: NetworkType;
   readonly initNodesNumber: number;
   readonly modelName: string;
+  readonly modelInfo: ModelInfo | undefined;
   readonly modelInfoList: readonly ModelInfo[];
 
   readonly clusterInfo: ClusterInfo;
@@ -114,11 +122,16 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
       try {
         const rawList = await getModelList();
         setModelInfoList((prev) => {
-          const next = rawList.map((name) => ({
-            name,
-            displayName: name,
-            logoUrl: getLogoUrl(name),
-          }));
+          const next = rawList.map<ModelInfo>(({ name, vram_gb }) => {
+            name = name || '';
+            vram_gb = vram_gb || 0;
+            return {
+              name,
+              displayName: name,
+              logoUrl: getLogoUrl(name),
+              vram: vram_gb,
+            };
+          });
           if (JSON.stringify(next) !== JSON.stringify(prev)) {
             debugLog('setModelInfoList', next);
             return next;
@@ -157,7 +170,14 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
     const onMessage = (message: any) => {
       if (message.type === 'cluster_status') {
         const {
-          data: { status, init_nodes_num, model_name, node_join_command, node_list },
+          data: {
+            status,
+            init_nodes_num,
+            model_name,
+            node_join_command,
+            node_list,
+            need_more_nodes,
+          },
         } = message;
         setModelName((prev) => model_name || prev);
         setClusterInfo((prev) => {
@@ -167,6 +187,7 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
             initNodesNumber: init_nodes_num || 0,
             modelName: model_name || '',
             nodeJoinCommand: node_join_command || {},
+            needMoreNodes: need_more_nodes || false,
           };
           if (JSON.stringify(next) !== JSON.stringify(prev)) {
             debugLog('setClusterInfo', next);
@@ -255,6 +276,7 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
         networkType,
         initNodesNumber,
         modelName,
+        modelInfo: modelInfoList.find((model) => model.name === modelName),
         modelInfoList,
         clusterInfo,
         nodeInfoList,
