@@ -233,11 +233,6 @@ def test_allocator(
         else DynamicProgrammingLayerAllocator(model, nodes, assign_left_over_nodes=False)
     )
     allocator.global_allocation()
-
-    print(f"Total pipelines:")
-    for nid, (start, end) in allocator.node_allocation.items():
-        print(f"  {nid}: {start}-{end} ({end-start} layers)")
-
     _test_gap_patch_rebalance(allocator)
 
     # Collect (start,end) per node in creation order
