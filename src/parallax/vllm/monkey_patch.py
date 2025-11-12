@@ -14,13 +14,14 @@ from parallax.vllm.monkey_patch_utils.weight_loader import (
 ## Here are patch functions for vLLM
 ## Hopefully, when vLLM supports pipeline parallelism natively in the way we need,
 ## we can remove these patches
-def apply_parallax_vllm_monkey_patch(is_last_stage: bool = True):
+def apply_parallax_vllm_monkey_patch(is_first_stage: bool, is_last_stage: bool):
     """
     Apply all Parallax monkey patches for vLLM.
 
     Args:
+        is_first_stage: Whether this is the first pipeline stage.
         is_last_stage: Whether this is the last pipeline stage. This affects
                       whether lm_head weights are expected to be loaded.
     """
-    set_vllm_pipeline_stage(is_last_stage)
+    set_vllm_pipeline_stage(is_first_stage, is_last_stage)
     apply_vllm_weight_loader_patch()

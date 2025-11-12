@@ -315,6 +315,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
                 f"Successfully loaded {self.num_shard_layers} layers "
                 f"[{self.start_layer}:{self.end_layer}]"
             )
+
         finally:
             vllm.distributed.utils.get_pp_indices = original_get_pp_indices
 
@@ -347,15 +348,15 @@ def initialize_vllm_model_runner(
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")
-
-    num_hidden_layers = getattr(config, "num_hidden_layers", 28)
+    
+    num_hidden_layers = config.get("num_hidden_layers")
     is_first_peer = start_layer == 0
     is_last_peer = end_layer == num_hidden_layers
 
     # Apply Parallax vLLM monkey patches for pipeline parallelism
     try:
-        apply_parallax_vllm_monkey_patch(is_last_stage=is_last_peer)
-        logger.debug(f"Applied Parallax vLLM monkey patches: is_last_stage={is_last_peer}")
+        apply_parallax_vllm_monkey_patch(is_first_stage=is_first_peer, is_last_stage=is_last_peer)
+        logger.debug(f"Applied Parallax vLLM monkey patches: is_first_stage={is_first_peer}, is_last_stage={is_last_peer}")
     except Exception as e:
         logger.warning("Failed to apply Parallax vLLM monkey patches: %s", e)
 
