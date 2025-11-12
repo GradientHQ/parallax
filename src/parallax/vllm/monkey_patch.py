@@ -17,11 +17,10 @@ from parallax.vllm.monkey_patch_utils.weight_loader import (
 def apply_parallax_vllm_monkey_patch(is_last_stage: bool = True):
     """
     Apply all Parallax monkey patches for vLLM.
-    
+
     Args:
         is_last_stage: Whether this is the last pipeline stage. This affects
                       whether lm_head weights are expected to be loaded.
     """
     set_vllm_pipeline_stage(is_last_stage)
     apply_vllm_weight_loader_patch()
-

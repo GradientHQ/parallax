@@ -2,6 +2,7 @@
 Monkey patch for vLLM weight loading to skip lm_head weights on non-last pipeline stages.
 This is similar to the approach used in sglang monkey patches.
 """
+
 import logging
 from typing import Any
 
@@ -22,27 +23,27 @@ def apply_vllm_weight_loader_patch():
     """
     Apply monkey patch to vLLM's default loader to skip lm_head initialization check
     when not on the last pipeline stage.
-    
+
     This patch intercepts ValueError exceptions during weight loading and checks if they
     are related to lm_head.weight not being initialized. If this occurs on a non-last
     pipeline stage, the error is suppressed as expected behavior. Otherwise, the error
     is re-raised.
     """
     global _vllm_patch_applied
-    
+
     if _vllm_patch_applied:
         logger.debug("vLLM weight loader patch already applied, skipping")
         return
-    
+
     try:
         from vllm.model_executor.model_loader import default_loader
-        
+
         original_load_weights = default_loader.DefaultModelLoader.load_weights
-        
+
         def patched_load_weights(self, model: Any, model_config: Any):
             """Patched load_weights that handles lm_head for pipeline parallelism."""
             global _is_last_stage
-            
+
             try:
                 # Call original load_weights
                 original_load_weights(self, model, model_config)
@@ -65,15 +66,14 @@ def apply_vllm_weight_loader_patch():
                 else:
                     # Different error, re-raise
                     raise
-        
+
         # Apply the patch
         default_loader.DefaultModelLoader.load_weights = patched_load_weights
         _vllm_patch_applied = True
         logger.info("Successfully applied vLLM weight loader patch for pipeline parallelism")
-        
+
     except ImportError as e:
         logger.warning(f"Could not apply vLLM weight loader patch: {e}")
     except Exception as e:
         logger.error(f"Error applying vLLM weight loader patch: {e}")
         raise
-

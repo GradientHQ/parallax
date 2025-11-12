@@ -26,13 +26,13 @@ from vllm.v1.core.kv_cache_utils import (
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheGroupSpec, KVCacheTensor
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
-from parallax.utils.tokenizer_utils import load_tokenizer
-from parallax_utils.logging_config import get_logger
 from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
     apply_weight_loader_filter_patch,
     set_layer_range_for_filtering,
 )
+from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.vllm.monkey_patch import apply_parallax_vllm_monkey_patch
+from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
@@ -200,7 +200,9 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             model_dtype = self.vllm_config.model_config.dtype
             if isinstance(model_dtype, str):
                 try:
-                    from vllm.utils.torch_utils import STR_DTYPE_TO_TORCH_DTYPE  # type: ignore
+                    from vllm.utils.torch_utils import (
+                        STR_DTYPE_TO_TORCH_DTYPE,  # type: ignore
+                    )
                 except Exception:
                     # Older/newer vLLM versions may not expose torch_utils.
                     # Fall back silently and default to float16.
@@ -349,16 +351,14 @@ def initialize_vllm_model_runner(
     num_hidden_layers = getattr(config, "num_hidden_layers", 28)
     is_first_peer = start_layer == 0
     is_last_peer = end_layer == num_hidden_layers
-    
+
     # Apply Parallax vLLM monkey patches for pipeline parallelism
     try:
         apply_parallax_vllm_monkey_patch(is_last_stage=is_last_peer)
-        logger.debug(
-            f"Applied Parallax vLLM monkey patches: is_last_stage={is_last_peer}"
-        )
+        logger.debug(f"Applied Parallax vLLM monkey patches: is_last_stage={is_last_peer}")
     except Exception as e:
         logger.warning("Failed to apply Parallax vLLM monkey patches: %s", e)
-    
+
     # Apply layer-range-based weight file filtering before any model load.
     # Reuse the generic monkey patch used by sglang implementation to reduce
     # local weight file reads when loading a partial layer shard.
