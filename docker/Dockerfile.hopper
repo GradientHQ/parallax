@@ -1,5 +1,7 @@
 FROM lmsysorg/sglang:v0.5.4.post1
 
+ENV SGLANG_ENABLE_JIT_DEEPGEMM=0
+
 WORKDIR /parallax
 
 COPY README.md ./README.md

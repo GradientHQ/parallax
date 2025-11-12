@@ -226,6 +226,7 @@ def join_command(args, passthrough_args: list[str] | None = None):
 
     # Set environment variable for the subprocess
     env = os.environ.copy()
+    env["SGLANG_ENABLE_JIT_DEEPGEMM"] = "0"
 
     # Build the command to run the launch.py script
     passthrough_args = passthrough_args or []
