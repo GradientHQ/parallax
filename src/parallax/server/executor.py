@@ -328,28 +328,13 @@ class Executor:
 
     def recv_requests_from_http(self) -> List[Request]:
         """Receives requests from http frontend"""
-        if self.tp_rank == 0:
-            recv_reqs = []
-            while True:
-                try:
-                    raw_request = self.recv_from_ipc_socket.recv_pyobj(zmq.NOBLOCK)
+        if self.tp_rank != 0:
+            return None
 
-                    # Check if this is an abort request
-                    if isinstance(raw_request, dict) and raw_request.get("type") == "abort":
-                        logger.debug(
-                            f"Received abort request from HTTP for request ID: {raw_request.get('rid')}"
-                        )
-                        self.scheduler.cancel_request(raw_request.get("rid"))
-                    else:
-                        # Normal request processing - do tokenization and form InitialRequest
-                        req = self._handle_raw_request(raw_request)
-                        recv_reqs.append(req)
-                except zmq.ZMQError:
-                    break
-                except Exception as e:
-                    logger.exception(f"Error receiving http request: {e}")
-        else:
-            recv_reqs = None
+        recv_reqs = []
+        while True:
+            try:
+                raw_request = self.recv_from_ipc_socket.recv_pyobj(zmq.NOBLOCK)
 
                 # Check if this is an abort request
                 if isinstance(raw_request, dict) and raw_request.get("type") == "abort":
