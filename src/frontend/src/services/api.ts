@@ -2,7 +2,7 @@ import { createHttpStreamFactory } from './http-stream';
 
 export const API_BASE_URL = import.meta.env.DEV ? '/proxy-api' : '';
 
-export const getModelList = async (): Promise<readonly string[]> => {
+export const getModelList = async (): Promise<readonly any[]> => {
   const response = await fetch(`${API_BASE_URL}/model/list`, { method: 'GET' });
   const message = await response.json();
   if (message.type !== 'model_list') {

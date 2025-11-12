@@ -576,3 +576,6 @@ class Scheduler:
         self._wake_event.set()
         with self._node_count_cv:
             self._node_count_cv.notify_all()
+
+    def need_more_nodes(self):
+        return not self._bootstrapped and len(self.nodes) >= self.min_nodes_bootstrapping

@@ -1,8 +1,12 @@
+import concurrent.futures
 import json
-import logging
+import math
 from pathlib import Path
 
+from parallax_utils.logging_config import get_logger
 from scheduling.model_info import ModelInfo
+
+logger = get_logger(__name__)
 
 # Supported model list - key: model name, value: MLX model name (same as key if no MLX variant)
 MODELS = {
@@ -57,7 +61,6 @@ MODELS = {
     "zai-org/GLM-4.6": "mlx-community/GLM-4.6-4bit",
 }
 
-logger = logging.getLogger(__name__)
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
 
 NODE_JOIN_COMMAND_PUBLIC_NETWORK = """parallax join -s {scheduler_addr} """
@@ -80,9 +83,6 @@ def get_model_info(model_name):
 
     config = _load_config_only(model_name)
 
-    # get quant method
-    # logger.info(f"Loading model config from {model_name}")
-
     quant_method = config.get("quant_method", None)
     quantization_config = config.get("quantization_config", None)
     if quant_method is None and quantization_config is not None:
@@ -92,8 +92,13 @@ def get_model_info(model_name):
         param_bytes_per_element = 2
     elif quant_method == "fp8":
         param_bytes_per_element = 1
-    elif quant_method in ("mxfp4", "int4", "awq", "gptq"):
+    elif quant_method in ("mxfp4", "int4", "awq", "gptq", "compressed-tensors"):
         param_bytes_per_element = 0.5
+    else:
+        param_bytes_per_element = 1
+        logger.warning(
+            f"model_name:{model_name} quant_method {quant_method} not supported in get_model_info method"
+        )
 
     mlx_param_bytes_per_element = param_bytes_per_element
     mlx_model_name = MODELS.get(model_name, model_name)
@@ -135,8 +140,42 @@ def get_model_info(model_name):
     return model_info
 
 
+def get_model_info_list():
+    model_name_list = list(MODELS.keys())
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        model_info_list = list(executor.map(get_model_info, model_name_list))
+    return model_info_list
+
+
+model_info_list_cache = get_model_info_list()
+
+
 def get_model_list():
-    return list(MODELS.keys())
+    model_info_list = model_info_list_cache
+
+    def build_single_model(model_info):
+        return {
+            "name": model_info.model_name,
+            "vram_gb": math.ceil(estimate_vram_gb_required(model_info)),
+        }
+
+    results = [build_single_model(model_info) for model_info in model_info_list]
+    return results
+
+
+def estimate_vram_gb_required(model_info):
+    if model_info is None:
+        return 0
+    return (
+        (
+            model_info.embedding_io_bytes
+            + model_info.num_layers * model_info.decoder_layer_io_bytes(roofline=False)
+        )
+        * 1.0
+        / 1024
+        / 1024
+        / 1024
+    )
 
 
 def get_node_join_command(scheduler_addr, is_local_network):

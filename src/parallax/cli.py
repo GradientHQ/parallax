@@ -15,10 +15,8 @@ import signal
 import subprocess
 import sys
 
-import machineid
 import requests
 
-from parallax.server.server_info import HardwareInfo
 from parallax_utils.file_util import get_project_root
 from parallax_utils.logging_config import get_logger
 from parallax_utils.version_check import get_current_version
@@ -297,40 +295,16 @@ def chat_command(args, passthrough_args: list[str] | None = None):
     _execute_with_graceful_shutdown(cmd)
 
 
-def collect_machine_info():
-    """Collect machine information."""
-    version = get_current_version()
-    device_uuid = str(machineid.id())
-    try:
-        hw = HardwareInfo.detect()
-        return {
-            "uuid": device_uuid,
-            "version": version,
-            "gpu": hw.chip,
-        }
-    except Exception:
-        return {
-            "uuid": device_uuid,
-            "version": version,
-            "gpu": "unknown",
-        }
-
-
 def update_package_info():
     """Update package information."""
-    usage_info = collect_machine_info()
+    version = get_current_version()
 
     try:
         package_info = load_package_info()
-        if (
-            package_info is not None
-            and package_info["uuid"] == usage_info["uuid"]
-            and package_info["version"] == usage_info["version"]
-            and package_info["gpu"] == usage_info["gpu"]
-        ):
+        if package_info is not None and package_info["version"] == version:
             return
 
-        save_package_info(usage_info)
+        save_package_info({"version": version})
     except Exception:
         pass
 

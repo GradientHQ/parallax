@@ -5,7 +5,7 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "parallax"
-version = "0.0.1"
+version = "0.1.0"
 description = "Decentralised pipeline-parallel LLM serving with Sglang + MLX-LM + Lattica"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -28,10 +28,9 @@ dependencies = [
   "uvloop",
   "fastapi",
   "pydantic",
-  "py-machineid",
   "protobuf==6.31.1",
   "dijkstar==2.6.0",
-  "lattica==1.0.9",
+  "lattica==1.0.10",
   "orjson",
 ]
 
