@@ -98,8 +98,7 @@ if __name__ == "__main__":
                 gradient_server.status = ServerState.READY
 
             # For each tp_rank > 0, create a subprocess and run executor
-            tp_rank_range = range(args.tp_size)
-            for tp_rank in (1, tp_rank_range):
+            for tp_rank in range(1, args.tp_size):
                 args_copy = argparse.Namespace(**vars(args))
                 args_copy.tp_rank = tp_rank
                 proc = multiprocessing.Process(
@@ -157,8 +156,7 @@ if __name__ == "__main__":
             while True:
                 try:
                     # For each tp_rank > 0, create a subprocess and run executor
-                    tp_rank_range = range(args.tp_size)
-                    for tp_rank in (1, tp_rank_range):
+                    for tp_rank in range(1, args.tp_size):
                         args_copy = argparse.Namespace(**vars(args))
                         args_copy.tp_rank = tp_rank
                         proc = multiprocessing.Process(
