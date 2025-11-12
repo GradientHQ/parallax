@@ -1578,6 +1578,7 @@ class Executor:
 
 def run_executor_process(args, gradient_server=None):
     """Run executor as a subprocess"""
+    executor = None
     try:
         executor = Executor.create_from_args(args, gradient_server)
         executor.run_loop()
@@ -1586,7 +1587,8 @@ def run_executor_process(args, gradient_server=None):
     except Exception as e:
         logger.exception(e)
     finally:
-        executor.shutdown()
+        if executor is not None:
+            executor.shutdown()
 
 
 def stop_executor_process(executor_process):
