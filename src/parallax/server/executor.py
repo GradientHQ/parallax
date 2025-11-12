@@ -1428,6 +1428,8 @@ class Executor:
         self._should_stop = False
         while not self._should_stop:
             # 1. Ingest new requests from the http frontend
+            http_requests = []
+
             if self.is_first_peer:
                 http_requests = self.recv_requests_from_http()
 
