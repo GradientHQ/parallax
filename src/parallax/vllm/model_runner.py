@@ -147,7 +147,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         )
 
     def _create_kv_cache_config(self, kv_cache_memory_fraction: float = None) -> KVCacheConfig:
-        logger.info("Generating KV cache configuration from model...")
+        logger.debug("Generating KV cache configuration from model...")
 
         try:
             kv_cache_specs = self.model.get_kv_cache_spec()
