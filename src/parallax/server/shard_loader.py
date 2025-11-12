@@ -36,6 +36,7 @@ class MLXModelLoader:
         *,
         start_layer: Optional[int] = None,
         end_layer: Optional[int] = None,
+        use_hfcache: bool = False,
     ):
         """
         Initializes the model loader.
@@ -47,10 +48,12 @@ class MLXModelLoader:
                                          Defaults to the beginning of the model.
             end_layer (Optional[int]): The ending layer index for the shard (exclusive).
                                        Defaults to the end of the model.
+            use_hfcache (bool): If True, use local Hugging Face cache only (no network download).
         """
         self.model_path_str = model_path_or_hf_repo
         self.start_layer = start_layer
         self.end_layer = end_layer
+        self.use_hfcache = use_hfcache
         self.register_block_class()
 
     def register_block_class(self):
@@ -113,6 +116,7 @@ class MLXModelLoader:
                 self.model_path_str,
                 start_layer=self.start_layer,
                 end_layer=self.end_layer,
+                local_files_only=self.use_hfcache,
             )
         else:
             model_path = get_model_path(self.model_path_str)[0]

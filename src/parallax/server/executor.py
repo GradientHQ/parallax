@@ -73,6 +73,7 @@ class Executor:
         dtype: str = "float16",
         # Backend selection
         gpu_backend: str = "sglang",
+        use_hfcache: bool = False,
         # Scheduler Configs
         max_batch_size: Optional[int] = 8,
         max_sequence_length: Optional[int] = None,
@@ -108,6 +109,7 @@ class Executor:
     ):
         # Backend
         self.device = get_current_device()
+        self.use_hfcache = use_hfcache
         logger.debug(f"Executor initializing on device: {self.device}")
         self.backend_type = gpu_backend
 
@@ -150,6 +152,7 @@ class Executor:
                 "tp_rank": tp_rank,
                 "tp_size": tp_size,
                 "nccl_port": nccl_port,
+                "using_hfcache": use_hfcache,
             }
 
             self.model_runner, self.config, self.tokenizer = initialize_cuda_model_runner(
@@ -176,7 +179,10 @@ class Executor:
                 f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer})"
             )
             self.shard_loader = MLXModelLoader(
-                model_repo, start_layer=start_layer, end_layer=end_layer
+                model_repo,
+                start_layer=start_layer,
+                end_layer=end_layer,
+                use_hfcache=self.use_hfcache,
             )
             t0 = time.time()
             self.model_shard, self.config, self.tokenizer = self.shard_loader.load()
@@ -1629,5 +1635,6 @@ def create_executor_config(args: argparse.Namespace, gradient_server=None):
         "tp_size": args.tp_size,
         "nccl_port": args.nccl_port,
         "gradient_server": gradient_server,
+        "use_hfcache": args.use_hfcache,
     }
     return config

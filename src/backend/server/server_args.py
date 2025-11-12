@@ -35,6 +35,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--is-local-network", type=bool, default=True, help="Whether to use local network"
     )
+    parser.add_argument(
+        "--use-hfcache",
+        action="store_true",
+        default=False,
+        help="Use local Hugging Face cache only (no network download)",
+    )
 
     parser.add_argument(
         "--gpu-backend",

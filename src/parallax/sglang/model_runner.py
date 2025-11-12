@@ -241,6 +241,11 @@ def initialize_sgl_model_runner(
     """
     apply_parallax_sglang_monkey_patch()
 
+    # Extract TP-related parameters from kwargs or use defaults
+    tp_rank = kwargs.get("tp_rank", 0)
+    tp_size = kwargs.get("tp_size", 1)
+    use_hfcache = kwargs.get("use_hfcache", False)
+    nccl_port = kwargs.get("nccl_port", None)
     # Use selective download for GPU models to save bandwidth and disk space
     from parallax.utils.selective_download import get_model_path_with_selective_download
 
@@ -248,19 +253,13 @@ def initialize_sgl_model_runner(
         f"Downloading model with selective weight files for layers [{start_layer}, {end_layer})"
     )
     model_path = get_model_path_with_selective_download(
-        model_repo,
-        start_layer=start_layer,
-        end_layer=end_layer,
+        model_repo, start_layer=start_layer, end_layer=end_layer, use_hfcache=use_hfcache
     )
 
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")
 
-    # Extract TP-related parameters from kwargs or use defaults
-    tp_rank = kwargs.get("tp_rank", 0)
-    tp_size = kwargs.get("tp_size", 1)
-    nccl_port = kwargs.get("nccl_port", None)
     if nccl_port is None:
         nccl_port = random.randint(4000, 5000)
 
