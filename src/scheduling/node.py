@@ -280,6 +280,12 @@ class Node:
             if not (include_input_embed and self.model_info.tie_embedding):
                 available_memory_bytes -= self.model_info.embedding_io_bytes
 
+        if self.hardware.device == "cuda":
+            # Reserve 2GB for CUDA graph capture
+            # TODO: Currently hardcoded, maybe need to scale with model size for very large models?
+            cuda_graph_overhead_gb = 2.0
+            available_memory_bytes -= cuda_graph_overhead_gb * 1024 * 1024 * 1024
+
         if self.hardware.device == "mlx":
             # For mlx, consider mlx bit factor
             return floor(
