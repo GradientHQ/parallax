@@ -91,8 +91,8 @@ if __name__ == "__main__":
                 model_name=args.model_path,
                 max_batch_size=args.max_batch_size,
                 max_sequence_length=args.max_sequence_length,
-                param_hosting_ratio=args.param_hosting_ratio,
-                kv_cache_ratio=args.kv_cache_ratio,
+                param_mem_ratio=args.param_mem_ratio,
+                kvcache_mem_ratio=args.kvcache_mem_ratio,
             )
             if gradient_server is not None:
                 gradient_server.status = ServerState.READY
@@ -131,8 +131,8 @@ if __name__ == "__main__":
                 model_name=args.model_path,
                 max_batch_size=args.max_batch_size,
                 max_sequence_length=args.max_sequence_length,
-                param_hosting_ratio=args.param_hosting_ratio,
-                kv_cache_ratio=args.kv_cache_ratio,
+                param_mem_ratio=args.param_mem_ratio,
+                kvcache_mem_ratio=args.kvcache_mem_ratio,
             )
             args.start_layer = gradient_server.block_start_index
             args.end_layer = gradient_server.block_end_index

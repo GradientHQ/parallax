@@ -174,8 +174,8 @@ class Node:
     hardware: NodeHardwareInfo
     model_info: ModelInfo
 
-    kv_cache_ratio: float = 0.3
-    param_hosting_ratio: float = 0.5
+    kvcache_mem_ratio: float = 0.3
+    param_mem_ratio: float = 0.5
 
     max_concurrent_requests: int = 16
     max_sequence_length: int = 4096
@@ -221,7 +221,7 @@ class Node:
             requested_max_batch_size=self.max_concurrent_requests,
             max_sequence_len=self.max_sequence_length,
             device=None,
-            kv_cache_memory_fraction=self.kv_cache_ratio,
+            kv_cache_memory_fraction=self.kvcache_mem_ratio,
             num_shard_layers=self.num_current_layers,
             num_key_value_heads=self.model_info.num_kv_heads,
             head_dim=self.model_info.head_size,
@@ -278,7 +278,7 @@ class Node:
             * 1024
             * 1024
             * 1024
-            * self.param_hosting_ratio
+            * self.param_mem_ratio
         )
         if include_input_embed:
             available_memory_bytes -= self.model_info.embedding_io_bytes
@@ -312,7 +312,7 @@ class Node:
                 * 1024
                 * 1024
                 * 1024
-                * self.kv_cache_ratio
+                * self.kvcache_mem_ratio
             )
             / self.num_current_layers
         )

@@ -252,8 +252,8 @@ class Scheduler:
         logger.debug(
             "Joining node %s (kv_ratio=%.2f, param_ratio=%.2f, manual_assignment=%s)",
             node.node_id,
-            node.kv_cache_ratio,
-            node.param_hosting_ratio,
+            node.kvcache_mem_ratio,
+            node.param_mem_ratio,
             node.manual_layer_assignment,
         )
         self.layer_allocator.declare(node)
