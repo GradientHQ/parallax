@@ -169,3 +169,18 @@ curl --location 'http://localhost:3000/v1/chat/completions' --header 'Content-Ty
 }'
 
 ```
+
+### FAQ
+> Q: When deploying on cloud servers, I encounter an error like "lattica RPC call failed". What does this mean and how can I resolve it?
+
+A:  This error may be caused by the required network ports for communication between the scheduler and nodes not being accessible—usually due to firewall or security group restrictions on your cloud platform.
+
+**How to fix:**
+- Ensure that the relevant TCP/UDP ports for both the scheduler and nodes are open and accessible between all machines in your cluster.
+    - By default, the scheduler uses HTTP port `3001`, and nodes use HTTP port `3000`. You can change these with the `--port` argument (e.g., `parallax run --port <your_port>` or `parallax join --port <your_port>`).
+    - For Lattica (node-to-node) communication, random ports are used by default. It is best to explicitly specify which TCP and UDP ports to use (e.g., `--tcp-port <your_tcp_port> --udp-port <your_udp_port>`), and then open those ports for inbound and outbound traffic in your cloud provider's security settings.
+- Check your cloud provider's firewall or network security group configurations:
+    1. Open inbound rules for the ports mentioned above on all scheduler and node machines.
+    2. Make sure that ports are open to the desired sources (e.g., to all cluster instances, or to your public IPs if required).
+
+After updating the firewall/security group settings to allow these ports, restart your scheduler and nodes. The "lattica RPC call failed" error should no longer appear if the connections can be established.
