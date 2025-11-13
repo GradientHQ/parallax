@@ -184,3 +184,20 @@ A: This error typically occurs when the necessary network ports for communicatio
     2. Make sure that ports are open to the desired sources (e.g., to all cluster instances, or to your public IPs if required).
 
 After updating the firewall/security group settings to allow these ports, restart your scheduler and nodes.
+
+> Q: When running on macOS, I encounter the error: `error sending packet on iface address No route to host (os error 65) address=192.168.xxx.xxx`. What does this mean and how can I fix it?
+
+A: On macOS, you need to allow your terminal or IDE (such as Terminal, iTerm2, VS Code, Cursor, etc.) access to the local network in order for Parallax to work correctly. If the application prompts you for network access the first time you run Parallax, click "Allow." If you have already denied access, follow these steps to enable it:
+
+1. Open System Settings from the Apple menu.
+2. Click on Privacy & Security in the sidebar.
+3. Click on Local Network.
+4. For each app listed, turn the ability to access your local network on or off using the toggle switch.
+
+This will ensure Parallax has the proper network permissions for local communication.
+
+> Q: When running the scheduler on Windows, nodes on other PCs cannot detect the scheduler ID over the local network. Why can't other machines join the cluster?
+
+A: If you are running Parallax in WSL (Windows Subsystem for Linux), make sure you are using the "Mirrored" networking mode. By default, WSL uses "NAT" (Network Address Translation) mode, which isolates your WSL environment behind a virtual network. As a result, services running inside WSL (such as Parallax scheduler) are not directly accessible from other devices on the LAN.
+
+To ensure that other machines on your network can connect to your WSL instance, change the WSL networking mode to "Mirrored" (supported on Windows 11 version 22H2 or later). In "Mirrored" mode, your WSL environment will share the same network as your host, allowing local network discovery and seamless joining of nodes to your Parallax cluster.
