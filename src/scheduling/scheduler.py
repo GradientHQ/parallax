@@ -509,6 +509,9 @@ class Scheduler:
                 node_id, cur, lat, rtts, is_active = self._pending_node_updates.get_nowait()
             except queue.Empty:
                 break
+            if node_id not in self.node_id_to_node:
+                logger.warning(f"Node {node_id} not found in node list, ignore the update")
+                continue
             self.update_node_info(
                 self.node_id_to_node[node_id],
                 current_requests=cur,
