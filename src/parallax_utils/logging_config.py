@@ -1,6 +1,7 @@
 """Logging configuration for Parallax."""
 
 import logging
+import os
 import sys
 import threading
 from typing import Optional
@@ -99,6 +100,8 @@ def set_log_level(level_name: str):
     """Set the root logger level."""
     _initialize_if_necessary()
     logging.getLogger().setLevel(level_name.upper())
+    if level_name.upper() == "DEBUG":
+        os.environ["RUST_LOG"] = "info"
 
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:
