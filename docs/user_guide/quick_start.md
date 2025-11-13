@@ -183,4 +183,4 @@ A: This error may be caused by the required network ports for communication betw
     1. Open inbound rules for the ports mentioned above on all scheduler and node machines.
     2. Make sure that ports are open to the desired sources (e.g., to all cluster instances, or to your public IPs if required).
 
-After updating the firewall/security group settings to allow these ports, restart your scheduler and nodes. The "lattica RPC call failed" error should no longer appear if the connections can be established.
+After updating the firewall/security group settings to allow these ports, restart your scheduler and nodes.
