@@ -173,7 +173,7 @@ curl --location 'http://localhost:3000/v1/chat/completions' --header 'Content-Ty
 ### FAQ
 > Q: When deploying on cloud servers, I encounter an error like "lattica RPC call failed". What does this mean and how can I resolve it?
 
-A:  This error may be caused by the required network ports for communication between the scheduler and nodes not being accessible—usually due to firewall or security group restrictions on your cloud platform.
+A: This error may be caused by the required network ports for communication between the scheduler and nodes not being accessible—usually due to firewall or security group restrictions on your cloud platform.
 
 **How to fix:**
 - Ensure that the relevant TCP/UDP ports for both the scheduler and nodes are open and accessible between all machines in your cluster.
