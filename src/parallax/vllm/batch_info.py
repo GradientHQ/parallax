@@ -159,6 +159,7 @@ def form_vllm_batch_prefill(
 def form_vllm_batch_decode(
     batched_requests: List[Request],
     model_runner: Any = None,
+    scheduler: Any = None,
 ) -> Optional[SchedulerOutput]:
     if not batched_requests:
         return None
@@ -183,7 +184,32 @@ def form_vllm_batch_decode(
     for req in batched_requests:
         req_ids.append(req.request_id)
         resumed_from_preemption.append(False)
+
+        # For GPU workers (non-first peer), IntermediateRequest doesn't have output_ids
+        # We need to get it from vLLM's CachedRequestState in model_runner
         output_ids = getattr(req, "output_ids", None) or []
+
+        # If this request doesn't have output_ids (IntermediateRequest case),
+        # try to get it from model_runner's cached request state (vLLM internal state)
+        if not output_ids and hasattr(model_runner, "requests"):
+            cached_req_state = model_runner.requests.get(req.request_id)
+            if cached_req_state is not None:
+                output_ids = getattr(cached_req_state, "output_token_ids", [])
+                logger.debug(
+                    f"[Decode] Retrieved output_token_ids from vLLM CachedRequestState for "
+                    f"{req.request_id}: len={len(output_ids)}"
+                )
+
+        # Fallback: try scheduler if available
+        if not output_ids and scheduler is not None:
+            running_req = scheduler.get_running_request(req.request_id)
+            if running_req is not None:
+                output_ids = getattr(running_req, "output_ids", None) or []
+                logger.debug(
+                    f"[Decode] Retrieved output_ids from scheduler for {req.request_id}: "
+                    f"len={len(output_ids)}"
+                )
+
         if output_ids:
             last_token = output_ids[-1]
             new_token_ids.append([last_token])
@@ -196,12 +222,22 @@ def form_vllm_batch_decode(
         vllm_req = _build_vllm_request(req, sampling_params, model_runner, include_outputs=True)
 
         prompt_ids = getattr(req, "input_ids", None) or []
-        output_ids = getattr(req, "output_ids", None) or []
+        # For decode stage, computed_token_count should be the total number of tokens
+        # that have been processed (including all output tokens).
+        # In pipeline parallelism, this must match what GPU worker expects.
         if output_ids:
-            computed_token_count = len(prompt_ids) + len(output_ids) - 1
+            # All tokens (prompt + all generated outputs) have been computed
+            computed_token_count = len(prompt_ids) + len(output_ids)
         else:
+            # First decode step: only prompt has been computed
             computed_token_count = len(prompt_ids)
         vllm_req.num_computed_tokens = computed_token_count
+
+        # Debug logging to track state synchronization
+        logger.debug(
+            f"[Decode] req_id={req.request_id}, prompt_len={len(prompt_ids)}, "
+            f"output_len={len(output_ids)}, computed_tokens={computed_token_count}"
+        )
 
         new_blocks = kv_cache_manager.allocate_slots(
             request=vllm_req,

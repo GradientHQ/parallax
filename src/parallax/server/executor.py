@@ -446,6 +446,57 @@ class Executor:
 
         return recv_reqs
 
+    def _compute_expected_intermediate_tokens(self, scheduler_output: Any) -> Optional[int]:
+        """Estimate the padded token count expected by vLLM for this batch."""
+        if scheduler_output is None:
+            return None
+
+        total_tokens = getattr(scheduler_output, "total_num_scheduled_tokens", None)
+        if total_tokens is None:
+            return None
+
+        try:
+            total_tokens = int(total_tokens)
+        except (TypeError, ValueError):
+            return None
+
+        model_runner = getattr(self, "model_runner", None)
+        if model_runner is None:
+            return None
+
+        get_num_input_tokens = getattr(model_runner, "_get_num_input_tokens", None)
+        get_dp_padding = getattr(model_runner, "get_dp_padding", None)
+        if get_num_input_tokens is None or get_dp_padding is None:
+            return None
+
+        num_input_tokens = get_num_input_tokens(total_tokens)
+        num_pad, _ = get_dp_padding(num_input_tokens)
+        return num_input_tokens + num_pad
+
+    @staticmethod
+    def _pad_or_trim_tensor(tensor: torch.Tensor, target_len: int) -> torch.Tensor:
+        if target_len < 0:
+            return tensor
+        current_len = tensor.shape[0]
+        if current_len == target_len:
+            return tensor
+        if current_len > target_len:
+            return tensor[:target_len]
+        pad_shape = (target_len - current_len,) + tensor.shape[1:]
+        pad = tensor.new_zeros(pad_shape)
+        return torch.cat((tensor, pad), dim=0)
+
+    def _resize_intermediate_tensors(self, intermediate_tensors, target_len: Optional[int]):
+        if intermediate_tensors is None or target_len is None:
+            return intermediate_tensors
+        if target_len < 0:
+            return intermediate_tensors
+
+        # Create a list to avoid "dictionary changed size during iteration".
+        for key, tensor in list(intermediate_tensors.items()):
+            intermediate_tensors[key] = self._pad_or_trim_tensor(tensor, target_len)
+        return intermediate_tensors
+
     def _prepare_cuda_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """
         Prepares inputs for CUDA backends from a batch of prefill requests.
@@ -459,6 +510,7 @@ class Executor:
 
         # Prepare PP proxy tensors (common for both backends when not first peer)
         pp_proxy_tensors = None
+        pp_proxy_initial_tokens = None
         if not self.is_first_peer:
             # Concatenate hidden states from all requests
             # For vLLM, we need to flatten to (total_tokens, hidden_size)
@@ -478,6 +530,7 @@ class Executor:
 
             # Concatenate along sequence dimension to get (total_tokens, hidden_size)
             hidden_states = torch.cat(hidden_states_list, dim=0)
+            pp_proxy_initial_tokens = hidden_states.shape[0]
 
             # Create residual tensor with same shape
             residual = torch.zeros(
@@ -514,6 +567,29 @@ class Executor:
             from parallax.vllm.batch_info import form_vllm_batch_prefill
 
             schedule_outputs_prefill = form_vllm_batch_prefill(batched_requests, self.model_runner)
+
+            if not self.is_first_peer and pp_proxy_tensors is not None:
+                target_tokens = self._compute_expected_intermediate_tokens(schedule_outputs_prefill)
+                if target_tokens is not None:
+                    before = pp_proxy_tensors["hidden_states"].shape[0]
+                    pp_proxy_tensors = self._resize_intermediate_tensors(
+                        pp_proxy_tensors, target_tokens
+                    )
+                    after = pp_proxy_tensors["hidden_states"].shape[0]
+                    if after != before:
+                        logger.debug(
+                            "PP Proxy: resized hidden_states from %d to %d tokens (requested=%s, initial=%s)",
+                            before,
+                            after,
+                            target_tokens,
+                            pp_proxy_initial_tokens,
+                        )
+
+            if not self.is_first_peer and pp_proxy_tensors is not None:
+                logger.debug(
+                    "PP Proxy: hidden_states shape after adjustment: %s",
+                    tuple(pp_proxy_tensors["hidden_states"].shape),
+                )
 
             ret = {
                 "scheduler_output": schedule_outputs_prefill,
@@ -572,6 +648,7 @@ class Executor:
 
             # Concatenate along sequence dimension to get (total_tokens, hidden_size)
             hidden_states = torch.cat(hidden_states_list, dim=0)
+            pp_proxy_initial_tokens = hidden_states.shape[0]
 
             # Create residual tensor with same shape
             residual = torch.zeros(
@@ -918,6 +995,10 @@ class Executor:
 
                     assert req.next_token_id is not None
                     original_req.commit_new_token(req.next_token_id)
+                    logger.debug(
+                        f"[FirstPeer-CUDA] Committed token {req.next_token_id} for {req.request_id}, "
+                        f"output_ids now has {len(original_req.output_ids)} tokens"
+                    )
                     if len(req.routing_table) > 0:
                         original_req.routing_table = req.routing_table
 
@@ -1102,6 +1183,8 @@ class Executor:
             assert isinstance(
                 request, IntermediateRequest
             ), "Last peer must receive an IntermediateRequest."
+            logger.info(f"hidden_states shape: {hidden_states.shape}")
+            logger.info(f"hidden_states: {hidden_states}")
             if self.device == "cuda":
                 assert hidden_states.dtype in (
                     torch.int64,
@@ -1143,6 +1226,7 @@ class Executor:
             for i, src_request in enumerate(requests):
                 if self.is_last_peer:
                     # Last peer gets a 1D array of token IDs
+                    logger.info(f"hidden_states: {hidden_states}")
                     hidden_state_for_req = hidden_states[i : i + 1]
                 else:
                     # Other peers get a 3D array of hidden states
@@ -1217,6 +1301,7 @@ class Executor:
                 import torch
 
                 sampled_token_ids = output.sampled_token_ids
+                logger.info(f"sampled_token_ids: {sampled_token_ids}")
                 if isinstance(sampled_token_ids, list) and len(sampled_token_ids) > 0:
                     # Convert to tensor: pad sequences to same length
                     max_len = max(len(seq) for seq in sampled_token_ids)
@@ -1498,6 +1583,7 @@ class Executor:
                         output = self.process_batch(
                             prepared_inputs, return_decoded_tokens=self.is_last_peer
                         )
+                        logger.info(f"output: {output}")
                         # Update metrics with per-layer latency sample (throttled by decode steps)
                         if batch_type == "decode_batch":
                             try:

@@ -319,7 +319,21 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         finally:
             vllm.distributed.utils.get_pp_indices = original_get_pp_indices
 
-        logger.debug("Model loaded successfully with partial layers")
+    def execute_model(self, scheduler_output, intermediate_tensors=None):
+        """
+        Execute the model with the given scheduler output and intermediate tensors.
+        If this is not the first peer, and the intermediate_tensors buffer is not initialized,
+        initialize it.
+        """
+        if not self.is_first_peer and self.intermediate_tensors is None:
+            self.intermediate_tensors = self.model.make_empty_intermediate_tensors(
+                batch_size=self.max_num_tokens,
+                dtype=self.model_config.dtype,
+                device=self.device,
+            )
+            logger.debug("Successfully initialized intermediate_tensors buffer")
+
+        return super().execute_model(scheduler_output, intermediate_tensors)
 
 
 def initialize_vllm_model_runner(
@@ -348,7 +362,7 @@ def initialize_vllm_model_runner(
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")
-    
+
     num_hidden_layers = config.get("num_hidden_layers")
     is_first_peer = start_layer == 0
     is_last_peer = end_layer == num_hidden_layers
@@ -356,7 +370,9 @@ def initialize_vllm_model_runner(
     # Apply Parallax vLLM monkey patches for pipeline parallelism
     try:
         apply_parallax_vllm_monkey_patch(is_first_stage=is_first_peer, is_last_stage=is_last_peer)
-        logger.debug(f"Applied Parallax vLLM monkey patches: is_first_stage={is_first_peer}, is_last_stage={is_last_peer}")
+        logger.debug(
+            f"Applied Parallax vLLM monkey patches: is_first_stage={is_first_peer}, is_last_stage={is_last_peer}"
+        )
     except Exception as e:
         logger.warning("Failed to apply Parallax vLLM monkey patches: %s", e)
 
