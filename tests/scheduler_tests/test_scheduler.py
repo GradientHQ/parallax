@@ -133,3 +133,109 @@ def test_scheduler_single_node_leave_then_rejoin_reassigns_layers():
     assert (
         n1_rejoin.start_layer is not None and n1_rejoin.end_layer is not None
     ), "After re-join, single node should be assigned a full layer range"
+
+
+def test_scheduler_three_nodes_sequential_join_leave_rejoin():
+    """Test scheduler with 28-layer model, 3 nodes each capable of 22 layers.
+
+    Scenario:
+    - 28-layer model
+    - n1, n2, n3 all can host 22 layers
+    - min_nodes_bootstrapping=2
+    - n1, n2, n3 join sequentially
+    - n1 leaves and rejoins
+    - n2 leaves and rejoins
+    - n3 leaves and rejoins
+    """
+    model = build_model_info(28)
+
+    # Create nodes that can each host 22 layers
+    # Calculation: 100GB can host 16 layers, so 22 layers need ~137.5GB
+    # Using 150GB to ensure capacity for 22 layers with some margin
+    n1 = build_node("n1", model, tflops=312.0, mem_gb=138.0, x=0, y=0)
+    n2 = build_node("n2", model, tflops=312.0, mem_gb=138.0, x=1, y=0)
+    n3 = build_node("n3", model, tflops=312.0, mem_gb=138.0, x=2, y=0)
+
+    # Verify nodes can host 22 layers
+    assert n1.get_decoder_layer_capacity() >= 22, "n1 should be able to host 22 layers"
+    assert n2.get_decoder_layer_capacity() >= 22, "n2 should be able to host 22 layers"
+    assert n3.get_decoder_layer_capacity() >= 22, "n3 should be able to host 22 layers"
+
+    # Initialize scheduler with min_nodes_bootstrapping=2, no nodes initially
+    sched = Scheduler(model, [], strategy="dp", min_nodes_bootstrapping=2)
+
+    # Step 1: n1 joins (not enough nodes yet)
+    sched.enqueue_join(n1)
+    sched._process_joins()  # type: ignore[attr-defined]
+    assert len(sched.nodes) == 1
+    assert not sched.layer_allocator.has_full_pipeline()
+
+    # Step 2: n2 joins (now we have 2 nodes, should bootstrap)
+    sched.enqueue_join(n2)
+    sched._process_joins()  # type: ignore[attr-defined]
+    set_rtt_from_coords(sched.nodes)
+    ok = sched.bootstrap()
+    assert ok, "Bootstrap should succeed with 2 nodes"
+    assert sched.layer_allocator.has_full_pipeline()
+
+    # Step 3: n3 joins (dynamic join after bootstrap)
+    sched.enqueue_join(n3)
+    sched._process_joins()  # type: ignore[attr-defined]
+    set_rtt_from_coords(sched.nodes)
+    assert n3.start_layer is not None and n3.end_layer is not None
+    assert len(sched.nodes) == 3
+
+    # Step 4: n1 leaves and rejoins
+    n1_id = n1.node_id
+    sched.leave(n1_id)
+    assert n1 not in sched.nodes
+    assert len(sched.nodes) == 2
+    assert sched.layer_allocator.has_full_pipeline()
+
+    # Rejoin n1
+    n1_rejoin = build_node("n1", model, tflops=312.0, mem_gb=138.0, x=0, y=0)
+    sched.enqueue_join(n1_rejoin)
+    sched._process_joins()  # type: ignore[attr-defined]
+    set_rtt_from_coords(sched.nodes)
+    assert n1_rejoin.start_layer is not None and n1_rejoin.end_layer is not None
+    assert len(sched.nodes) == 3
+    assert sched.layer_allocator.has_full_pipeline()
+
+    # Step 5: n2 leaves and rejoins
+    n2_id = n2.node_id
+    sched.leave(n2_id)
+    assert n2 not in sched.nodes
+    assert len(sched.nodes) == 2
+    assert sched.layer_allocator.has_full_pipeline()
+
+    # Rejoin n2
+    n2_rejoin = build_node("n2", model, tflops=312.0, mem_gb=138.0, x=1, y=0)
+    sched.enqueue_join(n2_rejoin)
+    sched._process_joins()  # type: ignore[attr-defined]
+    set_rtt_from_coords(sched.nodes)
+    assert n2_rejoin.start_layer is not None and n2_rejoin.end_layer is not None
+    assert len(sched.nodes) == 3
+    assert sched.layer_allocator.has_full_pipeline()
+
+    # Step 6: n3 leaves and rejoins
+    n3_id = n3.node_id
+    sched.leave(n3_id)
+    assert n3 not in sched.nodes
+    assert len(sched.nodes) == 2
+    assert sched.layer_allocator.has_full_pipeline()
+
+    # Rejoin n3
+    n3_rejoin = build_node("n3", model, tflops=312.0, mem_gb=138.0, x=2, y=0)
+    sched.enqueue_join(n3_rejoin)
+    sched._process_joins()  # type: ignore[attr-defined]
+    set_rtt_from_coords(sched.nodes)
+    assert n3_rejoin.start_layer is not None and n3_rejoin.end_layer is not None
+    assert len(sched.nodes) == 3
+    assert sched.layer_allocator.has_full_pipeline()
+
+    # Final verification: all nodes should have layer assignments
+    allocations = sched.list_node_allocations()
+    assert len(allocations) == 3, "All 3 nodes should have layer assignments"
+    # Verify full pipeline coverage
+    total_covered = sum(e - s for _, s, e in allocations)
+    assert total_covered >= model.num_layers, "All layers should be covered"

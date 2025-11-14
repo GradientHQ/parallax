@@ -38,19 +38,6 @@ pip install -e '.[mac]'
 
 Next time to re-activate this virtual environment, run ```source ./venv/bin/activate```.
 
-<details>
-<summary> Note for macOS users regarding network permissions</summary>
-
-On macOS, you need to allow your terminal or IDE (such as Terminal, iTerm2, VS Code, Cursor, etc.) access to the local network in order for Parallax to work correctly. If the application prompts you for network access the first time you run Parallax, click "Allow." If you have already denied access, follow these steps to enable it:
-
-1. Open System Settings from the Apple menu.
-2. Click on Privacy & Security in the sidebar.
-3. Click on Local Network.
-4. For each app listed, turn the ability to access your local network on or off using the toggle switch.
-
-This will ensure Parallax has the proper network permissions for local communication.
-</details>
-
 #### Extra step for development:
 ```sh
 pip install -e '.[dev]'

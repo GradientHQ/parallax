@@ -26,10 +26,10 @@ from .test_utils import build_model_info
 
 def _build_node(gpu_type: str, model: ModelInfo, id_suffix: str = "") -> Node:
     hw_map = {
-        "a100-80g": NodeHardwareInfo("a100-80g" + id_suffix, 312.0, "", 80.0, 2039.0, "cuda"),
-        "a100-40g": NodeHardwareInfo("a100-40g" + id_suffix, 312.0, "", 40.0, 1935.0, "cuda"),
-        "rtx5090": NodeHardwareInfo("rtx5090" + id_suffix, 165, "", 32.0, 1792.0, "cuda"),
-        "rtx4090": NodeHardwareInfo("rtx4090" + id_suffix, 82.6, "", 24.0, 1008.0, "cuda"),
+        "a100-80g": NodeHardwareInfo("a100-80g" + id_suffix, 1, 312.0, "", 80.0, 2039.0, "cuda"),
+        "a100-40g": NodeHardwareInfo("a100-40g" + id_suffix, 1, 312.0, "", 40.0, 1935.0, "cuda"),
+        "rtx5090": NodeHardwareInfo("rtx5090" + id_suffix, 1, 165, "", 32.0, 1792.0, "cuda"),
+        "rtx4090": NodeHardwareInfo("rtx4090" + id_suffix, 1, 82.6, "", 24.0, 1008.0, "cuda"),
     }
     hw = hw_map[gpu_type]
     return Node(node_id=hw.node_id, hardware=hw, model_info=model)
@@ -100,6 +100,7 @@ def _test_gap_patch_rebalance(allocator: BaseLayerAllocator):
     per_node_mem = {
         nid: (node.per_decoder_layer_kv_cache_memory or 0)
         for nid, node in allocator.node_id_to_node.items()
+        if nid in allocator.node_allocation
     }
     min_mem = min(per_node_mem.values()) if per_node_mem else 0
 
@@ -279,3 +280,38 @@ def test_pipeline_required_with_midrange_only(strategy: Literal["greedy", "dp"])
     assert len(assigned) >= 2
     total = sum(e - s for _, s, e in assigned)
     assert total == model.num_layers
+
+
+@pytest.mark.parametrize("strategy", ["greedy", "dp"])
+def test_allocator_does_not_duplicate_leftover_nodes(strategy: Literal["greedy", "dp"]):
+    """Both allocators should not duplicate self.nodes when left over after allocation.
+
+    Greedy: builds multiple pipelines, leaves nodes that can't form another pipeline
+    DP: optimizes for best pipeline configuration, may leave suboptimal nodes unallocated
+    """
+    model = build_model_info(12)
+
+    if strategy == "greedy":
+        # Two strong nodes form two complete pipelines (greedy maximizes pipelines)
+        # One weak node left unallocated
+        a100_1 = _build_node("a100-80g", model, id_suffix="-a1")
+        a100_2 = _build_node("a100-80g", model, id_suffix="-a2")
+        r1 = _build_node("rtx4090", model, id_suffix="-1")
+        nodes = [a100_1, a100_2, r1]
+        expected_node_count = 3
+    else:
+        # One strong node handles all layers (DP finds this optimal)
+        # One weak node left unallocated
+        a100 = _build_node("a100-80g", model, id_suffix="-a")
+        r1 = _build_node("rtx4090", model, id_suffix="-1")
+        nodes = [a100, r1]
+        expected_node_count = 2
+
+    alloc = (
+        GreedyLayerAllocator(model, nodes)
+        if strategy == "greedy"
+        else DynamicProgrammingLayerAllocator(model, nodes)
+    )
+    ok = alloc.global_allocation()
+    assert ok is True
+    assert len(alloc.nodes) == expected_node_count, "Should not duplicate nodes during allocation"

@@ -32,6 +32,7 @@ class SchedulerManage:
         host_maddrs: List[str] = [],
         announce_maddrs: List[str] = [],
         http_port: int = 3001,
+        use_hfcache: bool = False,
     ):
         """Initialize the manager with networking bootstrap parameters."""
         self.initial_peers = initial_peers
@@ -40,6 +41,7 @@ class SchedulerManage:
         self.host_maddrs = host_maddrs
         self.announce_maddrs = announce_maddrs
         self.http_port = http_port
+        self.use_hfcache = use_hfcache
         self.model_name = None
         self.init_nodes_num = None
         self.scheduler = None
@@ -119,6 +121,7 @@ class SchedulerManage:
         return {
             "node_id": node.node_id,
             "status": NODE_STATUS_AVAILABLE if node.is_active else NODE_STATUS_WAITING,
+            "gpu_num": node.hardware.num_gpus,
             "gpu_name": node.hardware.gpu_name,
             "gpu_memory": node.hardware.memory_gb,
         }
@@ -134,7 +137,7 @@ class SchedulerManage:
         self.model_name = model_name
         self.init_nodes_num = init_nodes_num
 
-        model_info = get_model_info(model_name)
+        model_info = get_model_info(model_name, self.use_hfcache)
         self.scheduler = Scheduler(model_info, [], min_nodes_bootstrapping=init_nodes_num)
 
         # Run the scheduler's event/dispatch loops in background so the process

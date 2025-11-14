@@ -140,6 +140,7 @@ if __name__ == "__main__":
         ],
         announce_maddrs=args.announce_maddrs,
         http_port=args.port,
+        use_hfcache=args.use_hfcache,
     )
 
     request_handler.set_scheduler_manage(scheduler_manage)

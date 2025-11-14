@@ -12,6 +12,7 @@ from scheduling.node import Node, NodeHardwareInfo
 
 A100_80G = NodeHardwareInfo(
     node_id="a100-80g",
+    num_gpus=1,
     tflops_fp16=312.0,
     gpu_name="",
     memory_gb=80.0,
@@ -20,6 +21,7 @@ A100_80G = NodeHardwareInfo(
 )
 A100_40G = NodeHardwareInfo(
     node_id="a100-40g",
+    num_gpus=1,
     tflops_fp16=312.0,
     gpu_name="",
     memory_gb=40.0,
@@ -28,6 +30,7 @@ A100_40G = NodeHardwareInfo(
 )
 RTX5090 = NodeHardwareInfo(
     node_id="rtx5090",
+    num_gpus=1,
     tflops_fp16=104.8,
     gpu_name="",
     memory_gb=32.0,
@@ -36,6 +39,7 @@ RTX5090 = NodeHardwareInfo(
 )
 RTX4090 = NodeHardwareInfo(
     node_id="rtx4090",
+    num_gpus=1,
     tflops_fp16=82.6,
     gpu_name="",
     memory_gb=24.0,
@@ -78,6 +82,7 @@ def build_node(
     """Create a `Node` with hardware info and attach test-only coordinates/bandwidth."""
     hw = NodeHardwareInfo(
         node_id=node_id,
+        num_gpus=1,
         tflops_fp16=tflops,
         gpu_name="",
         memory_gb=mem_gb,

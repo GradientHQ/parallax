@@ -2,7 +2,11 @@
 Launch the Parallax server.
 
 This script is used to launch the Parallax server.
-It will start the P2P server and the executor.
+It will start the following services:
+    1.Executor with tp_rank=0 in the main process.
+    2.Executor with tp_rank>0, each tp_rank as a subprocess.
+    3.HTTP server as a subprocess.
+    4.P2P server as a thread in the main process.
 
 Example command:
 python src/parallax/launch.py \
@@ -41,7 +45,7 @@ if __name__ == "__main__":
     gradient_server = None
     http_server_process = None
     executor = None
-    executor_procs = []
+    executor_subprocs = []
     try:
         args = parse_args()
         set_log_level(args.log_level)
@@ -75,6 +79,7 @@ if __name__ == "__main__":
                 pp_start_layer=args.start_layer,
                 pp_end_layer=args.end_layer,
                 hidden_layers=config.get("num_hidden_layers"),
+                tp_size=args.tp_size,
                 tcp_port=args.tcp_port,
                 udp_port=args.udp_port,
                 dht_prefix=args.dht_prefix,
@@ -86,13 +91,14 @@ if __name__ == "__main__":
                 model_name=args.model_path,
                 max_batch_size=args.max_batch_size,
                 max_sequence_length=args.max_sequence_length,
-                param_hosting_ratio=args.param_hosting_ratio,
-                kv_cache_ratio=args.kv_cache_ratio,
+                param_mem_ratio=args.param_mem_ratio,
+                kvcache_mem_ratio=args.kvcache_mem_ratio,
             )
             if gradient_server is not None:
                 gradient_server.status = ServerState.READY
-            tp_rank_range = range(args.tp_size)
-            for tp_rank in tp_rank_range:
+
+            # For each tp_rank > 0, create a subprocess and run executor
+            for tp_rank in range(1, args.tp_size):
                 args_copy = argparse.Namespace(**vars(args))
                 args_copy.tp_rank = tp_rank
                 proc = multiprocessing.Process(
@@ -100,9 +106,11 @@ if __name__ == "__main__":
                     args=(args_copy,),
                 )
                 proc.start()
-                executor_procs.append(proc)
-            for executor_process in executor_procs:
-                executor_process.join()
+                executor_subprocs.append(proc)
+            # Launch executor with tp_rank=0 in the main process
+            args.tp_rank = 0
+            executor = Executor.create_from_args(args)
+            executor.run_loop()
         else:
             gradient_server = launch_p2p_server(
                 initial_peers=args.initial_peers,
@@ -111,6 +119,7 @@ if __name__ == "__main__":
                 pp_start_layer=args.start_layer,
                 pp_end_layer=args.end_layer,
                 hidden_layers=None,
+                tp_size=args.tp_size,
                 tcp_port=args.tcp_port,
                 udp_port=args.udp_port,
                 dht_prefix=args.dht_prefix,
@@ -122,15 +131,13 @@ if __name__ == "__main__":
                 model_name=args.model_path,
                 max_batch_size=args.max_batch_size,
                 max_sequence_length=args.max_sequence_length,
-                param_hosting_ratio=args.param_hosting_ratio,
-                kv_cache_ratio=args.kv_cache_ratio,
+                param_mem_ratio=args.param_mem_ratio,
+                kvcache_mem_ratio=args.kvcache_mem_ratio,
             )
             args.start_layer = gradient_server.block_start_index
             args.end_layer = gradient_server.block_end_index
             args.model_path = gradient_server.model_name
-            # TODO: Implement inter-process communication to enable TP.
-            # For scheduler mode, currently only support tp_rank=0
-            args.tp_rank = 0
+            args.tp_size = gradient_server.tp_size
 
             logger.debug(
                 f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}"
@@ -148,6 +155,18 @@ if __name__ == "__main__":
             # Main execution loop with layer reallocation support
             while True:
                 try:
+                    # For each tp_rank > 0, create a subprocess and run executor
+                    for tp_rank in range(1, args.tp_size):
+                        args_copy = argparse.Namespace(**vars(args))
+                        args_copy.tp_rank = tp_rank
+                        proc = multiprocessing.Process(
+                            target=run_executor_process,
+                            args=(args_copy,),
+                        )
+                        proc.start()
+                        executor_subprocs.append(proc)
+                    # Launch executor with tp_rank=0 in the main process
+                    args.tp_rank = 0
                     executor = Executor.create_from_args(args, gradient_server=gradient_server)
                     if gradient_server is not None:
                         gradient_server.status = ServerState.READY
@@ -159,7 +178,18 @@ if __name__ == "__main__":
                         logger.warning(
                             "Layer allocation changed! Reloading executor with new layers..."
                         )
+
+                        # shutdown all executor processes
+                        thread_pool = []
+                        for executor_process in executor_subprocs:
+                            t = threading.Thread(
+                                target=stop_executor_process, args=(executor_process,)
+                            )
+                            t.start()
+                            thread_pool.append(t)
                         executor.shutdown()
+                        for t in thread_pool:
+                            t.join()
 
                         if args.start_layer == 0:
                             http_server_process = stop_http_server(http_server_process)
@@ -210,13 +240,13 @@ if __name__ == "__main__":
         if gradient_server is not None:
             gradient_server.shutdown()
 
-        # Shutdown executor subprocess for scheduler mode
-        for executor_process in executor_procs:
+        # Shutdown executor subprocesses
+        for executor_process in executor_subprocs:
             t = threading.Thread(target=stop_executor_process, args=(executor_process,))
             t.start()
             thread_pool.append(t)
 
-        # Shutdown executor main process for non-scheduler mode
+        # Shutdown executor main process
         if executor is not None:
             executor.shutdown()
 

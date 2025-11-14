@@ -201,6 +201,7 @@ class GradientServer:
         block_start_index: int = 0,
         block_end_index: int = 1,
         hidden_layers: int = 128,
+        tp_size: int = 1,
         dht_prefix: str = "gradient",
         host_maddrs: List[str] = [],
         http_port: Optional[int] = None,
@@ -209,8 +210,8 @@ class GradientServer:
         model_name: Optional[str] = None,
         max_batch_size: Optional[int] = None,
         max_sequence_length: Optional[int] = None,
-        param_hosting_ratio: float = 0.65,
-        kv_cache_ratio: float = 0.25,
+        param_mem_ratio: float = 0.65,
+        kvcache_mem_ratio: float = 0.25,
     ):
         self.recv_from_peer_addr = recv_from_peer_addr
         self.send_to_peer_addr = send_to_peer_addr
@@ -220,6 +221,7 @@ class GradientServer:
         self.block_start_index = block_start_index
         self.block_end_index = block_end_index
         self.hidden_layers = hidden_layers
+        self.tp_size = tp_size
         self.dht_prefix = dht_prefix
         self.host_maddrs = host_maddrs
         self.announce_maddrs = announce_maddrs
@@ -228,8 +230,8 @@ class GradientServer:
         self.model_name = model_name
         self.max_batch_size = max_batch_size
         self.max_sequence_length = max_sequence_length
-        self.param_hosting_ratio = param_hosting_ratio
-        self.kv_cache_ratio = kv_cache_ratio
+        self.param_mem_ratio = param_mem_ratio
+        self.kvcache_mem_ratio = kvcache_mem_ratio
         self.prefix_id = f"{dht_prefix}_announce"
         self.lattica = None
         self.routing_table = None
@@ -346,6 +348,7 @@ class GradientServer:
                     self.block_start_index = response.get("start_layer")
                     self.block_end_index = response.get("end_layer")
                 self.model_name = response.get("model_name")
+                self.tp_size = response.get("tp_size")
 
                 # Publish executor metrics to backend on each update
                 def _publish_metrics(_snapshot):
@@ -683,8 +686,8 @@ class GradientServer:
         info = {
             "node_id": self.lattica.peer_id(),
             "hardware": detect_node_hardware(self.lattica.peer_id()),
-            "kv_cache_ratio": self.kv_cache_ratio,
-            "param_hosting_ratio": self.param_hosting_ratio,
+            "kvcache_mem_ratio": self.kvcache_mem_ratio,
+            "param_mem_ratio": self.param_mem_ratio,
             "max_concurrent_requests": self.max_batch_size,
             "max_sequence_length": (
                 1024 if self.max_sequence_length is None else self.max_sequence_length
@@ -738,6 +741,7 @@ def launch_p2p_server(
     pp_start_layer: int,
     pp_end_layer: int,
     hidden_layers: int,
+    tp_size: int,
     tcp_port: int,
     udp_port: int,
     dht_prefix: str,
@@ -749,8 +753,8 @@ def launch_p2p_server(
     model_name: Optional[str],
     max_batch_size: Optional[int] = None,
     max_sequence_length: Optional[int] = None,
-    param_hosting_ratio: float = 0.65,
-    kv_cache_ratio: float = 0.25,
+    param_mem_ratio: float = 0.65,
+    kvcache_mem_ratio: float = 0.25,
 ):
     server = GradientServer(
         recv_from_peer_addr=recv_from_peer_addr,
@@ -761,6 +765,7 @@ def launch_p2p_server(
         block_start_index=pp_start_layer,
         block_end_index=pp_end_layer,
         hidden_layers=hidden_layers,
+        tp_size=tp_size,
         dht_prefix=dht_prefix,
         host_maddrs=[f"/ip4/0.0.0.0/tcp/{tcp_port}", f"/ip4/0.0.0.0/udp/{udp_port}/quic-v1"],
         announce_maddrs=announce_maddrs,
@@ -769,8 +774,8 @@ def launch_p2p_server(
         model_name=model_name,
         max_batch_size=max_batch_size,
         max_sequence_length=max_sequence_length,
-        param_hosting_ratio=param_hosting_ratio,
-        kv_cache_ratio=kv_cache_ratio,
+        param_mem_ratio=param_mem_ratio,
+        kvcache_mem_ratio=kvcache_mem_ratio,
     )
     # Start the server
     thread = threading.Thread(target=server.run, daemon=True)

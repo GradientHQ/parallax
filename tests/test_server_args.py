@@ -91,6 +91,7 @@ class TestCreateExecutorConfig:
             tp_rank=0,
             tp_size=1,
             nccl_port=4001,
+            use_hfcache=False,
         )
 
         config = create_executor_config(args)

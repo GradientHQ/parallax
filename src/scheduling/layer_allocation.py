@@ -112,6 +112,10 @@ class BaseLayerAllocator:
 
         self.layer_to_load: Dict[int, LayerLoad] = {}
         self.node_id_to_node: Dict[str, Node] = {}
+        # Sync dict with initial nodes; prevents declare() from adding duplicates
+        # when allocate_left_over_nodes() processes unallocated nodes
+        for node in self.nodes:
+            self.node_id_to_node[node.node_id] = node
 
         # Pipeline endpoints for routing
         self.embedding_node_ids: List[str] = []
@@ -203,6 +207,11 @@ class BaseLayerAllocator:
         node.is_active = False
         self._update_layer_loads_heap()
 
+    def reallocate(self, node: Node, start_layer: int, end_layer: int) -> None:
+        """Reallocate a node to a specific layer range."""
+        self.deallocate(node)
+        self.allocate(node, start_layer, end_layer)
+
     def declare(self, node: Node) -> None:
         """Declare a node to the allocator."""
         if node.node_id not in self.node_id_to_node:
@@ -287,7 +296,9 @@ class BaseLayerAllocator:
         if len(layer_heap) < 2:
             return False
 
-        total_cluster_memory = sum(node.hardware.memory_gb for node in self.nodes)
+        total_cluster_memory = sum(
+            (node.hardware.num_gpus * node.hardware.memory_gb) for node in self.nodes
+        )
 
         if total_cluster_memory == 0:
             raise ValueError("Total cluster memory is zero")

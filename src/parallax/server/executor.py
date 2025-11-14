@@ -77,6 +77,7 @@ class Executor:
         start_layer: int,
         end_layer: int,
         dtype: str = "float16",
+        use_hfcache: bool = False,
         # Scheduler Configs
         max_batch_size: Optional[int] = 8,
         max_sequence_length: Optional[int] = None,
@@ -101,17 +102,18 @@ class Executor:
         executor_input_ipc_addr: Optional[str] = None,
         executor_output_ipc_addr: Optional[str] = None,
         # GPU/SGLang Specialized Configs
-        attention_backend: Optional[str] = "torch_native",
+        attention_backend: Optional[str] = "flashinfer",
         moe_runner_backend: Optional[str] = "auto",
         # Tensor Parallel Configs
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
-        nccl_port: Optional[int] = None,
+        nccl_port: Optional[int] = 4000,
         # Optional gradient server for layer reallocation detection
         gradient_server: Optional[Any] = None,
     ):
         # Backend
         self.device = get_current_device()
+        self.use_hfcache = use_hfcache
         logger.debug(f"Executor initializing on device: {self.device}")
 
         # Sharded Model
@@ -134,6 +136,7 @@ class Executor:
                 tp_rank,
                 tp_size,
                 nccl_port,
+                use_hfcache=self.use_hfcache,
             )
             logger.debug(
                 f"CUDA model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
@@ -149,7 +152,10 @@ class Executor:
                 f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer})"
             )
             self.shard_loader = MLXModelLoader(
-                model_repo, start_layer=start_layer, end_layer=end_layer
+                model_repo,
+                start_layer=start_layer,
+                end_layer=end_layer,
+                use_hfcache=self.use_hfcache,
             )
             t0 = time.time()
             self.model_shard, self.config, self.tokenizer = self.shard_loader.load()
@@ -1431,5 +1437,6 @@ def create_executor_config(args: argparse.Namespace, gradient_server=None):
         "tp_size": args.tp_size,
         "nccl_port": args.nccl_port,
         "gradient_server": gradient_server,
+        "use_hfcache": args.use_hfcache,
     }
     return config

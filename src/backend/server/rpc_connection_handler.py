@@ -40,8 +40,8 @@ class RPCConnectionHandler(ConnectionHandler):
         #         "memory_gb": 100,
         #         "memory_bandwidth_gbps": 100,
         #     },
-        #     "kv_cache_ratio": 0.3,
-        #     "param_hosting_ratio": 0.5,
+        #     "kvcache_mem_ratio": 0.3,
+        #     "param_mem_ratio": 0.5,
         #     "max_concurrent_requests": 16,
         #     "max_sequence_length": 1024,
         # }
@@ -153,6 +153,7 @@ class RPCConnectionHandler(ConnectionHandler):
                         ),
                         "start_layer": start_layer,
                         "end_layer": end_layer,
+                        "tp_size": node.hardware.num_gpus,
                     }
         return {}
 
@@ -161,8 +162,8 @@ class RPCConnectionHandler(ConnectionHandler):
             node_id=node_json.get("node_id"),
             hardware=self.build_hardware(node_json.get("hardware")),
             model_info=self.scheduler.model_info,
-            kv_cache_ratio=node_json.get("kv_cache_ratio"),
-            param_hosting_ratio=node_json.get("param_hosting_ratio"),
+            kvcache_mem_ratio=node_json.get("kvcache_mem_ratio"),
+            param_mem_ratio=node_json.get("param_mem_ratio"),
             max_concurrent_requests=node_json.get("max_concurrent_requests"),
             max_sequence_length=node_json.get("max_sequence_length"),
             is_active=node_json.get("is_active", True),
@@ -182,6 +183,7 @@ class RPCConnectionHandler(ConnectionHandler):
 
     def build_hardware(self, hardware_json):
         node_id = hardware_json.get("node_id")
+        num_gpus = hardware_json.get("num_gpus")
         tflops_fp16 = hardware_json.get("tflops_fp16")
         gpu_name = hardware_json.get("gpu_name")
         memory_gb = hardware_json.get("memory_gb")
@@ -189,6 +191,7 @@ class RPCConnectionHandler(ConnectionHandler):
         device = hardware_json.get("device")
         return NodeHardwareInfo(
             node_id=node_id,
+            num_gpus=num_gpus,
             tflops_fp16=tflops_fp16,
             gpu_name=gpu_name,
             memory_gb=memory_gb,
