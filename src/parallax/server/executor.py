@@ -25,8 +25,8 @@ from typing import Any, Dict, List, Optional
 import mlx.core as mx
 import torch
 import zmq
-from mlx_lm.server import convert_chat, process_message_content
 from jinja2 import TemplateError
+from mlx_lm.server import convert_chat, process_message_content
 
 from parallax.p2p.message_util import (
     abort_request_to_proto,
