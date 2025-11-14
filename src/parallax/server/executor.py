@@ -26,11 +26,7 @@ import mlx.core as mx
 import torch
 import zmq
 from mlx_lm.server import convert_chat, process_message_content
-
-try:  # pragma: no cover - jinja2 is an optional dependency during tests
-    from jinja2 import TemplateError
-except Exception:  # pragma: no cover
-    TemplateError = None
+from jinja2 import TemplateError
 
 from parallax.p2p.message_util import (
     abort_request_to_proto,
@@ -793,7 +789,7 @@ class Executor:
         if rid is None:
             return
 
-        is_template_error = TemplateError is not None and isinstance(error, TemplateError)
+        is_template_error = isinstance(error, TemplateError)
         status = (
             HTTPStatus.BAD_REQUEST
             if isinstance(error, ValueError) or is_template_error
