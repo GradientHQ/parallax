@@ -61,14 +61,14 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--param-hosting-ratio",
+        "--param-mem-ratio",
         type=float,
         default=0.65,
         help="Ratio of GPU memory to use for parameter hosting",
     )
 
     parser.add_argument(
-        "--kv-cache-ratio",
+        "--kvcache-mem-ratio",
         type=float,
         default=0.25,
         help="Ratio of GPU memory to use for KV cache",
@@ -191,6 +191,13 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+
+    parser.add_argument(
+        "--use-hfcache",
+        action="store_true",
+        default=False,
+        help="Use local Hugging Face cache only (no network download)",
+    )
 
     args = parser.parse_args()
 

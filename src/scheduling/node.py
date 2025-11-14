@@ -31,6 +31,7 @@ class NodeHardwareInfo:
     """
 
     node_id: str
+    num_gpus: int
     tflops_fp16: float
     gpu_name: str
     memory_gb: float
@@ -173,8 +174,8 @@ class Node:
     hardware: NodeHardwareInfo
     model_info: ModelInfo
 
-    kv_cache_ratio: float = 0.3
-    param_hosting_ratio: float = 0.5
+    kvcache_mem_ratio: float = 0.3
+    param_mem_ratio: float = 0.5
 
     max_concurrent_requests: int = 16
     max_sequence_length: int = 4096
@@ -220,7 +221,7 @@ class Node:
             requested_max_batch_size=self.max_concurrent_requests,
             max_sequence_len=self.max_sequence_length,
             device=None,
-            kv_cache_memory_fraction=self.kv_cache_ratio,
+            kv_cache_memory_fraction=self.kvcache_mem_ratio,
             num_shard_layers=self.num_current_layers,
             num_key_value_heads=self.model_info.num_kv_heads,
             head_dim=self.model_info.head_size,
@@ -272,7 +273,12 @@ class Node:
         Capacity is measured using the parameter memory budget on the device.
         """
         available_memory_bytes = floor(
-            self.hardware.memory_gb * 1024 * 1024 * 1024 * self.param_hosting_ratio
+            self.hardware.num_gpus
+            * self.hardware.memory_gb
+            * 1024
+            * 1024
+            * 1024
+            * self.param_mem_ratio
         )
         if include_input_embed:
             available_memory_bytes -= self.model_info.embedding_io_bytes
@@ -300,7 +306,14 @@ class Node:
         if self.num_current_layers == 0:
             return None
         return floor(
-            (self.hardware.memory_gb * 1024 * 1024 * 1024 * self.kv_cache_ratio)
+            (
+                self.hardware.num_gpus
+                * self.hardware.memory_gb
+                * 1024
+                * 1024
+                * 1024
+                * self.kvcache_mem_ratio
+            )
             / self.num_current_layers
         )
 

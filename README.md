@@ -7,6 +7,7 @@
       <img src="docs/images/sglang.png" alt="SGLang" height="28" style="margin: 0 20px;">
       <img src="docs/images/kimi.png" alt="Kimi" height="30" style="margin: 0 20px;">
       <img src="docs/images/minimax.png" alt="Minimax" height="30" style="margin: 0 10px;">
+      <img src="docs/images/zai.svg"za alt="ZAI" height="30" style="margin: 0 10px;"/>
     </div>
   </p>
 
