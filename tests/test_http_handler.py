@@ -1,8 +1,6 @@
 import asyncio
 from http import HTTPStatus
 
-import pytest
-
 try:
     import torch  # type: ignore
 except Exception:  # pragma: no cover - torch might be unavailable in CI
