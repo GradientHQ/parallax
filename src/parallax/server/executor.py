@@ -96,12 +96,12 @@ class Executor:
         executor_input_ipc_addr: Optional[str] = None,
         executor_output_ipc_addr: Optional[str] = None,
         # GPU/SGLang Specialized Configs
-        attention_backend: Optional[str] = "torch_native",
+        attention_backend: Optional[str] = "flashinfer",
         moe_runner_backend: Optional[str] = "auto",
         # Tensor Parallel Configs
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
-        nccl_port: Optional[int] = None,
+        nccl_port: Optional[int] = 4000,
         # Optional gradient server for layer reallocation detection
         gradient_server: Optional[Any] = None,
     ):

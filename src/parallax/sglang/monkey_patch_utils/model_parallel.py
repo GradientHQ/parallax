@@ -158,9 +158,14 @@ def monkey_patch_initialize_model_parallel(
 
     # Build the tensor model-parallel groups.
     num_tensor_model_parallel_groups: int = world_size // tensor_model_parallel_size
-    assert (
-        sglang.srt.distributed.parallel_state._TP is None
-    ), "tensor model parallel group is already initialized"
+    ############################################################################
+    ## This is a patch code for sgalng
+    ## Ignore parallel state already set alert
+    # assert (
+    #     sglang.srt.distributed.parallel_state._TP is None
+    # ), "tensor model parallel group is already initialized"
+    ## End of patch
+    ############################################################################
     group_ranks = []
     for i in range(num_tensor_model_parallel_groups):
         ranks = list(range(i * tensor_model_parallel_size, (i + 1) * tensor_model_parallel_size))
@@ -199,9 +204,14 @@ def monkey_patch_initialize_model_parallel(
     moe_ep_size = expert_model_parallel_size
 
     moe_tp_size = tensor_model_parallel_size // moe_ep_size
-    assert (
-        sglang.srt.distributed.parallel_state._MOE_EP is None
-    ), "expert model parallel group is already initialized"
+    ############################################################################
+    ## This is a patch code for sgalng
+    ## Ignore parallel state already set alert
+    # assert (
+    #     sglang.srt.distributed.parallel_state._MOE_EP is None
+    # ), "expert model parallel group is already initialized"
+    ## End of patch
+    ############################################################################
     group_ranks = []
     for i in range(num_tensor_model_parallel_groups):
         for j in range(moe_tp_size):
@@ -220,9 +230,14 @@ def monkey_patch_initialize_model_parallel(
         )
     )
 
-    assert (
-        sglang.srt.distributed.parallel_state._MOE_TP is None
-    ), "expert model parallel group is already initialized"
+    ############################################################################
+    ## This is a patch code for sgalng
+    ## Ignore parallel state already set alert
+    # assert (
+    #     sglang.srt.distributed.parallel_state._MOE_TP is None
+    # ), "expert model parallel group is already initialized"
+    ## End of patch
+    ############################################################################
     group_ranks = []
     for i in range(num_tensor_model_parallel_groups):
         for j in range(moe_ep_size):
@@ -243,9 +258,14 @@ def monkey_patch_initialize_model_parallel(
 
     # Build the pipeline model-parallel groups.
     num_pipeline_model_parallel_groups: int = world_size // pipeline_model_parallel_size
-    assert (
-        sglang.srt.distributed.parallel_state._PP is None
-    ), "pipeline model parallel group is already initialized"
+    ############################################################################
+    ## This is a patch code for sgalng
+    ## Ignore parallel state already set alert
+    # assert (
+    #     sglang.srt.distributed.parallel_state._PP is None
+    # ), "pipeline model parallel group is already initialized"
+    ## End of patch
+    ############################################################################
     group_ranks = []
     for i in range(num_pipeline_model_parallel_groups):
         ranks = list(range(i, world_size, num_pipeline_model_parallel_groups))
