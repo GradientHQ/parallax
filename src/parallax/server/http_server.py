@@ -86,7 +86,7 @@ class HTTPRequestInfo:
     detokenizer: StreamingDetokenizer = None
     error_message: Optional[str] = None
     error_type: Optional[str] = None
-    error_status: HTTPStatus = HTTPStatus.BAD_REQUEST
+    error_status: HTTPStatus = HTTPStatus.INTERNAL_SERVER_ERROR
 
 
 class HTTPHandler:
