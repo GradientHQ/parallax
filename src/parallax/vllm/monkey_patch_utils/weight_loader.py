@@ -18,7 +18,9 @@ def set_vllm_pipeline_stage(is_first_stage: bool, is_last_stage: bool):
     global _is_first_stage, _is_last_stage
     _is_first_stage = is_first_stage
     _is_last_stage = is_last_stage
-    logger.debug(f"Set vLLM pipeline stage: is_first_stage={_is_first_stage}, is_last_stage={_is_last_stage}")
+    logger.debug(
+        f"Set vLLM pipeline stage: is_first_stage={_is_first_stage}, is_last_stage={_is_last_stage}"
+    )
 
 
 def apply_vllm_weight_loader_patch():
@@ -55,22 +57,30 @@ def apply_vllm_weight_loader_patch():
                 if "model.embed_tokens.weight" in error_msg and uninitialized_weights:
                     if not _is_first_stage:
                         # Expected behavior for non-first pipeline stages
-                        logger.info("Skipping embed_tokens.weight initialization check on non-first pipeline stage")
+                        logger.info(
+                            "Skipping embed_tokens.weight initialization check on non-first pipeline stage"
+                        )
                     else:
                         # This is the first stage, embed_tokens should be initialized
-                        logger.error("embed_tokens.weight not initialized on first pipeline stage, this is an error")
+                        logger.error(
+                            "embed_tokens.weight not initialized on first pipeline stage, this is an error"
+                        )
                         raise
 
                 # Case 2: lm_head.weight not found
                 elif "lm_head.weight" in error_msg and uninitialized_weights:
                     if not _is_last_stage:
                         # Expected behavior for non-last pipeline stages
-                        logger.info("Skipping lm_head.weight initialization check on non-last pipeline stage")
+                        logger.info(
+                            "Skipping lm_head.weight initialization check on non-last pipeline stage"
+                        )
                     else:
                         # This is the last stage, lm_head should be initialized
-                        logger.error("lm_head.weight not initialized on last pipeline stage, this is an error")
+                        logger.error(
+                            "lm_head.weight not initialized on last pipeline stage, this is an error"
+                        )
                         raise
-                
+
                 # Case 3: Other errors
                 else:
                     # Different error, re-raise

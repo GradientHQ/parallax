@@ -648,7 +648,6 @@ class Executor:
 
             # Concatenate along sequence dimension to get (total_tokens, hidden_size)
             hidden_states = torch.cat(hidden_states_list, dim=0)
-            pp_proxy_initial_tokens = hidden_states.shape[0]
 
             # Create residual tensor with same shape
             residual = torch.zeros(
