@@ -130,9 +130,13 @@ if __name__ == "__main__":
     args = parse_args()
     set_log_level(args.log_level)
     logger.info(f"args: {args}")
-    init_model_info_dict_cache(args.use_hfcache)
+
+    if args.model_name is None:
+        init_model_info_dict_cache(args.use_hfcache)
+    
     if args.log_level != "DEBUG":
         display_parallax_run()
+
     check_latest_release()
 
     scheduler_manage = SchedulerManage(
