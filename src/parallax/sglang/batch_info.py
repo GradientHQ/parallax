@@ -205,7 +205,7 @@ def form_sgl_batch_decode(
     return forward_batch
 
 
-def release_cuda_request(running_batch: ScheduleBatch, request_id: str):
+def release_sglang_request(running_batch: ScheduleBatch, request_id: str):
     """Release KV Cache and other resources for finished/aborted requests."""
     if running_batch is None or running_batch.is_empty():
         return
