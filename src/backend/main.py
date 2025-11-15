@@ -133,7 +133,7 @@ if __name__ == "__main__":
 
     if args.model_name is None:
         init_model_info_dict_cache(args.use_hfcache)
-    
+
     if args.log_level != "DEBUG":
         display_parallax_run()
 
