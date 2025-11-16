@@ -125,7 +125,7 @@ class Executor:
                 )
             elif self.backend_type == "sglang":
                 from sglang.srt.managers.schedule_batch import (
-                    ScheduleBatch as CudaScheduleBatch,
+                    ScheduleBatch as SGLangScheduleBatch,
                 )
 
                 from parallax.sglang.model_runner import (
@@ -162,17 +162,12 @@ class Executor:
                 f"CUDA model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
             )
             self.cur_batch = None
+            self.running_batch = None
+
             if self.backend_type == "sglang":
-                self.running_batch = CudaScheduleBatch(reqs=[], batch_is_full=False)
-                # Set tp_group for tensor parallelism support
-                if (
-                    hasattr(self.model_runner, "tp_group")
-                    and self.model_runner.tp_group is not None
-                ):
-                    self.tp_group = self.model_runner.tp_group
-                    self.tp_cpu_group = self.tp_group.cpu_group
-            else:
-                self.running_batch = None
+                self.running_batch = SGLangScheduleBatch(reqs=[], batch_is_full=False)
+                self.tp_group = self.model_runner.tp_group
+                self.tp_cpu_group = self.tp_group.cpu_group
 
         else:
             logger.debug(
@@ -446,57 +441,6 @@ class Executor:
 
         return recv_reqs
 
-    def _compute_expected_intermediate_tokens(self, scheduler_output: Any) -> Optional[int]:
-        """Estimate the padded token count expected by vLLM for this batch."""
-        if scheduler_output is None:
-            return None
-
-        total_tokens = getattr(scheduler_output, "total_num_scheduled_tokens", None)
-        if total_tokens is None:
-            return None
-
-        try:
-            total_tokens = int(total_tokens)
-        except (TypeError, ValueError):
-            return None
-
-        model_runner = getattr(self, "model_runner", None)
-        if model_runner is None:
-            return None
-
-        get_num_input_tokens = getattr(model_runner, "_get_num_input_tokens", None)
-        get_dp_padding = getattr(model_runner, "get_dp_padding", None)
-        if get_num_input_tokens is None or get_dp_padding is None:
-            return None
-
-        num_input_tokens = get_num_input_tokens(total_tokens)
-        num_pad, _ = get_dp_padding(num_input_tokens)
-        return num_input_tokens + num_pad
-
-    @staticmethod
-    def _pad_or_trim_tensor(tensor: torch.Tensor, target_len: int) -> torch.Tensor:
-        if target_len < 0:
-            return tensor
-        current_len = tensor.shape[0]
-        if current_len == target_len:
-            return tensor
-        if current_len > target_len:
-            return tensor[:target_len]
-        pad_shape = (target_len - current_len,) + tensor.shape[1:]
-        pad = tensor.new_zeros(pad_shape)
-        return torch.cat((tensor, pad), dim=0)
-
-    def _resize_intermediate_tensors(self, intermediate_tensors, target_len: Optional[int]):
-        if intermediate_tensors is None or target_len is None:
-            return intermediate_tensors
-        if target_len < 0:
-            return intermediate_tensors
-
-        # Create a list to avoid "dictionary changed size during iteration".
-        for key, tensor in list(intermediate_tensors.items()):
-            intermediate_tensors[key] = self._pad_or_trim_tensor(tensor, target_len)
-        return intermediate_tensors
-
     def _prepare_cuda_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """
         Prepares inputs for CUDA backends from a batch of prefill requests.
@@ -510,7 +454,6 @@ class Executor:
 
         # Prepare PP proxy tensors (common for both backends when not first peer)
         pp_proxy_tensors = None
-        pp_proxy_initial_tokens = None
         if not self.is_first_peer:
             # Concatenate hidden states from all requests
             # For vLLM, we need to flatten to (total_tokens, hidden_size)
@@ -530,7 +473,7 @@ class Executor:
 
             # Concatenate along sequence dimension to get (total_tokens, hidden_size)
             hidden_states = torch.cat(hidden_states_list, dim=0)
-            pp_proxy_initial_tokens = hidden_states.shape[0]
+            hidden_states.shape[0]
 
             # Create residual tensor with same shape
             residual = torch.zeros(
@@ -564,32 +507,19 @@ class Executor:
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
         if self.backend_type == "vllm":
-            from parallax.vllm.batch_info import form_vllm_batch_prefill
+            from parallax.vllm.batch_info import (
+                compute_expected_intermediate_tokens,
+                form_vllm_batch_prefill,
+                resize_intermediate_tensors,
+            )
 
             schedule_outputs_prefill = form_vllm_batch_prefill(batched_requests, self.model_runner)
 
             if not self.is_first_peer and pp_proxy_tensors is not None:
-                target_tokens = self._compute_expected_intermediate_tokens(schedule_outputs_prefill)
-                if target_tokens is not None:
-                    before = pp_proxy_tensors["hidden_states"].shape[0]
-                    pp_proxy_tensors = self._resize_intermediate_tensors(
-                        pp_proxy_tensors, target_tokens
-                    )
-                    after = pp_proxy_tensors["hidden_states"].shape[0]
-                    if after != before:
-                        logger.debug(
-                            "PP Proxy: resized hidden_states from %d to %d tokens (requested=%s, initial=%s)",
-                            before,
-                            after,
-                            target_tokens,
-                            pp_proxy_initial_tokens,
-                        )
-
-            if not self.is_first_peer and pp_proxy_tensors is not None:
-                logger.debug(
-                    "PP Proxy: hidden_states shape after adjustment: %s",
-                    tuple(pp_proxy_tensors["hidden_states"].shape),
+                target_tokens = compute_expected_intermediate_tokens(
+                    schedule_outputs_prefill, self.model_runner
                 )
+                pp_proxy_tensors = resize_intermediate_tensors(pp_proxy_tensors, target_tokens)
 
             ret = {
                 "scheduler_output": schedule_outputs_prefill,
@@ -621,7 +551,6 @@ class Executor:
         Prepares inputs for CUDA backends from a batch of decode requests.
         Routes to SGLang or vLLM depending on backend_type.
         """
-        from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
 
         batch_size = len(batched_requests)
         if batch_size == 0:
@@ -655,23 +584,17 @@ class Executor:
             )
 
             if self.backend_type == "vllm":
-                # For vLLM, pass directly as IntermediateTensors
-                from vllm.sequence import IntermediateTensors
-
-                pp_proxy_tensors = IntermediateTensors(
-                    {
-                        "hidden_states": hidden_states,
-                        "residual": residual,
-                    }
-                )
+                from vllm.sequence import IntermediateTensors as CudaPPProxyTensors
             else:
-                # For SGLang, use PPProxyTensors
-                pp_proxy_tensors = PPProxyTensors(
-                    {
-                        "hidden_states": hidden_states,
-                        "residual": residual,
-                    }
+                from sglang.srt.model_executor.forward_batch_info import (
+                    PPProxyTensors as CudaPPProxyTensors,
                 )
+            pp_proxy_tensors = CudaPPProxyTensors(
+                {
+                    "hidden_states": hidden_states,
+                    "residual": residual,
+                }
+            )
             logger.debug(f"PP Proxy: hidden_states shape: {hidden_states.shape}")
 
         # Prepare lengths (common for both backends)
@@ -1182,8 +1105,6 @@ class Executor:
             assert isinstance(
                 request, IntermediateRequest
             ), "Last peer must receive an IntermediateRequest."
-            logger.info(f"hidden_states shape: {hidden_states.shape}")
-            logger.info(f"hidden_states: {hidden_states}")
             if self.device == "cuda":
                 assert hidden_states.dtype in (
                     torch.int64,
@@ -1256,18 +1177,7 @@ class Executor:
         self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True
     ):
         """
-        Process a batch of requests in CUDA.
-
-        Supports both vLLM and SGLang backends with Pipeline Parallelism.
-
-        Args:
-            prepared_inputs: Dict containing batch data and metadata
-            return_decoded_tokens: If True, return token IDs (last peer);
-                                  If False, return hidden states (intermediate peer)
-
-        Returns:
-            token_ids (Tensor): If return_decoded_tokens=True
-            hidden_states (Tensor): If return_decoded_tokens=False
+        Process a batch of requests in CUDA, supports both vLLM and SGLang backends.
         """
         if self.backend_type == "vllm":
             # ========== vLLM Backend ==========
@@ -1582,7 +1492,6 @@ class Executor:
                         output = self.process_batch(
                             prepared_inputs, return_decoded_tokens=self.is_last_peer
                         )
-                        logger.info(f"output: {output}")
                         # Update metrics with per-layer latency sample (throttled by decode steps)
                         if batch_type == "decode_batch":
                             try:

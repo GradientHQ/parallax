@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+import torch
 from vllm.sampling_params import SamplingParams as VLLMSamplingParams
 from vllm.sampling_params import StructuredOutputsParams
+from vllm.sequence import IntermediateTensors
 from vllm.v1.core.sched.output import CachedRequestData, NewRequestData, SchedulerOutput
 from vllm.v1.request import Request as VLLMRequest
 
@@ -14,6 +16,95 @@ from parallax.server.sampling.sampling_params import (
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def compute_expected_intermediate_tokens(scheduler_output: Any, model_runner: Any) -> Optional[int]:
+    """
+    Estimate the padded token count expected by vLLM for this batch.
+
+    This function computes the total number of tokens including padding that vLLM
+    expects for data parallel processing.
+
+    Args:
+        scheduler_output: SchedulerOutput from vLLM scheduler
+        model_runner: The vLLM model runner instance
+
+    Returns:
+        Expected total token count including padding, or None if unable to compute
+    """
+    if scheduler_output is None:
+        return None
+
+    total_tokens = getattr(scheduler_output, "total_num_scheduled_tokens", None)
+    if total_tokens is None:
+        return None
+
+    try:
+        total_tokens = int(total_tokens)
+    except (TypeError, ValueError):
+        return None
+
+    if model_runner is None:
+        return None
+
+    get_num_input_tokens = getattr(model_runner, "_get_num_input_tokens", None)
+    get_dp_padding = getattr(model_runner, "get_dp_padding", None)
+    if get_num_input_tokens is None or get_dp_padding is None:
+        return None
+
+    num_input_tokens = get_num_input_tokens(total_tokens)
+    num_pad, _ = get_dp_padding(num_input_tokens)
+    return num_input_tokens + num_pad
+
+
+def pad_or_trim_tensor(tensor: torch.Tensor, target_len: int) -> torch.Tensor:
+    """
+    Pad or trim a tensor to the target length along dimension 0.
+
+    Args:
+        tensor: Input tensor to pad/trim
+        target_len: Target length for dimension 0. If negative, returns unchanged.
+
+    Returns:
+        Tensor with dimension 0 adjusted to target_len
+    """
+    if target_len < 0:
+        return tensor
+    current_len = tensor.shape[0]
+    if current_len == target_len:
+        return tensor
+    if current_len > target_len:
+        return tensor[:target_len]
+    pad_shape = (target_len - current_len,) + tensor.shape[1:]
+    pad = tensor.new_zeros(pad_shape)
+    return torch.cat((tensor, pad), dim=0)
+
+
+def resize_intermediate_tensors(
+    intermediate_tensors: IntermediateTensors, target_len: Optional[int]
+) -> IntermediateTensors:
+    """
+    Resize all tensors in IntermediateTensors to match the target length.
+
+    This is needed for vLLM pipeline parallelism when the actual token count
+    doesn't match the expected padded count for data parallel processing.
+
+    Args:
+        intermediate_tensors: vLLM IntermediateTensors containing hidden states
+        target_len: Target token count. If None or negative, returns unchanged.
+
+    Returns:
+        IntermediateTensors with all tensors resized to target_len
+    """
+    if intermediate_tensors is None or target_len is None:
+        return intermediate_tensors
+    if target_len < 0:
+        return intermediate_tensors
+
+    # Create a list to avoid "dictionary changed size during iteration".
+    for key, tensor in list(intermediate_tensors.items()):
+        intermediate_tensors[key] = pad_or_trim_tensor(tensor, target_len)
+    return intermediate_tensors
 
 
 def transform_sampling_params_to_vllm(old_params: ParallaxSamplingParams) -> VLLMSamplingParams:
@@ -160,6 +251,7 @@ def form_vllm_batch_decode(
     batched_requests: List[Request],
     model_runner: Any = None,
     scheduler: Any = None,
+    **kwargs,
 ) -> Optional[SchedulerOutput]:
     if not batched_requests:
         return None

@@ -559,12 +559,12 @@ def initialize_vllm_model_runner(
 
     model_runner.kv_cache_config = kv_cache_config
 
-    logger.debug("Initializing GPUModelRunner KV cache...")
+    logger.info("Initializing GPUModelRunner KV cache...")
     model_runner.initialize_kv_cache(kv_cache_config)
-    logger.debug("GPUModelRunner KV cache initialized successfully")
+    logger.info("GPUModelRunner KV cache initialized successfully")
 
-    logger.debug("Initializing KV Cache Manager...")
+    logger.info("Initializing KV Cache Manager...")
     model_runner.initialize_kv_cache_manager(max_model_len=model_config.max_model_len)
-    logger.debug("KV Cache Manager initialized successfully")
+    logger.info("KV Cache Manager initialized successfully")
 
     return model_runner, config, tokenizer
