@@ -319,7 +319,7 @@ def form_vllm_batch_decode(
         # In pipeline parallelism, this must match what GPU worker expects.
         if output_ids:
             # All tokens (prompt + all generated outputs) have been computed
-            computed_token_count = len(prompt_ids) + len(output_ids)
+            computed_token_count = len(prompt_ids) + len(output_ids) - 1
         else:
             # First decode step: only prompt has been computed
             computed_token_count = len(prompt_ids)
