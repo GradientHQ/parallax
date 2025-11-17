@@ -1145,7 +1145,6 @@ class Executor:
             for i, src_request in enumerate(requests):
                 if self.is_last_peer:
                     # Last peer gets a 1D array of token IDs
-                    logger.info(f"hidden_states: {hidden_states}")
                     hidden_state_for_req = hidden_states[i : i + 1]
                 else:
                     # Other peers get a 3D array of hidden states
@@ -1204,12 +1203,9 @@ class Executor:
 
             # Return appropriate output based on peer position
             if return_decoded_tokens:
-                # Last peer: return sampled token IDs as tensor
-                # Convert list[list[int]] to tensor
                 import torch
 
                 sampled_token_ids = output.sampled_token_ids
-                logger.info(f"sampled_token_ids: {sampled_token_ids}")
                 if isinstance(sampled_token_ids, list) and len(sampled_token_ids) > 0:
                     # Convert to tensor: pad sequences to same length
                     max_len = max(len(seq) for seq in sampled_token_ids)
@@ -1222,43 +1218,8 @@ class Executor:
                     return torch.tensor(sampled_token_ids, dtype=torch.int64)
             else:
                 # Intermediate peer: return hidden states for next peer
-                # vLLM with Parallax PP should return IntermediateTensors
-                def _merge_hidden_and_residual(hidden_tensor, residual_tensor):
-                    if hidden_tensor is None:
-                        return None
-                    if residual_tensor is not None:
-                        # vLLM separates residual connections; downstream peers expect the merged tensor.
-                        hidden_tensor = hidden_tensor + residual_tensor
-                    return hidden_tensor
-
-                if isinstance(output, IntermediateTensors):
-                    tensors = output.tensors
-                    merged = _merge_hidden_and_residual(
-                        tensors.get("hidden_states"), tensors.get("residual")
-                    )
-                    if merged is not None:
-                        return merged
-                    # Return full object if hidden states are packed under a different key
-                    if tensors:
-                        return output
-                elif hasattr(output, "hidden_states") and output.hidden_states is not None:
-                    residual = getattr(output, "residual", None)
-                    merged = _merge_hidden_and_residual(output.hidden_states, residual)
-                    if merged is not None:
-                        return merged
-                elif hasattr(output, "tensors") and "hidden_states" in output.tensors:
-                    tensors = output.tensors
-                    merged = _merge_hidden_and_residual(
-                        tensors.get("hidden_states"), tensors.get("residual")
-                    )
-                    if merged is not None:
-                        return merged
-
-                raise RuntimeError(
-                    "vLLM backend: expected hidden_states in output for PP, but got None. "
-                    f"Output type: {type(output)}, is_last_peer={self.is_last_peer}. "
-                    "This typically means the model runner is not configured for pipeline parallelism."
-                )
+                final_hidden_states = output.tensors["hidden_states"] + output.tensors["residual"]
+                return final_hidden_states
 
         else:  # self.backend_type == "sglang"
             # ========== SGLang Backend ==========
