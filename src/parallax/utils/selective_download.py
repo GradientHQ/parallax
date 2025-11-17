@@ -1,7 +1,8 @@
 import logging
+import os
 import requests
 import socket
-from typing import Any
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +24,42 @@ EXCLUDE_WEIGHT_PATTERNS = [
 ]
 
 
+def _resolve_hf_endpoint() -> tuple[str, int, bool]:
+    endpoint = os.environ.get("HF_ENDPOINT", "https://huggingface.co")
+    parsed = urlparse(endpoint)
+    scheme = parsed.scheme or "https"
+    host = parsed.netloc or parsed.path or "huggingface.co"
+    if ":" in host:
+        host_only, port_str = host.split(":", 1)
+        try:
+            port = int(port_str)
+        except ValueError:
+            port = 443 if scheme == "https" else 80
+        host = host_only
+    else:
+        port = 443 if scheme == "https" else 80
+    use_https = scheme == "https"
+    return host, port, use_https
+
+
+def _quick_hf_reachability_check(repo_id: str, timeout_s: float = 3.0) -> bool:
+    host, port, _ = _resolve_hf_endpoint()
+    try:
+        socket.create_connection((host, port), timeout=timeout_s).close()
+        return True
+    except OSError:
+        # Try an HTTP-level check which may respect proxies
+        try:
+            endpoint = os.environ.get("HF_ENDPOINT", "https://huggingface.co")
+            base = endpoint.rstrip("/")
+            # We don't care about response code, only that we can reach the server fast
+            url = f"{base}/api/models/{repo_id}"
+            requests.get(url, timeout=timeout_s, allow_redirects=True)
+            return True
+        except Exception:
+            return False
+
+
 def download_metadata_only(
     repo_id: str,
     cache_dir: Optional[str] = None,
@@ -35,6 +72,20 @@ def download_metadata_only(
         return local_path
 
     try:
+        # Quick pre-check to avoid hanging on unreachable networks
+        if not local_files_only:
+            ok = _quick_hf_reachability_check(repo_id)
+            if not ok:
+                logger.error(
+                    "Cannot reach Hugging Face endpoint before download (pre-check failed). "
+                    "This node likely has no egress or DNS to the Hub."
+                )
+                logger.error(
+                    "Please verify network connectivity, proxy settings, firewall rules, or set "
+                    "`local_files_only=True` / provide a local model path."
+                )
+                raise RuntimeError("Hugging Face Hub not reachable from this node")
+
         path = snapshot_download(
             repo_id=repo_id,
             cache_dir=cache_dir,
