@@ -6,6 +6,7 @@ arguments needed by decentralized inference.
 
 import logging
 import os
+import random
 
 import sglang
 import sglang.srt.distributed.parallel_state
@@ -221,17 +222,15 @@ def form_sgl_server_args(
 
 
 def initialize_sgl_model_runner(
-    original_model_path: str,
+    model_repo: str,
     start_layer: int,
     end_layer: int,
     kv_cache_memory_fraction: float,
     attention_backend: str,
     kv_block_size: int,
     moe_runner_backend: str,
-    tp_rank: int,
-    tp_size: int,
-    nccl_port: int,
-    use_hfcache: bool = False,
+    max_num_tokens_per_batch: int = 1024,
+    **kwargs,
 ):
     """
     Creates a SGL ModelRunner object.
@@ -242,6 +241,11 @@ def initialize_sgl_model_runner(
     """
     apply_parallax_sglang_monkey_patch()
 
+    # Extract TP-related parameters from kwargs or use defaults
+    tp_rank = kwargs.get("tp_rank", 0)
+    tp_size = kwargs.get("tp_size", 1)
+    use_hfcache = kwargs.get("use_hfcache", False)
+    nccl_port = kwargs.get("nccl_port", None)
     # Use selective download for GPU models to save bandwidth and disk space
     from parallax.utils.selective_download import get_model_path_with_selective_download
 
@@ -249,15 +253,15 @@ def initialize_sgl_model_runner(
         f"Downloading model with selective weight files for layers [{start_layer}, {end_layer})"
     )
     model_path = get_model_path_with_selective_download(
-        original_model_path,
-        start_layer=start_layer,
-        end_layer=end_layer,
-        local_files_only=use_hfcache,
+        model_repo, start_layer=start_layer, end_layer=end_layer, local_files_only=use_hfcache
     )
 
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")
+
+    if nccl_port is None:
+        nccl_port = random.randint(4000, 5000)
 
     # Handling mxfp4 arguments
     quant_method = config.get("quant_method", None)

@@ -15,6 +15,7 @@ Below are installation methods for different operating systems.
 
 ### From Source
 #### For Linux/WSL (GPU):
+Note: If you are using DGX Spark, please refer to the Docker installation section
 ```sh
 git clone https://github.com/GradientHQ/parallax.git
 cd parallax
@@ -78,6 +79,7 @@ For Linux+GPU devices, Parallax provides a docker environment for quick setup. C
 |:-------------|:----------------------------|:----------------------------|
 |Blackwell       | RTX50 series/B100/B200... |```docker pull gradientservice/parallax:latest-blackwell```|
 |Ampere/Hopper | RTX30 series/RTX40 series/A100/H100... |```docker pull gradientservice/parallax:latest-hopper```|
+|DGX Spark | GB10 |```docker pull gradientservice/parallax:spark-spark```|
 
 Run a docker container as below. Please note that generally the argument ```--gpus all``` is necessary for the docker to run on GPUs.
 ```sh
@@ -85,6 +87,8 @@ Run a docker container as below. Please note that generally the argument ```--gp
 docker run -it --gpus all --network host gradientservice/parallax:latest-blackwell bash
 # For Ampere/Hopper
 docker run -it --gpus all --network host gradientservice/parallax:latest-hopper bash
+# For DGX Spark
+docker run -it --gpus all --network host gradientservice/parallax:spark-spark bash
 ```
 The container starts under parallax workspace and you should be able to run parallax directly.
 

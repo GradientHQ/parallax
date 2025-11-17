@@ -7,6 +7,7 @@ repos:
         exclude: '^src/frontend/dist/|\.svg$|\.png$|\.jpg$|\.jpeg$|\.gif$|\.webp$'
       - id: trailing-whitespace
       - id: mixed-line-ending
+        args: ['--fix=lf']
 
   - repo: https://github.com/PyCQA/autoflake
     rev: v2.3.1
