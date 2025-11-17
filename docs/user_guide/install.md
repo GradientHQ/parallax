@@ -15,6 +15,7 @@ Below are installation methods for different operating systems.
 
 ### From Source
 #### For Linux/WSL (GPU):
+Note: If you are using DGX Spark, please refer to the Docker installation section
 ```sh
 git clone https://github.com/GradientHQ/parallax.git
 cd parallax
