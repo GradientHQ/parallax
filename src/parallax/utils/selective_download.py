@@ -1,11 +1,11 @@
 import logging
 import os
-import requests
 import socket
-from urllib.parse import urlparse
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
+import requests
 from huggingface_hub import hf_hub_download, snapshot_download
 
 logger = logging.getLogger(__name__)
