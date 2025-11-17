@@ -1,4 +1,7 @@
 import logging
+import requests
+import socket
+from typing import Any
 from pathlib import Path
 from typing import Optional
 
@@ -31,14 +34,36 @@ def download_metadata_only(
     if local_path.exists():
         return local_path
 
-    path = snapshot_download(
-        repo_id=repo_id,
-        cache_dir=cache_dir,
-        ignore_patterns=EXCLUDE_WEIGHT_PATTERNS,
-        force_download=force_download,
-        local_files_only=local_files_only,
-    )
-    return Path(path)
+    try:
+        path = snapshot_download(
+            repo_id=repo_id,
+            cache_dir=cache_dir,
+            ignore_patterns=EXCLUDE_WEIGHT_PATTERNS,
+            force_download=force_download,
+            local_files_only=local_files_only,
+        )
+        return Path(path)
+    except Exception as e:  # broad catch so we can provide a clearer message
+        # Detect common network-related errors and give user-friendly guidance
+        is_network = (
+            isinstance(e, requests.exceptions.RequestException)
+            or isinstance(e, OSError)
+            or isinstance(e, socket.error)
+        )
+        if is_network:
+            logger.error(
+                "Failed to download model metadata for %s due to network error: %s",
+                repo_id,
+                e,
+            )
+            logger.error(
+                "This is likely a network/connectivity issue (cannot reach Hugging Face Hub). "
+                "Please check your network, proxy settings or pre-download the model locally and "
+                "provide a local path instead of a repo id."
+            )
+        else:
+            logger.error("Failed to download model metadata for %s: %s", repo_id, e)
+        raise
 
 
 def selective_model_download(
@@ -78,25 +103,71 @@ def selective_model_download(
         if is_remote:
             if not needed_weight_files:
                 logger.debug("Could not determine specific weight files, downloading all")
-                snapshot_download(
-                    repo_id=repo_id,
-                    cache_dir=cache_dir,
-                    force_download=force_download,
-                    local_files_only=local_files_only,
-                )
+                try:
+                    snapshot_download(
+                        repo_id=repo_id,
+                        cache_dir=cache_dir,
+                        force_download=force_download,
+                        local_files_only=local_files_only,
+                    )
+                except Exception as e:
+                    is_network = (
+                        isinstance(e, requests.exceptions.RequestException)
+                        or isinstance(e, OSError)
+                        or isinstance(e, socket.error)
+                    )
+                    if is_network:
+                        logger.error(
+                            "Failed to download all model files for %s due to network error: %s",
+                            repo_id,
+                            e,
+                        )
+                        logger.error(
+                            "Cannot download model weights because of network issues. "
+                            "Check connectivity to Hugging Face Hub or provide local files."
+                        )
+                    else:
+                        logger.error("Failed to download all model files for %s: %s", repo_id, e)
+                    raise
             else:
                 # Step 3: Download only the needed weight files
                 logger.info(f"Downloading {len(needed_weight_files)} weight files")
 
                 for weight_file in needed_weight_files:
                     logger.debug(f"Downloading {weight_file}")
-                    hf_hub_download(
-                        repo_id=repo_id,
-                        filename=weight_file,
-                        cache_dir=cache_dir,
-                        force_download=force_download,
-                        local_files_only=local_files_only,
-                    )
+                    try:
+                        hf_hub_download(
+                            repo_id=repo_id,
+                            filename=weight_file,
+                            cache_dir=cache_dir,
+                            force_download=force_download,
+                            local_files_only=local_files_only,
+                        )
+                    except Exception as e:
+                        is_network = (
+                            isinstance(e, requests.exceptions.RequestException)
+                            or isinstance(e, OSError)
+                            or isinstance(e, socket.error)
+                        )
+                        if is_network:
+                            logger.error(
+                                "Failed to download weight file %s for %s due to network error: %s",
+                                weight_file,
+                                repo_id,
+                                e,
+                            )
+                            logger.error(
+                                "This usually means the node cannot reach Hugging Face Hub. "
+                                "Verify network connectivity, firewall/egress rules, or proxy settings."
+                            )
+                        else:
+                            logger.error(
+                                "Failed to download weight file %s for %s: %s",
+                                weight_file,
+                                repo_id,
+                                e,
+                            )
+                        raise
 
                 logger.debug(f"Downloaded weight files for layers [{start_layer}, {end_layer})")
         else:
@@ -106,12 +177,28 @@ def selective_model_download(
         # No layer range specified
         if is_remote:
             logger.debug("No layer range specified, downloading all model files")
-            snapshot_download(
-                repo_id=repo_id,
-                cache_dir=cache_dir,
-                force_download=force_download,
-                local_files_only=local_files_only,
-            )
+            try:
+                snapshot_download(
+                    repo_id=repo_id,
+                    cache_dir=cache_dir,
+                    force_download=force_download,
+                    local_files_only=local_files_only,
+                )
+            except Exception as e:
+                is_network = (
+                    isinstance(e, requests.exceptions.RequestException)
+                    or isinstance(e, OSError)
+                    or isinstance(e, socket.error)
+                )
+                if is_network:
+                    logger.error("Failed to download model %s due to network error: %s", repo_id, e)
+                    logger.error(
+                        "Model download failed because the node appears to have no network access to "
+                        "Hugging Face Hub. Please check network connectivity or pre-download the model."
+                    )
+                else:
+                    logger.error("Failed to download model %s: %s", repo_id, e)
+                raise
         else:
             logger.debug("No layer range specified and using local path; nothing to download")
 
