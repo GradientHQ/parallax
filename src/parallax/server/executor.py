@@ -1193,7 +1193,6 @@ class Executor:
                 logger.debug(f"vLLM: Using intermediate_tensors for PP (non-first peer)")
 
             # Import IntermediateTensors for type checking
-            from vllm.sequence import IntermediateTensors
 
             # Execute model with vLLM
             output = self.model_runner.execute_model(
