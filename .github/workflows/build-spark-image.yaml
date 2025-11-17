@@ -26,7 +26,7 @@ jobs:
       attestations: write
     strategy:
       matrix:
-        variant: [blackwell, hopper]
+        variant: [spark]
 
     steps:
     - name: Checkout code
@@ -66,4 +66,4 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-        platforms: linux/amd64
+        platforms: linux/arm64
