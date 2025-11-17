@@ -16,4 +16,8 @@ RUN git clone --branch v0.29.1 https://github.com/ml-explore/mlx.git && \
     PYPI_RELEASE=1 pip install . --break-system-packages && \
     cd ..
 
+# patch sglang version and model_parallel.py for current sglang spark docker
+RUN sed -i 's/sglang\[all\]==0.5.4.post1/sglang\[all\]==0.5.4.post2/g' pyproject.toml
+RUN sed -i 's/use_torch_symm_mem=use_torch_symm_mem/use_torch_symm_mem_all_reduce=use_torch_symm_mem/g' src/parallax/sglang/monkey_patch_utils/model_parallel.py
+
 RUN pip install -e '.[gpu]' --break-system-packages
