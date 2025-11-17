@@ -60,6 +60,28 @@ def _quick_hf_reachability_check(repo_id: str, timeout_s: float = 3.0) -> bool:
             return False
 
 
+def _is_network_error(e: Exception) -> bool:
+    return (
+        isinstance(e, requests.exceptions.RequestException)
+        or isinstance(e, OSError)
+        or isinstance(e, socket.error)
+    )
+
+
+def _handle_download_exception(
+    e: Exception,
+    base_fmt: str,
+    base_args: tuple,
+    network_hint: str | None = None,
+) -> None:
+    if _is_network_error(e):
+        logger.error(base_fmt + " due to network error: %s", *base_args, e)
+        if network_hint:
+            logger.error(network_hint)
+    else:
+        logger.error(base_fmt + ": %s", *base_args, e)
+
+
 def download_metadata_only(
     repo_id: str,
     cache_dir: Optional[str] = None,
@@ -95,25 +117,16 @@ def download_metadata_only(
         )
         return Path(path)
     except Exception as e:  # broad catch so we can provide a clearer message
-        # Detect common network-related errors and give user-friendly guidance
-        is_network = (
-            isinstance(e, requests.exceptions.RequestException)
-            or isinstance(e, OSError)
-            or isinstance(e, socket.error)
-        )
-        if is_network:
-            logger.error(
-                "Failed to download model metadata for %s due to network error: %s",
-                repo_id,
-                e,
-            )
-            logger.error(
+        _handle_download_exception(
+            e,
+            "Failed to download model metadata for %s",
+            (repo_id,),
+            (
                 "This is likely a network/connectivity issue (cannot reach Hugging Face Hub). "
                 "Please check your network, proxy settings or pre-download the model locally and "
                 "provide a local path instead of a repo id."
-            )
-        else:
-            logger.error("Failed to download model metadata for %s: %s", repo_id, e)
+            ),
+        )
         raise
 
 
@@ -162,23 +175,15 @@ def selective_model_download(
                         local_files_only=local_files_only,
                     )
                 except Exception as e:
-                    is_network = (
-                        isinstance(e, requests.exceptions.RequestException)
-                        or isinstance(e, OSError)
-                        or isinstance(e, socket.error)
-                    )
-                    if is_network:
-                        logger.error(
-                            "Failed to download all model files for %s due to network error: %s",
-                            repo_id,
-                            e,
-                        )
-                        logger.error(
+                    _handle_download_exception(
+                        e,
+                        "Failed to download all model files for %s",
+                        (repo_id,),
+                        (
                             "Cannot download model weights because of network issues. "
                             "Check connectivity to Hugging Face Hub or provide local files."
-                        )
-                    else:
-                        logger.error("Failed to download all model files for %s: %s", repo_id, e)
+                        ),
+                    )
                     raise
             else:
                 # Step 3: Download only the needed weight files
@@ -195,29 +200,15 @@ def selective_model_download(
                             local_files_only=local_files_only,
                         )
                     except Exception as e:
-                        is_network = (
-                            isinstance(e, requests.exceptions.RequestException)
-                            or isinstance(e, OSError)
-                            or isinstance(e, socket.error)
-                        )
-                        if is_network:
-                            logger.error(
-                                "Failed to download weight file %s for %s due to network error: %s",
-                                weight_file,
-                                repo_id,
-                                e,
-                            )
-                            logger.error(
+                        _handle_download_exception(
+                            e,
+                            "Failed to download weight file %s for %s",
+                            (weight_file, repo_id),
+                            (
                                 "This usually means the node cannot reach Hugging Face Hub. "
                                 "Verify network connectivity, firewall/egress rules, or proxy settings."
-                            )
-                        else:
-                            logger.error(
-                                "Failed to download weight file %s for %s: %s",
-                                weight_file,
-                                repo_id,
-                                e,
-                            )
+                            ),
+                        )
                         raise
 
                 logger.debug(f"Downloaded weight files for layers [{start_layer}, {end_layer})")
@@ -236,19 +227,15 @@ def selective_model_download(
                     local_files_only=local_files_only,
                 )
             except Exception as e:
-                is_network = (
-                    isinstance(e, requests.exceptions.RequestException)
-                    or isinstance(e, OSError)
-                    or isinstance(e, socket.error)
-                )
-                if is_network:
-                    logger.error("Failed to download model %s due to network error: %s", repo_id, e)
-                    logger.error(
+                _handle_download_exception(
+                    e,
+                    "Failed to download model %s",
+                    (repo_id,),
+                    (
                         "Model download failed because the node appears to have no network access to "
                         "Hugging Face Hub. Please check network connectivity or pre-download the model."
-                    )
-                else:
-                    logger.error("Failed to download model %s: %s", repo_id, e)
+                    ),
+                )
                 raise
         else:
             logger.debug("No layer range specified and using local path; nothing to download")
