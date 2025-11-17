@@ -173,6 +173,8 @@ def init_model_info_dict_cache(use_hfcache: bool = False):
 
 
 def get_model_info_dict_cache():
+    if model_info_dict_cache is None:
+        return {}
     return model_info_dict_cache
 
 
