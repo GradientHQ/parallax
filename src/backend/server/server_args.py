@@ -42,14 +42,6 @@ def parse_args() -> argparse.Namespace:
         help="Use local Hugging Face cache only (no network download)",
     )
 
-    parser.add_argument(
-        "--gpu-backend",
-        type=str,
-        default="sglang",
-        choices=["sglang", "vllm"],
-        help="GPU backend to use",
-    )
-
     args = parser.parse_args()
 
     return args
