@@ -49,7 +49,7 @@ mac = [
 gpu = [
   "mlx-lm==0.28.0",
   "mlx[cpu]==0.29.1",
-  "sglang[all]==0.5.4.post1",
+  "sglang[all]==0.5.4.post2",
 ]
 
 benchmark = [

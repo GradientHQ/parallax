@@ -79,7 +79,7 @@ class ParallaxGroupCoordinator(SGLGroupCoordinator):
             use_hpu_communicator=use_hpu_communicator,
             use_xpu_communicator=use_xpu_communicator,
             use_npu_communicator=use_npu_communicator,
-            use_torch_symm_mem=use_torch_symm_mem,
+            use_torch_symm_mem_all_reduce=use_torch_symm_mem,
             use_message_queue_broadcaster=use_message_queue_broadcaster,
             group_name=group_name,
         )
