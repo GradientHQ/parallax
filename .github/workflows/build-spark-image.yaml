@@ -1,4 +1,4 @@
-name: Build Images
+name: Build Spark Image
 
 on:
   workflow_dispatch:
