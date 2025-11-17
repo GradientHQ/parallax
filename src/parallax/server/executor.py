@@ -19,11 +19,13 @@ Executor handles
 
 import argparse
 import time
+from http import HTTPStatus
 from typing import Any, Dict, List, Optional
 
 import mlx.core as mx
 import torch
 import zmq
+from jinja2 import TemplateError
 from mlx_lm.server import convert_chat, process_message_content
 
 from parallax.p2p.message_util import (
@@ -98,12 +100,12 @@ class Executor:
         executor_input_ipc_addr: Optional[str] = None,
         executor_output_ipc_addr: Optional[str] = None,
         # GPU/SGLang Specialized Configs
-        attention_backend: Optional[str] = "torch_native",
+        attention_backend: Optional[str] = "flashinfer",
         moe_runner_backend: Optional[str] = "auto",
         # Tensor Parallel Configs
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
-        nccl_port: Optional[int] = None,
+        nccl_port: Optional[int] = 4000,
         # Optional gradient server for layer reallocation detection
         gradient_server: Optional[Any] = None,
     ):
@@ -356,29 +358,31 @@ class Executor:
 
     def recv_requests_from_http(self) -> List[Request]:
         """Receives requests from http frontend"""
-        if self.tp_rank == 0:
-            recv_reqs = []
-            while True:
-                try:
-                    raw_request = self.recv_from_ipc_socket.recv_pyobj(zmq.NOBLOCK)
+        if self.tp_rank != 0:
+            return None
 
-                    # Check if this is an abort request
-                    if isinstance(raw_request, dict) and raw_request.get("type") == "abort":
-                        logger.debug(
-                            f"Received abort request from HTTP for request ID: {raw_request.get('rid')}"
-                        )
-                        self.scheduler.cancel_request(raw_request.get("rid"))
-                    else:
-                        # Normal request processing - do tokenization and form InitialRequest
-                        req = self._handle_raw_request(raw_request)
-                        recv_reqs.append(req)
-                except zmq.ZMQError:
-                    break
-                except Exception as e:
-                    logger.exception(f"Error receiving http request: {e}")
-        else:
-            recv_reqs = None
+        recv_reqs = []
+        while True:
+            try:
+                raw_request = self.recv_from_ipc_socket.recv_pyobj(zmq.NOBLOCK)
 
+                # Check if this is an abort request
+                if isinstance(raw_request, dict) and raw_request.get("type") == "abort":
+                    logger.debug(
+                        f"Received abort request from HTTP for request ID: {raw_request.get('rid')}"
+                    )
+                    self.scheduler.cancel_request(raw_request.get("rid"))
+                else:
+                    # Normal request processing - do tokenization and form InitialRequest
+                    req = self._handle_raw_request(raw_request)
+                    recv_reqs.append(req)
+            except zmq.ZMQError:
+                break
+            except Exception as e:
+                logger.exception(f"Error receiving http request: {e}")
+                self._notify_http_request_error(raw_request, e)
+        if recv_reqs:
+            logger.debug(f"Received {len(recv_reqs)} HTTP requests")
         return recv_reqs
 
     def recv_requests_from_peer(self) -> List[Request]:
@@ -890,6 +894,34 @@ class Executor:
         if "routing_table" in raw_request:
             req.routing_table = raw_request["routing_table"]
         return req
+
+    def _notify_http_request_error(self, raw_request: Optional[Dict], error: Exception):
+        """Best-effort notification to HTTP server when request parsing fails."""
+        if not hasattr(self, "send_to_ipc_socket") or self.send_to_ipc_socket is None:
+            return
+        if not isinstance(raw_request, dict):
+            return
+        rid = raw_request.get("rid")
+        if rid is None:
+            return
+
+        is_template_error = isinstance(error, TemplateError)
+        status = (
+            HTTPStatus.BAD_REQUEST
+            if isinstance(error, ValueError) or is_template_error
+            else HTTPStatus.INTERNAL_SERVER_ERROR
+        )
+        payload = {
+            "type": "error",
+            "rid": rid,
+            "error": str(error),
+            "error_type": error.__class__.__name__,
+            "status_code": status.value,
+        }
+        try:
+            self.send_to_ipc_socket.send_pyobj(payload)
+        except Exception:  # pragma: no cover - best effort notification
+            logger.debug("Failed to send error notification to HTTP handler", exc_info=True)
 
     def _handle_cuda_input_requests(self, requests: List[Request]):
         """

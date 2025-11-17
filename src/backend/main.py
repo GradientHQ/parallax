@@ -12,7 +12,11 @@ from fastapi.staticfiles import StaticFiles
 from backend.server.request_handler import RequestHandler
 from backend.server.scheduler_manage import SchedulerManage
 from backend.server.server_args import parse_args
-from backend.server.static_config import get_model_list, get_node_join_command
+from backend.server.static_config import (
+    get_model_list,
+    get_node_join_command,
+    init_model_info_dict_cache,
+)
 from parallax_utils.ascii_anime import display_parallax_run
 from parallax_utils.file_util import get_project_root
 from parallax_utils.logging_config import get_logger, set_log_level
@@ -126,8 +130,13 @@ if __name__ == "__main__":
     args = parse_args()
     set_log_level(args.log_level)
     logger.info(f"args: {args}")
+
+    if args.model_name is None:
+        init_model_info_dict_cache(args.use_hfcache)
+
     if args.log_level != "DEBUG":
         display_parallax_run()
+
     check_latest_release()
 
     scheduler_manage = SchedulerManage(

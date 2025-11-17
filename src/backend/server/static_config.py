@@ -142,32 +142,62 @@ def get_model_info(model_name, use_hfcache: bool = False):
     return model_info
 
 
-def get_model_info_list():
+def get_model_info_with_try_catch(model_name, use_hfcache: bool = False):
+    try:
+        return get_model_info(model_name, use_hfcache)
+    except Exception as e:
+        logger.debug(f"Error loading config.json for {model_name}: {e}")
+        return None
+
+
+def get_model_info_dict(use_hfcache: bool = False):
     model_name_list = list(MODELS.keys())
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        model_info_list = list(executor.map(get_model_info, model_name_list))
-    return model_info_list
+        model_info_dict = dict(
+            executor.map(
+                lambda name: (name, get_model_info_with_try_catch(name, use_hfcache)),
+                model_name_list,
+            )
+        )
+    return model_info_dict
 
 
-model_info_list_cache = get_model_info_list()
+model_info_dict_cache = None
+
+
+def init_model_info_dict_cache(use_hfcache: bool = False):
+    global model_info_dict_cache
+    if model_info_dict_cache is not None:
+        return
+    model_info_dict_cache = get_model_info_dict(use_hfcache)
+
+
+def get_model_info_dict_cache():
+    return model_info_dict_cache
 
 
 def get_model_list():
-    model_info_list = model_info_list_cache
+    model_name_list = list(MODELS.keys())
+    model_info_dict = get_model_info_dict_cache()
 
-    def build_single_model(model_info):
+    def build_single_model(model_name, model_info):
         return {
-            "name": model_info.model_name,
+            "name": model_name,
             "vram_gb": math.ceil(estimate_vram_gb_required(model_info)),
         }
 
-    results = [build_single_model(model_info) for model_info in model_info_list]
+    results = [
+        build_single_model(model_name, model_info_dict.get(model_name, None))
+        for model_name in model_name_list
+    ]
     return results
 
 
 def estimate_vram_gb_required(model_info):
     if model_info is None:
         return 0
+
+    param_mem_ratio = 0.65
     return (
         (
             model_info.embedding_io_bytes
@@ -177,6 +207,7 @@ def estimate_vram_gb_required(model_info):
         / 1024
         / 1024
         / 1024
+        / param_mem_ratio
     )
 
 
