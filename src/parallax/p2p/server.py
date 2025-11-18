@@ -771,78 +771,6 @@ class GradientServer:
             self.lattica.close()
 
 
-def run_p2p_server_process(
-    initial_peers: List[str],
-    scheduler_addr: Optional[str],
-    relay_servers: List[str],
-    pp_start_layer: int,
-    pp_end_layer: int,
-    hidden_layers: int,
-    tp_size: int,
-    tcp_port: int,
-    udp_port: int,
-    dht_prefix: str,
-    announce_maddrs: List[str],
-    http_port: Optional[int],
-    notify_url: str,
-    recv_from_peer_addr: str,
-    send_to_peer_addr: str,
-    model_name: Optional[str],
-    max_batch_size: Optional[int] = None,
-    max_sequence_length: Optional[int] = None,
-    param_mem_ratio: float = 0.65,
-    kvcache_mem_ratio: float = 0.25,
-    shared_state: Optional[dict] = None,
-):
-    """Run P2P server as a subprocess
-
-    Args:
-        shared_state: Optional shared dictionary for inter-process communication.
-                     If provided, layer allocation info will be synced to this dict.
-    """
-    server = None
-    try:
-        server = GradientServer(
-            recv_from_peer_addr=recv_from_peer_addr,
-            send_to_peer_addr=send_to_peer_addr,
-            initial_peers=initial_peers,
-            scheduler_addr=scheduler_addr,
-            relay_servers=relay_servers,
-            block_start_index=pp_start_layer,
-            block_end_index=pp_end_layer,
-            hidden_layers=hidden_layers,
-            tp_size=tp_size,
-            dht_prefix=dht_prefix,
-            host_maddrs=[f"/ip4/0.0.0.0/tcp/{tcp_port}", f"/ip4/0.0.0.0/udp/{udp_port}/quic-v1"],
-            announce_maddrs=announce_maddrs,
-            http_port=http_port,
-            notify_url=notify_url,
-            model_name=model_name,
-            max_batch_size=max_batch_size,
-            max_sequence_length=max_sequence_length,
-            param_mem_ratio=param_mem_ratio,
-            kvcache_mem_ratio=kvcache_mem_ratio,
-        )
-        # Attach shared state to server for syncing layer allocation
-        if shared_state is not None:
-            server._shared_state = shared_state
-            # Initialize shared state with current values
-            shared_state["block_start_index"] = server.block_start_index
-            shared_state["block_end_index"] = server.block_end_index
-            shared_state["model_name"] = server.model_name
-            shared_state["tp_size"] = server.tp_size
-            shared_state["status"] = server.status.value
-
-        server.run()
-    except KeyboardInterrupt:
-        logger.debug("P2P server received interrupt signal, shutting down...")
-    except Exception as e:
-        logger.exception(f"P2P server error: {e}")
-    finally:
-        if server is not None:
-            server.shutdown()
-
-
 def launch_p2p_server_process(
     initial_peers: List[str],
     scheduler_addr: Optional[str],
@@ -872,32 +800,55 @@ def launch_p2p_server_process(
         shared_state: Optional shared dictionary for inter-process communication.
                      If provided, layer allocation info will be synced to this dict.
     """
-    process = multiprocessing.Process(
-        target=run_p2p_server_process,
-        args=(
-            initial_peers,
-            scheduler_addr,
-            relay_servers,
-            pp_start_layer,
-            pp_end_layer,
-            hidden_layers,
-            tp_size,
-            tcp_port,
-            udp_port,
-            dht_prefix,
-            announce_maddrs,
-            http_port,
-            notify_url,
-            recv_from_peer_addr,
-            send_to_peer_addr,
-            model_name,
-            max_batch_size,
-            max_sequence_length,
-            param_mem_ratio,
-            kvcache_mem_ratio,
-            shared_state,
-        ),
-    )
+
+    def _run_p2p_server_process():
+        """Run P2P server in subprocess"""
+        server = None
+        try:
+            server = GradientServer(
+                recv_from_peer_addr=recv_from_peer_addr,
+                send_to_peer_addr=send_to_peer_addr,
+                initial_peers=initial_peers,
+                scheduler_addr=scheduler_addr,
+                relay_servers=relay_servers,
+                block_start_index=pp_start_layer,
+                block_end_index=pp_end_layer,
+                hidden_layers=hidden_layers,
+                tp_size=tp_size,
+                dht_prefix=dht_prefix,
+                host_maddrs=[
+                    f"/ip4/0.0.0.0/tcp/{tcp_port}",
+                    f"/ip4/0.0.0.0/udp/{udp_port}/quic-v1",
+                ],
+                announce_maddrs=announce_maddrs,
+                http_port=http_port,
+                notify_url=notify_url,
+                model_name=model_name,
+                max_batch_size=max_batch_size,
+                max_sequence_length=max_sequence_length,
+                param_mem_ratio=param_mem_ratio,
+                kvcache_mem_ratio=kvcache_mem_ratio,
+            )
+            # Attach shared state to server for syncing layer allocation
+            if shared_state is not None:
+                server._shared_state = shared_state
+                # Initialize shared state with current values
+                shared_state["block_start_index"] = server.block_start_index
+                shared_state["block_end_index"] = server.block_end_index
+                shared_state["model_name"] = server.model_name
+                shared_state["tp_size"] = server.tp_size
+                shared_state["status"] = server.status.value
+
+            server.run()
+        except KeyboardInterrupt:
+            logger.debug("P2P server received interrupt signal, shutting down...")
+        except Exception as e:
+            logger.exception(f"P2P server error: {e}")
+        finally:
+            if server is not None:
+                server.shutdown()
+
+    process = multiprocessing.Process(target=_run_p2p_server_process)
     process.start()
     return process
 
@@ -915,60 +866,3 @@ def stop_p2p_server(p2p_server_process: Optional[multiprocessing.Process]):
                 p2p_server_process.join()
         except Exception as e:
             logger.error(f"Failed to terminate P2P server subprocess: {e}")
-
-
-def launch_p2p_server(
-    initial_peers: List[str],
-    scheduler_addr: Optional[str],
-    relay_servers: List[str],
-    pp_start_layer: int,
-    pp_end_layer: int,
-    hidden_layers: int,
-    tp_size: int,
-    tcp_port: int,
-    udp_port: int,
-    dht_prefix: str,
-    announce_maddrs: List[str],
-    http_port: Optional[int],
-    notify_url: str,
-    recv_from_peer_addr: str,
-    send_to_peer_addr: str,
-    model_name: Optional[str],
-    max_batch_size: Optional[int] = None,
-    max_sequence_length: Optional[int] = None,
-    param_mem_ratio: float = 0.65,
-    kvcache_mem_ratio: float = 0.25,
-):
-    """Legacy function: Launch P2P server as a thread (kept for backward compatibility)"""
-    server = GradientServer(
-        recv_from_peer_addr=recv_from_peer_addr,
-        send_to_peer_addr=send_to_peer_addr,
-        initial_peers=initial_peers,
-        scheduler_addr=scheduler_addr,
-        relay_servers=relay_servers,
-        block_start_index=pp_start_layer,
-        block_end_index=pp_end_layer,
-        hidden_layers=hidden_layers,
-        tp_size=tp_size,
-        dht_prefix=dht_prefix,
-        host_maddrs=[f"/ip4/0.0.0.0/tcp/{tcp_port}", f"/ip4/0.0.0.0/udp/{udp_port}/quic-v1"],
-        announce_maddrs=announce_maddrs,
-        http_port=http_port,
-        notify_url=notify_url,
-        model_name=model_name,
-        max_batch_size=max_batch_size,
-        max_sequence_length=max_sequence_length,
-        param_mem_ratio=param_mem_ratio,
-        kvcache_mem_ratio=kvcache_mem_ratio,
-    )
-    # Start the server
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-
-    # Wait for layer allocation and model_name to be set
-    while server.block_start_index is None or (
-        scheduler_addr is not None and server.model_name is None
-    ):
-        time.sleep(1)
-
-    return server
