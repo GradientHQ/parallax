@@ -858,6 +858,7 @@ class Executor:
             prompt = self.tokenizer.apply_chat_template(
                 messages,
                 raw_request.get("tools") or None,
+                tokenize=True,
                 add_generation_prompt=True,
                 **chat_template_kwargs,
             )

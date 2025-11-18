@@ -217,6 +217,7 @@ def form_sgl_server_args(
         mem_fraction_static=0.85,
         moe_runner_backend=moe_runner_backend,
         tp_size=tp_size,
+        trust_remote_code=True,
     )
     return sgl_server_args
 
