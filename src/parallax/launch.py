@@ -49,7 +49,6 @@ if __name__ == "__main__":
     shared_state["model_name"] = None
     shared_state["tp_size"] = None
     shared_state["_layer_allocation_changed"] = False
-    shared_state["_executor_ready"] = False
     shared_state["status"] = ServerState.JOINING.value
 
     try:
@@ -202,10 +201,7 @@ if __name__ == "__main__":
                     # Wait a bit for executors to initialize, then mark as ready
                     # This allows P2P server to report is_active=True
                     time.sleep(2)  # Give executors time to start
-                    shared_state["_executor_ready"] = True
-                    shared_state["status"] = (
-                        ServerState.READY.value
-                    )  # Also sync status for consistency
+                    shared_state["status"] = ServerState.READY.value
 
                     # Monitor executor processes and check for layer allocation changes
                     # Use timeout-based join to periodically check shared state
@@ -238,11 +234,9 @@ if __name__ == "__main__":
                             if shared_state.get("tp_size"):
                                 args.tp_size = shared_state["tp_size"]
 
-                            # Reset the flags
+                            # Reset the flag and set status to INITIALIZING
                             shared_state["_layer_allocation_changed"] = False
-                            shared_state["_executor_ready"] = (
-                                False  # Reset ready flag since executor will restart
-                            )
+                            shared_state["status"] = ServerState.INITIALIZING.value
 
                             logger.info(
                                 f"Creating new executor with layers [{args.start_layer}, {args.end_layer})"

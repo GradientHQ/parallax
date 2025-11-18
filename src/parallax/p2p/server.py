@@ -585,15 +585,11 @@ class GradientServer:
         """Start a thread that regularly announces this module's presence on DHT"""
 
         def _announcer_thread():
-            logger.info("Node announcer thread started")
             try:
                 while not self.stop_event.is_set():
                     # Announce the range ID
                     try:
                         if self.scheduler_peer_id is not None:
-                            logger.debug(
-                                f"Calling node_update, scheduler_peer_id={self.scheduler_peer_id}"
-                            )
                             response_future = self.scheduler_stub.node_update(
                                 self.get_node_info(is_update=True)
                             )
@@ -603,7 +599,6 @@ class GradientServer:
                                 if hasattr(response_future, "result")
                                 else response_future
                             )
-                            logger.debug(f"node_update response received: {response}")
 
                             # Print layer allocation information
                             if response and isinstance(response, dict):
@@ -611,7 +606,7 @@ class GradientServer:
                                 end_layer = response.get("end_layer")
                                 model_name = response.get("model_name")
                                 if start_layer is not None and end_layer is not None:
-                                    logger.info(
+                                    logger.debug(
                                         f"Heartbeat: Node {self.lattica.peer_id()}... "
                                         f"Model: {model_name}, Layers: [{start_layer}, {end_layer})"
                                     )
@@ -681,15 +676,10 @@ class GradientServer:
 
     def _get_is_active(self) -> bool:
         """Get is_active status, checking shared_state if available (subprocess mode)"""
-        # When running in subprocess mode, check shared_state for executor readiness
+        # When running in subprocess mode, check shared_state status
         if hasattr(self, "_shared_state") and self._shared_state is not None:
-            executor_ready = self._shared_state.get("_executor_ready", False)
-            # Also check if status in shared_state is READY (synced from main process)
             shared_status = self._shared_state.get("status")
-            if shared_status == ServerState.READY.value:
-                return True
-            # Fall back to executor_ready flag
-            return executor_ready
+            return shared_status == ServerState.READY.value
         # When running in same process, use local status
         return self.status == ServerState.READY
 
