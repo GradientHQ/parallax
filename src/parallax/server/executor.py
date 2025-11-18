@@ -108,6 +108,8 @@ class Executor:
         nccl_port: Optional[int] = 4000,
         # Optional gradient server for layer reallocation detection
         gradient_server: Optional[Any] = None,
+        # Optional shared state for layer reallocation detection (when running in subprocess)
+        shared_state: Optional[dict] = None,
     ):
         # Backend
         self.device = get_current_device()
@@ -194,6 +196,8 @@ class Executor:
         self._should_stop = False  # Flag to gracefully stop the executor
         # Reference to gradient server for layer reallocation detection
         self.gradient_server = gradient_server
+        # Reference to shared state for layer reallocation detection (when in subprocess mode)
+        self.shared_state = shared_state
 
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
@@ -332,9 +336,9 @@ class Executor:
                 )
 
     @classmethod
-    def create_from_args(cls, args: argparse.Namespace, gradient_server=None):
+    def create_from_args(cls, args: argparse.Namespace, gradient_server=None, shared_state=None):
         """Create executor from command line arguments."""
-        return cls(**create_executor_config(args, gradient_server))
+        return cls(**create_executor_config(args, gradient_server, shared_state))
 
     def _tensor_parallel_broadcast_byobj(self, broadcast_obj):
         """Wrapper for broadcast pyobject in TP group"""
@@ -1439,7 +1443,14 @@ class Executor:
                 self.finished_batch = []
 
             # Check for layer reallocation signal (before batch processing)
-            if self.gradient_server is not None and self.gradient_server._layer_allocation_changed:
+            # Check via gradient_server (when running in same process) or shared_state (when in subprocess)
+            layer_changed = False
+            if self.gradient_server is not None:
+                layer_changed = self.gradient_server._layer_allocation_changed
+            elif self.shared_state is not None:
+                layer_changed = self.shared_state.get("_layer_allocation_changed", False)
+
+            if layer_changed:
                 logger.info(
                     "Layer reallocation detected. Stopping executor to reload with new layers."
                 )
@@ -1567,11 +1578,11 @@ class Executor:
         logger.debug("Executor shutdown complete.")
 
 
-def run_executor_process(args, gradient_server=None):
+def run_executor_process(args, gradient_server=None, shared_state=None):
     """Run executor as a subprocess"""
     executor = None
     try:
-        executor = Executor.create_from_args(args, gradient_server)
+        executor = Executor.create_from_args(args, gradient_server, shared_state)
         executor.run_loop()
     except KeyboardInterrupt:
         logger.debug("Received interrupt signal, shutting down...")
@@ -1592,7 +1603,7 @@ def stop_executor_process(executor_process):
         logger.error(f"Failed to terminate executor subprocess: {e}")
 
 
-def create_executor_config(args: argparse.Namespace, gradient_server=None):
+def create_executor_config(args: argparse.Namespace, gradient_server=None, shared_state=None):
     """Create executor configuration from command line arguments."""
 
     config = {
@@ -1620,6 +1631,7 @@ def create_executor_config(args: argparse.Namespace, gradient_server=None):
         "tp_size": args.tp_size,
         "nccl_port": args.nccl_port,
         "gradient_server": gradient_server,
+        "shared_state": shared_state,
         "use_hfcache": args.use_hfcache,
     }
     return config
