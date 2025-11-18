@@ -3,10 +3,9 @@ Launch the Parallax server.
 
 This script is used to launch the Parallax server.
 It will start the following services:
-    1.Executor with tp_rank=0 as a subprocess.
-    2.Executor with tp_rank>0, each tp_rank as a subprocess.
-    3.HTTP server as a subprocess.
-    4.P2P server as a subprocess.
+    1.Executor with tp_rank>=0, each tp_rank as a subprocess.
+    2.HTTP server as a subprocess.
+    3.P2P server as a subprocess.
 
 Example command:
 python src/parallax/launch.py \
@@ -33,6 +32,31 @@ from parallax_utils.logging_config import get_logger, set_log_level
 from parallax_utils.version_check import check_latest_release
 
 logger = get_logger("parallax.launch")
+
+
+def _handle_layer_reallocation(args, shared_state, executor_subprocs):
+    """Handle layer reallocation: stop executors, update args, reset flags"""
+    logger.warning("Layer allocation changed detected! Stopping executor processes to reload...")
+
+    # Shutdown all executor processes
+    for executor_process in executor_subprocs:
+        if executor_process.is_alive():
+            logger.debug(f"Terminating executor process {executor_process.pid}")
+            stop_executor_process(executor_process)
+
+    # Update args with new layer allocation from shared state
+    args.start_layer = shared_state["block_start_index"]
+    args.end_layer = shared_state["block_end_index"]
+    if shared_state.get("model_name"):
+        args.model_path = shared_state["model_name"]
+    if shared_state.get("tp_size"):
+        args.tp_size = shared_state["tp_size"]
+
+    # Reset the flag and set status to INITIALIZING
+    shared_state["_layer_allocation_changed"] = False
+    shared_state["status"] = ServerState.INITIALIZING.value
+
+    logger.info(f"Creating new executor with layers [{args.start_layer}, {args.end_layer})")
 
 
 if __name__ == "__main__":
@@ -212,51 +236,17 @@ if __name__ == "__main__":
 
                         # Check if layer allocation changed while executor is running
                         if shared_state.get("_layer_allocation_changed", False):
-                            logger.warning(
-                                "Layer allocation changed detected! Stopping executor processes to reload..."
-                            )
-
-                            # Shutdown all executor processes
-                            for executor_process in executor_subprocs:
-                                if executor_process.is_alive():
-                                    logger.debug(
-                                        f"Terminating executor process {executor_process.pid}"
-                                    )
-                                    stop_executor_process(executor_process)
-
-                            # Update args with new layer allocation from shared state
-                            args.start_layer = shared_state["block_start_index"]
-                            args.end_layer = shared_state["block_end_index"]
-                            if shared_state.get("model_name"):
-                                args.model_path = shared_state["model_name"]
-                            if shared_state.get("tp_size"):
-                                args.tp_size = shared_state["tp_size"]
-
-                            # Reset the flag and set status to INITIALIZING
-                            shared_state["_layer_allocation_changed"] = False
-                            shared_state["status"] = ServerState.INITIALIZING.value
-
-                            logger.info(
-                                f"Creating new executor with layers [{args.start_layer}, {args.end_layer})"
-                            )
+                            _handle_layer_reallocation(args, shared_state, executor_subprocs)
                             layer_reallocation_detected = True
                             break  # Exit inner loop to restart executor processes
 
                     # Check if we exited due to layer allocation change
                     if layer_reallocation_detected:
-                        # Continue outer loop to restart executor processes with new layer allocation
-                        continue  # Create new executor in next iteration
+                        continue  # Restart executor processes with new layer allocation
                     elif shared_state.get("_layer_allocation_changed", False):
-                        # This should not happen as we check above, but handle it anyway
-                        logger.warning("Layer allocation changed after executor exit, reloading...")
-                        args.start_layer = shared_state["block_start_index"]
-                        args.end_layer = shared_state["block_end_index"]
-                        if shared_state.get("model_name"):
-                            args.model_path = shared_state["model_name"]
-                        if shared_state.get("tp_size"):
-                            args.tp_size = shared_state["tp_size"]
-                        shared_state["_layer_allocation_changed"] = False
-                        continue  # Create new executor in next iteration
+                        # Handle layer reallocation detected after executor exit (race condition)
+                        _handle_layer_reallocation(args, shared_state, executor_subprocs)
+                        continue  # Restart executor processes with new layer allocation
                     else:
                         # All processes exited normally
                         break  # Normal exit
