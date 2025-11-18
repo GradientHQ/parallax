@@ -124,6 +124,7 @@ if __name__ == "__main__":
                 param_mem_ratio=args.param_mem_ratio,
                 kvcache_mem_ratio=args.kvcache_mem_ratio,
                 shared_state=shared_state,
+                log_level=args.log_level,
             )
 
             # Launch all executor processes (including tp_rank=0)
@@ -167,6 +168,7 @@ if __name__ == "__main__":
                 param_mem_ratio=args.param_mem_ratio,
                 kvcache_mem_ratio=args.kvcache_mem_ratio,
                 shared_state=shared_state,
+                log_level=args.log_level,
             )
 
             # Wait for layer allocation from scheduler (via shared state)

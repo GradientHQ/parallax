@@ -10,7 +10,6 @@ It is used to handle the communication between the peers, and communicate with t
 import dataclasses
 import enum
 import json
-import logging
 import multiprocessing
 import threading
 import time
@@ -27,8 +26,9 @@ from parallax.p2p.utils import AsyncWorker
 from parallax.server.metrics import get_metrics, set_metrics_publisher
 from parallax.server.server_info import detect_node_hardware
 from parallax.utils.utils import get_zmq_socket
+from parallax_utils.logging_config import get_logger, set_log_level
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Global HTTP client for reuse
 _http_client = None
@@ -793,8 +793,11 @@ def _run_p2p_server_process(
     param_mem_ratio: float = 0.65,
     kvcache_mem_ratio: float = 0.25,
     shared_state: Optional[dict] = None,
+    log_level: str = "INFO",
 ):
     """Run P2P server in subprocess"""
+    # Set log level in subprocess (spawn mode doesn't inherit log configuration)
+    set_log_level(log_level)
     server = None
     try:
         server = GradientServer(
@@ -863,12 +866,14 @@ def launch_p2p_server_process(
     param_mem_ratio: float = 0.65,
     kvcache_mem_ratio: float = 0.25,
     shared_state: Optional[dict] = None,
+    log_level: str = "INFO",
 ) -> multiprocessing.Process:
     """Launch P2P server as a subprocess and return the process object
 
     Args:
         shared_state: Optional shared dictionary for inter-process communication.
                      If provided, layer allocation info will be synced to this dict.
+        log_level: Log level for the subprocess (default: INFO).
     """
     process = multiprocessing.Process(
         target=_run_p2p_server_process,
@@ -894,6 +899,7 @@ def launch_p2p_server_process(
             param_mem_ratio,
             kvcache_mem_ratio,
             shared_state,
+            log_level,
         ),
     )
     process.start()
