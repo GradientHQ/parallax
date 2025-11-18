@@ -110,9 +110,8 @@ if __name__ == "__main__":
                     target=run_executor_process,
                     args=(
                         args_copy,
-                        None,
                         shared_state,
-                    ),  # gradient_server is None, using shared_state
+                    ),
                 )
                 proc.start()
                 executor_subprocs.append(proc)
@@ -191,9 +190,8 @@ if __name__ == "__main__":
                             target=run_executor_process,
                             args=(
                                 args_copy,
-                                None,
                                 shared_state,
-                            ),  # gradient_server is None, using shared_state
+                            ),
                         )
                         proc.start()
                         executor_subprocs.append(proc)
