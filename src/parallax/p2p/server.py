@@ -275,7 +275,7 @@ class GradientServer:
 
         if len(self.initial_peers) > 0:
             logger.info(f"Using initial peers: {self.initial_peers}")
-            self.lattica.with_bootstraps(self.initial_peers).with_mdns(False)
+            self.lattica.with_bootstraps(self.initial_peers)
 
         self.lattica.build()
 
