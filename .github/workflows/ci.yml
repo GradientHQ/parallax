@@ -16,11 +16,6 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-
     - name: Check for file changes
       id: changes
       uses: dorny/paths-filter@v2
@@ -28,6 +23,12 @@ jobs:
         filters: |
           src:
             - 'src/**'
+
+    - name: Set up Python ${{ matrix.python-version }}
+      if: steps.changes.outputs.src == 'true'
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
 
     - name: Cache pip dependencies
       if: steps.changes.outputs.src == 'true'
