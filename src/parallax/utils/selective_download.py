@@ -1,13 +1,42 @@
+import inspect
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 
 logger = logging.getLogger(__name__)
 from parallax.utils.weight_filter_utils import (
     determine_needed_weight_files_for_download,
 )
+
+# Monkey patch HfApi.repo_info to add short timeout for faster failure on network issues
+# This prevents snapshot_download from hanging silently when Hugging Face Hub is unreachable
+_original_repo_info = HfApi.repo_info
+_REPO_INFO_TIMEOUT = float(os.environ.get("PARALLAX_HF_REPO_INFO_TIMEOUT", "5.0"))
+
+
+def _repo_info_with_timeout(self, repo_id, repo_type=None, revision=None, **kwargs):
+    """Wrapper for HfApi.repo_info that injects a short timeout if not provided."""
+    if "timeout" not in kwargs:
+        kwargs["timeout"] = _REPO_INFO_TIMEOUT
+        logger.debug(f"Injecting timeout={_REPO_INFO_TIMEOUT}s for repo_info call to {repo_id}")
+    return _original_repo_info(
+        self, repo_id=repo_id, repo_type=repo_type, revision=revision, **kwargs
+    )
+
+
+# Only apply monkey patch if repo_info accepts timeout parameter
+_repo_info_signature = inspect.signature(_original_repo_info)
+if "timeout" in _repo_info_signature.parameters or "kwargs" in str(_repo_info_signature):
+    HfApi.repo_info = _repo_info_with_timeout
+    logger.debug(f"Applied monkey patch to HfApi.repo_info with timeout={_REPO_INFO_TIMEOUT}s")
+else:
+    logger.warning(
+        "HfApi.repo_info does not accept 'timeout' parameter - monkey patch skipped. "
+        "Network timeout issues may still occur."
+    )
 
 EXCLUDE_WEIGHT_PATTERNS = [
     "*.safetensors",
@@ -89,14 +118,30 @@ def selective_model_download(
                 logger.info(f"Downloading {len(needed_weight_files)} weight files")
 
                 for weight_file in needed_weight_files:
+                    # Check if file already exists in local cache before downloading
+                    weight_file_path = model_path / weight_file
+                    if weight_file_path.exists():
+                        logger.debug(
+                            f"Weight file {weight_file} already exists locally, skipping download"
+                        )
+                        continue
+
                     logger.debug(f"Downloading {weight_file}")
-                    hf_hub_download(
-                        repo_id=repo_id,
-                        filename=weight_file,
-                        cache_dir=cache_dir,
-                        force_download=force_download,
-                        local_files_only=local_files_only,
-                    )
+                    try:
+                        hf_hub_download(
+                            repo_id=repo_id,
+                            filename=weight_file,
+                            cache_dir=cache_dir,
+                            force_download=force_download,
+                            local_files_only=local_files_only,
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to download {weight_file} for {repo_id}: {e}")
+                        logger.error(
+                            "This node cannot reach Hugging Face Hub to download weight files. "
+                            "Please check network connectivity or pre-download the model."
+                        )
+                        raise
 
                 logger.debug(f"Downloaded weight files for layers [{start_layer}, {end_layer})")
         else:
