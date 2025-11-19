@@ -91,7 +91,7 @@ def proto_to_request(
             status=status,
             input_ids=list(proto_req.input_ids),
             hidden_states=hidden_states,
-            routing_table=proto_req.routing_table,
+            routing_table=list(proto_req.routing_table),
             next_token_id=next_token_id,
             sampling_params=sampling_params,
         )

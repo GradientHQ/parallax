@@ -1418,20 +1418,18 @@ class Executor:
         )
         self._should_stop = False
         while not self._should_stop:
-            # 1. Ingest new requests from the http frontend
-            http_requests = []
+            received_requests = []
 
             if self.is_first_peer:
-                http_requests = self.recv_requests_from_http()
+                received_requests = self.recv_requests_from_http()
 
-            # 2. Ingest new requests from the RPC server
             incoming_requests = self.recv_requests_from_peer()
+            if incoming_requests:
+                received_requests.extend(incoming_requests)
 
-            # 3. Merge and handle requests
-            received_requests = self._join_requests(http_requests, incoming_requests)
             self._handle_input_requests(received_requests)
 
-            # 4. Send finished batch to next peer
+            # Send finished batch to next peer
             if len(self.finished_batch) > 0 and self.is_first_peer and self.tp_rank == 0:
                 self.send_to_peer_socket.send_multipart(
                     [b"abort", abort_request_to_proto(self.finished_batch).SerializeToString()]
