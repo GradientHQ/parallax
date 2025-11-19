@@ -330,10 +330,7 @@ class HTTPHandler:
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
 
-            is_finished = (
-                recv_dict.get("eos", False)
-                or recv_dict.get("length", False)
-            )
+            is_finished = recv_dict.get("eos", False) or recv_dict.get("length", False)
 
             # Only process and send non-EOS tokens
             if not is_finished and len(output) > 0:

@@ -182,7 +182,11 @@ class Scheduler:
         if self.eos_token_id and last_token_id == self.eos_token_id:
             request.update_status(RequestStatus.FINISHED_EOS)
             finished = True
-        elif self.tokenizer and self.tokenizer.eos_token_id and last_token_id == self.tokenizer.eos_token_id:
+        elif (
+            self.tokenizer
+            and self.tokenizer.eos_token_id
+            and last_token_id == self.tokenizer.eos_token_id
+        ):
             request.update_status(RequestStatus.FINISHED_EOS)
             finished = True
         elif request.output_length >= request.max_new_tokens:
