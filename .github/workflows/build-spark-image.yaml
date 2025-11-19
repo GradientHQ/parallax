@@ -1,15 +1,9 @@
 name: Build Spark Image
 
 on:
+  schedule:
+    - cron: '0 3 * * *'
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'docker/**'
-      - 'src/**'
-      - 'pyproject.toml'
-      - 'README.md'
 
 
 env:

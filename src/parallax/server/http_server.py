@@ -330,14 +330,10 @@ class HTTPHandler:
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
 
-            is_eos = (
-                recv_dict.get("eos", False)
-                or output == "<|im_end|>"
-                or recv_dict.get("length", False)
-            )
+            is_finished = recv_dict.get("eos", False) or recv_dict.get("length", False)
 
             # Only process and send non-EOS tokens
-            if not is_eos and len(output) > 0:
+            if not is_finished and len(output) > 0:
                 # Accumulate full text for non-streaming and potentially for logging
                 request_info.text += output
                 request_info.completion_tokens += 1
@@ -347,13 +343,17 @@ class HTTPHandler:
                     await request_info.token_queue.put(output)
 
             # If it is the end of the stream, update status and send sentinel
-            if is_eos:
+            if is_finished:
                 if recv_dict.get("length", False):
-                    logger.info(f"Request {rid} finished with length")
+                    logger.debug(f"Request {rid} finished with length")
                     request_info.finish_reason = "length"
-                else:
-                    request_info.finish_reason = "stop"
+                elif recv_dict.get("eos", False):
+                    logger.debug(f"Request {rid} finished with eos")
+                    request_info.finish_reason = "eos"
                     request_info.matched_stop = 0
+                else:
+                    logger.debug(f"Request {rid} finished with unknown reason")
+                    request_info.finish_reason = "unknown"
 
                 request_info.is_finish = True
                 if request_info.stream:

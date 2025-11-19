@@ -1,15 +1,9 @@
 name: Build Images
 
 on:
+  schedule:
+    - cron: '0 0 * * *'
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'docker/**'
-      - 'src/**'
-      - 'pyproject.toml'
-      - 'README.md'
 
 
 env:
@@ -24,9 +18,6 @@ jobs:
       packages: write
       id-token: write
       attestations: write
-    strategy:
-      matrix:
-        variant: [blackwell, hopper]
 
     steps:
     - name: Checkout code
@@ -51,16 +42,16 @@ jobs:
       with:
         images: ${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}
         tags: |
-          type=ref,event=branch,suffix=-${{ matrix.variant }}
-          type=ref,event=pr,suffix=-${{ matrix.variant }}
-          type=raw,value=latest-${{ matrix.variant }},enable={{is_default_branch}}
+          type=ref,event=branch
+          type=ref,event=pr
+          type=raw,value=latest,enable={{is_default_branch}}
 
     - name: Build and push Docker image
       id: build
       uses: docker/build-push-action@v5
       with:
         context: .
-        file: ./docker/Dockerfile.${{ matrix.variant }}
+        file: ./docker/Dockerfile
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}

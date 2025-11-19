@@ -75,7 +75,7 @@ def load_detokenizer(model_path, tokenizer):
     Note, to use a fast streaming tokenizer, pass a local file path rather than
     a Hugging Face repo ID.
     """
-    detokenizer_class = NaiveStreamingDetokenizer
+    detokenizer_class = ParallaxNaiveStreamingDetokenizer
     tokenmap = None
 
     tokenizer_file = model_path / "tokenizer.json"

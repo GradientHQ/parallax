@@ -124,7 +124,19 @@ def determine_needed_weight_files_for_download(
     index_file = model_path / "model.safetensors.index.json"
 
     if not index_file.exists():
-        logger.debug(f"Index file not found at {index_file}")
+        logger.debug(f"Index file not found at {index_file}, checking for single weight file")
+        # For non-sharded models, look for single weight file
+        single_weight_files = [
+            "model.safetensors",
+            "pytorch_model.bin",
+            "model.bin",
+        ]
+        for weight_file in single_weight_files:
+            if (model_path / weight_file).exists():
+                logger.debug(f"Found single weight file: {weight_file}")
+                return [weight_file]
+
+        logger.debug("No weight files found (neither index nor single file)")
         return []
 
     with open(index_file, "r") as f:
