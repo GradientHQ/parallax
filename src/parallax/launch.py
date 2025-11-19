@@ -74,6 +74,11 @@ if __name__ == "__main__":
     shared_state["tp_size"] = None
     shared_state["_layer_allocation_changed"] = False
     shared_state["status"] = ServerState.JOINING.value
+    # Create nested shared dict for metrics (Manager().dict() only supports top-level keys)
+    shared_state["metrics"] = manager.dict()
+    shared_state["metrics"]["current_requests"] = 0
+    shared_state["metrics"]["layer_latency_ms"] = None
+    shared_state["metrics"]["_last_update_ts"] = 0.0
 
     try:
         args = parse_args()

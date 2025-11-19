@@ -32,18 +32,13 @@ def _get_metrics_dict() -> Dict[str, Any]:
     """Get the metrics dictionary to update/read from.
 
     Returns shared_state["metrics"] if available, otherwise returns local _metrics.
-    Automatically initializes shared_state["metrics"] if needed.
+    Note: shared_state["metrics"] should be a Manager().dict() for proper inter-process sharing.
     """
     global _metrics, _shared_state
     if _shared_state is not None:
         try:
-            if "metrics" not in _shared_state:
-                _shared_state["metrics"] = {
-                    "current_requests": 0,
-                    "layer_latency_ms": None,
-                    "_last_update_ts": 0.0,
-                }
-            return _shared_state["metrics"]
+            if "metrics" in _shared_state:
+                return _shared_state["metrics"]
         except Exception:
             # Fallback to local _metrics if shared_state access fails
             return _metrics
@@ -89,8 +84,16 @@ def update_metrics(
 
 
 def get_metrics() -> Dict[str, Any]:
-    """Return a shallow copy of current metrics suitable for JSON serialization."""
-    return dict(_get_metrics_dict())
+    """Return a shallow copy of current metrics suitable for JSON serialization.
+
+    For Manager().dict(), we need to access it directly and then create a copy,
+    as dict() constructor may not properly read from Manager().dict() in all cases.
+    """
+    metrics_dict = _get_metrics_dict()
+    # For Manager().dict(), create a copy by accessing each key explicitly
+    if hasattr(metrics_dict, "keys"):  # Check if it's a dict-like object
+        return {k: metrics_dict[k] for k in metrics_dict.keys()}
+    return dict(metrics_dict)
 
 
 def set_metrics_publisher(publisher: Optional[Callable[[Dict[str, Any]], None]]) -> None:

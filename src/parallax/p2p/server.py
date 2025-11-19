@@ -23,7 +23,7 @@ from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream, rpc_stre
 from backend.server.rpc_connection_handler import RPCConnectionHandler
 from parallax.p2p.proto import forward_pb2
 from parallax.p2p.utils import AsyncWorker
-from parallax.server.metrics import get_metrics, set_metrics_publisher
+from parallax.server.metrics import get_metrics, set_metrics_publisher, set_shared_state
 from parallax.server.server_info import detect_node_hardware
 from parallax.utils.utils import get_zmq_socket
 from parallax_utils.logging_config import get_logger, set_log_level
@@ -674,14 +674,15 @@ class GradientServer:
             f"Started node announcer thread (daemon={self.announcer.daemon}, alive={self.announcer.is_alive()})"
         )
 
-    def _get_is_active(self) -> bool:
-        """Get is_active status, checking shared_state if available (subprocess mode)"""
+    def _get_status(self) -> str:
+        """Get current status, checking shared_state if available (subprocess mode)"""
         # When running in subprocess mode, check shared_state status
         if hasattr(self, "_shared_state") and self._shared_state is not None:
             shared_status = self._shared_state.get("status")
-            return shared_status == ServerState.READY.value
+            if shared_status is not None:
+                return shared_status
         # When running in same process, use local status
-        return self.status == ServerState.READY
+        return self.status.value
 
     def get_node_info(self, is_update: bool = False):
         # update rtt to nodes
@@ -728,8 +729,8 @@ class GradientServer:
                 1024 if self.max_sequence_length is None else self.max_sequence_length
             ),
             "rtt_to_nodes": self.rtts,
-            "status": self.status.value,
-            "is_active": self._get_is_active(),
+            "status": self._get_status(),
+            "is_active": self._get_status() == ServerState.READY.value,
         }
 
         # For manual layer assignment, always include start_layer and end_layer
@@ -833,6 +834,8 @@ def _run_p2p_server_process(
             shared_state["model_name"] = server.model_name
             shared_state["tp_size"] = server.tp_size
             shared_state["status"] = server.status.value
+            # Configure metrics to use shared_state for inter-process communication
+            set_shared_state(shared_state)
 
         server.run()
     except KeyboardInterrupt:
