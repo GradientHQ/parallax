@@ -347,18 +347,10 @@ class Executor:
         )
         return broadcast_result
 
-    def _join_requests(self, left_reqs: List[Request], right_reqs: List[Request]):
-        """Merge two request lists"""
-        if not left_reqs:
-            return right_reqs
-        if not right_reqs:
-            return left_reqs
-        return left_reqs + right_reqs
-
     def recv_requests_from_http(self) -> List[Request]:
         """Receives requests from http frontend"""
         if self.tp_rank != 0:
-            return None
+            return []
 
         recv_reqs = []
         while True:
@@ -380,7 +372,7 @@ class Executor:
             except Exception as e:
                 logger.exception(f"Error receiving http request: {e}")
                 self._notify_http_request_error(raw_request, e)
-        if recv_reqs:
+        if len(recv_reqs) > 0:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
         return recv_reqs
 
@@ -440,7 +432,7 @@ class Executor:
                 except Exception as e:
                     logger.exception(f"Error receiving or deserializing request: {e}")
         else:
-            recv_reqs = None
+            recv_reqs = []
 
         return recv_reqs
 
