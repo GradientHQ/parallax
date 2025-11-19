@@ -240,9 +240,7 @@ class Executor:
         else:
             self.pad_token_id = self.tokenizer.pad_token_id
 
-        self.eos_token_id = self.tokenizer.eos_token_id
-        if isinstance(self.eos_token_id, list):
-            self.eos_token_id = self.eos_token_id[0]
+        self.eos_token_id = self.config.get("eos_token_id", None)
 
         if self.device == "mlx":
             # Other setup for MAC
@@ -295,6 +293,7 @@ class Executor:
             micro_batch_ratio=micro_batch_ratio,
             is_first_peer=self.is_first_peer,
             tokenizer=self.tokenizer,
+            eos_token_id=self.eos_token_id,
             kv_cache_manager=self.kv_cache_manager if self.device == "mlx" else None,
             request_timeout_s=request_timeout_s,
         )
@@ -348,18 +347,10 @@ class Executor:
         )
         return broadcast_result
 
-    def _join_requests(self, left_reqs: List[Request], right_reqs: List[Request]):
-        """Merge two request lists"""
-        if not left_reqs:
-            return right_reqs
-        if not right_reqs:
-            return left_reqs
-        return left_reqs + right_reqs
-
     def recv_requests_from_http(self) -> List[Request]:
         """Receives requests from http frontend"""
         if self.tp_rank != 0:
-            return None
+            return []
 
         recv_reqs = []
         while True:
@@ -381,7 +372,7 @@ class Executor:
             except Exception as e:
                 logger.exception(f"Error receiving http request: {e}")
                 self._notify_http_request_error(raw_request, e)
-        if recv_reqs:
+        if len(recv_reqs) > 0:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
         return recv_reqs
 
@@ -441,7 +432,7 @@ class Executor:
                 except Exception as e:
                     logger.exception(f"Error receiving or deserializing request: {e}")
         else:
-            recv_reqs = None
+            recv_reqs = []
 
         return recv_reqs
 
@@ -858,6 +849,7 @@ class Executor:
             prompt = self.tokenizer.apply_chat_template(
                 messages,
                 raw_request.get("tools") or None,
+                tokenize=True,
                 add_generation_prompt=True,
                 **chat_template_kwargs,
             )
@@ -976,7 +968,7 @@ class Executor:
                             "next_token_id": req.next_token_id,
                             "rid": req.request_id,
                         }
-                        if req.next_token_id == self.tokenizer.eos_token_id:
+                        if original_req.status == RequestStatus.FINISHED_EOS:
                             req_dict["eos"] = True
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
@@ -1418,20 +1410,18 @@ class Executor:
         )
         self._should_stop = False
         while not self._should_stop:
-            # 1. Ingest new requests from the http frontend
-            http_requests = []
+            received_requests = []
 
+            # Receive requests from http frontend
             if self.is_first_peer:
-                http_requests = self.recv_requests_from_http()
+                received_requests = self.recv_requests_from_http()
 
-            # 2. Ingest new requests from the RPC server
-            incoming_requests = self.recv_requests_from_peer()
+            # Receive requests from peer
+            received_requests.extend(self.recv_requests_from_peer())
 
-            # 3. Merge and handle requests
-            received_requests = self._join_requests(http_requests, incoming_requests)
             self._handle_input_requests(received_requests)
 
-            # 4. Send finished batch to next peer
+            # Send finished batch to next peer
             if len(self.finished_batch) > 0 and self.is_first_peer and self.tp_rank == 0:
                 self.send_to_peer_socket.send_multipart(
                     [b"abort", abort_request_to_proto(self.finished_batch).SerializeToString()]

@@ -430,7 +430,7 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
                 prev = node
             self._rr_cursor += 1
             attempts += 1
-            if viable:
+            if viable and total_latency != float("inf"):
                 return candidate_ids, total_latency
             # Attempt a one-shot repair if the selected pipeline is not viable
             repaired = self._attempt_repair_pipeline(candidate_ids, nodes, num_layers)

@@ -145,7 +145,7 @@ const Dash: FC<{ animate?: boolean }> = ({ animate }) => {
 };
 
 const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node }) => {
-  const { id, status, gpuName, gpuMemory } = node || { status: 'waiting' };
+  const { id, status, gpuNumber, gpuName, gpuMemory } = node || { status: 'waiting' };
   const { palette } = useTheme();
   const { main, lighter } =
     status === 'waiting' ?
@@ -186,7 +186,13 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
           {(node && (
             <>
               <Typography variant='body1' sx={{ fontWeight: 500 }}>
-                {gpuName} {gpuMemory}GB
+                {[
+                  (gpuNumber && gpuNumber > 1 && `${gpuNumber}x`) || '',
+                  gpuName,
+                  (gpuMemory && `${gpuMemory}GB`) || '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
               </Typography>
               {/* <Typography variant='caption' color='text.disabled'>
                 Rancho Cordova, United States
