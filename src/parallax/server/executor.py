@@ -1412,12 +1412,12 @@ class Executor:
         while not self._should_stop:
             received_requests = []
 
+            # Receive requests from http frontend
             if self.is_first_peer:
                 received_requests = self.recv_requests_from_http()
 
-            incoming_requests = self.recv_requests_from_peer()
-            if incoming_requests:
-                received_requests.extend(incoming_requests)
+            # Receive requests from peer
+            received_requests.extend(self.recv_requests_from_peer())
 
             self._handle_input_requests(received_requests)
 
