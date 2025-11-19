@@ -1,4 +1,4 @@
-FROM lmsysorg/sglang:v0.5.4.post1
+FROM lmsysorg/sglang:v0.5.5
 
 ENV SGLANG_ENABLE_JIT_DEEPGEMM=0
 
