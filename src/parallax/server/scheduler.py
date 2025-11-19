@@ -177,7 +177,6 @@ class Scheduler:
 
         finished = False
         last_token_id = request.output_ids[-1] if request.output_ids else None
-        logger.debug(f"Last token ID: {last_token_id}, eos token ID: {self.eos_token_id}, tokenizer eos token ID: {self.tokenizer.eos_token_id if self.tokenizer else None}")
         if request.abort:
             finished = True
         if self.eos_token_id and last_token_id == self.eos_token_id:
