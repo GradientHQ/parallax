@@ -136,7 +136,9 @@ if __name__ == "__main__":
             )
             args.start_layer = gradient_server.block_start_index
             args.end_layer = gradient_server.block_end_index
-            args.model_path = gradient_server.model_name
+            # Only read model_name from scheduler if model_path is not set, so we can use local path as model_path
+            if args.model_path is None:
+                args.model_path = gradient_server.model_name
             args.tp_size = gradient_server.tp_size
 
             logger.debug(
