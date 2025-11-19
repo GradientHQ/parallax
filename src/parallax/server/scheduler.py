@@ -66,8 +66,8 @@ class Scheduler:
         self.is_first_peer = is_first_peer
         if is_first_peer:
             # Load configs for building InitialRequest
-            self.tokenizer = kwargs.get("tokenizer")
-            self.eos_token_id = self.tokenizer.eos_token_id
+            self.tokenizer = kwargs.get("tokenizer", None)
+            self.eos_token_id = kwargs.get("eos_token_id", None)
             self.max_new_tokens = kwargs.get("max_new_tokens", 512)
             self.max_total_length = kwargs.get("max_total_length", 1024)
 
@@ -177,9 +177,13 @@ class Scheduler:
 
         finished = False
         last_token_id = request.output_ids[-1] if request.output_ids else None
+        logger.debug(f"Last token ID: {last_token_id}, eos token ID: {self.eos_token_id}, tokenizer eos token ID: {self.tokenizer.eos_token_id if self.tokenizer else None}")
         if request.abort:
             finished = True
-        if last_token_id == self.eos_token_id:
+        if self.eos_token_id and last_token_id == self.eos_token_id:
+            request.update_status(RequestStatus.FINISHED_EOS)
+            finished = True
+        elif self.tokenizer and self.tokenizer.eos_token_id and last_token_id == self.tokenizer.eos_token_id:
             request.update_status(RequestStatus.FINISHED_EOS)
             finished = True
         elif request.output_length >= request.max_new_tokens:

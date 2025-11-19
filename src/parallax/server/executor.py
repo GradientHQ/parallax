@@ -240,9 +240,7 @@ class Executor:
         else:
             self.pad_token_id = self.tokenizer.pad_token_id
 
-        self.eos_token_id = self.tokenizer.eos_token_id
-        if isinstance(self.eos_token_id, list):
-            self.eos_token_id = self.eos_token_id[0]
+        self.eos_token_id = self.config.get("eos_token_id", None)
 
         if self.device == "mlx":
             # Other setup for MAC
@@ -295,6 +293,7 @@ class Executor:
             micro_batch_ratio=micro_batch_ratio,
             is_first_peer=self.is_first_peer,
             tokenizer=self.tokenizer,
+            eos_token_id=self.eos_token_id,
             kv_cache_manager=self.kv_cache_manager if self.device == "mlx" else None,
             request_timeout_s=request_timeout_s,
         )
@@ -977,7 +976,7 @@ class Executor:
                             "next_token_id": req.next_token_id,
                             "rid": req.request_id,
                         }
-                        if req.next_token_id == self.tokenizer.eos_token_id:
+                        if original_req.status == RequestStatus.FINISHED_EOS:
                             req_dict["eos"] = True
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
