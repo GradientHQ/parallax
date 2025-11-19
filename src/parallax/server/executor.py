@@ -36,7 +36,7 @@ from parallax.p2p.message_util import (
 )
 from parallax.p2p.proto import forward_pb2
 from parallax.server.kv_cache import KVCacheManager
-from parallax.server.metrics import update_metrics
+from parallax.server.metrics import set_shared_state, update_metrics
 from parallax.server.radix_cache import RadixCache
 from parallax.server.request import (
     InitialRequest,
@@ -194,6 +194,9 @@ class Executor:
         self._should_stop = False  # Flag to gracefully stop the executor
         # Reference to shared state for layer reallocation detection (when in subprocess mode)
         self.shared_state = shared_state
+        # Configure metrics to use shared_state for inter-process communication
+        if shared_state is not None:
+            set_shared_state(shared_state)
 
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
