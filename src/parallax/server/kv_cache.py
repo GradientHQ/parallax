@@ -179,6 +179,7 @@ class KVCacheManager:
         linear_num_v_heads: Optional[int] = None,
         qk_nope_head_dim: Optional[int] = None,
         qk_rope_head_dim: Optional[int] = None,
+        v_head_dim: Optional[int] = None,
     ):
         """
         Args:
@@ -202,11 +203,12 @@ class KVCacheManager:
         self.linear_num_v_heads = linear_num_v_heads
         self.qk_nope_head_dim = qk_nope_head_dim
         self.qk_rope_head_dim = qk_rope_head_dim
+        self.v_head_dim = v_head_dim
         if qk_nope_head_dim and qk_rope_head_dim:
             self.head_dim_k = qk_nope_head_dim + qk_rope_head_dim
         else:
             self.head_dim_k = head_dim
-        self.head_dim_v = head_dim
+        self.head_dim_v = v_head_dim if v_head_dim is not None else head_dim
 
         self.request_caches: Dict[str, KVCache] = {}
         self.tokens_in_cache = 0

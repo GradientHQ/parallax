@@ -215,6 +215,7 @@ class Executor:
         ) // self.config.get("num_attention_heads")
         self.qk_nope_head_dim = self.config.get("qk_nope_head_dim", None)
         self.qk_rope_head_dim = self.config.get("qk_rope_head_dim", None)
+        self.v_head_dim = self.config.get("v_head_dim", None)
         self.enable_prefix_cache = enable_prefix_cache
         self.linear_key_head_dim = self.config.get("linear_key_head_dim", None)
         self.linear_value_head_dim = self.config.get("linear_value_head_dim", None)
@@ -264,6 +265,7 @@ class Executor:
                 linear_num_v_heads=self.linear_num_value_heads,
                 qk_nope_head_dim=self.qk_nope_head_dim,
                 qk_rope_head_dim=self.qk_rope_head_dim,
+                v_head_dim=self.v_head_dim,
                 max_num_tokens=max_tokens_in_kv_pool,
             )
             mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
