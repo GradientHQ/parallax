@@ -187,7 +187,7 @@ const Node: FC<{ variant: NodeListVariant; node?: NodeInfo }> = ({ variant, node
             <>
               <Typography variant='body1' sx={{ fontWeight: 500 }}>
                 {[
-                  (gpuNumber && `${gpuNumber}x`) || '',
+                  (gpuNumber && gpuNumber > 1 && `${gpuNumber}x`) || '',
                   gpuName,
                   (gpuMemory && `${gpuMemory}GB`) || '',
                 ]
