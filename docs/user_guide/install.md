@@ -77,8 +77,7 @@ For Linux+GPU devices, Parallax provides a docker environment for quick setup. C
 
 |  GPU Architecture  |  GPU Series  | Image Pull Command |
 |:-------------|:----------------------------|:----------------------------|
-|Blackwell       | RTX50 series/B100/B200... |```docker pull gradientservice/parallax:latest-blackwell```|
-|Ampere/Hopper | RTX30 series/RTX40 series/A100/H100... |```docker pull gradientservice/parallax:latest-hopper```|
+|Blackwell/Ampere/Hopper| RTX50 series/RTX40 series/B100/B200/A100/H100... |```docker pull gradientservice/parallax:latest```|
 |DGX Spark | GB10 |```docker pull gradientservice/parallax:latest-spark```|
 
 Run a docker container as below. Please note that generally the argument ```--gpus all``` is necessary for the docker to run on GPUs.
