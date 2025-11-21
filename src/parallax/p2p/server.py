@@ -25,6 +25,7 @@ from parallax.p2p.proto import forward_pb2
 from parallax.p2p.utils import AsyncWorker
 from parallax.server.metrics import get_metrics, set_metrics_publisher, set_shared_state
 from parallax.server.server_info import detect_node_hardware
+from parallax.utils.shared_state import SharedState
 from parallax.utils.utils import get_zmq_socket
 from parallax_utils.logging_config import get_logger, set_log_level
 
@@ -258,12 +259,14 @@ class GradientServer:
     def _sync_to_shared_state(self):
         """Sync current layer allocation and status to shared state if available"""
         if hasattr(self, "_shared_state") and self._shared_state is not None:
-            self._shared_state["block_start_index"] = self.block_start_index
-            self._shared_state["block_end_index"] = self.block_end_index
-            self._shared_state["model_name"] = self.model_name
-            self._shared_state["tp_size"] = self.tp_size
-            self._shared_state["status"] = self.status.value
-            self._shared_state["_layer_allocation_changed"] = self._layer_allocation_changed
+            self._shared_state.update(
+                block_start_index=self.block_start_index,
+                block_end_index=self.block_end_index,
+                model_name=self.model_name,
+                tp_size=self.tp_size,
+                status=self.status.value,
+                _layer_allocation_changed=self._layer_allocation_changed,
+            )
 
     def build_lattica(self):
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs)
@@ -827,15 +830,18 @@ def _run_p2p_server_process(
         )
         # Attach shared state to server for syncing layer allocation
         if shared_state is not None:
+            shared_state = SharedState(shared_state)  # Auto-converts dict to SharedState
             server._shared_state = shared_state
             # Initialize shared state with current values
-            shared_state["block_start_index"] = server.block_start_index
-            shared_state["block_end_index"] = server.block_end_index
-            shared_state["model_name"] = server.model_name
-            shared_state["tp_size"] = server.tp_size
-            shared_state["status"] = server.status.value
+            shared_state.update(
+                block_start_index=server.block_start_index,
+                block_end_index=server.block_end_index,
+                model_name=server.model_name,
+                tp_size=server.tp_size,
+                status=server.status.value,
+            )
             # Configure metrics to use shared_state for inter-process communication
-            set_shared_state(shared_state)
+            set_shared_state(shared_state)  # Auto-extracts dict from SharedState
 
         server.run()
     except KeyboardInterrupt:

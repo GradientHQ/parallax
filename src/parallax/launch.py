@@ -26,6 +26,7 @@ from parallax.p2p.server import ServerState, launch_p2p_server_process, stop_p2p
 from parallax.server.executor import run_executor_process, stop_executor_process
 from parallax.server.http_server import launch_http_server, stop_http_server
 from parallax.server.server_args import parse_args
+from parallax.utils.shared_state import SharedState
 from parallax.utils.utils import fetch_model_from_hf, initialize_nccl_port
 from parallax_utils.ascii_anime import display_parallax_join
 from parallax_utils.logging_config import get_logger, set_log_level
@@ -34,7 +35,7 @@ from parallax_utils.version_check import check_latest_release
 logger = get_logger("parallax.launch")
 
 
-def _handle_layer_reallocation(args, shared_state, executor_subprocs):
+def _handle_layer_reallocation(args, shared_state: SharedState, executor_subprocs):
     """Handle layer reallocation: stop executors, update args, reset flags"""
     logger.warning("Layer allocation changed detected! Stopping executor processes to reload...")
 
@@ -45,16 +46,18 @@ def _handle_layer_reallocation(args, shared_state, executor_subprocs):
             stop_executor_process(executor_process)
 
     # Update args with new layer allocation from shared state
-    args.start_layer = shared_state["block_start_index"]
-    args.end_layer = shared_state["block_end_index"]
+    args.start_layer = shared_state.get("block_start_index")
+    args.end_layer = shared_state.get("block_end_index")
     if shared_state.get("model_name"):
-        args.model_path = shared_state["model_name"]
+        args.model_path = shared_state.get("model_name")
     if shared_state.get("tp_size"):
-        args.tp_size = shared_state["tp_size"]
+        args.tp_size = shared_state.get("tp_size")
 
     # Reset the flag and set status to INITIALIZING
-    shared_state["_layer_allocation_changed"] = False
-    shared_state["status"] = ServerState.INITIALIZING.value
+    shared_state.update(
+        _layer_allocation_changed=False,
+        status=ServerState.INITIALIZING.value,
+    )
 
     logger.info(f"Creating new executor with layers [{args.start_layer}, {args.end_layer})")
 
@@ -66,19 +69,8 @@ if __name__ == "__main__":
     http_server_process = None
     executor_subprocs = []
     # Shared state for layer allocation info (used when P2P server is in subprocess)
-    manager = multiprocessing.Manager()
-    shared_state = manager.dict()
-    shared_state["block_start_index"] = None
-    shared_state["block_end_index"] = None
-    shared_state["model_name"] = None
-    shared_state["tp_size"] = None
-    shared_state["_layer_allocation_changed"] = False
-    shared_state["status"] = ServerState.JOINING.value
-    # Create nested shared dict for metrics (Manager().dict() only supports top-level keys)
-    shared_state["metrics"] = manager.dict()
-    shared_state["metrics"]["current_requests"] = 0
-    shared_state["metrics"]["layer_latency_ms"] = None
-    shared_state["metrics"]["_last_update_ts"] = 0.0
+    shared_state = SharedState.create()
+    shared_state.set("status", ServerState.JOINING.value)
 
     try:
         args = parse_args()
@@ -140,7 +132,7 @@ if __name__ == "__main__":
                     target=run_executor_process,
                     args=(
                         args_copy,
-                        shared_state,
+                        shared_state.dict,  # Pass dict to subprocess
                     ),
                 )
                 proc.start()
@@ -151,6 +143,7 @@ if __name__ == "__main__":
                 proc.join()
         else:
             # Launch P2P server as subprocess (with scheduler)
+            # Pass dict to subprocess (multiprocessing requires serializable objects)
             p2p_server_process = launch_p2p_server_process(
                 initial_peers=args.initial_peers,
                 scheduler_addr=args.scheduler_addr,
@@ -172,7 +165,7 @@ if __name__ == "__main__":
                 max_sequence_length=args.max_sequence_length,
                 param_mem_ratio=args.param_mem_ratio,
                 kvcache_mem_ratio=args.kvcache_mem_ratio,
-                shared_state=shared_state,
+                shared_state=shared_state.dict,  # Pass dict to subprocess
                 log_level=args.log_level,
             )
 
@@ -191,11 +184,11 @@ if __name__ == "__main__":
                 time.sleep(1)
 
             # Get layer allocation from shared state
-            args.start_layer = shared_state["block_start_index"]
-            args.end_layer = shared_state["block_end_index"]
+            args.start_layer = shared_state.get("block_start_index")
+            args.end_layer = shared_state.get("block_end_index")
             # Only read model_name from scheduler if model_path is not set, so we can use local path as model_path
             if args.model_path is None:
-                args.model_path = shared_state["model_name"]
+                args.model_path = shared_state.get("model_name")
             args.tp_size = shared_state.get("tp_size", args.tp_size)
 
             logger.debug(
@@ -223,7 +216,7 @@ if __name__ == "__main__":
                             target=run_executor_process,
                             args=(
                                 args_copy,
-                                shared_state,
+                                shared_state.dict,  # Pass dict to subprocess
                             ),
                         )
                         proc.start()
@@ -232,7 +225,7 @@ if __name__ == "__main__":
                     # Wait a bit for executors to initialize, then mark as ready
                     # This allows P2P server to report is_active=True
                     time.sleep(2)  # Give executors time to start
-                    shared_state["status"] = ServerState.READY.value
+                    shared_state.set("status", ServerState.READY.value)
 
                     # Monitor executor processes and check for layer allocation changes
                     # Use timeout-based join to periodically check shared state

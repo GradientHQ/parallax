@@ -4,45 +4,37 @@ Metrics registry for executor-node telemetry.
 Exposes functions to update and retrieve per-node metrics that are consumed by
 the P2P server announcements (e.g., current_requests, layer_latency_ms).
 
-When running in subprocess mode, metrics are shared via a shared_state dict
-for inter-process communication. The shared_state is process-safe (managed by
-multiprocessing.Manager), so no thread locks are needed.
+Metrics are shared via a shared_state dict for inter-process communication.
+The shared_state is process-safe (managed by multiprocessing.Manager), so no thread locks are needed.
 """
 
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Union
+
+# Import SharedState for type hints (avoid circular import)
+try:
+    from parallax.utils.shared_state import SharedState
+except ImportError:
+    SharedState = Any  # type: ignore
 
 # Optional publisher for pushing updates to a backend (e.g., central scheduler)
 _publisher: Optional[Callable[[Dict[str, Any]], None]] = None
 
-# Optional shared state dict for inter-process communication (when running in subprocess mode)
+# Shared state dict for inter-process communication
 _shared_state: Optional[Dict[str, Any]] = None
-
-# Fallback in-process metrics (for backward compatibility when not using shared_state)
-_metrics: Dict[str, Any] = {
-    "current_requests": 0,
-    "layer_latency_ms": None,
-    "_last_update_ts": 0.0,
-}
 
 
 def _get_metrics_dict() -> Dict[str, Any]:
     """Get the metrics dictionary to update/read from.
 
-    Returns shared_state["metrics"] if available, otherwise returns local _metrics.
-    Note: shared_state["metrics"] should be a Manager().dict() for proper inter-process sharing.
+    Returns shared_state["metrics"] which should be a Manager().dict() for proper inter-process sharing.
     """
-    global _metrics, _shared_state
-    if _shared_state is not None:
-        try:
-            if "metrics" in _shared_state:
-                return _shared_state["metrics"]
-        except Exception:
-            # Fallback to local _metrics if shared_state access fails
-            return _metrics
-    return _metrics
+    global _shared_state
+    if _shared_state is not None and "metrics" in _shared_state:
+        return _shared_state["metrics"]
+    raise RuntimeError("shared_state['metrics'] not initialized. Call set_shared_state() first.")
 
 
 def update_metrics(
@@ -72,11 +64,12 @@ def update_metrics(
                 (1.0 - ewma_alpha) * float(prev) + ewma_alpha * float(layer_latency_ms_sample)
             )
     metrics["_last_update_ts"] = time.time()
-    snapshot = dict(metrics)
 
     # Publish snapshot if publisher is set
     if _publisher is not None:
         try:
+            # Create a snapshot by explicitly accessing each key for Manager().dict()
+            snapshot = {k: metrics[k] for k in metrics.keys()}
             _publisher(snapshot)
         except Exception:
             # Best-effort; logging is avoided here to keep this utility lightweight
@@ -86,14 +79,11 @@ def update_metrics(
 def get_metrics() -> Dict[str, Any]:
     """Return a shallow copy of current metrics suitable for JSON serialization.
 
-    For Manager().dict(), we need to access it directly and then create a copy,
-    as dict() constructor may not properly read from Manager().dict() in all cases.
+    For Manager().dict(), we need to access each key explicitly to ensure proper reading.
     """
     metrics_dict = _get_metrics_dict()
     # For Manager().dict(), create a copy by accessing each key explicitly
-    if hasattr(metrics_dict, "keys"):  # Check if it's a dict-like object
-        return {k: metrics_dict[k] for k in metrics_dict.keys()}
-    return dict(metrics_dict)
+    return {k: metrics_dict[k] for k in metrics_dict.keys()}
 
 
 def set_metrics_publisher(publisher: Optional[Callable[[Dict[str, Any]], None]]) -> None:
@@ -105,16 +95,21 @@ def set_metrics_publisher(publisher: Optional[Callable[[Dict[str, Any]], None]])
     _publisher = publisher
 
 
-def set_shared_state(shared_state: Optional[Dict[str, Any]]) -> None:
-    """Set shared state dict for inter-process metrics sharing.
+def set_shared_state(shared_state: Union[Dict[str, Any], "SharedState"]) -> None:
+    """Set shared state for inter-process metrics sharing.
 
-    When provided, metrics updates will be written to shared_state["metrics"].
+    Metrics updates will be written to shared_state["metrics"].
     This allows executor processes to share metrics with P2P server processes.
-    The metrics dict will be automatically initialized on first access.
 
     Args:
-        shared_state: Optional shared dictionary (e.g., from multiprocessing.Manager().dict()).
-                     Set to None to disable inter-process sharing.
+        shared_state: SharedState instance or shared dictionary (e.g., from multiprocessing.Manager().dict()).
+                     Must contain a "metrics" key with a Manager().dict() value.
     """
     global _shared_state
-    _shared_state = shared_state
+    # Auto-extract dict from SharedState if needed
+    if hasattr(shared_state, "dict"):
+        _shared_state = shared_state.dict
+    else:
+        _shared_state = shared_state
+    if "metrics" not in _shared_state:
+        raise ValueError("shared_state must contain a 'metrics' key")

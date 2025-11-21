@@ -48,6 +48,7 @@ from parallax.server.sampling.sampler import SamplingBatchInfo
 from parallax.server.sampling.sampling_params import SamplingParams
 from parallax.server.scheduler import Scheduler
 from parallax.server.shard_loader import MLXModelLoader
+from parallax.utils.shared_state import SharedState
 from parallax.utils.utils import (
     combine_padding_and_causal_masks,
     create_causal_mask,
@@ -193,10 +194,12 @@ class Executor:
         self.end_layer = end_layer
         self._should_stop = False  # Flag to gracefully stop the executor
         # Reference to shared state for layer reallocation detection (when in subprocess mode)
-        self.shared_state = shared_state
-        # Configure metrics to use shared_state for inter-process communication
         if shared_state is not None:
-            set_shared_state(shared_state)
+            self.shared_state = SharedState(shared_state)  # Auto-converts dict to SharedState
+            # Configure metrics to use shared_state for inter-process communication
+            set_shared_state(self.shared_state)  # Auto-extracts dict from SharedState
+        else:
+            self.shared_state = None
 
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
