@@ -179,7 +179,10 @@ class Scheduler:
         last_token_id = request.output_ids[-1] if request.output_ids else None
         if request.abort:
             finished = True
-        if self.eos_token_id and (last_token_id == self.eos_token_id or last_token_id in self.eos_token_id):
+        if self.eos_token_id and (
+            last_token_id == self.eos_token_id
+            or (isinstance(self.eos_token_id, list) and last_token_id in self.eos_token_id)
+        ):
             request.update_status(RequestStatus.FINISHED_EOS)
             finished = True
         elif (
