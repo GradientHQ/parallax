@@ -1053,7 +1053,7 @@ class Executor:
                             "next_token_id": req.next_token_id,
                             "rid": req.request_id,
                         }
-                        if req.next_token_id == self.tokenizer.eos_token_id:
+                        if original_req.status == RequestStatus.FINISHED_EOS:
                             req_dict["eos"] = True
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
