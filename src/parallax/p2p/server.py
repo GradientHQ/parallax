@@ -681,7 +681,7 @@ class GradientServer:
         """Get current status, checking shared_state if available (subprocess mode)"""
         # When running in subprocess mode, check shared_state status
         if hasattr(self, "_shared_state") and self._shared_state is not None:
-            shared_status = self._shared_state.get("status")
+            shared_status = self._shared_state.get_status()
             if shared_status is not None:
                 return shared_status
         # When running in same process, use local status
@@ -746,7 +746,11 @@ class GradientServer:
             )
 
         if is_update:
-            metrics = get_metrics()
+            # Prefer getting metrics from shared_state if available (subprocess mode)
+            if hasattr(self, "_shared_state") and self._shared_state is not None:
+                metrics = self._shared_state.get_metrics()
+            else:
+                metrics = get_metrics()
             info["current_requests"] = metrics.get("current_requests", 0)
             if metrics.get("layer_latency_ms") is not None:
                 info["layer_latency_ms"] = metrics.get("layer_latency_ms")

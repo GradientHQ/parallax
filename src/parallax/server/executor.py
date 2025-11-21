@@ -1437,7 +1437,7 @@ class Executor:
             # Check for layer reallocation signal (before batch processing)
             layer_changed = False
             if self.shared_state is not None:
-                layer_changed = self.shared_state.get("_layer_allocation_changed", False)
+                layer_changed = self.shared_state.get_layer_allocation_changed()
 
             if layer_changed:
                 logger.info(

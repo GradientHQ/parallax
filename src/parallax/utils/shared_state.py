@@ -69,6 +69,36 @@ class SharedState:
         """Get the underlying Manager().dict() for multiprocessing serialization."""
         return self._dict
 
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get a shallow copy of current metrics suitable for JSON serialization."""
+        metrics_dict = self._dict.get("metrics")
+        if not metrics_dict:
+            return {}
+        # For Manager().dict(), create a copy by accessing each key explicitly
+        return {k: metrics_dict[k] for k in metrics_dict.keys()}
+
+    def get_model_info(self) -> Dict[str, Any]:
+        """Get model and layer allocation information."""
+        return {
+            "model_name": self._dict.get("model_name"),
+            "block_start_index": self._dict.get("block_start_index"),
+            "block_end_index": self._dict.get("block_end_index"),
+            "tp_size": self._dict.get("tp_size"),
+            "_layer_allocation_changed": self._dict.get("_layer_allocation_changed", False),
+        }
+
+    def get_layer_allocation_changed(self) -> bool:
+        """Check if layer allocation has changed."""
+        return self._dict.get("_layer_allocation_changed", False)
+
+    def get_status(self) -> Optional[str]:
+        """Get current status."""
+        return self._dict.get("status")
+
+    def set_status(self, status: str) -> None:
+        """Set current status."""
+        self._dict["status"] = status
+
     @classmethod
     def create(cls) -> "SharedState":
         """Create a new SharedState with default initialization.
