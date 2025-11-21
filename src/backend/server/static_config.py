@@ -63,9 +63,6 @@ MODELS = {
     "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8": "mlx-community/Qwen3-235B-A22B-Thinking-2507-4bit",
     "Qwen/Qwen3-235B-A22B-GPTQ-Int4": "mlx-community/Qwen3-235B-A22B-4bit",
     # Llama Models
-    "meta-llama/Llama-3.1-8B-Instruct ": "mlx-community/Llama-3.1-8B-Instruct-4bit",
-    "meta-llama/Llama-3.1-70B-Instruct": "meta-llama/Llama-3.1-70B-Instruct",
-    "meta-llama/Llama-3.3-70B-Instruct": "mlx-community/Llama-3.3-70B-Instruct-4bit",
     "nvidia/Llama-3.1-8B-Instruct-FP8": "mlx-community/Llama-3.1-8B-Instruct-4bit",
     "nvidia/Llama-3.1-70B-Instruct-FP8": "meta-llama/Llama-3.1-70B-Instruct",
     "nvidia/Llama-3.3-70B-Instruct-FP8": "mlx-community/Llama-3.3-70B-Instruct-4bit",
