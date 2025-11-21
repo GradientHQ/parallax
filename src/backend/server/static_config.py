@@ -11,9 +11,9 @@ logger = get_logger(__name__)
 # Supported model list - key: model name, value: MLX model name (same as key if no MLX variant)
 MODELS = {
     # DeepSeek Models
-    "deepseek-ai/DeepSeek-V3.1": "deepseek-ai/DeepSeek-V3.1-4bit",
+    "deepseek-ai/DeepSeek-V3.1": "mlx-community/DeepSeek-V3.1-4bit",
     "deepseek-ai/DeepSeek-V3": "mlx-community/DeepSeek-V3-4bit",
-    "deepseek-ai/DeepSeek-V2.5-1210": "deepseek-ai/DeepSeek-V2.5-1210-4bit",
+    "deepseek-ai/DeepSeek-V2.5-1210": "mlx-community/DeepSeek-V2.5-1210-4bit",
     "deepseek-ai/DeepSeek-R1": "mlx-community/DeepSeek-R1-4bit",
     # OpenAI GPT-OSS Models
     "openai/gpt-oss-20b": "mlx-community/gpt-oss-20b-MXFP4-Q4",
@@ -64,12 +64,13 @@ MODELS = {
     "Qwen/Qwen3-235B-A22B-GPTQ-Int4": "mlx-community/Qwen3-235B-A22B-4bit",
     # Llama Models
     "nvidia/Llama-3.1-8B-Instruct-FP8": "mlx-community/Llama-3.1-8B-Instruct-4bit",
-    "nvidia/Llama-3.1-70B-Instruct-FP8": "meta-llama/Llama-3.1-70B-Instruct",
+    "nvidia/Llama-3.1-Nemotron-70B-Instruct-HF": "mlx-community/Llama-3.1-Nemotron-70B-Instruct-HF",
     "nvidia/Llama-3.3-70B-Instruct-FP8": "mlx-community/Llama-3.3-70B-Instruct-4bit",
     # Other Models
     "MiniMaxAI/MiniMax-M2": "mlx-community/MiniMax-M2-4bit",
     "zai-org/GLM-4.6": "mlx-community/GLM-4.6-4bit",
     "zai-org/GLM-4.6-FP8": "mlx-community/GLM-4.6-4bit",
+    "zai-org/GLM-4.5-Air": "lmstudio-community/GLM-4.5-Air-MLX-8bit",
 }
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
