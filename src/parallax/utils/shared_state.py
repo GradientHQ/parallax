@@ -8,7 +8,8 @@ with dict-like interface and get/set methods.
 from __future__ import annotations
 
 import multiprocessing
-from typing import Any, Dict, Optional, Union
+import time
+from typing import Any, Callable, Dict, Optional, Union
 
 
 class SharedState:
@@ -34,6 +35,7 @@ class SharedState:
             self._dict = manager_dict._dict
         else:
             self._dict = manager_dict
+        self._metrics_publisher: Optional[Callable[[Dict[str, Any]], None]] = None
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a value from shared state."""
@@ -76,6 +78,55 @@ class SharedState:
             return {}
         # For Manager().dict(), create a copy by accessing each key explicitly
         return {k: metrics_dict[k] for k in metrics_dict.keys()}
+
+    def update_metrics(
+        self,
+        *,
+        current_requests: Optional[int] = None,
+        layer_latency_ms_sample: Optional[float] = None,
+        ewma_alpha: float = 0.2,
+    ) -> None:
+        """Update metrics with optional fields and EWMA smoothing for latency.
+
+        Args:
+            current_requests: Number of in-flight requests on this node.
+            layer_latency_ms_sample: A new sample of per-layer latency in ms.
+            ewma_alpha: Smoothing factor in [0, 1] for latency EWMA.
+        """
+        metrics_dict = self._dict.get("metrics")
+        if not metrics_dict:
+            raise RuntimeError("metrics not initialized in shared_state")
+
+        # Update metrics
+        if current_requests is not None:
+            metrics_dict["current_requests"] = int(current_requests)
+        if layer_latency_ms_sample is not None:
+            prev = metrics_dict.get("layer_latency_ms")
+            if prev is None:
+                metrics_dict["layer_latency_ms"] = float(layer_latency_ms_sample)
+            else:
+                metrics_dict["layer_latency_ms"] = float(
+                    (1.0 - ewma_alpha) * float(prev) + ewma_alpha * float(layer_latency_ms_sample)
+                )
+        metrics_dict["_last_update_ts"] = time.time()
+
+        # Publish snapshot if publisher is set
+        if self._metrics_publisher is not None:
+            try:
+                # Create a snapshot by explicitly accessing each key for Manager().dict()
+                snapshot = {k: metrics_dict[k] for k in metrics_dict.keys()}
+                self._metrics_publisher(snapshot)
+            except Exception:
+                # Best-effort; logging is avoided here to keep this utility lightweight
+                pass
+
+    def set_metrics_publisher(self, publisher: Optional[Callable[[Dict[str, Any]], None]]) -> None:
+        """Register a callback to publish metric snapshots after each update.
+
+        Args:
+            publisher: Callable receiving a metrics dict. Set to None to disable publishing.
+        """
+        self._metrics_publisher = publisher
 
     def get_model_info(self) -> Dict[str, Any]:
         """Get model and layer allocation information."""

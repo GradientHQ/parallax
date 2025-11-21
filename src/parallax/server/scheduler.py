@@ -24,8 +24,8 @@ from collections import OrderedDict
 from typing import Dict, List, Optional
 
 from parallax.server.kv_cache import KVCacheManager
-from parallax.server.metrics import update_metrics
 from parallax.server.request import InitialRequest, Request, RequestStatus
+from parallax.utils.shared_state import SharedState
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -47,6 +47,7 @@ class Scheduler:
         is_first_peer: bool = False,
         kv_cache_manager: Optional[KVCacheManager] = None,
         request_timeout_s: Optional[int] = 600,
+        shared_state: Optional[SharedState] = None,
         **kwargs,
     ):
         """
@@ -77,6 +78,7 @@ class Scheduler:
         self._running_requests: Dict[str, Request] = OrderedDict()
 
         self.kv_cache_manager = kv_cache_manager
+        self.shared_state = shared_state
         # Default timeout for requests if not set on request object
         self.request_timeout_s = request_timeout_s
 
@@ -150,8 +152,9 @@ class Scheduler:
             logger.debug(f"Evicted request {request_id} from scheduler.")
             # Update metrics only if running count changed since last report
             try:
-                curr = self.num_running_requests
-                update_metrics(current_requests=curr)
+                if self.shared_state is not None:
+                    curr = self.num_running_requests
+                    self.shared_state.update_metrics(current_requests=curr)
             except Exception:
                 pass
         else:
@@ -231,10 +234,11 @@ class Scheduler:
 
         # Reflect current running requests metric after admission
         try:
-            curr = self.num_running_requests
-            if curr != self._last_reported_running_requests:
-                update_metrics(current_requests=curr)
-                self._last_reported_running_requests = curr
+            if self.shared_state is not None:
+                curr = self.num_running_requests
+                if curr != self._last_reported_running_requests:
+                    self.shared_state.update_metrics(current_requests=curr)
+                    self._last_reported_running_requests = curr
         except Exception:
             pass
 

@@ -23,7 +23,6 @@ from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream, rpc_stre
 from backend.server.rpc_connection_handler import RPCConnectionHandler
 from parallax.p2p.proto import forward_pb2
 from parallax.p2p.utils import AsyncWorker
-from parallax.server.metrics import get_metrics, set_metrics_publisher, set_shared_state
 from parallax.server.server_info import detect_node_hardware
 from parallax.utils.shared_state import SharedState
 from parallax.utils.utils import get_zmq_socket
@@ -375,7 +374,8 @@ class GradientServer:
                     except Exception:
                         pass
 
-                set_metrics_publisher(_publish_metrics)
+                if self._shared_state is not None:
+                    self._shared_state.set_metrics_publisher(_publish_metrics)
 
             except Exception as e:
                 logger.exception(f"Error in join scheduler: {e}")
@@ -746,11 +746,10 @@ class GradientServer:
             )
 
         if is_update:
-            # Prefer getting metrics from shared_state if available (subprocess mode)
+            metrics = {}
             if hasattr(self, "_shared_state") and self._shared_state is not None:
                 metrics = self._shared_state.get_metrics()
-            else:
-                metrics = get_metrics()
+
             info["current_requests"] = metrics.get("current_requests", 0)
             if metrics.get("layer_latency_ms") is not None:
                 info["layer_latency_ms"] = metrics.get("layer_latency_ms")
@@ -844,8 +843,7 @@ def _run_p2p_server_process(
                 tp_size=server.tp_size,
                 status=server.status.value,
             )
-            # Configure metrics to use shared_state for inter-process communication
-            set_shared_state(shared_state)  # Auto-extracts dict from SharedState
+            # shared_state is already set on server._shared_state
 
         server.run()
     except KeyboardInterrupt:

@@ -36,7 +36,6 @@ from parallax.p2p.message_util import (
 )
 from parallax.p2p.proto import forward_pb2
 from parallax.server.kv_cache import KVCacheManager
-from parallax.server.metrics import set_shared_state, update_metrics
 from parallax.server.radix_cache import RadixCache
 from parallax.server.request import (
     InitialRequest,
@@ -196,8 +195,6 @@ class Executor:
         # Reference to shared state for layer reallocation detection (when in subprocess mode)
         if shared_state is not None:
             self.shared_state = SharedState(shared_state)  # Auto-converts dict to SharedState
-            # Configure metrics to use shared_state for inter-process communication
-            set_shared_state(self.shared_state)  # Auto-extracts dict from SharedState
         else:
             self.shared_state = None
 
@@ -302,6 +299,7 @@ class Executor:
             eos_token_id=self.eos_token_id,
             kv_cache_manager=self.kv_cache_manager if self.device == "mlx" else None,
             request_timeout_s=request_timeout_s,
+            shared_state=self.shared_state,
         )
         logger.debug(
             f"Scheduler initialized (max_batch_size={max_batch_size}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"
@@ -1494,7 +1492,10 @@ class Executor:
                                     elapsed_ms = (time.time() - start_time) * 1000.0
                                     assert self.num_shard_layers > 0
                                     per_layer_ms = elapsed_ms / float(self.num_shard_layers)
-                                    update_metrics(layer_latency_ms_sample=per_layer_ms)
+                                    if self.shared_state is not None:
+                                        self.shared_state.update_metrics(
+                                            layer_latency_ms_sample=per_layer_ms
+                                        )
                                     self._decode_steps_since_metric = 0
                             except Exception:
                                 pass
