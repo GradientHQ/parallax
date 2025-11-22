@@ -35,32 +35,43 @@ from parallax_utils.version_check import check_latest_release
 logger = get_logger("parallax.launch")
 
 
-def _handle_layer_reallocation(args, shared_state: SharedState, executor_subprocs):
-    """Handle layer reallocation: stop executors, update args, reset flags"""
-    logger.warning("Layer allocation changed detected! Stopping executor processes to reload...")
+def _update_args_from_shared_state(args, shared_state: SharedState):
+    """Update args with layer allocation from shared state"""
+    model_info = shared_state.get_model_info()
+    args.start_layer = model_info["block_start_index"]
+    args.end_layer = model_info["block_end_index"]
+    # Update model_path if provided and not already set
+    if model_info["model_name"] and args.model_path is None:
+        args.model_path = model_info["model_name"]
+    # Update tp_size if provided, otherwise keep current value
+    args.tp_size = model_info["tp_size"] or args.tp_size
 
-    # Shutdown all executor processes
+
+def _stop_executor_processes(executor_subprocs):
+    """Stop all executor processes"""
     for executor_process in executor_subprocs:
         if executor_process.is_alive():
             logger.debug(f"Terminating executor process {executor_process.pid}")
             stop_executor_process(executor_process)
 
-    # Update args with new layer allocation from shared state
-    model_info = shared_state.get_model_info()
-    args.start_layer = model_info["block_start_index"]
-    args.end_layer = model_info["block_end_index"]
-    if model_info["model_name"]:
-        args.model_path = model_info["model_name"]
-    if model_info["tp_size"]:
-        args.tp_size = model_info["tp_size"]
 
-    # Reset the flag and set status to INITIALIZING
-    shared_state.update(
-        _layer_allocation_changed=False,
-        status=ServerState.INITIALIZING.value,
-    )
+def _wait_executors_check_layer_change(shared_state: SharedState, executor_subprocs):
+    """Wait for executor processes and check if layer allocation changed.
 
-    logger.info(f"Creating new executor with layers [{args.start_layer}, {args.end_layer})")
+    Returns:
+        True if layer allocation changed (need to reload executors),
+        False if all executors exited normally.
+    """
+    while any(proc.is_alive() for proc in executor_subprocs):
+        for proc in executor_subprocs:
+            if proc.is_alive():
+                proc.join(timeout=1.0)  # Check every second
+
+        if shared_state.get_layer_allocation_changed():
+            return True
+
+    # Check race condition: layer allocation changed after all processes exited
+    return shared_state.get_layer_allocation_changed()
 
 
 if __name__ == "__main__":
@@ -191,13 +202,7 @@ if __name__ == "__main__":
                 time.sleep(1)
 
             # Get layer allocation from shared state
-            model_info = shared_state.get_model_info()
-            args.start_layer = model_info["block_start_index"]
-            args.end_layer = model_info["block_end_index"]
-            # Only read model_name from scheduler if model_path is not set, so we can use local path as model_path
-            if args.model_path is None:
-                args.model_path = model_info["model_name"]
-            args.tp_size = model_info["tp_size"] or args.tp_size
+            _update_args_from_shared_state(args, shared_state)
 
             logger.debug(
                 f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}, "
@@ -235,31 +240,23 @@ if __name__ == "__main__":
                     time.sleep(2)  # Give executors time to start
                     shared_state.set_status(ServerState.READY.value)
 
-                    # Monitor executor processes and check for layer allocation changes
-                    # Use timeout-based join to periodically check shared state
-                    layer_reallocation_detected = False
-                    while any(proc.is_alive() for proc in executor_subprocs):
-                        # Wait for processes with timeout to allow periodic checking
-                        for proc in executor_subprocs:
-                            if proc.is_alive():
-                                proc.join(timeout=1.0)  # Check every 1 second
+                    # Wait for executors and restart if layer allocation changes
+                    if _wait_executors_check_layer_change(shared_state, executor_subprocs):
+                        logger.warning("Layer allocation changed! Stopping executors to reload...")
+                        _stop_executor_processes(executor_subprocs)
+                        _update_args_from_shared_state(args, shared_state)
+                        # Reset flag and set status to INITIALIZING
+                        shared_state.update(
+                            _layer_allocation_changed=False,
+                            status=ServerState.INITIALIZING.value,
+                        )
+                        logger.info(
+                            f"Reloading executor with layers [{args.start_layer}, {args.end_layer})"
+                        )
+                        continue
 
-                        # Check if layer allocation changed while executor is running
-                        if shared_state.get_layer_allocation_changed():
-                            _handle_layer_reallocation(args, shared_state, executor_subprocs)
-                            layer_reallocation_detected = True
-                            break  # Exit inner loop to restart executor processes
-
-                    # Check if we exited due to layer allocation change
-                    if layer_reallocation_detected:
-                        continue  # Restart executor processes with new layer allocation
-                    elif shared_state.get_layer_allocation_changed():
-                        # Handle layer reallocation detected after executor exit (race condition)
-                        _handle_layer_reallocation(args, shared_state, executor_subprocs)
-                        continue  # Restart executor processes with new layer allocation
-                    else:
-                        # All processes exited normally
-                        break  # Normal exit
+                    # All processes exited normally
+                    break
                 except KeyboardInterrupt:
                     logger.debug("Received interrupt signal, shutting down...")
                     break
