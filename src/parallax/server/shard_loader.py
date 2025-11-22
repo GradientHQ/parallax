@@ -223,12 +223,9 @@ class MLXModelLoader:
                         is_needed = True
                         remapped_key = key.replace("model.", "", 1)
                         if model_shard.is_last_shard and config.get("tie_word_embeddings", False):
-                            if key == "model.embed_tokens.weight":
-                                shard_weights["lm_head.weight"] = mx.array(f.get_tensor(key))
-                            elif key == "model.embed_tokens.scales":
-                                shard_weights["lm_head.scales"] = mx.array(f.get_tensor(key))
-                            elif key == "model.embed_tokens.biases":
-                                shard_weights["lm_head.biases"] = mx.array(f.get_tensor(key))
+                            # Also add lm_head mapping for tied embeddings
+                            lm_head_key = remapped_key.replace("embed_tokens", "lm_head")
+                            shard_weights[lm_head_key] = mx.array(f.get_tensor(key))
                     elif model_shard.is_last_shard:
                         if "model.norm" in key:
                             is_needed = True
@@ -238,14 +235,13 @@ class MLXModelLoader:
                             remapped_key = key
                         elif (
                             config.get("tie_word_embeddings", False)
-                            and "embed" in key
+                            and "embed_tokens" in key
                             and key.startswith("model.embed_tokens")
                         ):
-                            # TODO: we don't need load lm_head in this case
-                            # as we will pass hidden_states to FirstPeer
-                            # see request.py for details
                             is_needed = True
-                            remapped_key = "lm_head.weight"
+                            remapped_key = key.replace("model.", "", 1).replace(
+                                "embed_tokens", "lm_head"
+                            )
                     if layer_key_prefix in key:
                         try:
                             parts = key.split(".")
