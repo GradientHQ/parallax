@@ -843,7 +843,6 @@ def _run_p2p_server_process(
                 tp_size=server.tp_size,
                 status=server.status.value,
             )
-            # shared_state is already set on server._shared_state
 
         server.run()
     except KeyboardInterrupt:

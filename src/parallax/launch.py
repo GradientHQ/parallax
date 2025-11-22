@@ -121,7 +121,7 @@ if __name__ == "__main__":
                 max_sequence_length=args.max_sequence_length,
                 param_mem_ratio=args.param_mem_ratio,
                 kvcache_mem_ratio=args.kvcache_mem_ratio,
-                shared_state=shared_state,
+                shared_state=shared_state.dict,  # Pass dict to subprocess
                 log_level=args.log_level,
             )
 
