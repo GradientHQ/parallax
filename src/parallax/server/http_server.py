@@ -350,7 +350,7 @@ class HTTPHandler:
                 elif recv_dict.get("eos", False):
                     logger.debug(f"Request {rid} finished with eos")
                     request_info.finish_reason = "eos"
-                    request_info.matched_stop = 0
+                    request_info.matched_stop = next_token_id
                 else:
                     logger.debug(f"Request {rid} finished with unknown reason")
                     request_info.finish_reason = "unknown"
