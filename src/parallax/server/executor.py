@@ -36,7 +36,6 @@ from parallax.p2p.message_util import (
 )
 from parallax.p2p.proto import forward_pb2
 from parallax.server.kv_cache import KVCacheManager
-from parallax.server.metrics import update_metrics
 from parallax.server.radix_cache import RadixCache
 from parallax.server.request import (
     InitialRequest,
@@ -48,6 +47,7 @@ from parallax.server.sampling.sampler import SamplingBatchInfo
 from parallax.server.sampling.sampling_params import SamplingParams
 from parallax.server.scheduler import Scheduler
 from parallax.server.shard_loader import MLXModelLoader
+from parallax.utils.shared_state import SharedState
 from parallax.utils.utils import (
     combine_padding_and_causal_masks,
     create_causal_mask,
@@ -106,8 +106,8 @@ class Executor:
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
         nccl_port: Optional[int] = 4000,
-        # Optional gradient server for layer reallocation detection
-        gradient_server: Optional[Any] = None,
+        # Optional shared state for layer reallocation detection (when running in subprocess)
+        shared_state: Optional[dict] = None,
     ):
         # Backend
         self.device = get_current_device()
@@ -192,8 +192,11 @@ class Executor:
         self.start_layer = start_layer
         self.end_layer = end_layer
         self._should_stop = False  # Flag to gracefully stop the executor
-        # Reference to gradient server for layer reallocation detection
-        self.gradient_server = gradient_server
+        # Reference to shared state for layer reallocation detection (when in subprocess mode)
+        if shared_state is not None:
+            self.shared_state = SharedState(shared_state)  # Auto-converts dict to SharedState
+        else:
+            self.shared_state = None
 
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
@@ -298,6 +301,7 @@ class Executor:
             eos_token_id=self.eos_token_id,
             kv_cache_manager=self.kv_cache_manager if self.device == "mlx" else None,
             request_timeout_s=request_timeout_s,
+            shared_state=self.shared_state,
         )
         logger.debug(
             f"Scheduler initialized (max_batch_size={max_batch_size}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"
@@ -333,9 +337,9 @@ class Executor:
                 )
 
     @classmethod
-    def create_from_args(cls, args: argparse.Namespace, gradient_server=None):
+    def create_from_args(cls, args: argparse.Namespace, shared_state=None):
         """Create executor from command line arguments."""
-        return cls(**create_executor_config(args, gradient_server))
+        return cls(**create_executor_config(args, shared_state))
 
     def _tensor_parallel_broadcast_byobj(self, broadcast_obj):
         """Wrapper for broadcast pyobject in TP group"""
@@ -1431,7 +1435,11 @@ class Executor:
                 self.finished_batch = []
 
             # Check for layer reallocation signal (before batch processing)
-            if self.gradient_server is not None and self.gradient_server._layer_allocation_changed:
+            layer_changed = False
+            if self.shared_state is not None:
+                layer_changed = self.shared_state.get_layer_allocation_changed()
+
+            if layer_changed:
                 logger.info(
                     "Layer reallocation detected. Stopping executor to reload with new layers."
                 )
@@ -1486,7 +1494,10 @@ class Executor:
                                     elapsed_ms = (time.time() - start_time) * 1000.0
                                     assert self.num_shard_layers > 0
                                     per_layer_ms = elapsed_ms / float(self.num_shard_layers)
-                                    update_metrics(layer_latency_ms_sample=per_layer_ms)
+                                    if self.shared_state is not None:
+                                        self.shared_state.update_metrics(
+                                            layer_latency_ms_sample=per_layer_ms
+                                        )
                                     self._decode_steps_since_metric = 0
                             except Exception:
                                 pass
@@ -1559,11 +1570,11 @@ class Executor:
         logger.debug("Executor shutdown complete.")
 
 
-def run_executor_process(args, gradient_server=None):
+def run_executor_process(args, shared_state=None):
     """Run executor as a subprocess"""
     executor = None
     try:
-        executor = Executor.create_from_args(args, gradient_server)
+        executor = Executor.create_from_args(args, shared_state)
         executor.run_loop()
     except KeyboardInterrupt:
         logger.debug("Received interrupt signal, shutting down...")
@@ -1584,7 +1595,7 @@ def stop_executor_process(executor_process):
         logger.error(f"Failed to terminate executor subprocess: {e}")
 
 
-def create_executor_config(args: argparse.Namespace, gradient_server=None):
+def create_executor_config(args: argparse.Namespace, shared_state=None):
     """Create executor configuration from command line arguments."""
 
     config = {
@@ -1611,7 +1622,7 @@ def create_executor_config(args: argparse.Namespace, gradient_server=None):
         "tp_rank": args.tp_rank,
         "tp_size": args.tp_size,
         "nccl_port": args.nccl_port,
-        "gradient_server": gradient_server,
+        "shared_state": shared_state,
         "use_hfcache": args.use_hfcache,
     }
     return config
