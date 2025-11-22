@@ -139,6 +139,9 @@ if __name__ == "__main__":
                 proc.start()
                 executor_subprocs.append(proc)
 
+            time.sleep(2)  # Give executors time to start
+            shared_state.set_status(ServerState.READY.value)
+
             # Wait for all executor processes
             for proc in executor_subprocs:
                 proc.join()
