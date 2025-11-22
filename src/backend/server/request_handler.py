@@ -146,10 +146,10 @@ class RequestHandler:
                 return resp
             else:
                 response = stub.chat_completion(request_data)
-                response = next(response).decode()
+                content = (await anext(iterate_in_threadpool(response))).decode()
                 logger.debug(f"Non-stream response completed for {request_id}")
                 # response is a JSON string; parse to Python object before returning
-                return JSONResponse(content=json.loads(response))
+                return JSONResponse(content=json.loads(content))
         except Exception as e:
             logger.exception(f"Error in _forward_request: {e}")
             return JSONResponse(
