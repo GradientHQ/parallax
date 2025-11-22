@@ -222,6 +222,13 @@ def form_sgl_server_args(
     return sgl_server_args
 
 
+def dummy_prepare_init():
+    apply_parallax_sglang_monkey_patch()
+    import sglang.srt.eplb.expert_location as expert_location
+
+    expert_location._global_expert_location_metadata = None
+
+
 def initialize_sgl_model_runner(
     model_repo: str,
     start_layer: int,
@@ -240,7 +247,7 @@ def initialize_sgl_model_runner(
       - config: model config driven by mlx-lm
       - tokenizer: tokenizer driven by mlx-lm
     """
-    apply_parallax_sglang_monkey_patch()
+    dummy_prepare_init()
 
     # Extract TP-related parameters from kwargs or use defaults
     tp_rank = kwargs.get("tp_rank", 0)

@@ -52,9 +52,3 @@ def apply_parallax_sglang_monkey_patch():
     )
 
     apply_glm4_moe_monkey_patch()
-
-    from parallax.sglang.monkey_patch_utils.expert_location import (
-        apply_expert_location_monkey_patch,
-    )
-
-    apply_expert_location_monkey_patch()
