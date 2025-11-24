@@ -238,15 +238,16 @@ def estimate_vram_gb_required(model_info):
     )
 
 
-def get_node_join_command(scheduler_addr, is_local_network):
+def get_node_join_command(scheduler_addr, is_local_network, micro_batch_ratio=None):
+    cmd = ""
     if scheduler_addr:
         if is_local_network:
-            return {
-                "command": NODE_JOIN_COMMAND_LOCAL_NETWORK.format(scheduler_addr=scheduler_addr),
-            }
+            cmd = NODE_JOIN_COMMAND_LOCAL_NETWORK.format(scheduler_addr=scheduler_addr)
         else:
-            return {
-                "command": NODE_JOIN_COMMAND_PUBLIC_NETWORK.format(scheduler_addr=scheduler_addr),
-            }
+            cmd = NODE_JOIN_COMMAND_PUBLIC_NETWORK.format(scheduler_addr=scheduler_addr)
+
+        if micro_batch_ratio is not None and micro_batch_ratio != 2:
+            cmd += f" --micro-batch-ratio {micro_batch_ratio}"
+        return {"command": cmd}
     else:
         return None

@@ -159,6 +159,7 @@ if __name__ == "__main__":
     is_local_network = args.is_local_network
     routing_strategy = args.routing_strategy
     pipeline_rebalance_strategy = args.pipeline_rebalance_strategy
+    micro_batch_ratio = args.micro_batch_ratio
     if pipeline_rebalance_strategy == "none":
         pipeline_rebalance_strategy = None
 
@@ -169,6 +170,7 @@ if __name__ == "__main__":
             is_local_network,
             routing_strategy,
             pipeline_rebalance_strategy,
+            micro_batch_ratio,
         )
 
     host = args.host

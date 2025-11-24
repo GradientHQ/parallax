@@ -55,6 +55,12 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Use local Hugging Face cache only (no network download)",
     )
+    parser.add_argument(
+        "--micro-batch-ratio",
+        type=int,
+        default=2,
+        help="Micro batch ratio (max_batch_size / micro_batch_size)",
+    )
 
     args = parser.parse_args()
 
