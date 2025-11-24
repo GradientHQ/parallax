@@ -10,6 +10,9 @@ logger = get_logger(__name__)
 
 # Supported model list - key: model name, value: MLX model name (same as key if no MLX variant)
 MODELS = {
+    # =============================== for quickly test ===================================#
+    "Qwen/Qwen3-0.6B": "Qwen/Qwen3-0.6B",
+    # ======================================= End ========================================#
     # ===============================newly added models===================================#
     # Moonshot Kimi Models
     "moonshotai/Kimi-K2-Instruct": "mlx-community/Kimi-K2-Instruct-4bit",
@@ -41,7 +44,6 @@ MODELS = {
     "Qwen/Qwen2.5-32B-Instruct": "Qwen/Qwen2.5-32B-Instruct",
     "Qwen/Qwen2.5-72B-Instruct": "Qwen/Qwen2.5-72B-Instruct",
     # Qwen 3 Series (small models)
-    "Qwen/Qwen3-0.6B": "Qwen/Qwen3-0.6B",
     "Qwen/Qwen3-0.6B-FP8": "Qwen/Qwen3-0.6B-MLX-8bit",
     "Qwen/Qwen3-1.7B": "Qwen/Qwen3-1.7B",
     "Qwen/Qwen3-1.7B-FP8": "Qwen/Qwen3-1.7B-MLX-8bit",
