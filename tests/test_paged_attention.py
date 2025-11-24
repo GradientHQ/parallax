@@ -1,8 +1,10 @@
-import pytest
+import math
+
 import mlx.core as mx
 import numpy as np
-import math
-from parallax.metal.paged_attention.kernel import reshape_and_cache, paged_attention
+import pytest
+
+from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
 
 # --- Helper Functions ---
 

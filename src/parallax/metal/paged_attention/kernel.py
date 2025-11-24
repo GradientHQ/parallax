@@ -1,6 +1,7 @@
-import mlx.core as mx
 import os
-from typing import Optional, Tuple, List, Dict
+from typing import Dict, List
+
+import mlx.core as mx
 
 # Cache for compiled kernels
 _KERNELS: Dict[str, object] = {}
@@ -240,7 +241,6 @@ def paged_attention(
         "num_total_blocks",
         "scale",
     ]
-
 
     kernel = _get_kernel(
         name="paged_attention_kernel",
