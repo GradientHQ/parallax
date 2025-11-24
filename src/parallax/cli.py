@@ -244,6 +244,67 @@ def join_command(args, passthrough_args: list[str] | None = None):
     # The scheduler address is now taken directly from the parsed arguments.
     cmd.extend(["--scheduler-addr", args.scheduler_addr])
 
+    if args.enable_lora:
+        logger.info("LoRA adapter support enabled for SGLang backend")
+        cmd.append("--enable-lora")
+
+    if args.max_lora_rank is not None: 
+        logger.info(f"Setting maximum LoRA rank to: {args.max_lora_rank}")
+        cmd.extend(["--max-lora-rank", str(args.max_lora_rank)])
+
+    # 添加 lora-target-modules 参数处理
+    # 检查是否提供了目标模块列表
+    if args.lora_target_modules is not None:
+        # nargs='*' 会返回一个列表，即使只有一个元素或没有元素
+        if args.lora_target_modules: # 检查列表是否非空
+            # 将列表中的模块名用空格连接成一个字符串
+            modules_str = " ".join(args.lora_target_modules)
+            logger.info(f"Setting LoRA target modules to: {modules_str}")
+            # SGLang 可能期望模块名之间用空格分隔，作为单个参数值传递
+            # 或者需要多次传递 --lora-target-modules <module>
+            # 根据 SGLang 实际要求调整。假设是空格分隔作为一个参数：
+            cmd.extend(["--lora-target-modules", modules_str])
+        else:
+            # 如果列表为空 (例如用户只写了 --lora-target-modules 但没给值)
+            # 可能需要特殊处理或忽略，取决于 SGLang 的行为
+            # 这里选择忽略
+            logger.warning("--lora-target-modules was provided but no modules were listed. Ignoring.")
+
+    # 添加 lora-paths 参数处理
+    # 检查是否提供了 LoRA 路径列表
+    if args.lora_paths is not None:
+        if args.lora_paths: # 检查列表是否非空
+            # 将列表中的路径用空格连接成一个字符串 (假设 SGLang 接受这种方式)
+            paths_str = " ".join(args.lora_paths)
+            logger.info(f"Loading LoRA adapters from paths: {paths_str}")
+            cmd.extend(["--lora-paths", paths_str])
+        else:
+            # 如果列表为空
+            logger.warning("--lora-paths was provided but no paths were listed. Ignoring.")
+
+    if args.max_loras_per_batch is not None:
+        logger.info(f"Setting maximum LoRA adapters per batch to: {args.max_loras_per_batch}")
+        cmd.extend(["--max-loras-per-batch", str(args.max_loras_per_batch)])
+
+    # 添加 max-loaded-loras 参数处理
+    if args.max_loaded_loras is not None:
+        logger.info(f"Setting maximum loaded LoRA adapters to: {args.max_loaded_loras}")
+        cmd.extend(["--max-loaded-loras", str(args.max_loaded_loras)])
+
+    # 添加 lora-eviction-policy 参数处理
+    if args.lora_eviction_policy: # 'lru' 或 'fifo' 都为真
+        logger.info(f"Setting LoRA eviction policy to: {args.lora_eviction_policy}")
+        cmd.extend(["--lora-eviction-policy", args.lora_eviction_policy])
+
+    if args.lora_backend: # 'triton' 或 'csgmv' 都为真
+        logger.info(f"Setting LoRA backend to: {args.lora_backend}")
+        cmd.extend(["--lora-backend", args.lora_backend])
+
+    if args.max_lora_chunk_size: # 16, 32, 64, 128 都为真
+        # 注意：这个参数可能只在 --lora-backend csgmv 时有效，根据 SGLang 文档
+        logger.info(f"Setting maximum LoRA chunk size to: {args.max_lora_chunk_size}")
+        cmd.extend(["--max-lora-chunk-size", str(args.max_lora_chunk_size)]) # 转换为字符串
+
     # Relay logic based on effective scheduler address
     if args.use_relay or (
         args.scheduler_addr != "auto" and not str(args.scheduler_addr).startswith("/")
@@ -400,7 +461,36 @@ Examples:
         "-u", "--skip-upload", action="store_true", help="Skip upload package info"
     )
 
-    # Add 'chat' command parser
+
+    join_parser.add_argument('--enable-lora', action='store_true',
+                        help='Enable LoRA support for the model. This argument is automatically set to True if `--lora-paths` is provided.')
+
+
+    join_parser.add_argument('--max-lora-rank', type=int, default=None,
+                        help='The maximum rank of LoRA adapters. If not specified, it will be automatically inferred from the adapters provided in --lora-paths.')
+
+
+    join_parser.add_argument('--lora-target-modules', nargs='*', type=str, default=None,
+                        help='The union set of all target modules where LoRA should be applied. If not specified, it will be automatically inferred from the adapters provided in --lora-paths. If \'all\' is specified, all supported modules will be targeted.')
+
+    join_parser.add_argument('--lora-paths', nargs='*', type=str, default=None,
+                        help='The list of LoRA adapters to load. Each adapter must be specified in one of the following formats: <PATH> | <NAME>=<PATH> | JSON with schema {"lora_name":str,"lora_path":str,"pinned":bool}.')
+
+    join_parser.add_argument('--max-loras-per-batch', type=int, default=8,
+                        help='Maximum number of adapters for a running batch, include base-only request.')
+
+    join_parser.add_argument('--max-loaded-loras', type=int, default=None,
+                        help='If specified, it limits the maximum number of LoRA adapters loaded in CPU memory at a time. The value must be greater than or equal to `--max-loras-per-batch`.')
+
+    join_parser.add_argument('--lora-eviction-policy', choices=['lru', 'fifo'], default='lru',
+                        help='LoRA adapter eviction policy when memory pool is full. \'lru\': Least Recently Used (default, better cache efficiency). \'fifo\': First-In-First-Out.')
+
+    join_parser.add_argument('--lora-backend', choices=['triton', 'csgmv'], default='triton',
+                        help='Choose the kernel backend for multi-LoRA serving.')
+
+    join_parser.add_argument('--max-lora-chunk-size', choices=[16, 32, 64, 128], default=16,
+                        help='Maximum chunk size for the ChunkedSGMV LoRA backend. Only used when --lora-backend is \'csgmv\'. Choosing a larger value might improve performance.')
+
     chat_parser = subparsers.add_parser(
         "chat", help="Start the Parallax chat server (equivalent to scripts/chat.sh)"
     )

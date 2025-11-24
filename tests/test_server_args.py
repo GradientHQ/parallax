@@ -72,6 +72,41 @@ class TestCreateExecutorConfig:
     def test_create_config(self):
         """Test creating executor configuration."""
         args = argparse.Namespace(
+        model_path="mlx-community/Qwen3-0.6B-bf16",
+        start_layer=0,
+        end_layer=10,
+        dtype="float16",
+        gpu_backend="sglang",
+        max_sequence_length=2048,
+        max_batch_size=8,
+        kv_block_size=64,
+        kv_cache_memory_fraction=0.8,
+        enable_prefix_cache=False,
+        max_num_tokens_per_batch=1024,
+        prefill_priority=0,
+        micro_batch_ratio=2,
+        scheduler_wait_ms=500,
+        send_to_peer_addr=None,
+        recv_from_peer_addr=None,
+        executor_input_ipc="ipc://test_input",
+        executor_output_ipc="ipc://test_output",
+        attention_backend="flashinfer",
+        moe_runner_backend="auto",
+        tp_rank=0,
+        tp_size=1,
+        nccl_port=4000,
+        use_hfcache=False,
+        enable_lora=False,  # 添加此行
+        max_lora_rank=None,  # 添加此行
+        lora_target_modules=None,  # 添加此行
+        lora_paths=None,  # 添加此行
+        max_loras_per_batch=1,  # 添加此行
+        max_loaded_loras=8,  # 添加此行
+        lora_eviction_policy="lru",  # 添加此行
+        lora_backend="triton",  # 添加此行
+        max_lora_chunk_size=128,  # 添加此行
+    )
+        args = argparse.Namespace(
             model_path="mlx-community/Qwen3-0.6B-bf16",
             start_layer=0,
             end_layer=14,
@@ -92,6 +127,15 @@ class TestCreateExecutorConfig:
             tp_size=1,
             nccl_port=4001,
             use_hfcache=False,
+            enable_lora=False,
+            max_lora_rank=None,  
+            lora_target_modules=None,  
+            lora_paths=None,  
+            max_loras_per_batch=1, 
+            max_loaded_loras=8, 
+            lora_eviction_policy="lru",  
+            lora_backend="triton",  
+            max_lora_chunk_size=128,  
         )
 
         config = create_executor_config(args)

@@ -102,6 +102,15 @@ class Executor:
         # GPU/SGLang Specialized Configs
         attention_backend: Optional[str] = "flashinfer",
         moe_runner_backend: Optional[str] = "auto",
+        enable_lora: Optional[bool] = False,
+        max_lora_rank: Optional[int] = None,
+        lora_target_modules: Optional[List[str]] = None,
+        lora_paths: Optional[List[str]] = None,
+        max_loras_per_batch: Optional[int] = None,
+        max_loaded_loras: Optional[int] = None,
+        lora_eviction_policy: Optional[str] = "lru",
+        lora_backend: Optional[str] = "triton",
+        max_lora_chunk_size: Optional[int] = 128,
         # Tensor Parallel Configs
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
@@ -155,6 +164,15 @@ class Executor:
                 "tp_size": tp_size,
                 "nccl_port": nccl_port,
                 "using_hfcache": use_hfcache,
+                "enable_lora": enable_lora,
+                "max_lora_rank": max_lora_rank,
+                "lora_target_modules": lora_target_modules,
+                "lora_paths": lora_paths,
+                "max_loras_per_batch": max_loras_per_batch,
+                "max_loaded_loras": max_loaded_loras,
+                "lora_eviction_policy": lora_eviction_policy,
+                "lora_backend": lora_backend,
+                "max_lora_chunk_size": max_lora_chunk_size,
             }
 
             self.model_runner, self.config, self.tokenizer = initialize_cuda_model_runner(
@@ -1622,5 +1640,14 @@ def create_executor_config(args: argparse.Namespace, gradient_server=None):
         "nccl_port": args.nccl_port,
         "gradient_server": gradient_server,
         "use_hfcache": args.use_hfcache,
+        "enable_lora": args.enable_lora,
+        "max_lora_rank": args.max_lora_rank,
+        "lora_target_modules": args.lora_target_modules,
+        "lora_paths": args.lora_paths,
+        "max_loras_per_batch": args.max_loras_per_batch,
+        "max_loaded_loras": args.max_loaded_loras,
+        "lora_eviction_policy": args.lora_eviction_policy,
+        "lora_backend": args.lora_backend,
+        "max_lora_chunk_size": args.max_lora_chunk_size,
     }
     return config
