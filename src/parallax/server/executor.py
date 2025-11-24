@@ -876,6 +876,8 @@ class Executor:
                 sampling_params.top_k = raw_sampling_params["top_k"]
             if "top_p" in raw_sampling_params:
                 sampling_params.top_p = raw_sampling_params["top_p"]
+            if "ignore_eos" in raw_sampling_params:
+                sampling_params.ignore_eos = raw_sampling_params["ignore_eos"]
 
         req = InitialRequest(
             request_id=rid,

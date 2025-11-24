@@ -30,6 +30,13 @@ _LEVEL_COLOR = {
     "CRITICAL": _Ansi.MAGENTA,
 }
 
+_PACKAGE_COLOR = {
+    "parallax": _Ansi.CYAN,
+    "scheduling": _Ansi.GREEN,
+    "backend": _Ansi.YELLOW,
+    "sglang": _Ansi.MAGENTA,
+}
+
 
 class CustomFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:  # noqa: D401
@@ -42,7 +49,8 @@ class CustomFormatter(logging.Formatter):
         # caller_block: last path component + line no
         pathname = record.pathname.rsplit("/", 1)[-1]
         record.caller_block = f"{pathname}:{record.lineno}"
-
+        record.package = record.name.split(".")[0]
+        record.packagecolor = _PACKAGE_COLOR.get(record.package, "")
         return super().format(record)
 
 
@@ -82,6 +90,7 @@ def _initialize_if_necessary():
 
         fmt = (
             "{asctime}.{msecs:03.0f} "
+            "[{bold}{packagecolor}{package:<10}{reset}] "
             "[{bold}{levelcolor}{levelname:<8}{reset}] "
             "{caller_block:<25} {message}"
         )

@@ -327,6 +327,7 @@ class HTTPHandler:
             request_info.update_time = time.time()
             request_info.prompt_tokens = recv_dict["prompt_tokens"]
             next_token_id = recv_dict["next_token_id"]
+            request_info.completion_tokens += 1
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
 
@@ -336,7 +337,6 @@ class HTTPHandler:
             if not is_finished and len(output) > 0:
                 # Accumulate full text for non-streaming and potentially for logging
                 request_info.text += output
-                request_info.completion_tokens += 1
 
                 # For streaming, put the individual token into the queue.
                 if request_info.stream:
