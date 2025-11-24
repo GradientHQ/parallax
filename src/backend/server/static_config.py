@@ -19,7 +19,7 @@ MODELS = {
     "moonshotai/Kimi-K2-Instruct-0905": "mlx-community/Kimi-K2-Instruct-0905-mlx-DQ3_K_M",
     "moonshotai/Kimi-K2-Thinking": "mlx-community/Kimi-K2-Thinking",
     # OpenAI GPT-OSS Models
-    "openai/gpt-oss-20b": "mlx-community/gpt-oss-20b-MXFP4-Q4",
+    "openai/gpt-oss-20b": "mlx-community/gpt-oss-20b-MXFP4-Q8",
     "openai/gpt-oss-120b": "mlx-community/gpt-oss-120b-4bit",
     "openai/gpt-oss-safeguard-20b": "lmstudio-community/gpt-oss-safeguard-20b-MLX-MXFP4",
     "openai/gpt-oss-safeguard-120b": "lmstudio-community/gpt-oss-safeguard-120b-MLX-MXFP4",
