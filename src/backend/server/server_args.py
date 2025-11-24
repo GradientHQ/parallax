@@ -43,6 +43,13 @@ def parse_args() -> argparse.Namespace:
         help="Routing strategy: 'rr' (round-robin), 'dp' (dynamic programming), or 'random' (random)",
     )
     parser.add_argument(
+        "--pipeline-rebalance-strategy",
+        type=str,
+        default="water_filling",
+        choices=["greedy", "water_filling", "none"],
+        help="Pipeline rebalance strategy: 'greedy' (assign contiguous layers in capacity order), 'water_filling' (proportional water-filling based on compute power), or 'none' (disable rebalancing)",
+    )
+    parser.add_argument(
         "--use-hfcache",
         action="store_true",
         default=False,

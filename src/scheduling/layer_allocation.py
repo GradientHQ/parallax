@@ -102,6 +102,7 @@ class BaseLayerAllocator:
         rebalance_threshold: float = 0.25,
         water_filling_max_iterations: int = 40,
         assign_left_over_nodes: bool = True,
+        pipeline_rebalance_strategy: Optional[Literal["greedy", "water_filling"]] = "water_filling",
     ) -> None:
         self.model_info = model_info
         self.num_total_layers = model_info.num_layers
@@ -128,6 +129,8 @@ class BaseLayerAllocator:
         # Whether to assign left-over nodes using dynamic policy for
         # static allocation's leftover nodes
         self.assign_left_over_nodes = assign_left_over_nodes
+        # Strategy for in-place per-pipeline rebalancing
+        self.pipeline_rebalance_strategy = pipeline_rebalance_strategy
 
         # Node allocation
         self.node_allocation: Dict[str, Tuple[int, int]] = {}
@@ -640,24 +643,17 @@ class GreedyLayerAllocator(BaseLayerAllocator):
         self,
         *,
         look_ahead_enable: bool = True,
-        pipeline_rebalance_strategy: Literal["greedy", "water_filling"] = "water_filling",
     ) -> None:
         """Initialize Greedy allocator runtime knobs.
 
         Args:
             look_ahead_enable: Toggle the look-ahead optimization when selecting
                 the tail node to close a pipeline.
-            pipeline_rebalance_strategy: Strategy for in-place per-pipeline
-                rebalancing after a pipeline is formed. "greedy" assigns
-                contiguous layers in capacity order; "water_filling" uses
-                proportional water-filling based on compute power.
 
         Returns:
-            None. Sets internal flags `_look_ahead_enable` and
-            `_pipeline_rebalance_strategy`.
+            None. Sets internal flags `_look_ahead_enable`.
         """
         self._look_ahead_enable = look_ahead_enable
-        self._pipeline_rebalance_strategy = pipeline_rebalance_strategy
 
     def global_allocation(self) -> bool:
         """
@@ -680,7 +676,8 @@ class GreedyLayerAllocator(BaseLayerAllocator):
 
         # Read runtime knobs with sensible defaults if `init` wasn't called
         look_ahead_enabled = getattr(self, "_look_ahead_enable", True)
-        rebalance_strategy = getattr(self, "_pipeline_rebalance_strategy", "water_filling")
+        # rebalance_strategy used to be read from getattr(self, "_pipeline_rebalance_strategy", "water_filling")
+        # but now we use self.pipeline_rebalance_strategy passed in __init__
 
         while available_nodes:
             total_remaining_capacity = sum(
@@ -746,10 +743,11 @@ class GreedyLayerAllocator(BaseLayerAllocator):
                     "[Greedy] Built pipeline with %d nodes; adjusting layers",
                     len(pipeline_nodes),
                 )
-                if rebalance_strategy == "greedy":
+                if self.pipeline_rebalance_strategy == "greedy":
                     self.adjust_pipeline_layers_greedy(pipeline_nodes)
-                else:
+                elif self.pipeline_rebalance_strategy == "water_filling":
                     self.adjust_pipeline_layers(pipeline_nodes, assume_sorted=False)
+                # If None, do nothing (keep original allocation from the greedy construction)
                 any_assigned = True
             else:
                 # Cannot form a complete pipeline with remaining nodes
@@ -811,12 +809,14 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
         assign_left_over_nodes: bool = True,
         rebalance_threshold: float = 0.25,
         water_filling_max_iterations: int = 40,
+        pipeline_rebalance_strategy: Optional[Literal["greedy", "water_filling"]] = "water_filling",
     ) -> None:
         super().__init__(
             model_info,
             nodes,
             rebalance_threshold=rebalance_threshold,
             water_filling_max_iterations=water_filling_max_iterations,
+            pipeline_rebalance_strategy=pipeline_rebalance_strategy,
         )
         # Sort GPUs by layer capacity descending for stronger pruning
         self.alpha = alpha
@@ -959,7 +959,11 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
             if not pl_nodes:
                 continue
             logger.debug("[DP] Adjusting pipeline with %d nodes", len(pl_nodes))
-            self.adjust_pipeline_layers(pl_nodes, assume_sorted=False)
+            if self.pipeline_rebalance_strategy == "greedy":
+                self.adjust_pipeline_layers_greedy(pl_nodes)
+            elif self.pipeline_rebalance_strategy == "water_filling":
+                self.adjust_pipeline_layers(pl_nodes, assume_sorted=False)
+            # If None, do nothing
         # Assign any nodes that were left unallocated using dynamic policy
         if self.assign_left_over_nodes:
             logger.debug("[DP] Assigning left-over nodes")

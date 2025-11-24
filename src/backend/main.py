@@ -158,8 +158,18 @@ if __name__ == "__main__":
     init_nodes_num = args.init_nodes_num
     is_local_network = args.is_local_network
     routing_strategy = args.routing_strategy
+    pipeline_rebalance_strategy = args.pipeline_rebalance_strategy
+    if pipeline_rebalance_strategy == "none":
+        pipeline_rebalance_strategy = None
+
     if model_name is not None and init_nodes_num is not None:
-        scheduler_manage.run(model_name, init_nodes_num, is_local_network, routing_strategy)
+        scheduler_manage.run(
+            model_name,
+            init_nodes_num,
+            is_local_network,
+            routing_strategy,
+            pipeline_rebalance_strategy,
+        )
 
     host = args.host
     port = args.port

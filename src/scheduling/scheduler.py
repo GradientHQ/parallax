@@ -36,6 +36,7 @@ class Scheduler:
         min_nodes_bootstrapping: int = 1,
         strategy: Literal["greedy", "dp"] = "dp",
         routing_strategy: Literal["rr", "dp", "random"] = "rr",
+        pipeline_rebalance_strategy: Optional[Literal["greedy", "water_filling"]] = "water_filling",
         *,
         request_arrival_horizon_sec: float = 600.0,
         rebalance_threshold: float = float("inf"),
@@ -53,6 +54,10 @@ class Scheduler:
             routing_strategy: Request routing strategy ("dp" for dynamic programming, or
                 "greedy" for round-robin over complete pipelines skipping overloaded ones,
                 or "random" for random dispatch).
+            pipeline_rebalance_strategy: Strategy for in-place per-pipeline rebalancing.
+                "greedy": assigns contiguous layers in capacity order.
+                "water_filling": uses proportional water-filling based on compute power.
+                None: disables rebalancing (preserves original allocation).
             request_arrival_horizon_sec: Sliding window horizon for arrival-rate tracking.
             rebalance_threshold: Threshold for triggering rebalancing in allocation.
             water_filling_max_iterations: Max iterations for water-filling allocation.
@@ -70,6 +75,7 @@ class Scheduler:
             nodes,
             rebalance_threshold=rebalance_threshold,
             water_filling_max_iterations=water_filling_max_iterations,
+            pipeline_rebalance_strategy=pipeline_rebalance_strategy,
         )
         # Ensure Scheduler and allocator share the same node list to avoid divergence.
         self.nodes = self.layer_allocator.nodes
