@@ -243,13 +243,13 @@ if __name__ == "__main__":
                     # Wait for executors and restart if layer allocation changes
                     if _wait_executors_check_layer_change(shared_state, executor_subprocs):
                         logger.warning("Layer allocation changed! Stopping executors to reload...")
-                        _stop_executor_processes(executor_subprocs)
-                        _update_args_from_shared_state(args, shared_state)
                         # Reset flag and set status to INITIALIZING
                         shared_state.update(
                             _layer_allocation_changed=False,
                             status=ServerState.INITIALIZING.value,
                         )
+                        _stop_executor_processes(executor_subprocs)
+                        _update_args_from_shared_state(args, shared_state)
                         logger.info(
                             f"Reloading executor with layers [{args.start_layer}, {args.end_layer})"
                         )
@@ -275,14 +275,14 @@ if __name__ == "__main__":
         # Shutdown all processes
         logger.debug("Shutting down all processes...")
 
+        # Shutdown P2P server subprocess
+        if p2p_server_process is not None:
+            stop_p2p_server(p2p_server_process)
+
         # Shutdown executor subprocesses
         for executor_process in executor_subprocs:
             if executor_process.is_alive():
                 stop_executor_process(executor_process)
-
-        # Shutdown P2P server subprocess
-        if p2p_server_process is not None:
-            stop_p2p_server(p2p_server_process)
 
         # Shutdown http server
         if http_server_process is not None:
