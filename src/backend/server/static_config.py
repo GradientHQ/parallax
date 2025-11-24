@@ -13,6 +13,9 @@ MODELS = {
     # =============================== for quickly test ===================================#
     "Qwen/Qwen3-0.6B": "Qwen/Qwen3-0.6B",
     # ======================================= End ========================================#
+    #
+    #
+    #
     # ===============================newly added models===================================#
     # Moonshot Kimi Models
     "moonshotai/Kimi-K2-Instruct": "mlx-community/Kimi-K2-Instruct-4bit",
@@ -30,6 +33,9 @@ MODELS = {
     # Other Models
     "MiniMaxAI/MiniMax-M2": "mlx-community/MiniMax-M2-4bit",
     # ======================================= End ========================================#
+    #
+    #
+    # =============================== Major Models =====================================#
     # DeepSeek Models
     "deepseek-ai/DeepSeek-V3.1": "mlx-community/DeepSeek-V3.1-4bit",
     "deepseek-ai/DeepSeek-V3": "mlx-community/DeepSeek-V3-4bit",
@@ -76,6 +82,7 @@ MODELS = {
     "nvidia/Llama-3.1-8B-Instruct-FP8": "mlx-community/Meta-Llama-3.1-8B-Instruct-8bit",
     "nvidia/Llama-3.1-70B-Instruct-FP8": "mlx-community/Meta-Llama-3.1-70B-Instruct-8bit",
     "nvidia/Llama-3.3-70B-Instruct-FP8": "mlx-community/Llama-3.3-70B-Instruct-8bit",
+    # ======================================= End ========================================#
 }
 
 NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
