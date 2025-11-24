@@ -6,8 +6,6 @@ import pytest
 
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
 
-# --- Helper Functions ---
-
 
 def ref_masked_attention(q, k, v, scale):
     """
