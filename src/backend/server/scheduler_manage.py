@@ -50,12 +50,12 @@ class SchedulerManage:
         self.stubs = {}
         self.is_local_network = False
 
-    def run(self, model_name, init_nodes_num, is_local_network=True):
+    def run(self, model_name, init_nodes_num, is_local_network=True, routing_strategy="rr"):
         """
         Start the scheduler and the P2P service for RPC handling.
         """
         logger.debug(
-            f"SchedulerManage starting: model_name={model_name}, init_nodes_num={init_nodes_num}"
+            f"SchedulerManage starting: model_name={model_name}, init_nodes_num={init_nodes_num}, routing_strategy={routing_strategy}"
         )
         self.is_local_network = is_local_network
         if not is_local_network and not self.initial_peers and not self.relay_servers:
@@ -63,7 +63,7 @@ class SchedulerManage:
             self.initial_peers = PUBLIC_INITIAL_PEERS
             self.relay_servers = PUBLIC_RELAY_SERVERS
 
-        self._start_scheduler(model_name, init_nodes_num)
+        self._start_scheduler(model_name, init_nodes_num, routing_strategy)
         self._start_lattica()
         self.completion_handler = TransformerConnectionHandler(
             lattica=self.lattica,
@@ -126,7 +126,7 @@ class SchedulerManage:
             "gpu_memory": node.hardware.memory_gb,
         }
 
-    def _start_scheduler(self, model_name, init_nodes_num):
+    def _start_scheduler(self, model_name, init_nodes_num, routing_strategy="rr"):
         """
         Create the scheduler and start its background run loop if needed.
         """
@@ -138,7 +138,9 @@ class SchedulerManage:
         self.init_nodes_num = init_nodes_num
 
         model_info = get_model_info(model_name, self.use_hfcache)
-        self.scheduler = Scheduler(model_info, [], min_nodes_bootstrapping=init_nodes_num)
+        self.scheduler = Scheduler(
+            model_info, [], min_nodes_bootstrapping=init_nodes_num, routing_strategy=routing_strategy
+        )
 
         # Run the scheduler's event/dispatch loops in background so the process
         # can continue to serve RPCs and HTTP traffic.

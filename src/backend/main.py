@@ -157,8 +157,9 @@ if __name__ == "__main__":
     model_name = args.model_name
     init_nodes_num = args.init_nodes_num
     is_local_network = args.is_local_network
+    routing_strategy = args.routing_strategy
     if model_name is not None and init_nodes_num is not None:
-        scheduler_manage.run(model_name, init_nodes_num, is_local_network)
+        scheduler_manage.run(model_name, init_nodes_num, is_local_network, routing_strategy)
 
     host = args.host
     port = args.port

@@ -12,6 +12,7 @@ warm-up phase (to inform rebalancing), then perform shard-level DP to produce th
 final node path and total latency.
 """
 
+import random
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
 
@@ -454,3 +455,41 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
                     return repaired, total_latency
 
         return [], float("inf")
+
+
+class RandomPipelineRouting(RoundRobinPipelineRouting):
+    """
+    Random routing strategy.
+
+    Simply dispatches request randomly to any of the pipeline (as our experiment baseline).
+    """
+
+    def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
+        """Randomly select a pipeline."""
+        if not nodes or num_layers <= 0:
+            return [], float("inf")
+
+        self._ensure_pipelines(nodes, num_layers)
+        if not self._pipelines:
+            return [], float("inf")
+
+        candidate_ids = random.choice(self._pipelines)
+
+        # Calculate latency
+        id_to_node: Dict[str, Node] = {n.node_id: n for n in nodes}
+        total_latency = 0.0
+        prev: Optional[Node] = None
+
+        for nid in candidate_ids:
+            node = id_to_node.get(nid)
+            if node is None:
+                return [], float("inf")
+
+            total_latency += float(node.layer_latency_ms)
+            if prev is not None:
+                total_latency += (
+                    0.0 if prev.node_id == node.node_id else float(prev.get_rtt_to(node))
+                )
+            prev = node
+
+        return candidate_ids, total_latency

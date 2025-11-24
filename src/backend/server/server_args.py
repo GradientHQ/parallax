@@ -36,6 +36,13 @@ def parse_args() -> argparse.Namespace:
         "--is-local-network", type=bool, default=True, help="Whether to use local network"
     )
     parser.add_argument(
+        "--routing-strategy",
+        type=str,
+        default="rr",
+        choices=["rr", "dp", "random"],
+        help="Routing strategy: 'rr' (round-robin), 'dp' (dynamic programming), or 'random' (random)",
+    )
+    parser.add_argument(
         "--use-hfcache",
         action="store_true",
         default=False,

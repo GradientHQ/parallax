@@ -19,6 +19,7 @@ from scheduling.model_info import ModelInfo
 from scheduling.node import Node, RequestSignal
 from scheduling.request_routing import (
     DynamicProgrammingRouting,
+    RandomPipelineRouting,
     RoundRobinPipelineRouting,
 )
 
@@ -34,7 +35,7 @@ class Scheduler:
         nodes: List[Node],
         min_nodes_bootstrapping: int = 1,
         strategy: Literal["greedy", "dp"] = "dp",
-        routing_strategy: Literal["rr", "dp"] = "rr",
+        routing_strategy: Literal["rr", "dp", "random"] = "rr",
         *,
         request_arrival_horizon_sec: float = 600.0,
         rebalance_threshold: float = float("inf"),
@@ -50,7 +51,8 @@ class Scheduler:
             min_nodes_bootstrapping: Minimum nodes required to attempt initial allocation.
             strategy: Layer allocation strategy ("dp" or "greedy").
             routing_strategy: Request routing strategy ("dp" for dynamic programming, or
-                "greedy" for round-robin over complete pipelines skipping overloaded ones).
+                "greedy" for round-robin over complete pipelines skipping overloaded ones,
+                or "random" for random dispatch).
             request_arrival_horizon_sec: Sliding window horizon for arrival-rate tracking.
             rebalance_threshold: Threshold for triggering rebalancing in allocation.
             water_filling_max_iterations: Max iterations for water-filling allocation.
@@ -74,9 +76,12 @@ class Scheduler:
         self.node_id_to_node: Dict[str, Node] = self.layer_allocator.node_id_to_node
         self.min_nodes_bootstrapping = min_nodes_bootstrapping
 
-        self.request_router = (
-            DynamicProgrammingRouting() if routing_strategy == "dp" else RoundRobinPipelineRouting()
-        )
+        if routing_strategy == "dp":
+            self.request_router = DynamicProgrammingRouting()
+        elif routing_strategy == "random":
+            self.request_router = RandomPipelineRouting()
+        else:
+            self.request_router = RoundRobinPipelineRouting()
         self.request_warm_up_for_reshard = request_warm_up_for_reshard
 
         self._request_queue: "queue.Queue[RequestSignal]" = queue.Queue()
