@@ -400,6 +400,7 @@ Examples:
         "-u", "--skip-upload", action="store_true", help="Skip upload package info"
     )
 
+    # Add 'chat' command parser
     chat_parser = subparsers.add_parser(
         "chat", help="Start the Parallax chat server (equivalent to scripts/chat.sh)"
     )
