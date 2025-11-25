@@ -1,50 +1,55 @@
-
-// Inputs:
-// key, value, key_cache, value_cache, slot_mapping
-// key_stride, value_stride, num_kv_heads, head_dim, block_size, layer_idx,
-// num_layers, num_blocks (All are pointers)
-
-// Cast away const for cache updates
 device {{T}} *key_cache_mut = (device {{T}} *)key_cache;
 device {{T}} *value_cache_mut = (device {{T}} *)value_cache;
+// reshape_and_cache logic
+// Inputs are provided by MLX wrapper:
+// key, value, key_cache, value_cache, slot_mapping, ...
 
+// MLX provided variable for grid position
 uint3 gid = thread_position_in_grid;
 
-int batch_idx = gid.y;
-int flat_dim = gid.x;
+int kv_head_dim_idx = gid.x;
+int token_idx = gid.y;
 
-// Dereference constants
-// MLX seems to pass scalars as values if they are 0-D arrays?
-// Or maybe constant int& ref?
-// Let's try treating them as values first.
-int _num_kv_heads = num_kv_heads;
-int _head_dim = head_dim;
-int _block_size = block_size;
-int _layer_idx = layer_idx;
-int _num_blocks = num_blocks;
+// Scalars are passed by value (int32), so no dereference needed
+int n_kv_heads = num_kv_heads;
+int h_dim = head_dim;
 
-int head_idx = flat_dim / _head_dim;
-int dim_idx = flat_dim % _head_dim;
-
-if (head_idx >= _num_kv_heads)
+if (kv_head_dim_idx >= n_kv_heads * h_dim)
   return;
 
-// Input Index
-// key: [batch, num_kv_heads, head_dim]
-int src_idx = batch_idx * (_num_kv_heads * _head_dim) + flat_dim;
+int head_idx = kv_head_dim_idx / h_dim;
+int dim_idx = kv_head_dim_idx % h_dim;
 
-long slot_idx = slot_mapping[batch_idx];
-int block_idx = slot_idx / _block_size;
-int block_offset = slot_idx % _block_size;
+int64_t slot = slot_mapping[token_idx];
 
-// Cache Layout: (num_layers, num_blocks, num_kv_heads, block_size, head_dim)
-long layer_stride = (long)_num_blocks * _num_kv_heads * _block_size * _head_dim;
-long block_stride = _num_kv_heads * _block_size * _head_dim;
-long head_stride = _block_size * _head_dim;
-long offset_stride = _head_dim;
+// Handle padding tokens (slot == -1)
+if (slot < 0) {
+  return;
+}
 
-long dest_idx = _layer_idx * layer_stride + block_idx * block_stride +
-                head_idx * head_stride + block_offset * offset_stride + dim_idx;
+int b_size = block_size;
+int64_t block_idx = slot / b_size;
+int64_t block_offset = slot % b_size;
+
+int l_idx = layer_idx;
+int n_blocks = num_blocks;
+
+// Calculate source index
+// key shape: (num_tokens, num_kv_heads, head_dim)
+int64_t src_idx =
+    (int64_t)token_idx * n_kv_heads * h_dim + head_idx * h_dim + dim_idx;
+
+// Calculate destination index
+int64_t head_stride = b_size * h_dim;
+int64_t block_stride = n_kv_heads * head_stride;
+int64_t layer_stride = n_blocks * block_stride;
+
+int64_t dest_idx = (int64_t)l_idx * layer_stride + block_idx * block_stride +
+                   (int64_t)head_idx * head_stride + block_offset * h_dim +
+                   dim_idx;
+
+// Cast away const for cache updates
+// 'key_cache' is 'const device {{T}}*' in inputs, we need 'device {{T}}*'
 
 key_cache_mut[dest_idx] = key[src_idx];
 value_cache_mut[dest_idx] = value[src_idx];

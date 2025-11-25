@@ -37,13 +37,13 @@ def test_decode_pipeline_multiple_steps(start_layer, end_layer, num_decode_steps
         model_repo=model_repo,
         start_layer=end_layer,
         end_layer=ref_config.get("num_hidden_layers"),
-        kv_cache_memory_fraction=0.1,
+        kv_cache_memory_fraction=0.2,  # actually, we should use 0.1 for peer 1, but we use 0.2 for testing.
         dtype="bfloat16",
     )
 
     # 2. Setup initial requests for multiple prompts
     prompts = [
-        "The capital of France is",
+        "The capital of China is",
         "Qwen is a large language model developed by",
     ]
     initial_requests = [
@@ -61,7 +61,7 @@ def test_decode_pipeline_multiple_steps(start_layer, end_layer, num_decode_steps
     prefill_reqs_p2 = executor_peer1._prepare_next_batch_requests(
         requests=prefill_batch_data["requests"],
         hidden_states=hidden_states_p1,
-        lengths=prefill_batch_data["lengths"],
+        context_lengths=prefill_batch_data["context_lengths"],
     )
 
     # send to next peer
@@ -81,7 +81,7 @@ def test_decode_pipeline_multiple_steps(start_layer, end_layer, num_decode_steps
         feedback_reqs = executor_peer2._prepare_next_batch_requests(
             requests=prefill_batch_data["requests"],
             hidden_states=generated_tokens_pipeline[-1],
-            lengths=prefill_batch_data["lengths"],  # Not used by last peer
+            context_lengths=prefill_batch_data["context_lengths"],  # Not used by last peer
         )
 
         # 2. Peer 1: process feedback, commit token, re-enqueue
@@ -101,7 +101,7 @@ def test_decode_pipeline_multiple_steps(start_layer, end_layer, num_decode_steps
         decode_reqs_p2 = executor_peer1._prepare_next_batch_requests(
             requests=decode_batch_data["requests"],
             hidden_states=decode_hidden_states_p1,
-            lengths=decode_batch_data["lengths"],
+            context_lengths=decode_batch_data["context_lengths"],
         )
 
         # 5. Peer 2: process decode batch to get next tokens

@@ -1,4 +1,5 @@
 import math
+import time
 
 import mlx.core as mx
 import numpy as np
@@ -281,3 +282,102 @@ class TestPagedAttention:
         assert (
             max_diff < 1e-2
         ), f"Large scale test failed for {params['desc']}, max_diff: {max_diff}"
+
+    def test_benchmark_paged_vs_native(self):
+        """
+        Benchmark PagedAttention vs Native MLX SDPA.
+        """
+        # Config
+        batch_size = 8
+        num_heads = 32
+        num_kv_heads = 32
+        head_dim = 128
+        seq_len = 200  # Length
+        block_size = 1024
+        dtype = mx.float16
+        scale = 1.0 / math.sqrt(head_dim)
+
+        # Data
+        q = mx.random.uniform(shape=(batch_size, num_heads, 1, head_dim)).astype(dtype)
+        k_cont = mx.random.uniform(shape=(batch_size, num_kv_heads, seq_len, head_dim)).astype(
+            dtype
+        )
+        v_cont = mx.random.uniform(shape=(batch_size, num_kv_heads, seq_len, head_dim)).astype(
+            dtype
+        )
+
+        # Setup Paged
+        num_blocks = (seq_len + block_size - 1) // block_size
+        total_blocks = num_blocks * batch_size
+        # Quick setup without manager for pure kernel benchmark
+        key_cache = mx.zeros((1, total_blocks, num_kv_heads, block_size, head_dim), dtype=dtype)
+        value_cache = mx.zeros((1, total_blocks, num_kv_heads, block_size, head_dim), dtype=dtype)
+        all_blocks = np.arange(total_blocks, dtype=np.int32).reshape(batch_size, num_blocks)
+        block_tables = mx.array(all_blocks)
+        context_lengths = mx.array([seq_len] * batch_size, dtype=mx.int32)
+        # Force materialize paged cache
+        mx.eval(key_cache, value_cache)
+
+        # Benchmark Native (using mx.fast.scaled_dot_product_attention if available or manual)
+        # For fair comparison, we assume native implementation is fast.
+        # Manual implementation is slow in python.
+        # Let's check if mx.fast.scaled_dot_product_attention exists
+        has_sdpa = hasattr(mx.fast, "scaled_dot_product_attention")
+
+        print(f"\n[Benchmark BS={batch_size}, Len={seq_len}]")
+
+        if has_sdpa:
+            # K needs to be (B, H, L, D) for SDPA?
+            # SDPA docs: queries, keys, values.
+            # Usually expects (B, H, L, D) or (B, L, H, D) depending on layout.
+            # MLX SDPA: (q, k, v, ...).
+            # Let's assume (B, H, L, D) for simplicity or transpose.
+            # Native SDPA is highly optimized.
+            start = time.perf_counter()
+            for _ in range(100):
+                # Transpose to match SDPA expectations if needed
+                _ = mx.fast.scaled_dot_product_attention(q, k_cont, v_cont, scale=scale)
+                mx.eval(_)
+            end = time.perf_counter()
+            native_time = (end - start) / 100 * 1000
+            print(f"Native SDPA:     {native_time:.3f} ms")
+        else:
+            print("Native SDPA:     N/A (Not available in this MLX version)")
+
+        # Benchmark Paged
+        # Warmup
+        for _ in range(5):
+            _ = paged_attention(
+                q,
+                key_cache,
+                value_cache,
+                block_tables,
+                context_lengths,
+                block_size,
+                scale,
+                num_kv_heads,
+                0,
+            )
+            mx.eval(_)
+
+        start = time.perf_counter()
+        for _ in range(100):
+            out = paged_attention(
+                q,
+                key_cache,
+                value_cache,
+                block_tables,
+                context_lengths,
+                block_size,
+                scale,
+                num_kv_heads,
+                0,
+            )
+            mx.eval(out)
+        end = time.perf_counter()
+        paged_time = (end - start) / 100 * 1000
+        print(f"Paged Attention: {paged_time:.3f} ms")
+
+
+if __name__ == "__main__":
+    unittest.main()

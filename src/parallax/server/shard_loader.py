@@ -80,7 +80,7 @@ class MLXModelLoader:
                     if hasattr(entry_class, "get_architecture"):
                         architecture = entry_class.get_architecture()
                         self.block_class_map[architecture] = entry_class
-                        logger.info(f"Registered {architecture} -> {entry_class.__name__}")
+                        # logger.info(f"Registered {architecture} -> {entry_class.__name__}")
                     else:
                         logger.warning(f"No architecture attribute found in {entry_class.__name__}")
 

@@ -9,6 +9,7 @@ import pytest
 from mlx_lm.models.base import create_attention_mask
 from mlx_lm.utils import get_model_path, load_model
 
+from parallax.server.paged_kv_cache import PagedKVCacheManager
 from parallax.server.server_info import ShardedModelInfo
 from parallax.server.shard_loader import MLXModelLoader
 from parallax.utils.tokenizer_utils import load_tokenizer
@@ -32,27 +33,22 @@ ref_tokenizer = load_tokenizer(model_path, eos_token_ids=ref_config.get("eos_tok
 )
 def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
     """Load sharded model based on layers_config and
-
     compare its forward pass with a full reference model.
     """
+    dtype = mx.bfloat16
+
+    # Load sharded models
     model_shards = []
-    tokenizer = None
     for layer_from, layer_to in layers_config:
         loader = MLXModelLoader(
             model_path_or_hf_repo=REPO_ID,
             start_layer=layer_from,
             end_layer=layer_to,
         )
-        model_shard_instance, _, _tokenizer = loader.load()
-        if layer_from == 0:
-            tokenizer = _tokenizer
-        model_info = ShardedModelInfo.from_sharded_model(model_shard_instance)
-        print(model_info)
-
+        model_shard_instance, _, _ = loader.load()
         model_shards.append(model_shard_instance)
 
-    assert len(model_shards) == len(layers_config), "Number of loaded shards should match config"
-
+    # Prepare test inputs
     texts = [
         "This is a test.",
         "This is yet another test.",
@@ -60,11 +56,10 @@ def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
         "what color is Moon",
     ]
     ref_ids = [ref_tokenizer.encode(text) for text in texts]
-    ref_pad_token_id = ref_tokenizer.pad_token_id
-    if ref_pad_token_id is None:
-        ref_pad_token_id = ref_tokenizer.eos_token_id
-    ref_ids, ref_mask = pad_inputs(ref_pad_token_id, ref_ids)
+    ref_pad_token_id = ref_tokenizer.pad_token_id or ref_tokenizer.eos_token_id
+    ref_ids, ref_mask = pad_inputs(ref_pad_token_id, ref_ids, dtype=dtype)
 
+    # Run reference model
     def _call_with_mask(self, inputs, cache=None, mask=None):
         h = self.model.embed_tokens(inputs)
         if cache is None:
@@ -83,19 +78,85 @@ def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
         return h
 
     type(ref_model).__call__ = _call_with_mask
-
     ref_out = ref_model(ref_ids, mask=ref_mask)
 
-    mask = None
+    # Prepare PagedKV cache managers for each shard
+    batch_size = len(texts)
+    max_seq_len = ref_ids.shape[1]
+    num_kv_heads = ref_config.get("num_key_value_heads")
+    head_dim = ref_config.get("head_dim") or ref_config.get("hidden_size") // ref_config.get(
+        "num_attention_heads"
+    )
+
+    kv_cache_managers = []
+    cache_memory_fraction = 0
     for shard in model_shards:
-        if shard.start_layer == 0:
-            pad_token_id = tokenizer.pad_token_id
-            if pad_token_id is None:
-                pad_token_id = tokenizer.eos_token_id
-            ids = [tokenizer.encode(text) for text in texts]
-            ids, mask = pad_inputs(pad_token_id, ids)
-            x, _ = shard(ids, cache=None, mask=mask)
-        else:
-            x, _ = shard(x, cache=None, mask=mask)
+        num_shard_layers = shard.end_layer - shard.start_layer
+        cache_memory_fraction += 0.1
+        kv_mgr = PagedKVCacheManager(
+            num_layers=num_shard_layers,
+            num_kv_heads=num_kv_heads,
+            head_dim=head_dim,
+            dtype=dtype,
+            block_size=64,
+            cache_memory_fraction=cache_memory_fraction,
+        )
+        kv_cache_managers.append(kv_mgr)
+
+    # Prepare common inputs
+    padding_mask = (ref_ids != ref_pad_token_id).astype(dtype)
+    actual_seq_lengths = [int((padding_mask[i] > 0).sum()) for i in range(batch_size)]
+
+    # Run sharded models
+    x = None
+    for shard_idx, shard in enumerate(model_shards):
+        kv_cache_manager = kv_cache_managers[shard_idx]
+
+        # Allocate blocks and prepare metadata
+        block_tables_list = []
+        context_lengths_list = []
+        slot_mapping_flat = []
+
+        for i in range(batch_size):
+            req_id = f"req_{i}_shard_{shard_idx}"
+            seq_len = actual_seq_lengths[i]
+            context_lengths_list.append(seq_len)
+
+            success = kv_cache_manager.allocate_request(req_id, seq_len)
+            assert success, f"Failed to allocate blocks for request {i} in shard {shard_idx}"
+
+            block_table = kv_cache_manager.get_block_table(req_id)
+            block_tables_list.append(block_table)
+
+            # Generate slot mapping
+            for seq_idx in range(max_seq_len):
+                if seq_idx < seq_len:
+                    block_idx = seq_idx // kv_cache_manager.block_size
+                    block_offset = seq_idx % kv_cache_manager.block_size
+                    physical_block = block_table[block_idx]
+                    slot = physical_block * kv_cache_manager.block_size + block_offset
+                    slot_mapping_flat.append(slot)
+                else:
+                    slot_mapping_flat.append(-1)
+
+        # Pad block tables
+        max_blocks = max(len(bt) for bt in block_tables_list)
+        padded_block_tables = [bt + [0] * (max_blocks - len(bt)) for bt in block_tables_list]
+
+        block_tables = mx.array(padded_block_tables, dtype=mx.int32)
+        context_lengths = mx.array(context_lengths_list, dtype=mx.int32)
+        slot_mapping = mx.array(slot_mapping_flat, dtype=mx.int64)
+        cache = kv_cache_manager.get_cache()
+
+        # Forward pass
+        input_data = ref_ids if shard.start_layer == 0 else x
+        x = shard(
+            input_data,
+            cache=cache,
+            mask=ref_mask,
+            block_tables=block_tables,
+            context_lengths=context_lengths,
+            slot_mapping=slot_mapping,
+        )
 
     assert mx.allclose(x, ref_out, atol=1e-3, rtol=1e-3)

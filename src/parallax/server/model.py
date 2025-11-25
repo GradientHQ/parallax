@@ -110,33 +110,28 @@ class ShardedModel(nn.Module):
         self,
         h_or_tokens: mx.array,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
-        lengths: Optional[mx.array] = None,
         mask: Optional[mx.array] = None,
+        block_tables: Optional[mx.array] = None,
+        context_lengths: Optional[mx.array] = None,
+        slot_mapping: Optional[mx.array] = None,
         window_size: Optional[int] = None,
-        state_cache: Optional[Tuple[mx.array, mx.array]] = None,
-        using_state_cache: Optional[bool] = False,
-    ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
+    ) -> mx.array:
         """
         Args:
             h_or_tokens:
                 (batch, target_len_padded, D) or (batch, target_len_padded) for prefill,
                 (batch, 1, D) or (batch, 1) for decode.
-            cache: Optional tuple of (k_past_shard, v_past_shard) for this shard.
-                   each of k/v cache has shape:
-                       (batch, n_layers_in_shard, n_kv_heads, source_len_padded, head_dim)
+            cache: PagedAttention:
+                   (key_cache_global, value_cache_global)
+                   has for shape: (num_layers, num_blocks, num_kv_heads, block_size, head_dim)
             lengths: (batch,) true lengths of each sequence in batch.
             mask: Optional causal mask for the current segment.
             window_size: Optional int, if provided, will use a sliding window attention mask.
-            state_cache: Optional tuple of (state0, state1) for this qwen3-next model.
-
-        Returns:
-            h: (batch, L_padded, D) or (batch, L_padded, vocab_size) if last_shard
-            (stacked_k_updates, stacked_v_updates):
-                new KV for current segment.
-                (n_layers_in_shard, batch, n_kv_heads, L_padded, head_dim)
+            block_tables: (batch, max_blocks) for PagedAttention.
+            context_lengths: (batch,) for PagedAttention.
+            slot_mapping: (total_tokens,) for PagedAttention.
         """
         h = h_or_tokens
-        batch = h.shape[0]
         target_len = h.shape[1]
 
         if self.is_first_shard:
@@ -146,84 +141,18 @@ class ShardedModel(nn.Module):
             if self.has_norm_in and self.norm_in:
                 h = self.norm_in(h)
 
-        source_len = 0
-        k_past_all_layers, v_past_all_layers = None, None
-        state0_all_layers, state1_all_layers = None, None
+        if target_len > 1 and mask is None:
+            raise ValueError("ShardedModel: mask cannot be None for prefill.")
 
-        if cache is not None:
-            k_past_all_layers, v_past_all_layers = cache
-            if k_past_all_layers is not None:
-                assert (
-                    k_past_all_layers.ndim == 5
-                ), f"Unexpected k_past_all_layers ndim: {k_past_all_layers.ndim}"
-                # (batch, n_layers, n_kv_heads, source_len, head_dim)
-                source_len = k_past_all_layers.shape[3]
-        if state_cache is not None:
-            state0_all_layers, state1_all_layers = state_cache
-            if state0_all_layers is not None:
-                assert (
-                    state0_all_layers.ndim == 4
-                ), f"Unexpected state0_all_layers ndim: {state0_all_layers.ndim}"
-                assert (
-                    state1_all_layers.ndim == 5
-                ), f"Unexpected state1_all_layers ndim: {state1_all_layers.ndim}"
-
-        if lengths is None:
-            lengths = mx.full((batch,), target_len + source_len, dtype=mx.int32)
-        else:
-            # Validate cumulative_true_lengths shape
-            assert lengths.shape == (
-                batch,
-            ), f"lengths shape mismatch: expected ({batch},), got {lengths.shape}"
-
-        if cache is None:
-            offset = 0
-        else:
-            offset = source_len
-
-        if mask is None:
-            raise ValueError("ShardedModel: mask cannot be None.")
-
-        collected_k_updates = []
-        collected_v_updates = []
-        collected_state0_updates = None
-        collected_state1_updates = None
-        if using_state_cache:
-            collected_state0_updates = []
-            collected_state1_updates = []
-
-        for i, layer_module in enumerate(self.layers):
-            current_layer_past_kv = None
-            if k_past_all_layers is not None and v_past_all_layers is not None:
-                layer_k_past_slice = k_past_all_layers[:, i, ...]
-                layer_v_past_slice = v_past_all_layers[:, i, ...]
-                current_layer_past_kv = (layer_k_past_slice, layer_v_past_slice)
-            if state0_all_layers is not None and state1_all_layers is not None:
-                layer_state0_slice = state0_all_layers[:, i, ...]
-                layer_state1_slice = state1_all_layers[:, i, ...]
-                state_cache = (layer_state0_slice, layer_state1_slice)
-
-            if using_state_cache:
-                h, (new_k, new_v, new_state0, new_state1) = layer_module(
-                    h,
-                    mask=mask,
-                    cache=current_layer_past_kv,
-                    offset=offset,
-                    state_cache=state_cache,
-                    lengths=lengths,
-                )
-                collected_state0_updates.append(new_state0)
-                collected_state1_updates.append(new_state1)
-            else:
-                h, (new_k, new_v) = layer_module(
-                    h,
-                    mask=mask,
-                    cache=current_layer_past_kv,
-                    offset=offset,
-                    lengths=lengths,
-                )
-            collected_k_updates.append(new_k)
-            collected_v_updates.append(new_v)
+        for _, layer_module in enumerate(self.layers):
+            h = layer_module(
+                h,
+                mask=mask,
+                cache=cache,
+                block_tables=block_tables,
+                context_lengths=context_lengths,
+                slot_mapping=slot_mapping,
+            )
 
         if self.is_last_shard:
             if self.norm is None or self.lm_head is None:
@@ -231,19 +160,4 @@ class ShardedModel(nn.Module):
             h = self.norm(h)
             h = self.lm_head(h)
 
-        stacked_k_updates = mx.stack(collected_k_updates, axis=1)
-        stacked_v_updates = mx.stack(collected_v_updates, axis=1)
-        if collected_state0_updates is not None:
-            stacked_state0_updates = mx.stack(collected_state0_updates, axis=1)
-        if collected_state1_updates is not None:
-            stacked_state1_updates = mx.stack(collected_state1_updates, axis=1)
-
-        if using_state_cache:
-            return h, (
-                stacked_k_updates,
-                stacked_v_updates,
-                stacked_state0_updates,
-                stacked_state1_updates,
-            )
-        else:
-            return h, (stacked_k_updates, stacked_v_updates)
+        return h
