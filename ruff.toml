@@ -1,6 +1,4 @@
-# Ruff configuration
 # https://docs.astral.sh/ruff/
-
 line-length = 100
 target-version = "py312"
 
@@ -51,7 +49,7 @@ ignore = [
 # Deferred rules - require code changes, to be addressed in follow-up PRs
 # TODO: Remove from extend-ignore as issues are fixed
 extend-ignore = [
-  # === Require refactoring ===
+  # Require refactoring
   "PTH",    # pathlib migration - significant refactor
   "TCH",    # TYPE_CHECKING imports - requires careful review
   "UP035",  # typing.List -> list - touches many files
@@ -59,7 +57,7 @@ extend-ignore = [
   "B023",   # function-uses-loop-variable - needs case-by-case review
   "E402",   # module-import-not-at-top - sometimes intentional for side effects
 
-  # === Stylistic - sometimes the "violation" is clearer ===
+  # Stylistic - sometimes the "violation" is clearer
   "SIM102", # nested if statements
   "SIM105", # suppressible exception (contextlib.suppress)
   "SIM115", # open-file-with-context-handler
@@ -67,13 +65,13 @@ extend-ignore = [
   "SIM118", # key in dict.keys() -> key in dict
   "E731",   # lambda assignment
 
-  # === Naming - often intentional (math notation, DSL) ===
+  # Naming - often intentional (math notation, DSL)
   "N806",   # non-lowercase variable in function
   "N803",   # invalid argument name
   "N802",   # invalid function name
   "E741",   # ambiguous variable name (l, O, I)
 
-  # === Low priority / noisy ===
+  # Low priority / noisy
   "RUF059", # unused unpacked variable
   "RUF013", # implicit-optional (None default without Optional type)
   "RUF002", # ambiguous unicode in docstring
