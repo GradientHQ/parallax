@@ -347,7 +347,26 @@ class Scheduler:
             self._node_count_cv.notify_all()
 
     def leave(self, node_id: str) -> None:
-        """Remove a node from allocation and refresh plan and materialized nodes."""
+        """Remove a node from allocation and refresh plan and materialized nodes.
+
+        Trigger a recovery process if the pipeline is broken or
+        if significant load imbalance is detected.
+
+        Recovery Strategy:
+        1.  If the pipeline is broken (has gaps):
+            a.  Attempt **Warmup and Truncate**: Shrink shards to close small gaps.
+            b.  Attempt **Local Node Remap**: Move redundant or unallocated nodes to fill gaps.
+            c.  Fallback to **Global Rebalance**: Complete reallocation of all nodes.
+        2.  If the pipeline remains intact:
+            a.  Check load balance metrics.
+            b.  Trigger **Global Rebalance** if the load imbalance exceeds the threshold.
+
+        Args:
+            node_id: The unique identifier of the node leaving the cluster.
+
+        Returns:
+            None
+        """
         if node_id not in self.layer_allocator.node_id_to_node:
             raise ValueError(f"Node {node_id} not found in nodes")
         node = self.node_id_to_node[node_id]
@@ -355,36 +374,42 @@ class Scheduler:
             "Leaving node %s (start=%s, end=%s)", node_id, node.start_layer, node.end_layer
         )
         self.layer_allocator.leave(node_id)
-        if self.layer_allocator.should_global_rebalance():
-            logger.debug("Global rebalance triggered due to node leave")
 
-            # Count manual vs automatic nodes
-            manual_count = sum(1 for n in self.nodes if n.manual_layer_assignment)
-            total_count = len(self.nodes)
-            logger.debug(
-                f"Node count: {manual_count} manual, {total_count - manual_count} automatic"
+        # Count manual vs automatic nodes
+        manual_count = sum(1 for n in self.nodes if n.manual_layer_assignment)
+        total_count = len(self.nodes)
+        if manual_count == total_count:
+            logger.debug("All nodes are manual assignment, skipping dynamic recovery")
+            return
+        elif manual_count > 0:
+            logger.error(
+                f"Mixed assignment detected ({manual_count} manual, {total_count - manual_count} automatic); skipping dynamic recovery"
             )
-            if manual_count == total_count:
-                logger.debug("All nodes are manual assignment, skipping global rebalance")
-            elif manual_count > 0:
-                logger.error(
-                    f"Mixed assignment detected ({manual_count} manual, {total_count - manual_count} automatic); skipping rebalance"
-                )
+            return
+
+        if not self.layer_allocator.has_full_pipeline():
+            logger.debug("Pipeline broken after node leave; attempting recovery")
+
+            # 1a. Warmup and Truncate
+            logger.debug("Attempting recovery: Warmup and Truncate")
+            self._run_warmup_and_truncate(override_warmup_count=1)
+
+            if self.layer_allocator.has_full_pipeline():
+                logger.debug("Pipeline recovered via Warmup/Truncate")
             else:
-                # All nodes are automatic, try adjustment first, then rebalance if needed
-                if not self.layer_allocator.has_full_pipeline():
-                    logger.debug(
-                        "No full pipeline after node leave, attempting warmup and truncate"
-                    )
-                    self._run_warmup_and_truncate(override_warmup_count=1)
-                    if not self.layer_allocator.has_full_pipeline():
-                        self.bootstrap(clear_existing=True, skip_warmup=True)
-                    else:
-                        logger.debug(
-                            "Pipeline recovered through warmup and truncate, skipping global rebalance"
-                        )
+                # 1b. Local Node Remap
+                logger.debug("Attempting recovery: Local Node Remap")
+                if self.layer_allocator.local_node_remap():
+                    logger.debug("Pipeline recovered via Local Node Remap")
                 else:
+                    # 1c. Global Rebalance
+                    logger.debug("Pipeline still broken; forcing Global Rebalance")
                     self.bootstrap(clear_existing=True, skip_warmup=True)
+        else:
+            # Pipeline is intact, check if we need to rebalance due to load
+            if self.layer_allocator.should_global_rebalance():
+                logger.debug("Global rebalance triggered due to load imbalance after leave")
+                self.bootstrap(clear_existing=True, skip_warmup=True)
 
         with self._node_count_cv:
             self._node_count_cv.notify_all()

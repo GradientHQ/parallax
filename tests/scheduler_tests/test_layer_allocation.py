@@ -315,3 +315,101 @@ def test_allocator_does_not_duplicate_leftover_nodes(strategy: Literal["greedy",
     ok = alloc.global_allocation()
     assert ok is True
     assert len(alloc.nodes) == expected_node_count, "Should not duplicate nodes during allocation"
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        # Scenario 1: Single gap, single node repair
+        # Target: [0-36], Gap [18-27], R (redundant on [0-9]) fills it.
+        {
+            "num_layers": 36,
+            "nodes": [
+                ("A", "a100-80g", (0, 9), False),
+                ("B", "a100-80g", (9, 18), False),
+                ("C", "a100-80g", (18, 27), True),  # Fails
+                ("D", "a100-80g", (27, 36), False),
+                ("E", "a100-80g", (0, 9), False),  # Redundant
+            ],
+            "check_full": True,
+        },
+        # Scenario 2: Single gap (10 layers), multi-node repair (chaining)
+        # Gap [5-15], filled by R1[5-11] + R2[11-15] (capacity 6 each)
+        {
+            "num_layers": 20,
+            "nodes": [
+                ("A", "rtx4090", (0, 5), False),
+                ("B", "a100-80g", (5, 15), True),  # Fails
+                ("C", "rtx4090", (15, 20), False),
+                ("R1", "a100-40g", (0, 5), False),  # Redundant
+                ("R2", "a100-40g", (0, 5), False),  # Redundant
+            ],
+            "check_full": True,
+        },
+        # Scenario 3: Multi-gap, multi-node repair
+        # Gaps [0-10], [20-30]. Filled by R1 (redundant), R2 (unallocated).
+        {
+            "num_layers": 30,
+            "nodes": [
+                ("A", "rtx4090", (0, 10), True),  # Fails
+                ("B", "rtx4090", (10, 20), False),
+                ("C", "rtx4090", (20, 30), True),  # Fails
+                ("R1", "a100-80g", (10, 20), False),  # Redundant
+                ("R2", "a100-80g", None, False),  # Unallocated
+            ],
+            "check_full": True,
+        },
+    ],
+)
+def test_gap_filling_parametrized(scenario):
+    """Parametrized test for local gap filling scenarios."""
+    num_layers = scenario["num_layers"]
+    model = build_model_info(num_layers)
+
+    nodes_data = scenario["nodes"]
+    # Create nodes
+    nodes_map = {}
+    nodes_list = []
+    for nid, gpu, _, _ in nodes_data:
+        node = _build_node(gpu, model, id_suffix=f"-{nid}")
+        # Tweaking requests to influence selection order if needed
+        # Default 0 requests.
+        if nid == "A" and num_layers == 20:
+            # For multi-node repair scenario, make A busy so it's not picked
+            # But here A is allocated [0,5] and stays there.
+            # The repair needs R1, R2.
+            # In the original test we set A requests=100.
+            node.current_requests = 100
+        if nid == "A" and num_layers == 36:
+            # For single node repair, A is redundant with E. Make A busy so E is picked.
+            node.current_requests = 10
+
+        nodes_map[nid] = node
+        nodes_list.append(node)
+
+    allocator = BaseLayerAllocator(model, nodes_list)
+
+    # Setup initial allocations
+    failed_nodes = []
+    for nid, _, alloc, fails in nodes_data:
+        node = nodes_map[nid]
+        if alloc:
+            s, e = alloc
+            allocator.allocate(node, s, e)
+        if fails:
+            failed_nodes.append(node)
+
+    assert allocator.has_full_pipeline()
+
+    # Simulate Failures
+    for node in failed_nodes:
+        allocator.leave(node.node_id)
+
+    assert not allocator.has_full_pipeline()
+
+    # Run Repair
+    success = allocator.local_node_remap()
+
+    assert success is scenario["check_full"]
+    if scenario["check_full"]:
+        assert allocator.has_full_pipeline()

@@ -281,13 +281,27 @@ class BaseLayerAllocator:
                     )
                     continue
 
-    def try_local_repair(self) -> bool:
-        """Algorithm Sketch: Minimal Intervention Gap Filling
+    def local_node_remap(self) -> bool:
+        """Attempt to repair broken pipelines by locally remapping redundant or idle nodes.
 
-        Objective: Restore pipeline connectivity after a node failure by remapping
-        a *single* redundant node instead of rebooting the entire cluster.
+        This method detects gaps in the pipeline coverage (layers with 0 hosts) and
+        attempts to fill them using nodes that are either:
+        1. Redundant (hosting layers that have coverage > 1), or
+        2. Unallocated ("left-over").
+
+        The algorithm proceeds in three phases:
+        1.  **Scan**: Identify contiguous layer ranges with 0 coverage (gaps) and
+            redundant nodes.
+        2.  **Plan**: For each gap, find a set of candidate nodes to fill it.
+            Prioritizes nodes that can close gaps, have minimal active requests,
+            and use the smallest sufficient capacity.
+        3.  **Swap**: Execute the remapping plan (deallocate from old, allocate to new).
+
+        Returns:
+            True if the cluster has at least one full pipeline after the operation,
+            False otherwise.
         """
-        # 1. Identify Gaps & Redundancy (The Scan)
+        # Scan: Identify Gaps & Redundancy
         coverage = [0] * self.num_total_layers
         for layer_id, load in self.layer_to_load.items():
             coverage[layer_id] = len(load.hosting_nodes)
@@ -308,78 +322,137 @@ class BaseLayerAllocator:
         if not missing_ranges:
             return self.has_full_pipeline()
 
-        redundant_nodes: List[Node] = []
-        for node_id, (s, e) in self.node_allocation.items():
-            node = self.node_id_to_node[node_id]
-            # Check if removing this node creates no new gaps
-            # i.e. for all layers it hosts, coverage > 1
-            is_redundant = True
-            for l in range(s, e):
-                if coverage[l] <= 1:
-                    is_redundant = False
-                    break
-            if is_redundant:
-                redundant_nodes.append(node)
+        # Plan the repairs first to ensure atomicity per gap and avoid partial messy states
+        moves: List[Tuple[Node, int, int]] = []
+        used_nodes: Set[str] = set()
 
-        # 2. Candidate Selection (The Match) & 3. Execution (The Swap)
-        # We try to fill gaps one by one
+        # Working copy of coverage to track redundancy consumption during planning
+        current_coverage = list(coverage)
+
         for gap_start, gap_end in missing_ranges:
-            gap_size = gap_end - gap_start
-            candidates: List[Node] = []
+            current_ptr = gap_start
+            gap_moves: List[Tuple[Node, int, int]] = []
+            gap_filled = True
 
-            # Check redundant nodes
-            for node in redundant_nodes:
-                include_input_embed = gap_start == 0
+            while current_ptr < gap_end:
+                remaining = gap_end - current_ptr
+                include_input_embed = current_ptr == 0
                 include_lm_head = gap_end == self.num_total_layers
-                cap = node.get_decoder_layer_capacity(
-                    include_input_embed=include_input_embed, include_lm_head=include_lm_head
+
+                # Identify candidates
+                candidates: List[Tuple[Node, int, bool]] = []  # (node, assigned_len, is_closer)
+
+                all_nodes = self.nodes
+                for node in all_nodes:
+                    if node.node_id in used_nodes:
+                        continue
+
+                    # Check availability/redundancy
+                    if node.node_id in self.node_allocation:
+                        # Must be redundant in CURRENT coverage state
+                        s, e = self.node_allocation[node.node_id]
+                        is_redundant = True
+                        for l in range(s, e):
+                            if current_coverage[l] <= 1:
+                                is_redundant = False
+                                break
+                        if not is_redundant:
+                            continue
+
+                    # Calculate capacity for this slot
+                    cap = node.get_decoder_layer_capacity(include_input_embed=include_input_embed)
+
+                    # Determine how much this node can take
+                    # Option A: Closes the gap?
+                    can_close = False
+                    assigned_len = 0
+
+                    if cap >= remaining:
+                        # Capacity is sufficient for layers, check LM head if needed
+                        if include_lm_head:
+                            cap_with_head = node.get_decoder_layer_capacity(
+                                include_input_embed=include_input_embed, include_lm_head=True
+                            )
+                            if cap_with_head >= remaining:
+                                can_close = True
+                                assigned_len = remaining
+                        else:
+                            can_close = True
+                            assigned_len = remaining
+
+                    # Option B: Partial fill
+                    if not can_close:
+                        # Takes as much as it can (greedy)
+                        if cap > 0:
+                            assigned_len = cap
+
+                    if assigned_len > 0:
+                        candidates.append((node, assigned_len, can_close))
+
+                if not candidates:
+                    logger.warning(
+                        "No candidates found to fill sub-gap [%d, %d)", current_ptr, gap_end
+                    )
+                    gap_filled = False
+                    break
+
+                # Selection Strategy
+                # 1. Prefer nodes that close the gap (is_closer=True).
+                # 2. Minimal active requests (minimize disruption).
+                # 3. Smallest sufficient capacity (save big nodes).
+
+                def sort_key(item):
+                    node, length, closer = item
+                    cap_metric = node.get_decoder_layer_capacity(
+                        include_input_embed=include_input_embed
+                    )
+                    if closer:
+                        # Rank 1: Closers.
+                        # Priority: Min Requests (descending -req), then Min Capacity (descending -cap)
+                        return (1, -node.current_requests, -cap_metric)
+                    else:
+                        # Rank 0: Partial.
+                        # Priority: Max Length, then Min Requests
+                        return (0, length, -node.current_requests)
+
+                # Sort descending
+                candidates.sort(key=sort_key, reverse=True)
+
+                best_node, length, _ = candidates[0]
+
+                # Record move
+                gap_moves.append((best_node, current_ptr, current_ptr + length))
+                used_nodes.add(best_node.node_id)
+
+                # Update temporary coverage if node was redundant
+                if best_node.node_id in self.node_allocation:
+                    s, e = self.node_allocation[best_node.node_id]
+                    for l in range(s, e):
+                        current_coverage[l] -= 1
+
+                current_ptr += length
+
+            if gap_filled:
+                moves.extend(gap_moves)
+                logger.info(
+                    "Gap [%d, %d) repair plan found using %d nodes",
+                    gap_start,
+                    gap_end,
+                    len(gap_moves),
                 )
-                if cap >= gap_size:
-                    candidates.append(node)
+            else:
+                logger.error("Failed to find repair plan for gap [%d, %d)", gap_start, gap_end)
 
-            # Check left-over pool (unallocated nodes)
-            left_over_nodes = [
-                n for n in self.nodes
-                if n.node_id not in self.node_allocation
-            ]
-            for node in left_over_nodes:
-                include_input_embed = gap_start == 0
-                include_lm_head = gap_end == self.num_total_layers
-                cap = node.get_decoder_layer_capacity(
-                    include_input_embed=include_input_embed, include_lm_head=include_lm_head
-                )
-                if cap >= gap_size:
-                    candidates.append(node)
+        if not moves:
+            return self.has_full_pipeline()
 
-            if not candidates:
-                logger.warning("No candidates found to fill gap [%d, %d)", gap_start, gap_end)
-                continue
-
-            # Sort candidates:
-            # 1. Capacity (ascending) - use "smallest sufficient"
-            # 2. Hosted requests (ascending) - affect minimum on-going requests
-            candidates.sort(key=lambda n: (
-                n.get_decoder_layer_capacity(
-                    include_input_embed=(gap_start == 0),
-                    include_lm_head=(gap_end == self.num_total_layers)
-                ),
-                n.current_requests
-            ))
-
-            best_node = candidates[0]
-            logger.info(
-                "Gap Filling: Remapping node %s to fill gap [%d, %d)",
-                best_node.node_id, gap_start, gap_end
-            )
-
-            # Execute Swap
-            if best_node.node_id in self.node_allocation:
-                self.deallocate(best_node)
-                if best_node in redundant_nodes:
-                    redundant_nodes.remove(best_node)
-
-            self.allocate(best_node, gap_start, gap_end)
-            best_node.is_active = True
+        # Execution (The Swap)
+        for node, start, end in moves:
+            logger.info("Repairing: Remapping node %s to [%d, %d)", node.node_id, start, end)
+            if node.node_id in self.node_allocation:
+                self.deallocate(node)
+            self.allocate(node, start, end)
+            node.is_active = True
 
         return self.has_full_pipeline()
 
@@ -392,10 +465,6 @@ class BaseLayerAllocator:
         loads. If this value exceeds a configurable threshold, it indicates
         significant imbalance and returns True.
         """
-
-        # If we don't currently have a full pipeline covering [0, L), force rebalance
-        if not self.has_full_pipeline():
-            return True
 
         layer_heap = self.layer_loads_heap
         if len(layer_heap) < 2:
