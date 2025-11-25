@@ -35,10 +35,8 @@ from parallax.p2p.message_util import (
     request_to_proto,
 )
 from parallax.p2p.proto import forward_pb2
-from parallax.server.metrics import update_metrics
-from parallax.server.paged_kv_cache import PagedKVCacheManager
 from parallax.p2p.server import ServerState
-from parallax.server.kv_cache import KVCacheManager
+from parallax.server.paged_kv_cache import PagedKVCacheManager
 from parallax.server.radix_cache import RadixCache
 from parallax.server.request import (
     InitialRequest,
