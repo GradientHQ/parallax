@@ -98,7 +98,7 @@ def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
             head_dim=head_dim,
             dtype=dtype,
             block_size=64,
-            cache_memory_fraction=cache_memory_fraction,
+            num_gpu_blocks=200,
         )
         kv_cache_managers.append(kv_mgr)
 
