@@ -274,7 +274,7 @@ class HTTPHandler:
             },
         }
         choice = response["choices"][0]
-        choice["messages"] = {
+        choice["message"] = {
             "role": "assistant",
             "content": request_info.text,
             "reasoning_content": None,

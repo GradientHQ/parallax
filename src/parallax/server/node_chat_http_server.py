@@ -32,7 +32,7 @@ async def init_app_states(state: State, node_chat_http_server):
 
 
 async def v1_chat_completions(request_data: Dict, request_id: str, received_ts: int):
-    return app.state.http_server.chat_completion(request_data, request_id, received_ts)
+    return await app.state.http_server.chat_completion(request_data, request_id, received_ts)
 
 
 async def get_cluster_status():
@@ -158,7 +158,7 @@ class NodeChatHttpServer:
         self.lattica.close()
         return False
 
-    def chat_completion(self, request_data, request_id: str, received_ts: int):
+    async def chat_completion(self, request_data, request_id: str, received_ts: int):
         if self.scheduler_addr is not None:  # central scheduler mode
             try:
                 if self.scheduler_stub is None:
@@ -192,10 +192,10 @@ class NodeChatHttpServer:
                         return resp
                     else:
                         response = stub.chat_completion(request_data)
-                        response = next(response).decode()
+                        content = (await anext(iterate_in_threadpool(response))).decode()
                         logger.debug(f"Non-stream response completed for {request_id}")
                         # response is a JSON string; parse to Python object before returning
-                        return JSONResponse(content=json.loads(response))
+                        return JSONResponse(content=json.loads(content))
                 except Exception as e:
                     logger.exception(f"Error in _forward_request: {e}")
                     return JSONResponse(

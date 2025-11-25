@@ -10,7 +10,7 @@ It is used to handle the communication between the peers, and communicate with t
 import dataclasses
 import enum
 import json
-import logging
+import multiprocessing
 import threading
 import time
 from typing import List, Optional
@@ -23,11 +23,12 @@ from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream, rpc_stre
 from backend.server.rpc_connection_handler import RPCConnectionHandler
 from parallax.p2p.proto import forward_pb2
 from parallax.p2p.utils import AsyncWorker
-from parallax.server.metrics import get_metrics, set_metrics_publisher
 from parallax.server.server_info import detect_node_hardware
+from parallax.utils.shared_state import SharedState
 from parallax.utils.utils import get_zmq_socket
+from parallax_utils.logging_config import get_logger, set_log_level
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Global HTTP client for reuse
 _http_client = None
@@ -252,6 +253,19 @@ class GradientServer:
         self.stop_event = threading.Event()
         logger.debug(f"manual_layer_assignment: {self.manual_layer_assignment}")
         self._layer_allocation_changed = False
+        self._shared_state = None  # Will be set if running in subprocess mode
+
+    def _sync_to_shared_state(self):
+        """Sync current layer allocation and status to shared state if available"""
+        if hasattr(self, "_shared_state") and self._shared_state is not None:
+            self._shared_state.update(
+                block_start_index=self.block_start_index,
+                block_end_index=self.block_end_index,
+                model_name=self.model_name,
+                tp_size=self.tp_size,
+                status=self.status.value,
+                _layer_allocation_changed=self._layer_allocation_changed,
+            )
 
     def build_lattica(self):
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs)
@@ -350,14 +364,8 @@ class GradientServer:
                 self.model_name = response.get("model_name")
                 self.tp_size = response.get("tp_size")
 
-                # Publish executor metrics to backend on each update
-                def _publish_metrics(_snapshot):
-                    try:
-                        self.scheduler_stub.node_update(self.get_node_info(is_update=True))
-                    except Exception:
-                        pass
-
-                set_metrics_publisher(_publish_metrics)
+                # Sync to shared state if available
+                self._sync_to_shared_state()
 
             except Exception as e:
                 logger.exception(f"Error in join scheduler: {e}")
@@ -615,12 +623,19 @@ class GradientServer:
                                         # Set status to INITIALIZING to prevent scheduler from sending requests
                                         # during rebalancing
                                         self.status = ServerState.INITIALIZING
+
+                                        # Sync to shared state if available
+                                        self._sync_to_shared_state()
+
                                         logger.info(
                                             "Layer allocation updated. Executor will reload on next check. "
                                             "Status set to INITIALIZING to prevent new requests."
                                         )
                                 else:
-                                    logger.warning(f"Heartbeat response: {response}")
+                                    logger.debug(
+                                        f"Heartbeat: Missing layer info - start_layer={start_layer}, "
+                                        f"end_layer={end_layer}, response={response}"
+                                    )
                             else:
                                 logger.warning(
                                     f"Heartbeat: No layer allocation received yet, response: {response}"
@@ -637,7 +652,8 @@ class GradientServer:
                             )
                     except Exception as e:
                         logger.warning(
-                            f"Failed to announce {self.prefix_id}_{self.lattica.peer_id()}: {e}"
+                            f"Failed to announce {self.prefix_id}_{self.lattica.peer_id()}: {e}",
+                            exc_info=True,
                         )
 
                     time.sleep(10)
@@ -647,6 +663,19 @@ class GradientServer:
         # Start announcer thread
         self.announcer = threading.Thread(target=_announcer_thread, daemon=True)
         self.announcer.start()
+        logger.info(
+            f"Started node announcer thread (daemon={self.announcer.daemon}, alive={self.announcer.is_alive()})"
+        )
+
+    def _get_status(self) -> str:
+        """Get current status, checking shared_state if available (subprocess mode)"""
+        # When running in subprocess mode, check shared_state status
+        if hasattr(self, "_shared_state") and self._shared_state is not None:
+            shared_status = self._shared_state.get_status()
+            if shared_status is not None:
+                return shared_status
+        # When running in same process, use local status
+        return self.status.value
 
     def get_node_info(self, is_update: bool = False):
         # update rtt to nodes
@@ -693,8 +722,8 @@ class GradientServer:
                 1024 if self.max_sequence_length is None else self.max_sequence_length
             ),
             "rtt_to_nodes": self.rtts,
-            "status": self.status.value,
-            "is_active": self.status == ServerState.READY,
+            "status": self._get_status(),
+            "is_active": self._get_status() == ServerState.READY.value,
         }
 
         # For manual layer assignment, always include start_layer and end_layer
@@ -707,7 +736,10 @@ class GradientServer:
             )
 
         if is_update:
-            metrics = get_metrics()
+            metrics = {}
+            if hasattr(self, "_shared_state") and self._shared_state is not None:
+                metrics = self._shared_state.get_metrics()
+
             info["current_requests"] = metrics.get("current_requests", 0)
             if metrics.get("layer_latency_ms") is not None:
                 info["layer_latency_ms"] = metrics.get("layer_latency_ms")
@@ -722,6 +754,8 @@ class GradientServer:
         self.stop_event.set()
 
         self.status = ServerState.OFFLINE
+        # Sync final status to shared state
+        self._sync_to_shared_state()
         if self.scheduler_addr is not None:
             logger.info(f"Leave scheduler: {self.lattica.peer_id()}")
             self.scheduler_stub.node_leave(self.get_node_info(is_update=True))
@@ -734,7 +768,7 @@ class GradientServer:
             self.lattica.close()
 
 
-def launch_p2p_server(
+def _run_p2p_server_process(
     initial_peers: List[str],
     scheduler_addr: Optional[str],
     relay_servers: List[str],
@@ -755,36 +789,133 @@ def launch_p2p_server(
     max_sequence_length: Optional[int] = None,
     param_mem_ratio: float = 0.65,
     kvcache_mem_ratio: float = 0.25,
+    shared_state: Optional[dict] = None,
+    log_level: str = "INFO",
 ):
-    server = GradientServer(
-        recv_from_peer_addr=recv_from_peer_addr,
-        send_to_peer_addr=send_to_peer_addr,
-        initial_peers=initial_peers,
-        scheduler_addr=scheduler_addr,
-        relay_servers=relay_servers,
-        block_start_index=pp_start_layer,
-        block_end_index=pp_end_layer,
-        hidden_layers=hidden_layers,
-        tp_size=tp_size,
-        dht_prefix=dht_prefix,
-        host_maddrs=[f"/ip4/0.0.0.0/tcp/{tcp_port}", f"/ip4/0.0.0.0/udp/{udp_port}/quic-v1"],
-        announce_maddrs=announce_maddrs,
-        http_port=http_port,
-        notify_url=notify_url,
-        model_name=model_name,
-        max_batch_size=max_batch_size,
-        max_sequence_length=max_sequence_length,
-        param_mem_ratio=param_mem_ratio,
-        kvcache_mem_ratio=kvcache_mem_ratio,
+    """Run P2P server in subprocess"""
+    # Set log level in subprocess (spawn mode doesn't inherit log configuration)
+    set_log_level(log_level)
+    server = None
+    try:
+        server = GradientServer(
+            recv_from_peer_addr=recv_from_peer_addr,
+            send_to_peer_addr=send_to_peer_addr,
+            initial_peers=initial_peers,
+            scheduler_addr=scheduler_addr,
+            relay_servers=relay_servers,
+            block_start_index=pp_start_layer,
+            block_end_index=pp_end_layer,
+            hidden_layers=hidden_layers,
+            tp_size=tp_size,
+            dht_prefix=dht_prefix,
+            host_maddrs=[
+                f"/ip4/0.0.0.0/tcp/{tcp_port}",
+                f"/ip4/0.0.0.0/udp/{udp_port}/quic-v1",
+            ],
+            announce_maddrs=announce_maddrs,
+            http_port=http_port,
+            notify_url=notify_url,
+            model_name=model_name,
+            max_batch_size=max_batch_size,
+            max_sequence_length=max_sequence_length,
+            param_mem_ratio=param_mem_ratio,
+            kvcache_mem_ratio=kvcache_mem_ratio,
+        )
+        # Attach shared state to server for syncing layer allocation
+        if shared_state is not None:
+            shared_state = SharedState(shared_state)  # Auto-converts dict to SharedState
+            server._shared_state = shared_state
+            # Initialize shared state with current values
+            shared_state.update(
+                block_start_index=server.block_start_index,
+                block_end_index=server.block_end_index,
+                model_name=server.model_name,
+                tp_size=server.tp_size,
+                status=server.status.value,
+            )
+
+        server.run()
+    except KeyboardInterrupt:
+        logger.debug("P2P server received interrupt signal, shutting down...")
+    except Exception as e:
+        logger.exception(f"P2P server error: {e}")
+    finally:
+        if server is not None:
+            server.shutdown()
+
+
+def launch_p2p_server_process(
+    initial_peers: List[str],
+    scheduler_addr: Optional[str],
+    relay_servers: List[str],
+    pp_start_layer: int,
+    pp_end_layer: int,
+    hidden_layers: int,
+    tp_size: int,
+    tcp_port: int,
+    udp_port: int,
+    dht_prefix: str,
+    announce_maddrs: List[str],
+    http_port: Optional[int],
+    notify_url: str,
+    recv_from_peer_addr: str,
+    send_to_peer_addr: str,
+    model_name: Optional[str],
+    max_batch_size: Optional[int] = None,
+    max_sequence_length: Optional[int] = None,
+    param_mem_ratio: float = 0.65,
+    kvcache_mem_ratio: float = 0.25,
+    shared_state: Optional[dict] = None,
+    log_level: str = "INFO",
+) -> multiprocessing.Process:
+    """Launch P2P server as a subprocess and return the process object
+
+    Args:
+        shared_state: Optional shared dictionary for inter-process communication.
+                     If provided, layer allocation info will be synced to this dict.
+        log_level: Log level for the subprocess (default: INFO).
+    """
+    process = multiprocessing.Process(
+        target=_run_p2p_server_process,
+        args=(
+            initial_peers,
+            scheduler_addr,
+            relay_servers,
+            pp_start_layer,
+            pp_end_layer,
+            hidden_layers,
+            tp_size,
+            tcp_port,
+            udp_port,
+            dht_prefix,
+            announce_maddrs,
+            http_port,
+            notify_url,
+            recv_from_peer_addr,
+            send_to_peer_addr,
+            model_name,
+            max_batch_size,
+            max_sequence_length,
+            param_mem_ratio,
+            kvcache_mem_ratio,
+            shared_state,
+            log_level,
+        ),
     )
-    # Start the server
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
+    process.start()
+    return process
 
-    # Wait for layer allocation and model_name to be set
-    while server.block_start_index is None or (
-        scheduler_addr is not None and server.model_name is None
-    ):
-        time.sleep(1)
 
-    return server
+def stop_p2p_server(p2p_server_process: Optional[multiprocessing.Process]):
+    """Stop P2P server subprocess"""
+    if p2p_server_process is not None and p2p_server_process.is_alive():
+        logger.debug("Terminating P2P server subprocess...")
+        try:
+            p2p_server_process.terminate()
+            p2p_server_process.join(timeout=5)
+            if p2p_server_process.is_alive():
+                logger.warning("P2P server process did not terminate gracefully, killing...")
+                p2p_server_process.kill()
+                p2p_server_process.join()
+        except Exception as e:
+            logger.error(f"Failed to terminate P2P server subprocess: {e}")
