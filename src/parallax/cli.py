@@ -260,56 +260,6 @@ def join_command(args, passthrough_args: list[str] | None = None):
     # The scheduler address is now taken directly from the parsed arguments.
     cmd.extend(["--scheduler-addr", args.scheduler_addr])
 
-    if _flag_present(passthrough_args, ["--enable-lora"]):
-        logger.info("LoRA adapter support enabled for SGLang backend")
-        cmd.append("--enable-lora")
-
-    max_lora_rank = _find_flag_value(passthrough_args, ["--max-lora-rank"])
-    if max_lora_rank is not None:
-        logger.info(f"Setting maximum LoRA rank to: {max_lora_rank}")
-        cmd.extend(["--max-lora-rank", max_lora_rank])
-
-    lora_target_modules = _extract_list_from_args(passthrough_args, "--lora-target-modules")
-    if lora_target_modules:
-        modules_str = " ".join(lora_target_modules)
-        logger.info(f"Setting LoRA target modules to: {modules_str}")
-        cmd.extend(["--lora-target-modules", modules_str])
-    elif _flag_present(passthrough_args, ["--lora-target-modules"]):
-        logger.warning("--lora-target-modules was provided but no modules were listed. Ignoring.")
-
-    lora_paths = _extract_list_from_args(passthrough_args, "--lora-paths")
-    if lora_paths:
-        paths_str = " ".join(lora_paths)
-        logger.info(f"Loading LoRA adapters from paths: {paths_str}")
-        cmd.extend(["--lora-paths", paths_str])
-    elif _flag_present(passthrough_args, ["--lora-paths"]):
-        logger.warning("--lora-paths was provided but no paths were listed. Ignoring.")
-
-    max_loras_per_batch = _find_flag_value(passthrough_args, ["--max-loras-per-batch"])
-    if max_loras_per_batch is not None:
-        logger.info(f"Setting maximum LoRA adapters per batch to: {max_loras_per_batch}")
-        cmd.extend(["--max-loras-per-batch", max_loras_per_batch])
-
-    max_loaded_loras = _find_flag_value(passthrough_args, ["--max-loaded-loras"])
-    if max_loaded_loras is not None:
-        logger.info(f"Setting maximum loaded LoRA adapters to: {max_loaded_loras}")
-        cmd.extend(["--max-loaded-loras", max_loaded_loras])
-
-    lora_eviction_policy = _find_flag_value(passthrough_args, ["--lora-eviction-policy"])
-    if lora_eviction_policy:
-        logger.info(f"Setting LoRA eviction policy to: {lora_eviction_policy}")
-        cmd.extend(["--lora-eviction-policy", lora_eviction_policy])
-
-    lora_backend = _find_flag_value(passthrough_args, ["--lora-backend"])
-    if lora_backend:
-        logger.info(f"Setting LoRA backend to: {lora_backend}")
-        cmd.extend(["--lora-backend", lora_backend])
-
-    max_lora_chunk_size = _find_flag_value(passthrough_args, ["--max-lora-chunk-size"])
-    if max_lora_chunk_size:
-        logger.info(f"Setting maximum LoRA chunk size to: {max_lora_chunk_size}")
-        cmd.extend(["--max-lora-chunk-size", max_lora_chunk_size])
-
     # Relay logic based on effective scheduler address
     if args.use_relay or (
         args.scheduler_addr != "auto" and not str(args.scheduler_addr).startswith("/")
