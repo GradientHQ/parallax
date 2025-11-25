@@ -68,22 +68,6 @@ def _flag_present(args_list: list[str], flag_names: list[str]) -> bool:
     return False
 
 
-def _extract_list_from_args(args_list: list[str], flag: str) -> list[str]:
-    """Extract a list of values following a flag until the next flag or end."""
-    if not args_list:
-        return []
-    try:
-        idx = args_list.index(flag)
-    except ValueError:
-        return []
-    values = []
-    for token in args_list[idx + 1 :]:
-        if token.startswith("-"):
-            break
-        values.append(token)
-    return values
-
-
 def _find_flag_value(args_list: list[str], flag_names: list[str]) -> str | None:
     """Find the value for the first matching flag in args_list, if present.
 
