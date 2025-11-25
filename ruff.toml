@@ -1,0 +1,106 @@
+# Ruff configuration
+# https://docs.astral.sh/ruff/
+
+line-length = 100
+target-version = "py312"
+
+# Exclude generated files and caches
+exclude = [
+  ".git",
+  ".venv",
+  "__pycache__",
+  "build",
+  "dist",
+  "*.egg-info",
+  "src/parallax/p2p/proto",  # Generated protobuf
+  "src/frontend/dist",
+  "src/frontend/node_modules",
+]
+
+[lint]
+# Enable pycodestyle (E, W), Pyflakes (F), isort (I), and more
+select = [
+  "E",      # pycodestyle errors
+  "W",      # pycodestyle warnings
+  "F",      # Pyflakes
+  "I",      # isort
+  "N",      # pep8-naming
+  "UP",     # pyupgrade
+  "B",      # flake8-bugbear
+  "C4",     # flake8-comprehensions
+  "SIM",    # flake8-simplify
+  "RUF",    # Ruff-specific rules
+  "TCH",    # flake8-type-checking
+  "PTH",    # flake8-use-pathlib
+  "TID",    # flake8-tidy-imports
+  "ASYNC",  # flake8-async
+]
+
+# Allow autofix for all enabled rules
+fixable = ["ALL"]
+unfixable = []
+
+# Ignore specific rules
+ignore = [
+  "E501",   # Line too long (handled by formatter)
+  "B008",   # Do not perform function calls in argument defaults
+  "C901",   # Function is too complex
+  "SIM108", # Use ternary operator (sometimes less readable)
+]
+
+# Deferred rules - require code changes, to be addressed in follow-up PRs
+# TODO: Remove from extend-ignore as issues are fixed
+extend-ignore = [
+  # === Require refactoring ===
+  "PTH",    # pathlib migration - significant refactor
+  "TCH",    # TYPE_CHECKING imports - requires careful review
+  "UP035",  # typing.List -> list - touches many files
+  "B006",   # mutable-argument-default - needs case-by-case review
+  "B023",   # function-uses-loop-variable - needs case-by-case review
+  "E402",   # module-import-not-at-top - sometimes intentional for side effects
+
+  # === Stylistic - sometimes the "violation" is clearer ===
+  "SIM102", # nested if statements
+  "SIM105", # suppressible exception (contextlib.suppress)
+  "SIM115", # open-file-with-context-handler
+  "SIM117", # nested with statements
+  "SIM118", # key in dict.keys() -> key in dict
+  "E731",   # lambda assignment
+
+  # === Naming - often intentional (math notation, DSL) ===
+  "N806",   # non-lowercase variable in function
+  "N803",   # invalid argument name
+  "N802",   # invalid function name
+  "E741",   # ambiguous variable name (l, O, I)
+
+  # === Low priority / noisy ===
+  "RUF059", # unused unpacked variable
+  "RUF013", # implicit-optional (None default without Optional type)
+  "RUF002", # ambiguous unicode in docstring
+  "RUF003", # ambiguous unicode in comment
+  "RUF012", # mutable class default (needs ClassVar annotation)
+  "B018",   # useless expression - sometimes intentional for side effects
+  "B904",   # raise-without-from - needs case-by-case review
+  "ASYNC109", # async timeout parameter - needs careful review
+]
+
+[lint.per-file-ignores]
+# Ignore imports in __init__.py files
+"__init__.py" = ["F401", "F403"]
+# Test files can have additional imports
+"tests/**/*.py" = ["F401", "F403", "B018"]
+# Benchmark code has known issues to be fixed separately
+"src/backend/benchmark/**/*.py" = ["F821", "C419"]
+
+[lint.isort]
+known-first-party = ["parallax", "scheduling", "parallax_utils", "backend"]
+combine-as-imports = true
+lines-after-imports = 2
+
+[format]
+# Use double quotes for strings
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true

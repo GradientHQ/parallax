@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v5.0.0
     hooks:
       - id: check-yaml
       - id: end-of-file-fixer
@@ -8,27 +8,22 @@ repos:
       - id: trailing-whitespace
       - id: mixed-line-ending
         args: ['--fix=lf']
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-json
+        exclude: '^src/frontend/.*\.json$'  # tsconfig uses JSON5 (comments, trailing commas)
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: debug-statements
 
-  - repo: https://github.com/PyCQA/autoflake
-    rev: v2.3.1
+  # Ruff replaces autoflake, isort, black, and many flake8 plugins
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.6
     hooks:
-      - id: autoflake
-        args:
-          - --remove-all-unused-imports
-          - --remove-unused-variables
-          - --in-place
-
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        language_version: python3.11
-        args: ["--profile", "black"]
-        exclude: '^src/parallax/p2p/proto/forward_pb2\.py$'
-
-  - repo: https://github.com/psf/black
-    rev: 24.3.0
-    hooks:
-      - id: black
-        language_version: python3.11
-        exclude: '^src/parallax/p2p/proto/forward_pb2\.py$'
+      # Run the linter
+      - id: ruff
+        args: [--fix]
+        exclude: '^src/parallax/p2p/proto/'
+      # Run the formatter
+      - id: ruff-format
+        exclude: '^src/parallax/p2p/proto/'
