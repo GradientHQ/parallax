@@ -58,7 +58,7 @@ from parallax.utils.utils import (
     pad_inputs,
     pad_prefix_caches,
 )
-from parallax_utils.logging_config import get_logger
+from parallax_utils.logging_config import get_logger, set_log_level
 
 logger = get_logger(__name__)
 
@@ -1570,6 +1570,7 @@ class Executor:
 
 def run_executor_process(args, shared_state=None):
     """Run executor as a subprocess"""
+    set_log_level(args.log_level)
     executor = None
     try:
         executor = Executor.create_from_args(args, shared_state)
