@@ -58,18 +58,11 @@ jobs:
         # Install extras dependencies based on matrix variable
         pip install -e ".[${{ matrix.extras }}]"
 
-    - name: Run Unit Tests
-      if: steps.changes.outputs.src == 'true'
+    - name: Run Unit Tests (macOS only)
+      if: steps.changes.outputs.src == 'true' && runner.os == 'macOS'
       shell: bash
       run: |
-        # Run full unit tests only on macOS because Linux CI environments usually lack GPUs,
-        # and 'gpu' dependencies like sglang might require a GPU to import or run correctly.
-        if [ "$RUNNER_OS" == "macOS" ]; then
-          pytest tests/ -v --cov=src/parallax --cov-report=xml
-        else
-          echo "Skipping unit tests on Linux runner (CPU-only environment)."
-          # If you have CPU-only tests, you can use: pytest tests/ -v -m "not gpu"
-        fi
+        pytest tests/ -v --cov=src/parallax --cov-report=xml
 
     - name: Upload coverage to Codecov
       if: steps.changes.outputs.src == 'true' && runner.os == 'macOS'
@@ -85,7 +78,7 @@ jobs:
       run: |
         # Start the server
         python src/parallax/launch.py \
-          --model-path Qwen/Qwen3-0.6B-MLX-bf16 \
+          --model-path Qwen/Qwen3-0.6B \
           --max-num-tokens-per-batch 16384 \
           --kv-block-size 1024 \
           --max-batch-size 128 \
@@ -117,8 +110,8 @@ jobs:
         done
 
         echo "Sending test request..."
-        # Use --fail to fail the step if the request fails
-        curl --fail --location 'http://localhost:3000/v1/chat/completions' \
+        # Capture the response
+        RESPONSE=$(curl --fail --silent --show-error --location 'http://localhost:3000/v1/chat/completions' \
           --header 'Content-Type: application/json' \
           --data '{
             "messages": [
@@ -133,7 +126,19 @@ jobs:
             "sampling_params": {
                 "top_k": 3
             }
-        }'
+        }')
+
+        echo "Response received:"
+        echo "$RESPONSE"
+
+        # Check if the response contains "Paris" (case-insensitive)
+        if echo "$RESPONSE" | grep -iq "Paris"; then
+            echo "Test passed: Response contains 'Paris'"
+        else
+            echo "Test failed: Response does not contain 'Paris'"
+            kill $PID 2>/dev/null || true
+            exit 1
+        fi
         
         # Clean up process
         kill $PID 2>/dev/null || true
