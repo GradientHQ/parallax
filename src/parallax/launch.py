@@ -235,11 +235,6 @@ if __name__ == "__main__":
                         proc.start()
                         executor_subprocs.append(proc)
 
-                    # Wait a bit for executors to initialize, then mark as ready
-                    # This allows P2P server to report is_active=True
-                    time.sleep(2)  # Give executors time to start
-                    shared_state.set_status(ServerState.READY.value)
-
                     # Wait for executors and restart if layer allocation changes
                     if _wait_executors_check_layer_change(shared_state, executor_subprocs):
                         logger.warning("Layer allocation changed! Stopping executors to reload...")

@@ -35,6 +35,7 @@ from parallax.p2p.message_util import (
     request_to_proto,
 )
 from parallax.p2p.proto import forward_pb2
+from parallax.p2p.server import ServerState
 from parallax.server.kv_cache import KVCacheManager
 from parallax.server.radix_cache import RadixCache
 from parallax.server.request import (
@@ -333,6 +334,8 @@ class Executor:
                 self.send_to_ipc_socket = get_zmq_socket(
                     self.zmq_context, zmq.PUSH, executor_output_ipc_addr, bind=False
                 )
+        if self.shared_state is not None:
+            self.shared_state.set_status(ServerState.READY.value)
 
     @classmethod
     def create_from_args(cls, args: argparse.Namespace, shared_state=None):
