@@ -999,7 +999,6 @@ class Executor:
                         self.kv_cache_manager.release_request(original_req.request_id)
                         logger.debug(
                             f"Released resources for finished request {req.request_id}, "
-                            f"kv cache manager has {self.kv_cache_manager.tokens_in_cache} tokens, "
                             f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
                         )
                         if not self.is_last_peer:
@@ -1446,7 +1445,7 @@ class Executor:
                         next_batch = self._prepare_next_batch_requests(
                             requests=prepared_inputs["requests"],
                             hidden_states=output,
-                            lengths=prepared_inputs["lengths"],
+                            context_lengths=prepared_inputs["context_lengths"],
                         )
 
                         # 8. Dispatch to the appropriate destination
