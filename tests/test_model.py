@@ -10,7 +10,6 @@ from mlx_lm.models.base import create_attention_mask
 from mlx_lm.utils import get_model_path, load_model
 
 from parallax.server.paged_kv_cache import PagedKVCacheManager
-from parallax.server.server_info import ShardedModelInfo
 from parallax.server.shard_loader import MLXModelLoader
 from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.utils.utils import pad_inputs
