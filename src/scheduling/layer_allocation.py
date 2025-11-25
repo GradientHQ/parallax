@@ -281,6 +281,108 @@ class BaseLayerAllocator:
                     )
                     continue
 
+    def try_local_repair(self) -> bool:
+        """Algorithm Sketch: Minimal Intervention Gap Filling
+
+        Objective: Restore pipeline connectivity after a node failure by remapping
+        a *single* redundant node instead of rebooting the entire cluster.
+        """
+        # 1. Identify Gaps & Redundancy (The Scan)
+        coverage = [0] * self.num_total_layers
+        for layer_id, load in self.layer_to_load.items():
+            coverage[layer_id] = len(load.hosting_nodes)
+
+        missing_ranges: List[Tuple[int, int]] = []
+        current_gap_start = None
+        for layer_id in range(self.num_total_layers):
+            if coverage[layer_id] == 0:
+                if current_gap_start is None:
+                    current_gap_start = layer_id
+            else:
+                if current_gap_start is not None:
+                    missing_ranges.append((current_gap_start, layer_id))
+                    current_gap_start = None
+        if current_gap_start is not None:
+            missing_ranges.append((current_gap_start, self.num_total_layers))
+
+        if not missing_ranges:
+            return self.has_full_pipeline()
+
+        redundant_nodes: List[Node] = []
+        for node_id, (s, e) in self.node_allocation.items():
+            node = self.node_id_to_node[node_id]
+            # Check if removing this node creates no new gaps
+            # i.e. for all layers it hosts, coverage > 1
+            is_redundant = True
+            for l in range(s, e):
+                if coverage[l] <= 1:
+                    is_redundant = False
+                    break
+            if is_redundant:
+                redundant_nodes.append(node)
+
+        # 2. Candidate Selection (The Match) & 3. Execution (The Swap)
+        # We try to fill gaps one by one
+        for gap_start, gap_end in missing_ranges:
+            gap_size = gap_end - gap_start
+            candidates: List[Node] = []
+
+            # Check redundant nodes
+            for node in redundant_nodes:
+                include_input_embed = gap_start == 0
+                include_lm_head = gap_end == self.num_total_layers
+                cap = node.get_decoder_layer_capacity(
+                    include_input_embed=include_input_embed, include_lm_head=include_lm_head
+                )
+                if cap >= gap_size:
+                    candidates.append(node)
+
+            # Check left-over pool (unallocated nodes)
+            left_over_nodes = [
+                n for n in self.nodes
+                if n.node_id not in self.node_allocation
+            ]
+            for node in left_over_nodes:
+                include_input_embed = gap_start == 0
+                include_lm_head = gap_end == self.num_total_layers
+                cap = node.get_decoder_layer_capacity(
+                    include_input_embed=include_input_embed, include_lm_head=include_lm_head
+                )
+                if cap >= gap_size:
+                    candidates.append(node)
+
+            if not candidates:
+                logger.warning("No candidates found to fill gap [%d, %d)", gap_start, gap_end)
+                continue
+
+            # Sort candidates:
+            # 1. Capacity (ascending) - use "smallest sufficient"
+            # 2. Hosted requests (ascending) - affect minimum on-going requests
+            candidates.sort(key=lambda n: (
+                n.get_decoder_layer_capacity(
+                    include_input_embed=(gap_start == 0),
+                    include_lm_head=(gap_end == self.num_total_layers)
+                ),
+                n.current_requests
+            ))
+
+            best_node = candidates[0]
+            logger.info(
+                "Gap Filling: Remapping node %s to fill gap [%d, %d)",
+                best_node.node_id, gap_start, gap_end
+            )
+
+            # Execute Swap
+            if best_node.node_id in self.node_allocation:
+                self.deallocate(best_node)
+                if best_node in redundant_nodes:
+                    redundant_nodes.remove(best_node)
+
+            self.allocate(best_node, gap_start, gap_end)
+            best_node.is_active = True
+
+        return self.has_full_pipeline()
+
     def should_global_rebalance(self) -> bool:
         """Trigger global rebalance, i.e. re-run `initialize`  if load imbalance is too high.
 
