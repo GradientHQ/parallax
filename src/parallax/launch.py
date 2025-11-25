@@ -3,7 +3,7 @@ Launch the Parallax server.
 
 This script is used to launch the Parallax server.
 It will start the following services:
-    1.Executor with tp_rank>=0, each tp_rank as a subprocess.
+    1.Executor each tp_rank as a subprocess.
     2.HTTP server as a subprocess.
     3.P2P server as a subprocess.
 
@@ -275,14 +275,14 @@ if __name__ == "__main__":
         # Shutdown all processes
         logger.debug("Shutting down all processes...")
 
-        # Shutdown P2P server subprocess
-        if p2p_server_process is not None:
-            stop_p2p_server(p2p_server_process)
-
         # Shutdown executor subprocesses
         for executor_process in executor_subprocs:
             if executor_process.is_alive():
                 stop_executor_process(executor_process)
+
+        # Shutdown P2P server subprocess
+        if p2p_server_process is not None:
+            stop_p2p_server(p2p_server_process)
 
         # Shutdown http server
         if http_server_process is not None:

@@ -1575,7 +1575,7 @@ def run_executor_process(args, shared_state=None):
         executor = Executor.create_from_args(args, shared_state)
         executor.run_loop()
     except KeyboardInterrupt:
-        logger.debug("Received interrupt signal, shutting down...")
+        logger.debug("Executor received interrupt signal, shutting down...")
     except Exception as e:
         logger.exception(e)
     finally:
