@@ -9,11 +9,7 @@ from __future__ import annotations
 
 import multiprocessing
 import time
-from typing import Any, Callable, Dict, Optional, Union
-
-from parallax_utils.logging_config import get_logger
-
-logger = get_logger(__name__)
+from typing import Any, Dict, Optional, Union
 
 
 class SharedState:
