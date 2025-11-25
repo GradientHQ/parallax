@@ -33,6 +33,7 @@ dependencies = [
   "dijkstar==2.6.0",
   "lattica==1.0.13",
   "orjson",
+  "transformers==4.55.2",
 ]
 
 [project.scripts]

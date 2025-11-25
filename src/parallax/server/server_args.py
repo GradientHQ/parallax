@@ -171,6 +171,69 @@ def parse_args() -> argparse.Namespace:
         help="Choose the GPU moe kernels",
     )
 
+    parser.add_argument(
+        "--enable-lora", action="store_true", help="Enable LoRA adapter support for SGLang backend"
+    )
+
+    parser.add_argument(
+        "--max-lora-rank",
+        type=int,
+        default=None,
+        help="The maximum rank of LoRA adapters. If not specified, it will be automatically inferred from the adapters provided in --lora-paths.",
+    )
+
+    parser.add_argument(
+        "--lora-target-modules",
+        nargs="*",
+        type=str,
+        default=None,
+        help="The union set of all target modules where LoRA should be applied. If not specified, it will be automatically inferred from the adapters provided in --lora-paths. If 'all' is specified, all supported modules will be targeted.",
+    )
+
+    parser.add_argument(
+        "--lora-paths",
+        nargs="*",
+        type=str,
+        default=None,
+        help="The list of LoRA adapters to load. Each adapter must be specified in one of the following formats: <PATH> | <NAME>=<PATH> | JSON with schema {'lora_name':str,'lora_path':str,'pinned':bool}.",
+    )
+
+    parser.add_argument(
+        "--max-loras-per-batch",
+        type=int,
+        default=8,
+        help="Maximum number of adapters for a running batch, include base-only request.",
+    )
+
+    parser.add_argument(
+        "--max-loaded-loras",
+        type=int,
+        default=None,
+        help="If specified, it limits the maximum number of LoRA adapters loaded in CPU memory at a time. The value must be greater than or equal to --max-loras-per-batch.",
+    )
+
+    parser.add_argument(
+        "--lora-eviction-policy",
+        choices=["lru", "fifo"],
+        default="lru",
+        help="LoRA adapter eviction policy when memory pool is full. 'lru': Least Recently Used (default, better cache efficiency). 'fifo': First-In-First-Out.",
+    )
+
+    parser.add_argument(
+        "--lora-backend",
+        choices=["triton", "csgmv"],
+        default="triton",
+        help="Choose the kernel backend for multi-LoRA serving.",
+    )
+
+    parser.add_argument(
+        "--max-lora-chunk-size",
+        choices=[16, 32, 64, 128],
+        type=int,
+        default=16,
+        help="Maximum chunk size for the ChunkedSGMV LoRA backend. Only used when --lora-backend is 'csgmv'. Choosing a larger value might improve performance.",
+    )
+
     # Tensor parallel configuration
     parser.add_argument("--tp-size", type=int, default=1, help="Tensor parallel size")
 
