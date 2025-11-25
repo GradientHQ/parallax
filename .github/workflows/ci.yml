@@ -85,7 +85,7 @@ jobs:
           --start-layer 0 \
           --end-layer 28 &
         PID=$!
-        
+
         echo "Waiting for server to start..."
         # Poll to check if the port is ready (wait up to 60 seconds)
         for i in {1..30}; do
@@ -94,13 +94,13 @@ jobs:
              echo "Server is up!"
              break
           fi
-          
+
           # Check if the process is still alive
           if ! kill -0 $PID 2>/dev/null; then
              echo "Server process died prematurely"
              exit 1
           fi
-          
+
           if [ $i -eq 30 ]; then
              echo "Server failed to start within 60 seconds"
              kill $PID 2>/dev/null
@@ -139,6 +139,6 @@ jobs:
             kill $PID 2>/dev/null || true
             exit 1
         fi
-        
+
         # Clean up process
         kill $PID 2>/dev/null || true
