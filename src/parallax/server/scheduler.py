@@ -277,7 +277,6 @@ class Scheduler:
           max_num_tokens_per_batch.
         """
         self.admit_requests()
-        print("11111111111111111111111111")
         if not self._running_requests:
             return []
 
