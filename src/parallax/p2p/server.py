@@ -367,16 +367,6 @@ class GradientServer:
                 # Sync to shared state if available
                 self._sync_to_shared_state()
 
-                # Publish executor metrics to backend on each update
-                def _publish_metrics(_snapshot):
-                    try:
-                        self.scheduler_stub.node_update(self.get_node_info(is_update=True))
-                    except Exception:
-                        pass
-
-                if self._shared_state is not None:
-                    self._shared_state.set_metrics_publisher(_publish_metrics)
-
             except Exception as e:
                 logger.exception(f"Error in join scheduler: {e}")
                 exit(1)

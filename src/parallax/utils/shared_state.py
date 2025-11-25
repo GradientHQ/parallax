@@ -11,6 +11,10 @@ import multiprocessing
 import time
 from typing import Any, Callable, Dict, Optional, Union
 
+from parallax_utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 class SharedState:
     """Wrapper for multiprocessing.Manager().dict() with dict-like interface.
@@ -35,7 +39,6 @@ class SharedState:
             self._dict = manager_dict._dict
         else:
             self._dict = manager_dict
-        self._metrics_publisher: Optional[Callable[[Dict[str, Any]], None]] = None
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a value from shared state."""
@@ -109,24 +112,6 @@ class SharedState:
                     (1.0 - ewma_alpha) * float(prev) + ewma_alpha * float(layer_latency_ms_sample)
                 )
         metrics_dict["_last_update_ts"] = time.time()
-
-        # Publish snapshot if publisher is set
-        if self._metrics_publisher is not None:
-            try:
-                # Create a snapshot by explicitly accessing each key for Manager().dict()
-                snapshot = {k: metrics_dict[k] for k in metrics_dict.keys()}
-                self._metrics_publisher(snapshot)
-            except Exception:
-                # Best-effort; logging is avoided here to keep this utility lightweight
-                pass
-
-    def set_metrics_publisher(self, publisher: Optional[Callable[[Dict[str, Any]], None]]) -> None:
-        """Register a callback to publish metric snapshots after each update.
-
-        Args:
-            publisher: Callable receiving a metrics dict. Set to None to disable publishing.
-        """
-        self._metrics_publisher = publisher
 
     def get_model_info(self) -> Dict[str, Any]:
         """Get model and layer allocation information."""
