@@ -348,52 +348,6 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
         logger.debug(f"Pipelines: {pipelines_map}")
         return pipelines_map
 
-    def _interleave_pipelines(self, pipelines: List[List[str]]) -> List[List[str]]:
-        """Recursively interleave pipelines to balance usage of nodes at each stage.
-
-        Groups pipelines by their first node, recursively interleaves the tails of each group,
-        and then round-robin interleaves the results across the groups.
-        """
-        if not pipelines:
-            return []
-
-        # Group by head node
-        groups: Dict[str, List[List[str]]] = {}
-        for p in pipelines:
-            if not p:
-                continue
-            groups.setdefault(p[0], []).append(p)
-
-        # If we are at the end of the chains (empty lists or only empty lists), just return original
-        if not groups:
-            return pipelines
-
-        # Recursively interleave tails for each group
-        interleaved_groups: List[List[List[str]]] = []
-        # Sort keys for determinism
-        for head in sorted(groups.keys()):
-            group = groups[head]
-            # Extract tails
-            tails = [p[1:] for p in group]
-            # Recurse
-            interleaved_tails = self._interleave_pipelines(tails)
-            # Reattach head
-            reconstructed = [[head] + t for t in interleaved_tails]
-            interleaved_groups.append(reconstructed)
-
-        # Mux the groups together
-        result = []
-        if not interleaved_groups:
-            return result
-
-        max_len = max(len(g) for g in interleaved_groups)
-        for i in range(max_len):
-            for g in interleaved_groups:
-                if i < len(g):
-                    result.append(g[i])
-
-        return result
-
     def find_turning_points(self, nodes: List[Node], num_layers: int) -> List[Tuple[str, int, str]]:
         """No warm-up/truncation in the baseline; return no turning points."""
         return []
