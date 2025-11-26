@@ -138,8 +138,6 @@ async def async_request_openai_completions(
             exc_info = sys.exc_info()
             output.error = "".join(traceback.format_exception(*exc_info))
 
-    if pbar:
-        pbar.update(1)
     return output
 
 
@@ -266,8 +264,6 @@ async def async_request_openai_chat_completions(
             exc_info = sys.exc_info()
             output.error = "".join(traceback.format_exception(*exc_info))
 
-    if pbar:
-        pbar.update(1)
     return output
 
 

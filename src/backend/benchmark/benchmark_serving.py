@@ -546,6 +546,15 @@ async def benchmark(
     print(f"Maximum request concurrency: {max_concurrency}")
 
     if time_serving:
+        if request_rate == float("inf") and max_concurrency is None:
+            print(
+                "WARNING: time_serving enabled with infinite request_rate "
+                "and no max_concurrency. Defaulting max_concurrency to 256 "
+                "to prevent client overload."
+            )
+            max_concurrency = 256
+
+    if time_serving:
         pbar = None if disable_tqdm else tqdm(unit="req")
     else:
         pbar = None if disable_tqdm else tqdm(total=len(input_requests))
@@ -590,12 +599,12 @@ async def benchmark(
     if time_serving:
         reporter_task = asyncio.create_task(reporter_func())
 
-    async def limited_request_func(request_func_input, pbar):
-        if semaphore is None:
+    async def limited_request_func(request_func_input, pbar, sema=None):
+        try:
             res = await request_func(request_func_input=request_func_input, pbar=pbar)
-        else:
-            async with semaphore:
-                res = await request_func(request_func_input=request_func_input, pbar=pbar)
+        finally:
+            if sema:
+                sema.release()
 
         if time_serving:
             live_metrics["completed_requests"] += 1
@@ -608,6 +617,15 @@ async def benchmark(
                         tokenizer(res.generated_text, add_special_tokens=False).input_ids
                     )
                 live_metrics["generated_tokens"] += out_tokens
+
+        if pbar is not None:
+            pbar.update(1)
+            if time_serving:
+                now = time.perf_counter()
+                total_elapsed = now - benchmark_start_time
+                if total_elapsed > 0:
+                    avg_tok_per_sec = live_metrics["generated_tokens"] / total_elapsed
+                    pbar.set_postfix_str(f"tok/s={avg_tok_per_sec:.2f}")
 
         return res
 
@@ -622,6 +640,9 @@ async def benchmark(
     async for request in request_generator:
         if time_serving and (time.perf_counter() - benchmark_start_time) > time_serving:
             break
+
+        if semaphore:
+            await semaphore.acquire()
 
         prompt, prompt_len, output_len, mm_content = request
         request_func_input = RequestFuncInput(
@@ -638,10 +659,53 @@ async def benchmark(
         )
         tasks.append(
             asyncio.create_task(
-                limited_request_func(request_func_input=request_func_input, pbar=pbar)
+                limited_request_func(
+                    request_func_input=request_func_input, pbar=pbar, sema=semaphore
+                )
             )
         )
-    outputs: List[RequestFuncOutput] = await asyncio.gather(*tasks)
+
+    # Cancel pending tasks if time is up
+    if time_serving:
+        pending = [t for t in tasks if not t.done()]
+        if pending:
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    outputs: List[RequestFuncOutput] = await asyncio.gather(*tasks, return_exceptions=True)
+    # Filter out cancelled or failed tasks from outputs to avoid analysis errors
+    valid_outputs = []
+    for i, output in enumerate(outputs):
+        if isinstance(output, Exception):
+            continue
+        valid_outputs.append(output)
+
+    # Re-align input_requests to match valid_outputs
+    # Since we cycle input_requests in time_serving, we need to match the successful ones.
+    # However, outputs order in gather matches tasks order.
+    # We need to filter input_requests as well.
+
+    # Actually, better to just keep the output structure consistent but mark failed ones.
+    # But RequestFuncOutput has an error field.
+
+    final_outputs = []
+    for output in outputs:
+        if isinstance(output, asyncio.CancelledError):
+            # Create a dummy failed output
+            out = RequestFuncOutput()
+            out.error = "Cancelled due to time limit"
+            out.success = False
+            final_outputs.append(out)
+        elif isinstance(output, Exception):
+            out = RequestFuncOutput()
+            out.error = str(output)
+            out.success = False
+            final_outputs.append(out)
+        else:
+            final_outputs.append(output)
+
+    outputs = final_outputs
 
     if reporter_task:
         reporter_task.cancel()
@@ -669,6 +733,18 @@ async def benchmark(
         pbar.close()
 
     benchmark_duration = time.perf_counter() - benchmark_start_time
+
+    # Flatten inputs if we used cycle
+    # In time_serving mode, input_requests is a list of N prompts.
+    # But we generated M requests (where M > N).
+    # We need to reconstruct the full list of inputs corresponding to the tasks.
+    if time_serving:
+        # Re-create the sequence of inputs used
+        # We need to know exactly how many tasks were created.
+        num_tasks = len(tasks)
+        # We can slice the infinite iterator effectively by cycling the original list
+        extended_inputs = list(itertools.islice(itertools.cycle(input_requests), num_tasks))
+        input_requests = extended_inputs
 
     metrics, actual_output_lens = calculate_metrics(
         input_requests=input_requests,
