@@ -284,7 +284,7 @@ def test_round_robin_pipeline_discovery_overlapping_heads_and_tails():
     assert has_expected1 and has_expected2
 
 
-def test_round_robin_naive_pipeline_discovery():
+def test_round_robin_discovery():
     """Verify that naive pipeline discovery limits the number of pipelines.
 
     Topology setup:

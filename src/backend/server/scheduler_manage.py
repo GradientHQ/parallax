@@ -59,13 +59,12 @@ class SchedulerManage:
         routing_strategy="rr",
         pipeline_rebalance_strategy="water_filling",
         micro_batch_ratio=2,
-        naive_pipeline_routing=False,
     ):
         """
         Start the scheduler and the P2P service for RPC handling.
         """
         logger.debug(
-            f"SchedulerManage starting: model_name={model_name}, init_nodes_num={init_nodes_num}, routing_strategy={routing_strategy}, pipeline_rebalance_strategy={pipeline_rebalance_strategy}, micro_batch_ratio={micro_batch_ratio}, naive_pipeline_routing={naive_pipeline_routing}"
+            f"SchedulerManage starting: model_name={model_name}, init_nodes_num={init_nodes_num}, routing_strategy={routing_strategy}, pipeline_rebalance_strategy={pipeline_rebalance_strategy}, micro_batch_ratio={micro_batch_ratio} "
         )
         self.is_local_network = is_local_network
         self.micro_batch_ratio = micro_batch_ratio
