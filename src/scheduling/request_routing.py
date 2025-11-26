@@ -232,9 +232,14 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
 
     def __init__(self) -> None:
         self._rr_cursor: int = 0
-        self._pipelines: Optional[List[List[str]]] = None
+        self._pipelines: Optional[Dict[str, List[str]]] = None
 
-    def pipeline_discovery(self, nodes: List[Node], num_layers: int) -> List[List[str]]:
+    @property
+    def pipelines(self) -> Optional[Dict[str, List[str]]]:
+        """Return the cached pipelines map."""
+        return self._pipelines
+
+    def pipeline_discovery(self, nodes: List[Node], num_layers: int) -> Dict[str, List[str]]:
         """Discover and return all complete pipelines via DFS backtracking.
 
         Robust enumeration procedure:
@@ -249,10 +254,10 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
         overlapping heads/tails yield all valid pipelines.
 
         Returns:
-            A list of pipelines as node-id sequences. Does not cache.
+            A dict of pipelines as {pipeline_id: node-id sequence}. Does not cache.
         """
         if not nodes or num_layers <= 0:
-            return []
+            return {}
 
         # Index nodes by start layer
         start_to_nodes: Dict[int, List[Node]] = {}
@@ -262,13 +267,13 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
             start_to_nodes.setdefault(n.start_layer, []).append(n)
 
         heads = start_to_nodes.get(0, [])
-        pipelines: List[List[str]] = []
+        pipelines_list: List[List[str]] = []
 
         def dfs(current_end: Optional[int], path_ids: List[str]) -> None:
             if current_end is None:
                 return
             if current_end == num_layers:
-                pipelines.append(list(path_ids))
+                pipelines_list.append(list(path_ids))
                 return
             candidates = [
                 n
@@ -288,9 +293,20 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
             path_ids: List[str] = [head.node_id]
             dfs(int(head.end_layer), path_ids)  # type: ignore[arg-type]
 
-        logger.debug(f"Discovered {len(pipelines)} pipelines")
-        logger.debug(f"Pipelines: {pipelines}")
-        return pipelines
+        # Assign unique pipeline IDs to nodes in discovered pipelines
+        # This optimization helps the scheduler identify and repair specific pipelines
+        id_to_node = {n.node_id: n for n in nodes}
+        pipelines_map = {}
+        for i, pipeline in enumerate(pipelines_list):
+            pid = f"pipe-{i}"
+            pipelines_map[pid] = pipeline
+            for node_id in pipeline:
+                if node_id in id_to_node:
+                    id_to_node[node_id].pipeline_id = pid
+
+        logger.debug(f"Discovered {len(pipelines_map)} pipelines")
+        logger.debug(f"Pipelines: {pipelines_map}")
+        return pipelines_map
 
     def find_turning_points(self, nodes: List[Node], num_layers: int) -> List[Tuple[str, int, str]]:
         """No warm-up/truncation in the baseline; return no turning points."""
@@ -385,6 +401,74 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
 
         return None
 
+    def mark_pipeline_broken(
+        self, pipeline_id: str, node_id_to_node: Dict[str, Node]
+    ) -> Optional[List[str]]:
+        """Mark a pipeline as broken: remove from cache and mark nodes as left-over.
+
+        Args:
+            pipeline_id: The ID of the broken pipeline.
+            node_id_to_node: Map to look up node objects to set left_over=True.
+
+        Returns:
+            The list of node IDs that were in the broken pipeline, or None if not found.
+        """
+        if self._pipelines is None or pipeline_id not in self._pipelines:
+            logger.warning("Pipeline %s not found in cache", pipeline_id)
+            return None
+
+        logger.debug("Marking pipeline %s as broken and nodes as left-over", pipeline_id)
+        pipeline_nodes = self._pipelines.pop(pipeline_id)
+        for nid in pipeline_nodes:
+            if nid in node_id_to_node:
+                node_id_to_node[nid].left_over = True
+
+        return pipeline_nodes
+
+    def register_pipeline(self, pipeline_id: Optional[str], nodes: List[Node]) -> str:
+        """Register a new pipeline with the router.
+
+        1. If no pipeline_id provided, generates a new one.
+        2. Marks all nodes as NOT left-over.
+        3. Sorts nodes by hosting layer (start_layer).
+        4. Updates node.pipeline_id for all nodes.
+        5. Adds to cached pipelines map.
+
+        Args:
+            pipeline_id: Optional existing ID. If None, generates 'pipe-N'.
+            nodes: List of nodes forming the complete pipeline.
+
+        Returns:
+            The pipeline_id used for registration.
+        """
+        if not self._pipelines:
+            self._pipelines = {}
+
+        # 1. Generate ID if needed
+        if not pipeline_id:
+            # Simple generation strategy: find max pipe-N and increment
+            idx = 0
+            while f"pipe-{idx}" in self._pipelines:
+                idx += 1
+            pipeline_id = f"pipe-{idx}"
+
+        # 3. Sort nodes by layer order
+        sorted_nodes = sorted(
+            [n for n in nodes if n.start_layer is not None], key=lambda n: n.start_layer or 0
+        )
+        node_ids = [n.node_id for n in sorted_nodes]
+
+        # 2. & 4. Mark left-over False and set pipeline_id
+        for node in sorted_nodes:
+            node.left_over = False
+            node.pipeline_id = pipeline_id
+
+        # 5. Add to cache
+        self._pipelines[pipeline_id] = node_ids
+        logger.debug("Registered pipeline %s: %s", pipeline_id, node_ids)
+
+        return pipeline_id
+
     def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
         """Round-robin among cached pipelines, skipping overloaded ones.
 
@@ -409,11 +493,12 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
         id_to_node: Dict[str, Node] = {n.node_id: n for n in nodes}
 
         attempts = 0
-        total_pipelines = len(self._pipelines)
+        pipelines_list = list(self._pipelines.values())
+        total_pipelines = len(pipelines_list)
         self._rr_cursor %= total_pipelines
         while attempts < total_pipelines:
             idx = self._rr_cursor % total_pipelines
-            candidate_ids = self._pipelines[idx]
+            candidate_ids = pipelines_list[idx]
             # Check overloaded / presence
             viable = True
             prev: Optional[Node] = None
@@ -473,7 +558,7 @@ class RandomPipelineRouting(RoundRobinPipelineRouting):
         if not self._pipelines:
             return [], float("inf")
 
-        candidate_ids = random.choice(self._pipelines)
+        candidate_ids = random.choice(list(self._pipelines.values()))
 
         # Calculate latency
         id_to_node: Dict[str, Node] = {n.node_id: n for n in nodes}

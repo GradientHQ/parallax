@@ -117,6 +117,7 @@ class BaseLayerAllocator:
         # when allocate_left_over_nodes() processes unallocated nodes
         for node in self.nodes:
             self.node_id_to_node[node.node_id] = node
+            node.left_over = True  # Initially left-over until allocated
 
         # Pipeline endpoints for routing
         self.embedding_node_ids: List[str] = []
@@ -175,7 +176,9 @@ class BaseLayerAllocator:
                 f"Invalid allocation: start_layer {start_layer} >= end_layer {end_layer}"
             )
         self.node_id_to_node[node.node_id] = node
+
         node.set_layer_allocation(start_layer, end_layer)
+        node.left_over = False
         self.node_allocation[node.node_id] = (start_layer, end_layer)
         logger.debug("Allocated node %s to layers [%d, %d)", node.node_id, start_layer, end_layer)
         if start_layer == 0:
@@ -208,6 +211,8 @@ class BaseLayerAllocator:
                 self.layer_to_load[layer_id].remove_node(node)
         node.clear_layer_allocation()
         node.is_active = False
+        node.left_over = True
+
         self._update_layer_loads_heap()
 
     def reallocate(self, node: Node, start_layer: int, end_layer: int) -> None:
@@ -220,6 +225,8 @@ class BaseLayerAllocator:
         if node.node_id not in self.node_id_to_node:
             self.nodes.append(node)
             self.node_id_to_node[node.node_id] = node
+            node.left_over = True
+
         # Keep order deterministic without rebinding the list reference
         self.nodes.sort(key=lambda node: node.get_decoder_layer_capacity(), reverse=True)
         logger.debug("Declared node %s (total declared: %d)", node.node_id, len(self.nodes))
@@ -259,6 +266,12 @@ class BaseLayerAllocator:
                 self.nodes.remove(node)
                 break
 
+    def get_and_sort_left_over_nodes(self) -> List[Node]:
+        """Return all left-over nodes sorted by capacity descending."""
+        left_over_nodes = [n for n in self.nodes if n.left_over]
+        left_over_nodes.sort(key=lambda n: n.get_decoder_layer_capacity(), reverse=True)
+        return left_over_nodes
+
     def allocate_left_over_nodes(self) -> None:
         """Assign any nodes without allocations by treating them as dynamic joins.
 
@@ -269,7 +282,7 @@ class BaseLayerAllocator:
         """
         logger.debug("Allocating left-over nodes (unassigned after global allocation)")
         # Iterate in capacity order for determinism and better packing
-        for node in sorted(self.nodes, key=lambda n: n.get_decoder_layer_capacity(), reverse=True):
+        for node in self.get_and_sort_left_over_nodes():
             if node.node_id not in self.node_allocation:
                 try:
                     logger.debug("Attempting left-over allocation for %s", node.node_id)
@@ -455,6 +468,63 @@ class BaseLayerAllocator:
             node.is_active = True
 
         return self.has_full_pipeline()
+
+    def attempt_pipeline_repair(
+        self, target_pipeline_id: str, gap_start: int, gap_end: int
+    ) -> Optional[Tuple[Node, str]]:
+        """Attempt to repair a specific pipeline gap using optimized candidate selection.
+
+        Prioritizes candidates in this order:
+        1. Unallocated (left-over) nodes with smallest sufficient capacity.
+        2. Nodes belonging to broken/inactive pipelines (cannibalization).
+
+        Args:
+            target_pipeline_id: The ID of the pipeline to repair.
+            gap_start: Start layer of the gap.
+            gap_end: End layer of the gap.
+
+        Returns:
+            A tuple (best_node, target_pipeline_id) if successful, None otherwise.
+        """
+        gap_size = gap_end - gap_start
+        include_input_embed = gap_start == 0
+        include_lm_head = gap_end == self.num_total_layers
+
+        candidates: List[Node] = []
+
+        # 1. Left-overs, with smallest sufficient.
+        left_overs = self.get_and_sort_left_over_nodes()
+        for node in reversed(left_overs):
+            cap = node.get_decoder_layer_capacity(
+                include_input_embed=include_input_embed, include_lm_head=include_lm_head
+            )
+            if cap >= gap_size:
+                candidates.append(node)
+                break
+
+        if not candidates:
+            return None
+
+        best_node = candidates[0]
+        logger.info(
+            "Fast Repair: Remapping node %s (pipeline=%s) to fill gap [%d, %d) in pipeline %s",
+            best_node.node_id,
+            best_node.pipeline_id,
+            gap_start,
+            gap_end,
+            target_pipeline_id,
+        )
+
+        # Execute
+        if best_node.node_id in self.node_allocation:
+            self.deallocate(best_node)
+
+        self.allocate(best_node, gap_start, gap_end)
+        # Update pipeline ID to match target
+        best_node.pipeline_id = target_pipeline_id
+        best_node.is_active = True
+
+        return best_node, target_pipeline_id
 
     def should_global_rebalance(self) -> bool:
         """Trigger global rebalance, i.e. re-run `initialize`  if load imbalance is too high.

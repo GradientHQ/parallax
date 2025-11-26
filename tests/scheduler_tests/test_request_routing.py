@@ -256,12 +256,13 @@ def test_round_robin_pipeline_discovery_overlapping_heads_and_tails():
     rr = RoundRobinPipelineRouting()
     pipelines = rr.pipeline_discovery(nodes, num_layers)
 
-    # Pipelines should be sequences of node ids
+    # Pipelines should be sequences of node ids. pipeline_discovery returns a dict.
     assert len(pipelines) >= 2
     # Convert to layer ranges to validate coverage and specific two expected pipelines
     id_to_node = {n.node_id: n for n in nodes}
     ranges = [
-        [(id_to_node[nid].start_layer, id_to_node[nid].end_layer) for nid in p] for p in pipelines
+        [(id_to_node[nid].start_layer, id_to_node[nid].end_layer) for nid in p]
+        for p in pipelines.values()
     ]
 
     expected1 = [

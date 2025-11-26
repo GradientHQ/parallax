@@ -195,6 +195,9 @@ class Node:
 
     rtt_to_nodes: Optional[Dict[str, float]] = None
 
+    pipeline_id: Optional[str] = None
+    left_over: bool = True
+
     _force_max_concurrent_requests: bool = False
 
     def __post_init__(self):

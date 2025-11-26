@@ -373,6 +373,15 @@ class Scheduler:
         logger.debug(
             "Leaving node %s (start=%s, end=%s)", node_id, node.start_layer, node.end_layer
         )
+
+        # Mark peers in the same pipeline as left-over
+        broken_pipeline_nodes = None
+        if node.pipeline_id:
+            if hasattr(self.request_router, "mark_pipeline_broken"):
+                broken_pipeline_nodes = self.request_router.mark_pipeline_broken(
+                    node.pipeline_id, self.node_id_to_node
+                )
+
         self.layer_allocator.leave(node_id)
 
         # Count manual vs automatic nodes
@@ -386,6 +395,41 @@ class Scheduler:
                 f"Mixed assignment detected ({manual_count} manual, {total_count - manual_count} automatic); skipping dynamic recovery"
             )
             return
+
+        # Check for specific pipeline breakage and fast repair
+        if node.pipeline_id and node.start_layer is not None and node.end_layer is not None:
+            logger.debug("Attempting Fast Repair for pipeline %s", node.pipeline_id)
+
+            repair_result = self.layer_allocator.attempt_pipeline_repair(
+                node.pipeline_id, node.start_layer, node.end_layer
+            )
+
+            if repair_result:
+                new_node, pipeline_id = repair_result
+                logger.debug(
+                    "Fast Repair successful for pipeline %s with node %s",
+                    pipeline_id,
+                    new_node.node_id,
+                )
+
+                # Notify request router about pipeline update
+                if broken_pipeline_nodes and hasattr(self.request_router, "register_pipeline"):
+                    # Reconstruct the pipeline nodes list
+                    # We need Node objects, not just IDs, to register properly
+                    repaired_nodes_list = []
+                    for nid in broken_pipeline_nodes:
+                        if nid == node_id:
+                            repaired_nodes_list.append(new_node)
+                        else:
+                            peer = self.node_id_to_node.get(nid)
+                            if peer:
+                                repaired_nodes_list.append(peer)
+
+                    self.request_router.register_pipeline(pipeline_id, repaired_nodes_list)
+
+                with self._node_count_cv:
+                    self._node_count_cv.notify_all()
+                return
 
         if not self.layer_allocator.has_full_pipeline():
             logger.debug("Pipeline broken after node leave; attempting recovery")
