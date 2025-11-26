@@ -328,11 +328,6 @@ def test_round_robin_naive_pipeline_discovery():
     add_nodes(1, 28, 36)
 
     # Test normal mode
-    rr_normal = RoundRobinPipelineRouting(naive_pipeline=False)
+    rr_normal = RoundRobinPipelineRouting()
     pipelines_normal = rr_normal.pipeline_discovery(nodes, num_layers)
-    assert len(pipelines_normal) == 756
-
-    # Test naive mode
-    rr_naive = RoundRobinPipelineRouting(naive_pipeline=True)
-    pipelines_naive = rr_naive.pipeline_discovery(nodes, num_layers)
-    assert len(pipelines_naive) == 6
+    assert len(pipelines_normal) == 6

@@ -230,11 +230,10 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
     to force rediscovery if allocations change.
     """
 
-    def __init__(self, enable_repair: bool = False, naive_pipeline: bool = False) -> None:
+    def __init__(self, enable_repair: bool = False) -> None:
         self._rr_cursor: int = 0
         self._pipelines: Optional[Dict[str, List[str]]] = None
         self.enable_repair = enable_repair
-        self.naive_pipeline = naive_pipeline
 
     @property
     def pipelines(self) -> Optional[Dict[str, List[str]]]:
@@ -288,8 +287,6 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
                 path_ids.append(nxt.node_id)
                 found = dfs(int(nxt.end_layer), path_ids)  # type: ignore[arg-type]
                 path_ids.pop()
-                if found and self.naive_pipeline:
-                    return True
             return False
 
         for head in heads:
@@ -298,13 +295,47 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
             path_ids: List[str] = [head.node_id]
             dfs(int(head.end_layer), path_ids)  # type: ignore[arg-type]
 
-        # Interleave pipelines to balance load across branches if not in naive mode
-        if not self.naive_pipeline:
-            pipelines_list = self._interleave_pipelines(pipelines_list)
-
         # Assign unique pipeline IDs to nodes in discovered pipelines
         # This optimization helps the scheduler identify and repair specific pipelines
         id_to_node = {n.node_id: n for n in nodes}
+
+        # Select exactly one best pipeline per head node
+        # ("Best" = minimum estimated latency including RTT)
+        if pipelines_list:
+            best_per_head: Dict[str, Tuple[List[str], float]] = {}
+
+            def calculate_pipeline_cost(pipeline: List[str]) -> float:
+                cost = 0.0
+                prev_node = None
+                for nid in pipeline:
+                    node = id_to_node.get(nid)
+                    if not node:
+                        return float("inf")
+                    # Use base latency without load compensation for static selection
+                    # if available, otherwise current latency
+                    base_lat = (
+                        node.avg_layer_latency_ms
+                        if node.avg_layer_latency_ms is not None
+                        else node.layer_latency_ms
+                    )
+                    cost += float(base_lat)
+                    if prev_node:
+                        cost += prev_node.get_rtt_to(node)
+                    prev_node = node
+                return cost
+
+            for pipe in pipelines_list:
+                if not pipe:
+                    continue
+                head_id = pipe[0]
+                cost = calculate_pipeline_cost(pipe)
+                if head_id not in best_per_head or cost < best_per_head[head_id][1]:
+                    best_per_head[head_id] = (pipe, cost)
+
+            pipelines_list = [p for p, _ in best_per_head.values()]
+            logger.debug(
+                f"Pipeline selection: reduced to {len(pipelines_list)} pipelines (1 per head)"
+            )
         pipelines_map = {}
         for i, pipeline in enumerate(pipelines_list):
             pid = f"pipe-{i}"

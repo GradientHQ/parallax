@@ -160,7 +160,6 @@ if __name__ == "__main__":
     routing_strategy = args.routing_strategy
     pipeline_rebalance_strategy = args.pipeline_rebalance_strategy
     micro_batch_ratio = args.micro_batch_ratio
-    naive_pipeline_routing = args.naive_pipeline_routing
     if pipeline_rebalance_strategy == "none":
         pipeline_rebalance_strategy = None
 
@@ -172,7 +171,6 @@ if __name__ == "__main__":
             routing_strategy,
             pipeline_rebalance_strategy,
             micro_batch_ratio,
-            naive_pipeline_routing,
         )
 
     host = args.host

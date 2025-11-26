@@ -38,7 +38,6 @@ class Scheduler:
         routing_strategy: Literal["rr", "dp", "random"] = "rr",
         pipeline_rebalance_strategy: Optional[Literal["greedy", "water_filling"]] = "water_filling",
         enable_pipeline_repair: bool = False,
-        naive_pipeline_discovery: bool = False,
         *,
         request_arrival_horizon_sec: float = 600.0,
         rebalance_threshold: float = float("inf"),
@@ -89,9 +88,7 @@ class Scheduler:
         elif routing_strategy == "random":
             self.request_router = RandomPipelineRouting()
         else:
-            self.request_router = RoundRobinPipelineRouting(
-                enable_repair=enable_pipeline_repair, naive_pipeline=naive_pipeline_discovery
-            )
+            self.request_router = RoundRobinPipelineRouting(enable_repair=enable_pipeline_repair)
         self.request_warm_up_for_reshard = request_warm_up_for_reshard
 
         self._request_queue: "queue.Queue[RequestSignal]" = queue.Queue()
