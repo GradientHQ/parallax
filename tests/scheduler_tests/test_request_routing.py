@@ -335,7 +335,7 @@ def test_round_robin_pipeline_diversity():
     for n in nodes:
         n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
 
-    rr = RoundRobinPipelineRouting()
+    rr = RoundRobinPipelineRouting(allow_overlap=True)
     pipelines = rr.pipeline_discovery(nodes, num_layers)
 
     assert len(pipelines) == 2

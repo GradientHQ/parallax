@@ -230,10 +230,10 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
     to force rediscovery if allocations change.
     """
 
-    def __init__(self, enable_repair: bool = False) -> None:
+    def __init__(self, allow_overlap: bool = False) -> None:
         self._rr_cursor: int = 0
         self._pipelines: Optional[Dict[str, List[str]]] = None
-        self.enable_repair = enable_repair
+        self.allow_overlap = allow_overlap
 
     @property
     def pipelines(self) -> Optional[Dict[str, List[str]]]:
@@ -337,6 +337,9 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
                     if u > max_use:
                         max_use = u
                     sum_use += u
+
+                if not self.allow_overlap and max_use > 0:
+                    continue
 
                 score = (max_use, sum_use, cost)
                 if score < best_score:

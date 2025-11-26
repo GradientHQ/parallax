@@ -88,7 +88,7 @@ class Scheduler:
         elif routing_strategy == "random":
             self.request_router = RandomPipelineRouting()
         else:
-            self.request_router = RoundRobinPipelineRouting(enable_repair=enable_pipeline_repair)
+            self.request_router = RoundRobinPipelineRouting()
         self.request_warm_up_for_reshard = request_warm_up_for_reshard
 
         self._request_queue: "queue.Queue[RequestSignal]" = queue.Queue()
