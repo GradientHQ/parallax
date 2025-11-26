@@ -234,6 +234,13 @@ def parse_args() -> argparse.Namespace:
         help="Maximum chunk size for the ChunkedSGMV LoRA backend. Only used when --lora-backend is 'csgmv'. Choosing a larger value might improve performance.",
     )
 
+    parser.add_argument(
+        "--adapters",
+        type=str,
+        default=None,
+        help="Path to the adapter repository for model fine-tuning",
+    )
+
     # Tensor parallel configuration
     parser.add_argument("--tp-size", type=int, default=1, help="Tensor parallel size")
 

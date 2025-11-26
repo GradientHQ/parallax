@@ -112,6 +112,7 @@ class Executor:
         lora_eviction_policy: Optional[str] = "lru",
         lora_backend: Optional[str] = "triton",
         max_lora_chunk_size: Optional[int] = 128,
+        adapters: Optional[str] = None,
         # Tensor Parallel Configs
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
@@ -174,6 +175,7 @@ class Executor:
                 "lora_eviction_policy": lora_eviction_policy,
                 "lora_backend": lora_backend,
                 "max_lora_chunk_size": max_lora_chunk_size,
+                "adapters": adapters,
             }
 
             self.model_runner, self.config, self.tokenizer = initialize_cuda_model_runner(
@@ -202,6 +204,11 @@ class Executor:
             )
             t0 = time.time()
             self.model_shard, self.config, self.tokenizer = self.shard_loader.load()
+
+            if adapters:
+                logger.debug(f"mlx adapters is: {adapters}")
+                self.model_shard = self.shard_loader.load_lora(self.model_shard, adapters)
+
             logger.debug(
                 f"MLX sharded model loaded in {(time.time() - t0) * 1000:.1f} ms; num_layers={self.config.get('num_hidden_layers')}"
             )
@@ -1657,5 +1664,6 @@ def create_executor_config(args: argparse.Namespace, shared_state=None):
         "lora_eviction_policy": args.lora_eviction_policy,
         "lora_backend": args.lora_backend,
         "max_lora_chunk_size": args.max_lora_chunk_size,
+        "adapters": args.adapters,
     }
     return config
