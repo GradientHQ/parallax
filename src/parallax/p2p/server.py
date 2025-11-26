@@ -656,7 +656,8 @@ class GradientServer:
                             exc_info=True,
                         )
 
-                    time.sleep(10)
+                    # TODO: remove this; this is just for testing.
+                    time.sleep(1)
             except Exception as e:
                 logger.exception(f"Module announcer thread error: {e}")
 
