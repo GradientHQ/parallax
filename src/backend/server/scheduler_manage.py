@@ -59,12 +59,13 @@ class SchedulerManage:
         routing_strategy="rr",
         pipeline_rebalance_strategy="water_filling",
         micro_batch_ratio=2,
+        naive_pipeline_routing=False,
     ):
         """
         Start the scheduler and the P2P service for RPC handling.
         """
         logger.debug(
-            f"SchedulerManage starting: model_name={model_name}, init_nodes_num={init_nodes_num}, routing_strategy={routing_strategy}, pipeline_rebalance_strategy={pipeline_rebalance_strategy}, micro_batch_ratio={micro_batch_ratio}"
+            f"SchedulerManage starting: model_name={model_name}, init_nodes_num={init_nodes_num}, routing_strategy={routing_strategy}, pipeline_rebalance_strategy={pipeline_rebalance_strategy}, micro_batch_ratio={micro_batch_ratio}, naive_pipeline_routing={naive_pipeline_routing}"
         )
         self.is_local_network = is_local_network
         self.micro_batch_ratio = micro_batch_ratio
@@ -74,7 +75,11 @@ class SchedulerManage:
             self.relay_servers = PUBLIC_RELAY_SERVERS
 
         self._start_scheduler(
-            model_name, init_nodes_num, routing_strategy, pipeline_rebalance_strategy
+            model_name,
+            init_nodes_num,
+            routing_strategy,
+            pipeline_rebalance_strategy,
+            naive_pipeline_routing,
         )
         self._start_lattica()
         self.completion_handler = TransformerConnectionHandler(
@@ -144,6 +149,7 @@ class SchedulerManage:
         init_nodes_num,
         routing_strategy="rr",
         pipeline_rebalance_strategy="water_filling",
+        naive_pipeline_routing=False,
     ):
         """
         Create the scheduler and start its background run loop if needed.
@@ -162,6 +168,7 @@ class SchedulerManage:
             min_nodes_bootstrapping=init_nodes_num,
             routing_strategy=routing_strategy,
             pipeline_rebalance_strategy=pipeline_rebalance_strategy,
+            naive_pipeline_discovery=naive_pipeline_routing,
         )
 
         # Run the scheduler's event/dispatch loops in background so the process

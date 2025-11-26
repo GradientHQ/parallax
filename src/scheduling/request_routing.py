@@ -230,9 +230,11 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
     to force rediscovery if allocations change.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, enable_repair: bool = False, naive_pipeline: bool = False) -> None:
         self._rr_cursor: int = 0
         self._pipelines: Optional[Dict[str, List[str]]] = None
+        self.enable_repair = enable_repair
+        self.naive_pipeline = naive_pipeline
 
     @property
     def pipelines(self) -> Optional[Dict[str, List[str]]]:
@@ -269,12 +271,12 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
         heads = start_to_nodes.get(0, [])
         pipelines_list: List[List[str]] = []
 
-        def dfs(current_end: Optional[int], path_ids: List[str]) -> None:
+        def dfs(current_end: Optional[int], path_ids: List[str]) -> bool:
             if current_end is None:
-                return
+                return False
             if current_end == num_layers:
                 pipelines_list.append(list(path_ids))
-                return
+                return True
             candidates = [
                 n
                 for n in start_to_nodes.get(int(current_end), [])
@@ -284,14 +286,21 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
             candidates.sort(key=lambda n: n.end_layer)  # type: ignore[arg-type]
             for nxt in candidates:
                 path_ids.append(nxt.node_id)
-                dfs(int(nxt.end_layer), path_ids)  # type: ignore[arg-type]
+                found = dfs(int(nxt.end_layer), path_ids)  # type: ignore[arg-type]
                 path_ids.pop()
+                if found and self.naive_pipeline:
+                    return True
+            return False
 
         for head in heads:
             if head.end_layer is None:
                 continue
             path_ids: List[str] = [head.node_id]
             dfs(int(head.end_layer), path_ids)  # type: ignore[arg-type]
+
+        # Interleave pipelines to balance load across branches if not in naive mode
+        if not self.naive_pipeline:
+            pipelines_list = self._interleave_pipelines(pipelines_list)
 
         # Assign unique pipeline IDs to nodes in discovered pipelines
         # This optimization helps the scheduler identify and repair specific pipelines
@@ -307,6 +316,52 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
         logger.debug(f"Discovered {len(pipelines_map)} pipelines")
         logger.debug(f"Pipelines: {pipelines_map}")
         return pipelines_map
+
+    def _interleave_pipelines(self, pipelines: List[List[str]]) -> List[List[str]]:
+        """Recursively interleave pipelines to balance usage of nodes at each stage.
+
+        Groups pipelines by their first node, recursively interleaves the tails of each group,
+        and then round-robin interleaves the results across the groups.
+        """
+        if not pipelines:
+            return []
+
+        # Group by head node
+        groups: Dict[str, List[List[str]]] = {}
+        for p in pipelines:
+            if not p:
+                continue
+            groups.setdefault(p[0], []).append(p)
+
+        # If we are at the end of the chains (empty lists or only empty lists), just return original
+        if not groups:
+            return pipelines
+
+        # Recursively interleave tails for each group
+        interleaved_groups: List[List[List[str]]] = []
+        # Sort keys for determinism
+        for head in sorted(groups.keys()):
+            group = groups[head]
+            # Extract tails
+            tails = [p[1:] for p in group]
+            # Recurse
+            interleaved_tails = self._interleave_pipelines(tails)
+            # Reattach head
+            reconstructed = [[head] + t for t in interleaved_tails]
+            interleaved_groups.append(reconstructed)
+
+        # Mux the groups together
+        result = []
+        if not interleaved_groups:
+            return result
+
+        max_len = max(len(g) for g in interleaved_groups)
+        for i in range(max_len):
+            for g in interleaved_groups:
+                if i < len(g):
+                    result.append(g[i])
+
+        return result
 
     def find_turning_points(self, nodes: List[Node], num_layers: int) -> List[Tuple[str, int, str]]:
         """No warm-up/truncation in the baseline; return no turning points."""
@@ -519,25 +574,28 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
             if viable and total_latency != float("inf"):
                 return candidate_ids, total_latency
             # Attempt a one-shot repair if the selected pipeline is not viable
-            repaired = self._attempt_repair_pipeline(candidate_ids, nodes, num_layers)
-            if repaired:
-                # Compute latency for the repaired path
-                total_latency = 0.0
-                prev = None
-                for nid in repaired:
-                    node = id_to_node.get(nid)
-                    # If any node is missing/overloaded, skip this repair
-                    if node is None or node.is_overloaded:
-                        total_latency = float("inf")
-                        break
-                    total_latency += float(node.layer_latency_ms)
-                    if prev is not None:
-                        total_latency += (
-                            0.0 if prev.node_id == node.node_id else float(prev.get_rtt_to(node))
-                        )
-                    prev = node
-                if total_latency != float("inf"):
-                    return repaired, total_latency
+            if self.enable_repair:
+                repaired = self._attempt_repair_pipeline(candidate_ids, nodes, num_layers)
+                if repaired:
+                    # Compute latency for the repaired path
+                    total_latency = 0.0
+                    prev = None
+                    for nid in repaired:
+                        node = id_to_node.get(nid)
+                        # If any node is missing/overloaded, skip this repair
+                        if node is None or node.is_overloaded:
+                            total_latency = float("inf")
+                            break
+                        total_latency += float(node.layer_latency_ms)
+                        if prev is not None:
+                            total_latency += (
+                                0.0
+                                if prev.node_id == node.node_id
+                                else float(prev.get_rtt_to(node))
+                            )
+                        prev = node
+                    if total_latency != float("inf"):
+                        return repaired, total_latency
 
         return [], float("inf")
 

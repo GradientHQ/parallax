@@ -50,6 +50,12 @@ def parse_args() -> argparse.Namespace:
         help="Pipeline rebalance strategy: 'greedy' (assign contiguous layers in capacity order), 'water_filling' (proportional water-filling based on compute power), or 'none' (disable rebalancing)",
     )
     parser.add_argument(
+        "--naive-pipeline-routing",
+        action="store_true",
+        default=False,
+        help="Use naive pipeline discovery for round-robin routing (limits to one pipeline per head node)",
+    )
+    parser.add_argument(
         "--use-hfcache",
         action="store_true",
         default=False,

@@ -282,3 +282,57 @@ def test_round_robin_pipeline_discovery_overlapping_heads_and_tails():
     )
     has_expected2 = any(matches_path(r, expected2) for r in ranges)
     assert has_expected1 and has_expected2
+
+
+def test_round_robin_naive_pipeline_discovery():
+    """Verify that naive pipeline discovery limits the number of pipelines.
+
+    Topology setup:
+    - 6 nodes: [0, 9)
+    - 5 nodes: [9, 18)
+    - 1 node:  [9, 19)
+    - 5 nodes: [18, 27)
+    - 1 node:  [19, 28)
+    - 5 nodes: [27, 36)
+    - 1 node:  [28, 36)
+
+    Normal mode should find 6*5*5*5 + 6*1*1*1 = 756 pipelines.
+    Naive mode should limit search to stop after finding *one* valid pipeline per head node.
+    Since there are 6 head nodes (starting at layer 0), we expect exactly 6 pipelines.
+    """
+    num_layers = 36
+    model = build_model(num_layers)
+    nodes = []
+
+    def add_nodes(count, start, end):
+        current_len = len(nodes)
+        for i in range(count):
+            node_id = f"node-{current_len + i}"
+            n = build_node(node_id, model)
+            n.set_layer_allocation(start, end)
+            nodes.append(n)
+
+    # 6x [0, 9)
+    add_nodes(6, 0, 9)
+    # 5x [9, 18)
+    add_nodes(5, 9, 18)
+    # 1x [9, 19)
+    add_nodes(1, 9, 19)
+    # 5x [18, 27)
+    add_nodes(5, 18, 27)
+    # 1x [19, 28)
+    add_nodes(1, 19, 28)
+    # 5x [27, 36)
+    add_nodes(5, 27, 36)
+    # 1x [28, 36)
+    add_nodes(1, 28, 36)
+
+    # Test normal mode
+    rr_normal = RoundRobinPipelineRouting(naive_pipeline=False)
+    pipelines_normal = rr_normal.pipeline_discovery(nodes, num_layers)
+    assert len(pipelines_normal) == 756
+
+    # Test naive mode
+    rr_naive = RoundRobinPipelineRouting(naive_pipeline=True)
+    pipelines_naive = rr_naive.pipeline_discovery(nodes, num_layers)
+    assert len(pipelines_naive) == 6
