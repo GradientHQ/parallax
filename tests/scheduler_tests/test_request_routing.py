@@ -253,6 +253,10 @@ def test_round_robin_pipeline_discovery_overlapping_heads_and_tails():
         N("t2", 47, 64),
     ]
 
+    # Ensure mock RTT exists, otherwise cost calc might fail or default weirdly
+    for n in nodes:
+        n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
+
     rr = RoundRobinPipelineRouting()
     pipelines = rr.pipeline_discovery(nodes, num_layers)
 
@@ -284,32 +288,97 @@ def test_round_robin_pipeline_discovery_overlapping_heads_and_tails():
     assert has_expected1 and has_expected2
 
 
-def test_round_robin_discovery():
-    """Verify that naive pipeline discovery limits the number of pipelines.
+def test_round_robin_pipeline_diversity():
+    """
+    Verify that the router maximizes node diversity when selecting pipelines.
 
-    Topology setup:
-    - 6 nodes: [0, 9)
-    - 5 nodes: [9, 18)
-    - 1 node:  [9, 19)
-    - 5 nodes: [18, 27)
-    - 1 node:  [19, 28)
-    - 5 nodes: [27, 36)
-    - 1 node:  [28, 36)
+    Scenario:
+    Head nodes: H1, H2
+    Mid nodes: M1 (fast), M2 (slightly slower)
+    Tail nodes: T1
 
-    Normal mode should find 6*5*5*5 + 6*1*1*1 = 756 pipelines.
-    Naive mode should limit search to stop after finding *one* valid pipeline per head node.
-    Since there are 6 head nodes (starting at layer 0), we expect exactly 6 pipelines.
+    Pipelines from H1: [H1, M1, T1] (cost 10), [H1, M2, T1] (cost 12)
+    Pipelines from H2: [H2, M1, T1] (cost 10), [H2, M2, T1] (cost 12)
+
+    Optimized selection should realize M1 and T1 are used by H1, and prefer [H2, M2, T1] for the second head
+    to minimize contention on M1, even if M2 is slower.
+    """
+    num_layers = 3
+    model = build_model(num_layers)
+
+    # Construct nodes with explicit latencies to control cost
+    # Costs: H=1, M1=1, M2=3, T=1. RTT=0 for simplicity.
+    # Path 1: 1+1+1 = 3
+    # Path 2: 1+3+1 = 5
+
+    h1 = build_node("h1", model)
+    h1.set_layer_allocation(0, 1)
+    h1.set_layer_latency_ms(1.0)
+    h2 = build_node("h2", model)
+    h2.set_layer_allocation(0, 1)
+    h2.set_layer_latency_ms(1.0)
+
+    m1 = build_node("m1", model)
+    m1.set_layer_allocation(1, 2)
+    m1.set_layer_latency_ms(1.0)
+    m2 = build_node("m2", model)
+    m2.set_layer_allocation(1, 2)
+    m2.set_layer_latency_ms(3.0)
+
+    t1 = build_node("t1", model)
+    t1.set_layer_allocation(2, 3)
+    t1.set_layer_latency_ms(1.0)
+
+    nodes = [h1, h2, m1, m2, t1]
+
+    # Mock RTT to be 0
+    for n in nodes:
+        n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
+
+    rr = RoundRobinPipelineRouting()
+    pipelines = rr.pipeline_discovery(nodes, num_layers)
+
+    assert len(pipelines) == 2
+
+    # Extract the mid node from each pipeline
+    mid_nodes = []
+    for p in pipelines.values():
+        # p is list of node ids [Head, Mid, Tail]
+        mid_nodes.append(p[1])
+
+    # We expect one to use m1 and the other to use m2
+    assert "m1" in mid_nodes
+    assert "m2" in mid_nodes
+
+
+def test_rr_24_node_topology_utilization():
+    """Verify that with the 24-node topology, we utilize almost all nodes.
+
+    Topology:
+    - 6x [0, 9)
+    - 5x [9, 18)
+    - 1x [9, 19)
+    - 5x [18, 27)
+    - 1x [19, 28)
+    - 5x [27, 36)
+    - 1x [28, 36)
+
+    Total 24 nodes.
+    We expect 6 pipelines.
+    Ideally all 24 nodes should be used.
     """
     num_layers = 36
     model = build_model(num_layers)
     nodes = []
 
     def add_nodes(count, start, end):
-        current_len = len(nodes)
+        len(nodes)
         for i in range(count):
-            node_id = f"node-{current_len + i}"
+            node_id = f"n_{start}_{end}_{i}"
             n = build_node(node_id, model)
             n.set_layer_allocation(start, end)
+            # Set uniform latency/RTT so cost doesn't skew selection away from diversity
+            n.set_layer_latency_ms(10.0)
             nodes.append(n)
 
     # 6x [0, 9)
@@ -327,7 +396,23 @@ def test_round_robin_discovery():
     # 1x [28, 36)
     add_nodes(1, 28, 36)
 
-    # Test normal mode
-    rr_normal = RoundRobinPipelineRouting()
-    pipelines_normal = rr_normal.pipeline_discovery(nodes, num_layers)
-    assert len(pipelines_normal) == 6
+    # Mock RTT to be 0
+    for n in nodes:
+        n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
+
+    rr = RoundRobinPipelineRouting()
+    pipelines = rr.pipeline_discovery(nodes, num_layers)
+
+    assert len(pipelines) == 6
+
+    unique_nodes_used = set()
+    for p in pipelines.values():
+        for nid in p:
+            unique_nodes_used.add(nid)
+
+    print(f"Used {len(unique_nodes_used)} unique nodes out of {len(nodes)}")
+    # We expect high utilization.
+    # 6 pipelines * 4 stages = 24 slots.
+    # We have 24 nodes available.
+    # Ideally 24. Allow slight slack if topology logic is tricky, but should be > 20.
+    assert len(unique_nodes_used) >= 24

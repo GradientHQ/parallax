@@ -240,27 +240,11 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
         """Return the cached pipelines map."""
         return self._pipelines
 
-    def pipeline_discovery(self, nodes: List[Node], num_layers: int) -> Dict[str, List[str]]:
-        """Discover and return all complete pipelines via DFS backtracking.
-
-        Robust enumeration procedure:
-        - Build a mapping from start_layer to nodes starting there.
-        - For each head node with start_layer == 0, perform a depth-first search
-          from its end_layer, trying all candidate next nodes whose start equals
-          the current end and whose end strictly increases.
-        - Record any chain that reaches exactly `num_layers` as a complete pipeline.
-
-        This approach backtracks when a candidate cannot lead to completion,
-        avoiding the brittleness of a single greedy choice and ensuring that
-        overlapping heads/tails yield all valid pipelines.
-
-        Returns:
-            A dict of pipelines as {pipeline_id: node-id sequence}. Does not cache.
-        """
+    def _dfs_all_pipelines(self, nodes: List[Node], num_layers: int) -> List[List[str]]:
+        """Helper: DFS to find all valid pipelines."""
         if not nodes or num_layers <= 0:
-            return {}
+            return []
 
-        # Index nodes by start layer
         start_to_nodes: Dict[int, List[Node]] = {}
         for n in nodes:
             if n.start_layer is None or n.end_layer is None:
@@ -270,24 +254,22 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
         heads = start_to_nodes.get(0, [])
         pipelines_list: List[List[str]] = []
 
-        def dfs(current_end: Optional[int], path_ids: List[str]) -> bool:
+        def dfs(current_end: Optional[int], path_ids: List[str]) -> None:
             if current_end is None:
-                return False
+                return
             if current_end == num_layers:
                 pipelines_list.append(list(path_ids))
-                return True
+                return
             candidates = [
                 n
                 for n in start_to_nodes.get(int(current_end), [])
                 if n.end_layer is not None and n.end_layer > current_end
             ]
-            # Deterministic order: try shorter segments first
             candidates.sort(key=lambda n: n.end_layer)  # type: ignore[arg-type]
             for nxt in candidates:
                 path_ids.append(nxt.node_id)
-                found = dfs(int(nxt.end_layer), path_ids)  # type: ignore[arg-type]
+                dfs(int(nxt.end_layer), path_ids)  # type: ignore[arg-type]
                 path_ids.pop()
-            return False
 
         for head in heads:
             if head.end_layer is None:
@@ -295,57 +277,99 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
             path_ids: List[str] = [head.node_id]
             dfs(int(head.end_layer), path_ids)  # type: ignore[arg-type]
 
-        # Assign unique pipeline IDs to nodes in discovered pipelines
-        # This optimization helps the scheduler identify and repair specific pipelines
+        return pipelines_list
+
+    def _select_best_pipelines(
+        self, all_pipelines: List[List[str]], nodes: List[Node]
+    ) -> List[List[str]]:
+        """Helper: Select best pipeline per head minimizing node reuse and latency."""
+        if not all_pipelines:
+            return []
+
         id_to_node = {n.node_id: n for n in nodes}
 
-        # Select exactly one best pipeline per head node
-        # ("Best" = minimum estimated latency including RTT)
-        if pipelines_list:
-            best_per_head: Dict[str, Tuple[List[str], float]] = {}
+        def calculate_cost(pipeline: List[str]) -> float:
+            cost = 0.0
+            prev = None
+            for nid in pipeline:
+                node = id_to_node.get(nid)
+                if not node:
+                    return float("inf")
+                base_lat = (
+                    node.avg_layer_latency_ms
+                    if node.avg_layer_latency_ms is not None
+                    else node.layer_latency_ms
+                )
+                cost += float(base_lat)
+                if prev:
+                    cost += prev.get_rtt_to(node)
+                prev = node
+            return cost
 
-            def calculate_pipeline_cost(pipeline: List[str]) -> float:
-                cost = 0.0
-                prev_node = None
-                for nid in pipeline:
-                    node = id_to_node.get(nid)
-                    if not node:
-                        return float("inf")
-                    # Use base latency without load compensation for static selection
-                    # if available, otherwise current latency
-                    base_lat = (
-                        node.avg_layer_latency_ms
-                        if node.avg_layer_latency_ms is not None
-                        else node.layer_latency_ms
-                    )
-                    cost += float(base_lat)
-                    if prev_node:
-                        cost += prev_node.get_rtt_to(node)
-                    prev_node = node
-                return cost
+        # Group by head
+        by_head: Dict[str, List[Tuple[List[str], float]]] = {}
+        for p in all_pipelines:
+            if not p:
+                continue
+            head = p[0]
+            cost = calculate_cost(p)
+            if cost != float("inf"):
+                by_head.setdefault(head, []).append((p, cost))
 
-            for pipe in pipelines_list:
-                if not pipe:
-                    continue
-                head_id = pipe[0]
-                cost = calculate_pipeline_cost(pipe)
-                if head_id not in best_per_head or cost < best_per_head[head_id][1]:
-                    best_per_head[head_id] = (pipe, cost)
+        # Sort heads by their best possible cost (fastest heads first)
+        sorted_heads = sorted(by_head.keys(), key=lambda h: min(c for _, c in by_head[h]))
 
-            pipelines_list = [p for p, _ in best_per_head.values()]
-            logger.debug(
-                f"Pipeline selection: reduced to {len(pipelines_list)} pipelines (1 per head)"
-            )
+        selected = []
+        node_usage: Dict[str, int] = {}
+
+        for head in sorted_heads:
+            candidates = by_head[head]
+            best_p = None
+            # Score: (max_usage_in_path, sum_usage_in_path, cost)
+            best_score = (float("inf"), float("inf"), float("inf"))
+
+            for p, cost in candidates:
+                # Calculate usage stats of any node in this path
+                max_use = 0
+                sum_use = 0
+                for nid in p:
+                    u = node_usage.get(nid, 0)
+                    if u > max_use:
+                        max_use = u
+                    sum_use += u
+
+                score = (max_use, sum_use, cost)
+                if score < best_score:
+                    best_score = score
+                    best_p = p
+
+            if best_p:
+                selected.append(best_p)
+                for nid in best_p:
+                    node_usage[nid] = node_usage.get(nid, 0) + 1
+
+        logger.debug(
+            f"Pipeline selection: selected {len(selected)} pipelines (1 per head). "
+            f"Max node overlap: {max(node_usage.values()) if node_usage else 0}"
+        )
+        return selected
+
+    def pipeline_discovery(self, nodes: List[Node], num_layers: int) -> Dict[str, List[str]]:
+        """Discover and return optimal diverse pipelines."""
+        # 1. DFS to get all possible pipelines
+        all_pipes = self._dfs_all_pipelines(nodes, num_layers)
+        logger.debug(f"Discovered {len(all_pipes)} possible raw pipelines")
+
+        # 2. Select best diverse subset (one per head)
+        selected_pipes = self._select_best_pipelines(all_pipes, nodes)
+
+        # 3. Format as dict
         pipelines_map = {}
-        for i, pipeline in enumerate(pipelines_list):
+        for i, pipeline in enumerate(selected_pipes):
             pid = f"pipe-{i}"
             pipelines_map[pid] = pipeline
-            for node_id in pipeline:
-                if node_id in id_to_node:
-                    id_to_node[node_id].pipeline_id = pid
 
-        logger.debug(f"Discovered {len(pipelines_map)} pipelines")
-        logger.debug(f"Pipelines: {pipelines_map}")
+        logger.debug(f"Final pipelines map: {pipelines_map}")
         return pipelines_map
 
     def find_turning_points(self, nodes: List[Node], num_layers: int) -> List[Tuple[str, int, str]]:
@@ -355,91 +379,12 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
     def _ensure_pipelines(self, nodes: List[Node], num_layers: int) -> None:
         """Ensure cached pipelines exist; discover and cache if missing."""
         if self._pipelines is None:
-            self._pipelines = self.pipeline_discovery(nodes, num_layers)
-
-    def _build_start_index(self, nodes: List[Node]) -> Dict[int, List[Node]]:
-        """Build an index of nodes by their `start_layer` for fast lookups.
-
-        Only nodes with both `start_layer` and `end_layer` set are included.
-        """
-        index: Dict[int, List[Node]] = {}
-        for n in nodes:
-            if n.start_layer is None or n.end_layer is None:
-                continue
-            index.setdefault(n.start_layer, []).append(n)
-        return index
-
-    def _attempt_repair_pipeline(
-        self, candidate_ids: List[str], nodes: List[Node], num_layers: int
-    ) -> Optional[List[str]]:
-        """Best-effort repair of an overloaded pipeline by backtracking from the tail.
-
-        Starting from the end of the proposed pipeline, keep the longest viable
-        prefix (no missing/overloaded nodes) and search for an alternative suffix
-        that completes coverage to `num_layers`. The search explores all nodes that
-        start at the split layer and are not overloaded, performing DFS until a
-        complete chain is found or possibilities are exhausted.
-
-        Returns:
-            A repaired pipeline (list of node_ids) or None if not found.
-        """
-        id_to_node: Dict[str, Node] = {n.node_id: n for n in nodes}
-        start_to_nodes = self._build_start_index(nodes)
-
-        # Identify which positions in the original pipeline are viable
-        def is_viable_node_id(nid: str) -> bool:
-            node = id_to_node.get(nid)
-            return node is not None and not node.is_overloaded
-
-        # Try backtracking from the tail to earlier split points
-        for split_idx in range(len(candidate_ids) - 1, -1, -1):
-            # Check that prefix [0, split_idx) remains viable
-            prefix_ok = True
-            for i in range(split_idx):
-                if not is_viable_node_id(candidate_ids[i]):
-                    prefix_ok = False
-                    break
-            if not prefix_ok:
-                continue
-
-            # Determine split layer where we start reconstructing the suffix
-            if split_idx == 0:
-                split_layer = 0
-            else:
-                prev_node = id_to_node.get(candidate_ids[split_idx - 1])
-                if prev_node is None or prev_node.end_layer is None:
-                    continue
-                split_layer = int(prev_node.end_layer)
-
-            # Depth-first search to build a non-overloaded suffix covering [split_layer, L)
-            repaired_suffix: Optional[List[str]] = None
-
-            def dfs(layer: int, acc: List[str]) -> bool:
-                nonlocal repaired_suffix
-                if layer == num_layers:
-                    repaired_suffix = list(acc)
-                    return True
-                candidates = [
-                    n
-                    for n in start_to_nodes.get(layer, [])
-                    if n.end_layer is not None and n.end_layer > layer and not n.is_overloaded
-                ]
-                # Prefer shorter segments first for responsiveness
-                candidates.sort(key=lambda n: n.end_layer)  # type: ignore[arg-type]
-                for nxt in candidates:
-                    acc.append(nxt.node_id)
-                    if dfs(int(nxt.end_layer), acc):  # type: ignore[arg-type]
-                        return True
-                    acc.pop()
-                return False
-
-            if dfs(split_layer, []):
-                new_pipeline = candidate_ids[:split_idx] + (repaired_suffix or [])
-                # Sanity check: ensure coverage starts from 0 and ends at L
-                # (prefix guarantees contiguous coverage up to split_layer)
-                return new_pipeline if new_pipeline else None
-
-        return None
+            self._pipelines = {}
+            discovered = self.pipeline_discovery(nodes, num_layers)
+            id_to_node = {n.node_id: n for n in nodes}
+            for pid, node_ids in discovered.items():
+                pipeline_nodes = [id_to_node[nid] for nid in node_ids if nid in id_to_node]
+                self.register_pipeline(pid, pipeline_nodes)
 
     def mark_pipeline_broken(
         self, pipeline_id: str, node_id_to_node: Dict[str, Node]
@@ -558,29 +503,6 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
             attempts += 1
             if viable and total_latency != float("inf"):
                 return candidate_ids, total_latency
-            # Attempt a one-shot repair if the selected pipeline is not viable
-            if self.enable_repair:
-                repaired = self._attempt_repair_pipeline(candidate_ids, nodes, num_layers)
-                if repaired:
-                    # Compute latency for the repaired path
-                    total_latency = 0.0
-                    prev = None
-                    for nid in repaired:
-                        node = id_to_node.get(nid)
-                        # If any node is missing/overloaded, skip this repair
-                        if node is None or node.is_overloaded:
-                            total_latency = float("inf")
-                            break
-                        total_latency += float(node.layer_latency_ms)
-                        if prev is not None:
-                            total_latency += (
-                                0.0
-                                if prev.node_id == node.node_id
-                                else float(prev.get_rtt_to(node))
-                            )
-                        prev = node
-                    if total_latency != float("inf"):
-                        return repaired, total_latency
 
         return [], float("inf")
 
