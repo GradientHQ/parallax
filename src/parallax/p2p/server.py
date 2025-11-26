@@ -599,10 +599,13 @@ class GradientServer:
                                 end_layer = response.get("end_layer")
                                 model_name = response.get("model_name")
                                 if start_layer is not None and end_layer is not None:
+                                    # TODO: uncomment this, just for testing
+                                    """
                                     logger.debug(
                                         f"Heartbeat: Node {self.lattica.peer_id()}... "
                                         f"Model: {model_name}, Layers: [{start_layer}, {end_layer})"
                                     )
+                                    """
                                     # Check if layer allocation changed
                                     if (
                                         start_layer != self.block_start_index

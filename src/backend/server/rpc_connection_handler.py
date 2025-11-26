@@ -70,7 +70,8 @@ class RPCConnectionHandler(ConnectionHandler):
 
     @rpc_method
     def node_update(self, message):
-        logger.debug(f"receive node_update request: {message}")
+        # TODO: uncomment this, just for testing
+        # logger.debug(f"receive node_update request: {message}")
         try:
             node = self.build_node(message)
             self.scheduler.enqueue_node_update(

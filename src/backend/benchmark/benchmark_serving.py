@@ -30,6 +30,7 @@ import asyncio
 import base64
 import gc
 import io
+import itertools
 import json
 import os
 import random
@@ -483,6 +484,8 @@ async def benchmark(
     ignore_eos: bool,
     goodput_config_dict: Dict[str, float],
     max_concurrency: Optional[int],
+    time_serving: Optional[float] = None,
+    report_interval: float = 30.0,
 ):
     if backend in ASYNC_REQUEST_FUNCS:
         request_func = ASYNC_REQUEST_FUNCS[backend]
@@ -542,7 +545,10 @@ async def benchmark(
     print(f"Burstiness factor: {burstiness} ({distribution})")
     print(f"Maximum request concurrency: {max_concurrency}")
 
-    pbar = None if disable_tqdm else tqdm(total=len(input_requests))
+    if time_serving:
+        pbar = None if disable_tqdm else tqdm(unit="req")
+    else:
+        pbar = None if disable_tqdm else tqdm(total=len(input_requests))
 
     # This can be used once the minimum Python version is 3.10 or higher,
     # and it will simplify the code in limited_request_func.
@@ -550,15 +556,73 @@ async def benchmark(
     #                 if max_concurrency else contextlib.nullcontext())
     semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency else None
 
+    # Live metrics for time-based serving
+    live_metrics = {
+        "completed_requests": 0,
+        "generated_tokens": 0,
+        "last_report_time": time.perf_counter(),
+        "last_completed_requests": 0,
+        "last_generated_tokens": 0,
+    }
+
+    async def reporter_func():
+        while True:
+            await asyncio.sleep(report_interval)
+            now = time.perf_counter()
+            elapsed = now - live_metrics["last_report_time"]
+
+            current_completed = live_metrics["completed_requests"]
+            current_tokens = live_metrics["generated_tokens"]
+
+            new_reqs = current_completed - live_metrics["last_completed_requests"]
+            new_tokens = current_tokens - live_metrics["last_generated_tokens"]
+
+            req_per_sec = new_reqs / elapsed if elapsed > 0 else 0
+            tok_per_sec = new_tokens / elapsed if elapsed > 0 else 0
+
+            print(f"[Report] Throughput: {req_per_sec:.2f} req/s, " f"{tok_per_sec:.2f} tokens/s")
+
+            live_metrics["last_report_time"] = now
+            live_metrics["last_completed_requests"] = current_completed
+            live_metrics["last_generated_tokens"] = current_tokens
+
+    reporter_task = None
+    if time_serving:
+        reporter_task = asyncio.create_task(reporter_func())
+
     async def limited_request_func(request_func_input, pbar):
         if semaphore is None:
-            return await request_func(request_func_input=request_func_input, pbar=pbar)
-        async with semaphore:
-            return await request_func(request_func_input=request_func_input, pbar=pbar)
+            res = await request_func(request_func_input=request_func_input, pbar=pbar)
+        else:
+            async with semaphore:
+                res = await request_func(request_func_input=request_func_input, pbar=pbar)
+
+        if time_serving:
+            live_metrics["completed_requests"] += 1
+            if res.success:
+                # If output_tokens is 0 (e.g. backend didn't return usage),
+                # we use tokenizer to count.
+                out_tokens = res.output_tokens
+                if out_tokens == 0 and res.generated_text:
+                    out_tokens = len(
+                        tokenizer(res.generated_text, add_special_tokens=False).input_ids
+                    )
+                live_metrics["generated_tokens"] += out_tokens
+
+        return res
 
     benchmark_start_time = time.perf_counter()
     tasks: List[asyncio.Task] = []
-    async for request in get_request(input_requests, request_rate, burstiness):
+
+    if time_serving:
+        request_generator = get_request(itertools.cycle(input_requests), request_rate, burstiness)
+    else:
+        request_generator = get_request(input_requests, request_rate, burstiness)
+
+    async for request in request_generator:
+        if time_serving and (time.perf_counter() - benchmark_start_time) > time_serving:
+            break
+
         prompt, prompt_len, output_len, mm_content = request
         request_func_input = RequestFuncInput(
             model=model_id,
@@ -578,6 +642,13 @@ async def benchmark(
             )
         )
     outputs: List[RequestFuncOutput] = await asyncio.gather(*tasks)
+
+    if reporter_task:
+        reporter_task.cancel()
+        try:
+            await reporter_task
+        except asyncio.CancelledError:
+            pass
 
     if profile:
         print("Stopping profiler...")
@@ -864,6 +935,8 @@ def main(args: argparse.Namespace):
             ignore_eos=args.ignore_eos,
             goodput_config_dict=goodput_config_dict,
             max_concurrency=args.max_concurrency,
+            time_serving=args.time_serving,
+            report_interval=args.report_interval,
         )
     )
 
@@ -1197,6 +1270,21 @@ if __name__ == "__main__":
         help="The model name used in the API. "
         "If not specified, the model name will be the "
         "same as the ``--model`` argument. ",
+    )
+
+    parser.add_argument(
+        "--time-serving",
+        type=float,
+        default=None,
+        help="Duration in seconds to run the benchmark. "
+        "If specified, --num-prompts is ignored for termination "
+        "and requests are cycled.",
+    )
+    parser.add_argument(
+        "--report-interval",
+        type=float,
+        default=30.0,
+        help="Interval in seconds to report throughput metrics during " "time-based serving.",
     )
 
     args = parser.parse_args()

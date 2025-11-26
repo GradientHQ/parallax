@@ -544,7 +544,7 @@ class Scheduler:
                         if node_id in self._node_assigned_request_count:
                             n_hosted_requests = self._node_assigned_request_count[node_id]
                         logger.debug(
-                            "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d",
+                            "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d | active %s",
                             node_id,
                             start_layer,
                             end_layer,
@@ -552,6 +552,7 @@ class Scheduler:
                             capacity,
                             latency_str,
                             n_hosted_requests,
+                            node.is_active,
                         )
                 except Exception as exc:
                     logger.warning(f"Allocation logger error: {exc}")
