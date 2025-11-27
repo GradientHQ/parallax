@@ -297,7 +297,7 @@ class Executor:
             )
             try:
                 mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
-            except Exception as e:
+            except Exception:
                 logger.warning(f"Using mlx without metal backend.")
             logger.debug(
                 f"KVCacheManager ready; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}"

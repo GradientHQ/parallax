@@ -12,15 +12,11 @@ import pytest
 from mlx_lm.generate import generate
 from mlx_lm.utils import get_model_path, load_model
 
+from parallax.p2p.message_util import proto_to_request, request_to_proto
 from parallax.server.executor import Executor
 from parallax.server.request import InitialRequest
 from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.utils.utils import get_current_device
-
-from parallax.p2p.message_util import (
-    proto_to_request,
-    request_to_proto,
-)
 
 MLX_MODEL_REPO = "mlx-community/Qwen3-0.6B-bf16"
 CUDA_MODEL_REPO = "Qwen/Qwen3-0.6B"
@@ -64,7 +60,15 @@ def run_executor_pipeline_stage(executor, requests, batch_type, is_last_peer):
     return output_reqs, hidden_states
 
 
-@pytest.mark.parametrize("pipeline_devices", [("cuda", "cuda", "cuda"), ("cuda", "mlx", "cuda"), ("mlx", "cuda", "mlx"), ("mlx", "mlx", "mlx")])
+@pytest.mark.parametrize(
+    "pipeline_devices",
+    [
+        ("cuda", "cuda", "cuda"),
+        ("cuda", "mlx", "cuda"),
+        ("mlx", "cuda", "mlx"),
+        ("mlx", "mlx", "mlx"),
+    ],
+)
 @pytest.mark.parametrize("pp_end_layers", [(10, 18, 28)])
 @pytest.mark.parametrize("num_decode_steps", [8])
 def test_decode_pipeline_multiple_steps(pipeline_devices, pp_end_layers, num_decode_steps):
@@ -102,15 +106,21 @@ def test_decode_pipeline_multiple_steps(pipeline_devices, pp_end_layers, num_dec
     ]
 
     # 3. Prefill
-    prefill_reqs_out1, _ = run_executor_pipeline_stage(executor_peer1, initial_requests, "prefill_batch", False)
+    prefill_reqs_out1, _ = run_executor_pipeline_stage(
+        executor_peer1, initial_requests, "prefill_batch", False
+    )
     prefill_proto_p1 = request_to_proto(prefill_reqs_out1, device=pipeline_devices[0])
 
     prefill_reqs_in2 = proto_to_request(prefill_proto_p1, device=pipeline_devices[1])
-    prefill_reqs_out2, _ = run_executor_pipeline_stage(executor_peer2, prefill_reqs_in2, "prefill_batch", False)
+    prefill_reqs_out2, _ = run_executor_pipeline_stage(
+        executor_peer2, prefill_reqs_in2, "prefill_batch", False
+    )
     prefill_proto_p2 = request_to_proto(prefill_reqs_out2, device=pipeline_devices[1])
 
     prefill_reqs_in3 = proto_to_request(prefill_proto_p2, device=pipeline_devices[2])
-    prefill_reqs_out3, gen_tokens = run_executor_pipeline_stage(executor_peer3, prefill_reqs_in3, "prefill_batch", True)
+    prefill_reqs_out3, gen_tokens = run_executor_pipeline_stage(
+        executor_peer3, prefill_reqs_in3, "prefill_batch", True
+    )
     prefill_proto_p3 = request_to_proto(prefill_reqs_out3, device=pipeline_devices[2])
 
     generated_tokens_pipeline = [gen_tokens]
@@ -120,15 +130,21 @@ def test_decode_pipeline_multiple_steps(pipeline_devices, pp_end_layers, num_dec
     # 4. Decode
     for _ in range(num_decode_steps):
         decode_reqs_in1 = proto_to_request(first_rank_proto, device=pipeline_devices[0])
-        decode_reqs_out1, _ = run_executor_pipeline_stage(executor_peer1, decode_reqs_in1, "decode_batch", False)
+        decode_reqs_out1, _ = run_executor_pipeline_stage(
+            executor_peer1, decode_reqs_in1, "decode_batch", False
+        )
         decode_proto_p1 = request_to_proto(decode_reqs_out1, device=pipeline_devices[0])
 
         decode_reqs_in2 = proto_to_request(decode_proto_p1, device=pipeline_devices[1])
-        decode_reqs_out2, _ = run_executor_pipeline_stage(executor_peer2, decode_reqs_in2, "decode_batch", False)
+        decode_reqs_out2, _ = run_executor_pipeline_stage(
+            executor_peer2, decode_reqs_in2, "decode_batch", False
+        )
         decode_proto_p2 = request_to_proto(decode_reqs_out2, device=pipeline_devices[1])
 
         decode_reqs_in3 = proto_to_request(decode_proto_p2, device=pipeline_devices[2])
-        decode_reqs_out3, next_gen_tokens = run_executor_pipeline_stage(executor_peer3, decode_reqs_in3, "decode_batch", True)
+        decode_reqs_out3, next_gen_tokens = run_executor_pipeline_stage(
+            executor_peer3, decode_reqs_in3, "decode_batch", True
+        )
         decode_proto_p3 = request_to_proto(decode_reqs_out3, device=pipeline_devices[2])
 
         first_rank_proto = decode_proto_p3
