@@ -19,7 +19,6 @@ from scheduling.model_info import ModelInfo
 from scheduling.node import Node, RequestSignal
 from scheduling.request_routing import (
     DynamicProgrammingRouting,
-    RandomPipelineRouting,
     RoundRobinPipelineRouting,
 )
 
@@ -85,8 +84,6 @@ class Scheduler:
 
         if routing_strategy == "dp":
             self.request_router = DynamicProgrammingRouting()
-        elif routing_strategy == "random":
-            self.request_router = RandomPipelineRouting()
         else:
             self.request_router = RoundRobinPipelineRouting()
         self.request_warm_up_for_reshard = request_warm_up_for_reshard
@@ -341,11 +338,71 @@ class Scheduler:
         elif not bootstrap:
             # Automatic layer assignment (only after bootstrap)
             self.layer_allocator.join(node)
+            self._try_register_new_pipeline(node)
         # If bootstrap=True and not manual, node is only declared (allocation deferred to bootstrap())
 
         # Notify waiters that node count changed
         with self._node_count_cv:
             self._node_count_cv.notify_all()
+
+    def _try_register_new_pipeline(self, tail_node: Node) -> None:
+        """Try to register a new pipeline if the tail node completes one."""
+        # Only applicable for RoundRobinPipelineRouting
+        if not isinstance(self.request_router, RoundRobinPipelineRouting):
+            return
+
+        # Only trigger if the node covers the last layer
+        if tail_node.end_layer != self.num_layers:
+            return
+
+        # Identify nodes already in pipelines
+        existing_pipelines = self.request_router.pipelines or {}
+        occupied_node_ids = set()
+        for node_ids in existing_pipelines.values():
+            occupied_node_ids.update(node_ids)
+
+        # If tail_node is already in a pipeline, skip
+        if tail_node.node_id in occupied_node_ids:
+            return
+
+        # Find candidate nodes (left-over nodes)
+        candidates = [
+            n
+            for n in self.nodes
+            if n.node_id not in occupied_node_ids
+            and n.start_layer is not None
+            and n.end_layer is not None
+        ]
+
+        # Build a map for fast lookup: end_layer -> list of nodes
+        candidates_by_end: Dict[int, List[Node]] = {}
+        for n in candidates:
+            candidates_by_end.setdefault(n.end_layer, []).append(n)
+
+        # Backwards search for a path from tail_node to layer 0
+        # Queue for BFS: (current_node, path_list)
+        queue: Deque[Tuple[Node, List[Node]]] = deque([(tail_node, [tail_node])])
+
+        while queue:
+            curr, path = queue.popleft()
+
+            if curr.start_layer == 0:
+                # Found a full pipeline!
+                # Correct order is reversed path (since we built it backwards)
+                pipeline_nodes = list(reversed(path))
+                new_pid = self.request_router.register_pipeline(None, pipeline_nodes)
+                logger.info(
+                    f"Dynamic join of {tail_node.node_id} completed a new pipeline {new_pid} with nodes {[n.node_id for n in pipeline_nodes]}"
+                )
+                return
+
+            # Find predecessors: nodes ending at curr.start_layer
+            if curr.start_layer is not None:
+                preds = candidates_by_end.get(curr.start_layer, [])
+                for p in preds:
+                    # Avoid cycles
+                    if p not in path:
+                        queue.append((p, path + [p]))
 
     def leave(self, node_id: str) -> None:
         """Remove a node from allocation and refresh plan and materialized nodes.

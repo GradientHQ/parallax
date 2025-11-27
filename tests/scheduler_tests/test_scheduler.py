@@ -239,3 +239,92 @@ def test_scheduler_three_nodes_sequential_join_leave_rejoin():
     # Verify full pipeline coverage
     total_covered = sum(e - s for _, s, e in allocations)
     assert total_covered >= model.num_layers, "All layers should be covered"
+
+
+def test_scheduler_dynamic_join_creates_new_pipeline():
+    """Test that a dynamic join triggering a full pipeline completion registers it."""
+    # 36 layers model
+    model = build_model_info(36)
+
+    # We need nodes with specific capacities to cover 9 layers each.
+    # Using manual_layer_assignment for the first 7 nodes.
+    # Using automatic assignment for the 8th node.
+    # Adjust memory to force 4 nodes per pipeline (capacity ~10 layers)
+    # If 200GB -> 33 layers, then per layer ~6GB. 65GB should give ~10 layers.
+    mem_gb = 65.0
+
+    # Initialize empty scheduler with RoundRobin routing
+    sched = Scheduler(
+        model, [], strategy="greedy", routing_strategy="rr", min_nodes_bootstrapping=1
+    )
+
+    # 1. Setup Pipeline 1 manually (Nodes 0-3)
+    pipe1_nodes = []
+    for i in range(4):
+        n = build_node(f"p1-node-{i}", model, mem_gb=mem_gb)
+        pipe1_nodes.append(n)
+        sched.enqueue_join(n)
+    sched._process_joins()
+
+    # Set RTTs so RoundRobin router accepts the pipeline
+    set_rtt_from_coords(sched.nodes)
+
+    # Ensure scheduler is bootstrapped and Pipeline 1 is registered
+    assert sched._bootstrapped
+    # Force pipeline discovery
+    sched.request_router._ensure_pipelines(sched.nodes, model.num_layers)
+    pipelines = sched.request_router.pipelines
+    assert pipelines is not None
+    assert len(pipelines) == 1, f"Should have 1 pipeline, found {len(pipelines)}"
+
+    # 2. Setup Pipeline 2 prefix manually (Nodes 4-6)
+    # These cover 0-27. They are 'left-over' as they don't complete a pipeline.
+    pipe2_nodes = []
+    for i in range(3):
+        n = build_node(f"p2-node-{i}", model, mem_gb=mem_gb)
+        pipe2_nodes.append(n)
+        sched.join(n)
+
+    # Update RTTs for new nodes
+    set_rtt_from_coords(sched.nodes)
+
+    # Verify we still only have 1 pipeline registered
+    sched.request_router._ensure_pipelines(sched.nodes, model.num_layers)  # Force refresh
+    assert len(sched.request_router.pipelines) == 1
+
+    # 3. Dynamic join of the final node (Node 7)
+    # Automatic assignment!
+    last_node = build_node("p2-node-3", model, mem_gb=mem_gb)
+    # Ensure capacity > 9
+    assert last_node.get_decoder_layer_capacity() >= 9
+
+    # Pre-set RTTs (joining node needs to talk to others)
+    # We pass all existing nodes + new one to the helper
+    set_rtt_from_coords(sched.nodes + [last_node])
+
+    # Join!
+    sched.join(last_node)
+
+    # 4. Verification
+    # With capacity 10, previous 3 nodes cover 0-30 (10 each).
+    # So this node starts at 30.
+    assert last_node.start_layer == 30
+    assert last_node.end_layer == 36
+
+    # And importantly, a new pipeline should be registered in the router
+    pipelines = sched.request_router.pipelines
+    assert len(pipelines) == 2, f"Should have 2 pipelines, found {len(pipelines)}"
+
+    # Verify the second pipeline contains our new node
+    found_new_node = False
+    for pid, node_ids in pipelines.items():
+        if last_node.node_id in node_ids:
+            found_new_node = True
+            # Check completeness of this pipeline
+            assert len(node_ids) == 4
+            expected_ids = [n.node_id for n in pipe2_nodes] + [last_node.node_id]
+            # Order might vary but let's check set equality or specific order
+            # Router sorts by start_layer, so order should match
+            assert node_ids == expected_ids
+            break
+    assert found_new_node, "New pipeline should include the joined node"
