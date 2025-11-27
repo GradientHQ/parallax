@@ -32,7 +32,7 @@ dependencies = [
   "pydantic",
   "protobuf==6.31.1",
   "dijkstar==2.6.0",
-  "lattica==1.0.13",
+  "lattica==1.0.14",
   "orjson",
 ]
 
