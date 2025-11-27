@@ -40,9 +40,10 @@ def _update_args_from_shared_state(args, shared_state: SharedState):
     model_info = shared_state.get_model_info()
     args.start_layer = model_info["block_start_index"]
     args.end_layer = model_info["block_end_index"]
-    # Update model_path if provided and not already set
-    if model_info["model_name"] and args.model_path is None:
+    # Update model_path if provided (always update to support model switching)
+    if model_info["model_name"]:
         args.model_path = model_info["model_name"]
+        logger.debug(f"Updated model_path to: {args.model_path}")
     # Update tp_size if provided, otherwise keep current value
     args.tp_size = model_info["tp_size"] or args.tp_size
 
