@@ -24,12 +24,13 @@ import { useRefCallback } from '../hooks';
 export default function PageSetup() {
   const [
     {
-      networkType,
-      initNodesNumber,
-      modelInfo,
+      config: { networkType, initNodesNumber, modelInfo },
       clusterInfo: { status: clusterStatus },
     },
-    { setNetworkType, setInitNodesNumber, init },
+    {
+      config: { setNetworkType, setInitNodesNumber },
+      init,
+    },
   ] = useCluster();
 
   const navigate = useNavigate();

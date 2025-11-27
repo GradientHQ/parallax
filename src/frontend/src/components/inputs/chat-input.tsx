@@ -14,7 +14,6 @@ import { DotPulse } from './dot-pulse';
 export const ChatInput: FC = () => {
   const [
     {
-      modelName,
       clusterInfo: { status: clusterStatus },
     },
   ] = useCluster();

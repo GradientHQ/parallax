@@ -50,6 +50,7 @@ export interface ClusterInfo {
   readonly id: string;
   readonly status: ClusterStatus;
   readonly modelName: string;
+  readonly modelInfo: ModelInfo | undefined;
   readonly nodeJoinCommand: Readonly<Record<string, string>>;
   readonly initNodesNumber: number;
   readonly needMoreNodes: boolean;
@@ -59,6 +60,7 @@ const INITIAL_CLUSTER_INFO: ClusterInfo = {
   id: '',
   status: 'idle',
   modelName: '',
+  modelInfo: undefined,
   nodeJoinCommand: {},
   initNodesNumber: 4,
   needMoreNodes: false,
@@ -74,26 +76,34 @@ export interface NodeInfo {
   readonly gpuMemory: number;
 }
 
-// Interface
+// Configs
 
 export type NetworkType = 'local' | 'remote';
 
-export interface ClusterStates {
+export interface ClusterConfig {
   readonly networkType: NetworkType;
   readonly initNodesNumber: number;
   readonly modelName: string;
   readonly modelInfo: ModelInfo | undefined;
   readonly modelInfoList: readonly ModelInfo[];
+}
 
+export interface ClusterConfigSetters {
+  readonly setNetworkType: Dispatch<SetStateAction<NetworkType>>;
+  readonly setInitNodesNumber: Dispatch<SetStateAction<number>>;
+  readonly setModelName: Dispatch<SetStateAction<string>>;
+}
+
+// Interface
+
+export interface ClusterStates {
+  readonly config: ClusterConfig;
   readonly clusterInfo: ClusterInfo;
   readonly nodeInfoList: readonly NodeInfo[];
 }
 
 export interface ClusterActions {
-  readonly setNetworkType: Dispatch<SetStateAction<NetworkType>>;
-  readonly setInitNodesNumber: Dispatch<SetStateAction<number>>;
-  readonly setModelName: Dispatch<SetStateAction<string>>;
-
+  readonly config: ClusterConfigSetters;
   readonly init: () => Promise<void>;
 }
 
@@ -106,7 +116,7 @@ const { Provider } = context;
 export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
   const [{ type: hostType }] = useHost();
 
-  // Init Parameters
+  // Configs
   const [networkType, setNetworkType] = useState<NetworkType>('local');
   const [initNodesNumber, setInitNodesNumber] = useState(1);
   const [modelName, setModelName] = useState<string>('');
@@ -180,13 +190,13 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
             need_more_nodes,
           },
         } = message;
-        setModelName((prev) => model_name || prev);
         setClusterInfo((prev) => {
           const next = {
             ...prev,
             status: (model_name && status) || 'idle',
             initNodesNumber: init_nodes_num || 0,
             modelName: model_name || '',
+            modelInfo: modelInfoList.find((model) => model.name === model_name),
             nodeJoinCommand: node_join_command || {},
             needMoreNodes: need_more_nodes || false,
           };
@@ -243,6 +253,8 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
     streamClusterStatus.send();
   }, []);
 
+  // Init
+
   const init = useRefCallback(async () => {
     if (initNodesNumber < 1) {
       throw new Error('initNodesNumber must be greater than 0');
@@ -262,11 +274,15 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
     // }));
   });
 
+  // Forwards
+
   const actions: ClusterActions = useMemo(() => {
     return {
-      setNetworkType,
-      setInitNodesNumber,
-      setModelName,
+      config: {
+        setNetworkType,
+        setInitNodesNumber,
+        setModelName,
+      },
       init,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -275,11 +291,13 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
   const value = useMemo<readonly [ClusterStates, ClusterActions]>(
     () => [
       {
-        networkType,
-        initNodesNumber,
-        modelName,
-        modelInfo: modelInfoList.find((model) => model.name === modelName),
-        modelInfoList,
+        config: {
+          networkType,
+          initNodesNumber,
+          modelName,
+          modelInfo: modelInfoList.find((model) => model.name === modelName),
+          modelInfoList,
+        },
         clusterInfo,
         nodeInfoList,
       },

@@ -89,7 +89,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
 
   const [
     {
-      modelInfo,
+      config: { modelInfo },
       clusterInfo: { status: clusterStatus, needMoreNodes },
     },
   ] = useCluster();

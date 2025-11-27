@@ -104,11 +104,12 @@ export const ModelSelect: FC<ModelSelectProps> = ({ variant = 'outlined' }) => {
   const [{ type: hostType }] = useHost();
   const [
     {
-      modelName,
-      modelInfoList,
-      clusterInfo: { status: clusterStatus },
+      config: { modelName: configModelName, modelInfoList },
+      clusterInfo: { modelName: clusterModelName },
     },
-    { setModelName },
+    {
+      config: { setModelName },
+    },
   ] = useCluster();
 
   const [nodeDialog, { open: openDialog }] = useAlertDialog({
@@ -138,7 +139,7 @@ export const ModelSelect: FC<ModelSelectProps> = ({ variant = 'outlined' }) => {
         ownerState={{ variant }}
         readOnly={hostType === 'node'}
         input={variant === 'outlined' ? <OutlinedInput /> : <InputBase />}
-        value={modelName}
+        value={configModelName}
         onChange={onChange}
         renderValue={(value: unknown) => {
           const model = modelInfoList.find((m) => m.name === value);

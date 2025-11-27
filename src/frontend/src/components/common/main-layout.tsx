@@ -107,7 +107,12 @@ export const MainLayout: FC<PropsWithChildren<MainLayoutProps>> = ({
 };
 
 const DebugInfo: FC = () => {
-  const [{ initNodesNumber, networkType, modelName, clusterInfo }] = useCluster();
+  const [
+    {
+      config: { initNodesNumber, networkType, modelName },
+      clusterInfo,
+    },
+  ] = useCluster();
 
   const renderRecord = (title: string, record: Record<string, any>) => (
     <Stack gap={1}>
