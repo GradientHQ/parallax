@@ -85,9 +85,14 @@ def reshape_and_cache(
         # Decode Mode
         batch_size = key.shape[0]
         if key.ndim == 4:
-            # (batch, num_kv_heads, 1, head_dim) -> (batch, num_kv_heads, head_dim)
-            key = key.squeeze(2)
-            value = value.squeeze(2)
+            # (batch, 1, num_kv_heads, head_dim) -> (batch, num_kv_heads, head_dim)
+            if key.shape[1] == 1:
+                key = key.squeeze(1)
+                value = value.squeeze(1)
+            elif key.shape[2] == 1:
+                # Fallback for old layout (batch, num_kv_heads, 1, head_dim)
+                key = key.squeeze(2)
+                value = value.squeeze(2)
 
         num_kv_heads = key.shape[1]
         head_dim = key.shape[2]
@@ -110,14 +115,13 @@ def reshape_and_cache(
 
     else:
         # Prefill Mode
-        # Key/Value input shape: (batch, num_kv_heads, target_len, head_dim) = BHTD
+        # Key/Value input shape: (batch, target_len, num_kv_heads, head_dim) = BTHD
         # We need to flatten to: (total_tokens, num_kv_heads, head_dim)
         if key.ndim == 4:
-            # Input is (B, H, T, D), need to reshape to (B*T, H, D)
-            B, H, T, D = key.shape
-            # Transpose to (B, T, H, D), then reshape to (B*T, H, D)
-            key = key.transpose(0, 2, 1, 3).reshape(B * T, H, D)
-            value = value.transpose(0, 2, 1, 3).reshape(B * T, H, D)
+            # Input is (B, T, H, D) from optimized Qwen3
+            B, T, H, D = key.shape
+            key = key.reshape(B * T, H, D)
+            value = value.reshape(B * T, H, D)
 
         num_tokens = key.shape[0]
         num_kv_heads = key.shape[1]

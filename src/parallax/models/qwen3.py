@@ -58,9 +58,7 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
         keys_new = self.k_norm(keys_new.reshape(batch, target_len, self.n_kv_heads, -1)).transpose(
             0, 2, 1, 3
         )
-        values_new = values_new.reshape(batch, target_len, self.n_kv_heads, -1).transpose(
-            0, 2, 1, 3
-        )
+        values_new = values_new.reshape(batch, target_len, self.n_kv_heads, -1)
 
         key_cache_global, value_cache_global = cache
 
@@ -74,6 +72,8 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
             q_slice = queries_new[i : i + 1]
             k_slice = keys_new[i : i + 1]
             q_rot = self.rope(q_slice, offset=current_pos)
+            # RoPE expects (Batch, Heads, Time, Dim), but keys_new is (Batch, Time, Heads, Dim)
+            # So we transpose locally for RoPE, then transpose back.
             k_rot = self.rope(k_slice, offset=current_pos)
             queries_rotated_list.append(q_rot)
             keys_rotated_list.append(k_rot)
@@ -84,7 +84,7 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
         block_size = key_cache_global.shape[3]
 
         reshape_and_cache(
-            keys_rotated,
+            keys_rotated.transpose(0, 2, 1, 3),
             values_new,
             key_cache_global,
             value_cache_global,
@@ -115,7 +115,7 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
             output = scaled_dot_product_attention(
                 queries_rotated,
                 keys_rotated,
-                values_new,
+                values_new.transpose(0, 2, 1, 3),
                 scale=self.scale,
                 mask=mask,
                 cache=None,
