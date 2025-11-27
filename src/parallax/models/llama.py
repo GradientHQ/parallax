@@ -78,7 +78,7 @@ class ParallaxLlamaAttention(MLXLlamaAttention):
         block_size = key_cache_global.shape[3]
 
         reshape_and_cache(
-            keys_rotated,
+            keys_rotated.transpose(0, 2, 1, 3),
             values_new,
             key_cache_global,
             value_cache_global,

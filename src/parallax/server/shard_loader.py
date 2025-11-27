@@ -255,7 +255,16 @@ class MLXModelLoader:
 
                     # If the key is needed, load only that tensor from the file
                     if is_needed:
-                        shard_weights[remapped_key] = mx.array(f.get_tensor(key))
+                        # Load tensor
+                        tensor = f.get_tensor(key)
+                        weight_array = mx.array(tensor)
+
+                        # Only convert dtype for non-quantized weights
+                        # Quantized weights (uint32) and scales/biases should keep their original dtype
+                        if weight_array.dtype not in (mx.uint32, mx.int32):
+                            weight_array = weight_array.astype(dtype)
+
+                        shard_weights[remapped_key] = weight_array
 
         if (quantization := config.get("quantization", None)) is not None:
             logger.debug("Model is quantized. Applying quantization parameters...")
