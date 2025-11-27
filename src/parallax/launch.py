@@ -19,12 +19,13 @@ python src/parallax/launch.py \
 import argparse
 import multiprocessing
 import os
+import signal
 import tempfile
 import time
 
-from parallax.p2p.server import ServerState, launch_p2p_server_process, stop_p2p_server
-from parallax.server.executor import run_executor_process, stop_executor_process
-from parallax.server.http_server import launch_http_server, stop_http_server
+from parallax.p2p.server import ServerState, launch_p2p_server_process
+from parallax.server.executor import run_executor_process 
+from parallax.server.http_server import launch_http_server
 from parallax.server.server_args import parse_args
 from parallax.utils.shared_state import SharedState
 from parallax.utils.utils import fetch_model_from_hf, initialize_nccl_port
@@ -270,17 +271,26 @@ if __name__ == "__main__":
         # Shutdown all processes
         logger.debug("Shutting down all processes...")
 
+        all_processes = executor_subprocs + [http_server_process, p2p_server_process]
+        all_processes = [process for process in all_processes if process is not None]
+
         # Shutdown executor subprocesses
-        for executor_process in executor_subprocs:
-            if executor_process.is_alive():
-                stop_executor_process(executor_process)
-
-        # Shutdown P2P server subprocess
-        if p2p_server_process is not None:
-            stop_p2p_server(p2p_server_process)
-
-        # Shutdown http server
-        if http_server_process is not None:
-            stop_http_server(http_server_process)
-
-        logger.debug("All processes shut down.")
+        # for process in all_processes:
+        #     if process.is_alive():
+        #         logger.debug(f"Terminating {process} subprocess...")
+        #         try:
+        #             os.kill(process.pid, signal.SIGINT)
+        #         except Exception as e:
+        #             logger.error(f"Failed to terminate {process} subprocess: {e}")
+            
+        # time.sleep(5)
+        # for process in all_processes:
+        #     if process.is_alive():
+        #         logger.debug(f"killing {process} subprocess...")
+        #         try:
+        #             os.kill(process.pid, signal.SIGKILL)
+        #             process.join()
+        #         except Exception as e:
+        #             logger.error(f"Failed to kill {process} subprocess: {e}")
+            
+        # logger.debug("All processes killed.")

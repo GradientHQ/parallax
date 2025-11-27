@@ -1562,11 +1562,10 @@ class Executor:
 
     def shutdown(self):
         """Shuts down the executor."""
+        if self._should_stop:
+            return
         logger.debug("Executor shutting down...")
         self._should_stop = True
-        import time
-
-        time.sleep(0.1)  # Give run_loop a moment to exit gracefully
 
         try:
             all_requests = [req for _, _, _, req in self.scheduler._request_queue] + list(
@@ -1607,16 +1606,6 @@ def run_executor_process(args, shared_state=None):
     finally:
         if executor is not None:
             executor.shutdown()
-
-
-def stop_executor_process(executor_process):
-    """Kill a subprocess"""
-    logger.debug("Terminating executor subprocess...")
-    try:
-        executor_process.kill()
-        executor_process.join()
-    except Exception as e:
-        logger.error(f"Failed to terminate executor subprocess: {e}")
 
 
 def create_executor_config(args: argparse.Namespace, shared_state=None):

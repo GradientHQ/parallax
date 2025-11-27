@@ -670,6 +670,7 @@ class GradientServer:
     def _get_status(self) -> str:
         """Get current status, checking shared_state if available (subprocess mode)"""
         # When running in subprocess mode, check shared_state status
+        try
         if hasattr(self, "_shared_state") and self._shared_state is not None:
             shared_status = self._shared_state.get_status()
             if shared_status is not None:
@@ -754,11 +755,9 @@ class GradientServer:
         self.stop_event.set()
 
         self.status = ServerState.OFFLINE
-        # Sync final status to shared state
-        self._sync_to_shared_state()
         if self.scheduler_addr is not None:
             logger.info(f"Leave scheduler: {self.lattica.peer_id()}")
-            self.scheduler_stub.node_leave(self.get_node_info(is_update=True))
+            self.scheduler_stub.node_leave(self.get_node_info())
 
         if self.announcer is not None:
             self.announcer.join()
@@ -904,18 +903,3 @@ def launch_p2p_server_process(
     )
     process.start()
     return process
-
-
-def stop_p2p_server(p2p_server_process: Optional[multiprocessing.Process]):
-    """Stop P2P server subprocess"""
-    if p2p_server_process is not None and p2p_server_process.is_alive():
-        logger.debug("Terminating P2P server subprocess...")
-        try:
-            p2p_server_process.terminate()
-            p2p_server_process.join(timeout=5)
-            if p2p_server_process.is_alive():
-                logger.warning("P2P server process did not terminate gracefully, killing...")
-                p2p_server_process.kill()
-                p2p_server_process.join()
-        except Exception as e:
-            logger.error(f"Failed to terminate P2P server subprocess: {e}")

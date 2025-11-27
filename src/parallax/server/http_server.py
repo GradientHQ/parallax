@@ -514,7 +514,25 @@ class ParallaxHttpServer:
 
     async def run_tasks(self):
         """Gather results of all asyncio tasks"""
-        await asyncio.gather(self.run_uvicorn(), app.state.http_handler.create_handle_loop())
+        # Create tasks for uvicorn server and request handler loop
+        server_task = asyncio.create_task(self.run_uvicorn())
+        handler_task = asyncio.create_task(app.state.http_handler.create_handle_loop())
+
+        # Wait for either task to complete.
+        # Uvicorn server will complete when it receives SIGINT/SIGTERM.
+        done, pending = await asyncio.wait(
+            [server_task, handler_task],
+            return_when=asyncio.FIRST_COMPLETED
+        )
+
+        # If the server task finished (graceful shutdown), cancel the handler loop
+        if handler_task in pending:
+            logger.info("Uvicorn server stopped, cancelling handle loop...")
+            handler_task.cancel()
+            try:
+                await handler_task
+            except asyncio.CancelledError:
+                pass
 
     def run(self):
         """
@@ -544,21 +562,6 @@ def launch_http_server(args):
     process = mp.Process(target=http_server.run)
     process.start()
     return process
-
-
-def stop_http_server(http_server_process):
-    """
-    Stop HTTP server process if it exists.
-    """
-    if http_server_process is not None:
-        logger.info("Stopping HTTP server process...")
-        try:
-            http_server_process.kill()
-            http_server_process.join()
-        except Exception as e:
-            logger.error(f"Failed to terminate HTTP server process: {e}")
-        return None
-    return http_server_process
 
 
 def restart_http_server(args, http_server_process):
