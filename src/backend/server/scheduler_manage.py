@@ -156,9 +156,7 @@ class SchedulerManage:
         # Stop existing scheduler if running
         if self.scheduler is not None:
             logger.info("Scheduler already running, stopping it first for re-initialization")
-            self.scheduler._stop_event.set()
-            time.sleep(0.1)
-            self.scheduler = None
+            self.stop()
 
         self.model_name = model_name
         self.init_nodes_num = init_nodes_num
