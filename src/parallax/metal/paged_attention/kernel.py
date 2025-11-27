@@ -64,7 +64,7 @@ def reshape_and_cache(
     context_lengths: mx.array,  # (batch,)
     block_size: int,
     layer_idx: int,
-    slot_mapping: Optional[mx.array] = None,  # (batch,) or (batch * total_tokens,)
+    slot_mapping: Optional[mx.array] = None,  # (batch,) or (batch * target_len,)
 ):
     """
     Writes new keys and values into the Paged KV Cache using a custom Metal kernel.
@@ -74,7 +74,7 @@ def reshape_and_cache(
     1. Decode (Single Token): slot_mapping is None. Calculated internally.
        Input shape: (batch, num_kv_heads, 1, head_dim)
     2. Prefill (Batch Tokens): slot_mapping is provided.
-       Input shape: (total_tokens, num_kv_heads, head_dim)
+       Input shape: (batch, target_len, num_kv_heads, head_dim)
     """
     dtype = key.dtype
     if key_cache.dtype != dtype:
