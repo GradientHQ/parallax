@@ -74,7 +74,7 @@ def reshape_and_cache(
     1. Decode (Single Token): slot_mapping is None. Calculated internally.
        Input shape: (batch, num_kv_heads, 1, head_dim)
     2. Prefill (Batch Tokens): slot_mapping is provided.
-       Input shape: (batch, target_len, num_kv_heads, head_dim)
+       Input shape: (batch, num_kv_heads, target_len, head_dim)
     """
     dtype = key.dtype
     if key_cache.dtype != dtype:
