@@ -1,4 +1,5 @@
-import type { FC, ReactNode } from 'react';
+import { useEffect, useState, type FC, type ReactNode } from 'react';
+import * as motion from 'motion/react-client';
 import {
   InputBase,
   MenuItem,
@@ -12,7 +13,7 @@ import {
 import { useCluster, useHost, type ModelInfo } from '../../services';
 import { useRefCallback } from '../../hooks';
 import { useAlertDialog } from '../mui';
-import { IconRestore } from '@tabler/icons-react';
+import { IconCheck, IconLoader, IconRestore } from '@tabler/icons-react';
 
 const ModelSelectRoot = styled(Select)<{ ownerState: ModelSelectProps }>(({
   theme,
@@ -62,6 +63,15 @@ const ValueRow = styled(Stack)(({ theme }) => ({
   pointerEvents: 'none',
 }));
 
+const ModelExtraStatus = styled(motion.div)(({ theme }) => ({
+  width: '1rem',
+  height: '1rem',
+  '& > .tabler-icon': {
+    width: '1rem',
+    height: '1rem',
+  },
+}));
+
 const ModelLogo = styled('img')(({ theme }) => ({
   width: '2.25rem',
   height: '2.25rem',
@@ -86,52 +96,81 @@ const ModelName = styled('span')(({ theme }) => ({
   color: theme.palette.text.secondary,
 }));
 
-const renderOption = (model: ModelInfo): ReactNode => (
-  <ModelSelectOption key={model.name} value={model.name}>
-    <ModelLogo src={model.logoUrl} />
+const renderOption = (
+  { name, displayName, logoUrl }: ModelInfo,
+  { selected, loading, disabled }: { selected?: boolean; loading?: boolean; disabled?: boolean },
+): ReactNode => (
+  <ModelSelectOption key={name} value={name}>
+    <ModelExtraStatus
+      {...(loading && {
+        animate: { rotate: 360 },
+        transition: {
+          repeat: Infinity,
+          ease: 'linear',
+          duration: 2,
+        },
+      })}
+    >
+      {(loading && <IconLoader />) || (selected && <IconCheck />)}
+    </ModelExtraStatus>
+    <ModelLogo src={logoUrl} />
     <Stack gap={0.25}>
-      <ModelDisplayName>{model.displayName}</ModelDisplayName>
-      <ModelName>{model.name}</ModelName>
+      <ModelDisplayName>{displayName}</ModelDisplayName>
+      <ModelName>{name}</ModelName>
     </Stack>
   </ModelSelectOption>
 );
 
 export interface ModelSelectProps {
   variant?: 'outlined' | 'text';
+  autoCommit?: boolean;
 }
 
-export const ModelSelect: FC<ModelSelectProps> = ({ variant = 'outlined' }) => {
+export const ModelSelect: FC<ModelSelectProps> = ({ variant = 'outlined', autoCommit = false }) => {
   const [{ type: hostType }] = useHost();
   const [
     {
       config: { modelName: configModelName, modelInfoList },
-      clusterInfo: { modelName: clusterModelName },
+      clusterInfo: { status: clusterStatus, modelName: clusterModelName },
     },
     {
       config: { setModelName },
+      init,
     },
   ] = useCluster();
 
-  const [nodeDialog, { open: openDialog }] = useAlertDialog({
-    titleIcon: <IconRestore />,
-    title: 'Switch model',
-    content: (
-      <Typography variant='body2' color='text.secondary'>
-        The current version of parallax only supports hosting one model at once. Switching the model
-        will terminate your existing chat service. You can restart the current scheduler in your
-        terminal. We will add node rebalancing and dynamic model allocation soon.
-      </Typography>
-    ),
-    confirmLabel: 'Continue',
-  });
+  // const [nodeDialog, { open: openDialog }] = useAlertDialog({
+  //   titleIcon: <IconRestore />,
+  //   title: 'Switch model',
+  //   content: (
+  //     <Typography variant='body2' color='text.secondary'>
+  //       The current version of parallax only supports hosting one model at once. Switching the model
+  //       will terminate your existing chat service. You can restart the current scheduler in your
+  //       terminal. We will add node rebalancing and dynamic model allocation soon.
+  //     </Typography>
+  //   ),
+  //   confirmLabel: 'Continue',
+  // });
 
   const onChange = useRefCallback((e) => {
-    if (clusterStatus !== 'idle') {
-      openDialog();
-      return;
-    }
+    // if (clusterStatus !== 'idle') {
+    //   openDialog();
+    //   return;
+    // }
     setModelName(String(e.target.value));
   });
+
+  const [canAutoCommit, setCanAutoCommit] = useState(false);
+  useEffect(() => {
+    if (autoCommit) {
+      setCanAutoCommit(autoCommit);
+    }
+  }, [autoCommit]);
+  useEffect(() => {
+    if (canAutoCommit && configModelName !== clusterModelName) {
+      init();
+    }
+  }, [canAutoCommit, configModelName]);
 
   return (
     <>
@@ -157,10 +196,18 @@ export const ModelSelect: FC<ModelSelectProps> = ({ variant = 'outlined' }) => {
         }}
         IconComponent={hostType === 'node' ? () => null : undefined}
       >
-        {modelInfoList.map((model) => renderOption(model))}
+        {modelInfoList.map((model) => {
+          const { name } = model;
+          const selected = name === configModelName || name === clusterModelName;
+          const loading =
+            clusterStatus !== 'idle'
+            && name === configModelName
+            && configModelName !== clusterModelName;
+          return renderOption(model, { selected, loading });
+        })}
       </ModelSelectRoot>
 
-      {nodeDialog}
+      {/* {nodeDialog} */}
     </>
   );
 };
