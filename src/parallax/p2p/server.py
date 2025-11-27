@@ -607,11 +607,13 @@ class GradientServer:
                                     if (
                                         start_layer != self.block_start_index
                                         or end_layer != self.block_end_index
+                                        or model_name != self.model_name
                                     ):
                                         logger.warning(
                                             f"Layer allocation changed! "
                                             f"Current: [{self.block_start_index}, {self.block_end_index}) -> "
-                                            f"New: [{start_layer}, {end_layer})"
+                                            f"New: [{start_layer}, {end_layer}) "
+                                            f"Model: {self.model_name} -> {model_name}"
                                         )
                                         # Update layer allocation
                                         self.block_start_index = start_layer
