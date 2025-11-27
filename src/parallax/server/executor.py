@@ -72,6 +72,8 @@ class Executor:
         start_layer: int,
         end_layer: int,
         dtype: str = "float16",
+        # Device override
+        device: Optional[str] = None,
         # Backend selection
         gpu_backend: str = "sglang",
         use_hfcache: bool = False,
@@ -118,7 +120,10 @@ class Executor:
         shared_state: Optional[dict] = None,
     ):
         # Backend
-        self.device = get_current_device()
+        if device is not None:
+            self.device = device
+        else:
+            self.device = get_current_device()
         self.use_hfcache = use_hfcache
         logger.debug(f"Executor initializing on device: {self.device}")
         self.backend_type = gpu_backend
@@ -269,7 +274,10 @@ class Executor:
                 block_size=kv_block_size,
                 cache_memory_fraction=kv_cache_memory_fraction,
             )
-            mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
+            try:
+                mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
+            except Exception:
+                logger.warning(f"Using mlx without metal backend.")
             logger.debug(
                 f"PagedKVCacheManager ready; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}"
             )

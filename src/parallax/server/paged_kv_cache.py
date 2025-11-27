@@ -103,13 +103,19 @@ class PagedKVCacheManager:
         self.context_lengths: Dict[str, int] = {}
 
     def _calculate_num_blocks(self, cache_memory_fraction: float, dtype: mx.Dtype) -> int:
-        """Calculate the number of GPU blocks based on memory fraction."""
+        """Calculate the number of GPU blocks based on memory fraction.
+
+        Note: cache_memory_fraction should already be adjusted for the number of executors
+        sharing the same device. This method directly uses the fraction to calculate available
+        memory, ensuring each executor gets its fair share even when model weights are already loaded.
+        """
         device_info = mx.metal.device_info()
         total_mem = device_info["max_recommended_working_set_size"]
 
-        current_used = mx.metal.get_active_memory()
-        target_memory = total_mem * cache_memory_fraction
-        available_for_kv = max(0, target_memory - current_used)
+        # Directly use the fraction of total memory, as it's already adjusted for
+        # the number of executors sharing the device. This ensures each executor gets
+        # its allocated share of memory for KV cache, even when model weights are loaded.
+        available_for_kv = total_mem * cache_memory_fraction
 
         dtype_size = 2 if dtype in [mx.float16, mx.bfloat16] else 4
         # 2x for Key and Value

@@ -4,15 +4,36 @@ on:
   pull_request:
     branches: [ main ]
 
-
 jobs:
   test:
-    runs-on: macos-15
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ['3.11']
+        include:
+          - os: ubuntu-latest
+            python-version: '3.11'
+            # Install gpu (sglang) and dev dependencies for Linux
+            extras: 'gpu, dev'
+          - os: macos-latest
+            python-version: '3.11'
+            # Install mac (mlx) and dev dependencies for macOS
+            extras: 'mac, dev'
 
     steps:
+    - name: Free Disk Space (Ubuntu)
+      if: runner.os == 'Linux'
+      uses: jlumbroso/free-disk-space@v1.3.1
+      with:
+        tool-cache: false
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: false
+
     - name: Checkout code
       uses: actions/checkout@v4
 
@@ -23,16 +44,18 @@ jobs:
         filters: |
           src:
             - 'src/**'
+            - 'tests/**'
+            - 'pyproject.toml'
 
     - name: Set up Python ${{ matrix.python-version }}
       if: steps.changes.outputs.src == 'true'
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
     - name: Cache pip dependencies
       if: steps.changes.outputs.src == 'true'
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
@@ -44,32 +67,65 @@ jobs:
       if: steps.changes.outputs.src == 'true'
       run: |
         python -m pip install --upgrade pip
-        pip install -e '.[mac, dev]'
+        # Install extras dependencies based on matrix variable
+        pip install -e ".[${{ matrix.extras }}]"
 
-    - name: Run tests
-      if: steps.changes.outputs.src == 'true'
-      run: pytest tests/ -v --cov=src/parallax --cov-report=xml
+    - name: Run Unit Tests (macOS only)
+      if: steps.changes.outputs.src == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: |
+        pytest tests/ -v --cov=src/parallax --cov-report=xml
 
     - name: Upload coverage to Codecov
-      if: steps.changes.outputs.src == 'true'
-      uses: codecov/codecov-action@v3
+      if: steps.changes.outputs.src == 'true' && runner.os == 'macOS'
+      uses: codecov/codecov-action@v4
       with:
         file: ./coverage.xml
         fail_ci_if_error: false
+        token: ${{ secrets.CODECOV_TOKEN }}
 
-    - name: Run E2E tests
-      if: steps.changes.outputs.src == 'true'
+    - name: Run E2E tests (macOS only)
+      if: steps.changes.outputs.src == 'true' && runner.os == 'macOS'
+      shell: bash
       run: |
+        # Start the server
         python src/parallax/launch.py \
-          --model-path Qwen/Qwen3-0.6B-MLX-bf16 \
+          --model-path Qwen/Qwen3-0.6B \
           --max-num-tokens-per-batch 16384 \
           --kv-block-size 1024 \
           --max-batch-size 128 \
           --start-layer 0 \
           --end-layer 28 &
         PID=$!
-        sleep 60
-        curl --location 'http://localhost:3000/v1/chat/completions' --header 'Content-Type: application/json' --data '{
+
+        echo "Waiting for server to start..."
+        # Poll to check if the port is ready (wait up to 60 seconds)
+        for i in {1..30}; do
+          # If curl succeeds (200) or returns 405 (Method Not Allowed), the port is open
+          if curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/v1/chat/completions | grep -qE "200|400|405"; then
+             echo "Server is up!"
+             break
+          fi
+
+          # Check if the process is still alive
+          if ! kill -0 $PID 2>/dev/null; then
+             echo "Server process died prematurely"
+             exit 1
+          fi
+
+          if [ $i -eq 30 ]; then
+             echo "Server failed to start within 60 seconds"
+             kill $PID 2>/dev/null
+             exit 1
+          fi
+          sleep 2
+        done
+
+        echo "Sending test request..."
+        # Capture the response
+        RESPONSE=$(curl --fail --silent --show-error --location 'http://localhost:3000/v1/chat/completions' \
+          --header 'Content-Type: application/json' \
+          --data '{
             "messages": [
               {
                 "role": "user",
@@ -82,6 +138,19 @@ jobs:
             "sampling_params": {
                 "top_k": 3
             }
-        }'
+        }')
+
+        echo "Response received:"
+        echo "$RESPONSE"
+
+        # Check if the response contains "Paris" (case-insensitive)
+        if echo "$RESPONSE" | grep -iq "Paris"; then
+            echo "Test passed: Response contains 'Paris'"
+        else
+            echo "Test failed: Response does not contain 'Paris'"
+            kill $PID 2>/dev/null || true
+            exit 1
+        fi
+
+        # Clean up process
         kill $PID 2>/dev/null || true
-        wait $PID 2>/dev/null || echo -e "\nE2E test completed after 60 seconds"
