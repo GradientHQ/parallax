@@ -106,6 +106,7 @@ class ParallaxDeepSeekV2Block(MLXDeepseekV2Block):
     def __init__(self, args: ModelArgs, layer_idx: int):
         super().__init__(args, layer_idx=layer_idx)
         self.self_attn = ParallaxDeepSeekV2Attention(args)
+        self.layer_idx = layer_idx
 
     def __call__(
         self,

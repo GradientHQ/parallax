@@ -127,6 +127,7 @@ class ParallaxQwen3MoeBlock(MLXQwen3MoeBlock):
     def __init__(self, args: ModelArgs, layer_idx: int):
         super().__init__(args, layer_idx)
         self.self_attn = ParallaxQwen3MoeAttention(args, layer_idx)
+        self.layer_idx = layer_idx
 
     def __call__(
         self,

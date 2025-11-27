@@ -103,19 +103,12 @@ class PagedKVCacheManager:
         self.context_lengths: Dict[str, int] = {}
 
     def _calculate_num_blocks(self, cache_memory_fraction: float, dtype: mx.Dtype) -> int:
-        """Calculate the number of GPU blocks based on memory fraction.
 
-        Note: cache_memory_fraction should already be adjusted for the number of executors
-        sharing the same device. This method directly uses the fraction to calculate available
-        memory, ensuring each executor gets its fair share even when model weights are already loaded.
-        """
         device_info = mx.metal.device_info()
         total_mem = device_info["max_recommended_working_set_size"]
-
-        # Directly use the fraction of total memory, as it's already adjusted for
-        # the number of executors sharing the device. This ensures each executor gets
-        # its allocated share of memory for KV cache, even when model weights are loaded.
-        available_for_kv = total_mem * cache_memory_fraction
+        current_mem = mx.metal.get_active_memory()
+        free_mem = total_mem - current_mem
+        available_for_kv = free_mem * cache_memory_fraction
 
         dtype_size = 2 if dtype in [mx.float16, mx.bfloat16] else 4
         # 2x for Key and Value
@@ -127,14 +120,19 @@ class PagedKVCacheManager:
 
         if num_gpu_blocks <= 0:
             logger.warning(
-                f"Not enough memory for KV cache. Available: {available_for_kv / 1024**3:.2f} GB. "
+                f"Not enough memory for KV cache. Total: {total_mem / 1024**3:.2f} GB, "
+                f"Used: {current_mem / 1024**3:.2f} GB, Free: {free_mem / 1024**3:.2f} GB. "
                 f"Defaulting to minimal 16 blocks."
             )
             num_gpu_blocks = 16
 
         logger.info(
             f"PagedKVCache: Calculated num_gpu_blocks={num_gpu_blocks} based on "
-            f"fraction={cache_memory_fraction}, available={available_for_kv/1024**3:.2f} GB"
+            f"fraction={cache_memory_fraction:.2f}, "
+            f"total_mem={total_mem/1024**3:.2f} GB, "
+            f"used_mem={current_mem/1024**3:.2f} GB, "
+            f"free_mem={free_mem/1024**3:.2f} GB, "
+            f"available_for_kv={free_mem/1024**3:.2f} GB"
         )
         return num_gpu_blocks
 
