@@ -263,11 +263,14 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
       throw new Error('modelName is required');
     }
 
-    await initScheduler({
+    const params: Parameters<typeof initScheduler>[0] = {
       model_name: modelName,
       init_nodes_num: initNodesNumber,
       is_local_network: networkType === 'local',
-    });
+    };
+
+    debugLog('initScheduler', params);
+    await initScheduler(params);
     // setClusterInfo((prev) => ({
     //   ...prev,
     //   status: 'waiting',
