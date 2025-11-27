@@ -36,9 +36,7 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
         Args:
             x: (batch, target_len, hidden_dim) - Input hidden states for the current query segment.
             mask: (batch, n_q_heads, target_len, source_len)
-            cache: Optional tuple (past_k, past_v).
-                   shape: (batch, n_kv_heads, S_past_padded, head_dim)
-                   OR if block_tables is set, this contains (key_cache, value_cache) global.
+            cache: contains (key_cache, value_cache) global.
             block_tables: (batch, max_blocks) - PagedKV block tables.
             context_lengths: (batch,) - PagedKV sequence lengths.
             layer_idx: Layer index for PagedKV access.
@@ -72,8 +70,6 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
             q_slice = queries_new[i : i + 1]
             k_slice = keys_new[i : i + 1]
             q_rot = self.rope(q_slice, offset=current_pos)
-            # RoPE expects (Batch, Heads, Time, Dim), but keys_new is (Batch, Time, Heads, Dim)
-            # So we transpose locally for RoPE, then transpose back.
             k_rot = self.rope(k_slice, offset=current_pos)
             queries_rotated_list.append(q_rot)
             keys_rotated_list.append(k_rot)

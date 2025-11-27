@@ -14,6 +14,8 @@ from mlx_lm.models.llama import Attention as MLXLlamaAttention
 from mlx_lm.models.llama import ModelArgs
 from mlx_lm.models.llama import TransformerBlock as MLXLlamaBlock
 
+from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
+
 
 class ParallaxLlamaAttention(MLXLlamaAttention):
     """Custom attention for Llama, with explicit KV cache returns.
@@ -27,63 +29,94 @@ class ParallaxLlamaAttention(MLXLlamaAttention):
         x: mx.array,
         mask: Optional[mx.array] = None,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
-        offset: int = 0,
-    ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
+        block_tables: Optional[mx.array] = None,
+        context_lengths: Optional[mx.array] = None,
+        slot_mapping: Optional[mx.array] = None,
+        layer_idx: int = 0,
+    ) -> mx.array:
         """
         Attention forward pass with explicit KV cache handling.
 
         Args:
             x: (batch, target_len, hidden_dim) - Input hidden states for the current query segment.
             mask: (batch, n_q_heads, target_len, source_len)
-            cache: Optional tuple (past_k, past_v).
-                   shape: (batch, n_kv_heads, S_past_padded, head_dim)
-            offset: source_len_padded (scalar, used for RoPE calculation).
+            cache: contains (key_cache, value_cache) global.
+            block_tables: (batch, max_blocks) - PagedKV block tables.
+            context_lengths: (batch,) - PagedKV sequence lengths.
+            layer_idx: Layer index for PagedKV access.
 
         Returns:
-            output_h: (batch, target_len, hidden_dim) - Output hidden states.
-            new_k: (batch, n_kv_heads, target_len, head_dim) - New keys for this segment.
-            new_v: (batch, n_kv_heads, target_len, head_dim) - New values for this segment.
+            output: (batch, target_len, hidden_dim) - Output hidden states.
         """
         batch, target_len, _ = x.shape
 
-        queries = self.q_proj(x)
-        keys = self.k_proj(x)
-        values = self.v_proj(x)
+        queries_new = self.q_proj(x)
+        keys_new = self.k_proj(x)
+        values_new = self.v_proj(x)
 
-        queries = queries.reshape(batch, target_len, self.n_heads, -1).transpose(0, 2, 1, 3)
-        keys = keys.reshape(batch, target_len, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
-        values = values.reshape(batch, target_len, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
+        queries_new = queries_new.reshape(batch, target_len, self.n_heads, -1).transpose(0, 2, 1, 3)
+        keys_new = keys_new.reshape(batch, target_len, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
+        values_new = values_new.reshape(batch, target_len, self.n_kv_heads, -1)
 
-        queries_rotated = self.rope(queries, offset=offset)
-        keys_rotated = self.rope(keys, offset=offset)
+        key_cache_global, value_cache_global = cache
 
-        if cache is not None:
-            past_k, past_v = cache
-            if past_k is not None and past_v is not None:
-                if past_k.shape[2] != offset:
-                    raise ValueError(
-                        f"ParallaxAttention: Expected past_k sequence length {past_k.shape[2]} "
-                        f"to match RoPE offset {offset} (S_past_padded)."
-                    )
-                final_keys_for_attn = mx.concatenate([past_k, keys_rotated], axis=2)
-                final_values_for_attn = mx.concatenate([past_v, values], axis=2)
-            else:
-                raise ValueError("cache was provided but one of k/v was None.")
-        else:
-            final_keys_for_attn = keys_rotated
-            final_values_for_attn = values
+        queries_rotated_list = []
+        keys_rotated_list = []
 
-        output = scaled_dot_product_attention(
-            queries_rotated,
-            final_keys_for_attn,
-            final_values_for_attn,
-            scale=self.scale,
-            mask=mask,
-            cache=None,
+        for i in range(batch):
+            current_pos = int(context_lengths[i]) - 1 if target_len == 1 else 0
+            q_slice = queries_new[i : i + 1]
+            k_slice = keys_new[i : i + 1]
+            q_rot = self.rope(q_slice, offset=current_pos)
+            k_rot = self.rope(k_slice, offset=current_pos)
+            queries_rotated_list.append(q_rot)
+            keys_rotated_list.append(k_rot)
+
+        queries_rotated = mx.concatenate(queries_rotated_list, axis=0)
+        keys_rotated = mx.concatenate(keys_rotated_list, axis=0)
+
+        block_size = key_cache_global.shape[3]
+
+        reshape_and_cache(
+            keys_rotated,
+            values_new,
+            key_cache_global,
+            value_cache_global,
+            block_tables,
+            context_lengths,
+            block_size,
+            layer_idx,
+            slot_mapping=slot_mapping,
         )
 
-        output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
-        return self.o_proj(output), (keys_rotated, values)
+        # 3. Compute Attention
+        if target_len == 1:
+            # Decode Phase: Use Paged Attention Kernel
+            output = paged_attention(
+                queries_rotated,
+                key_cache_global,
+                value_cache_global,
+                block_tables,
+                context_lengths,
+                block_size,
+                self.scale,
+                self.n_kv_heads,
+                layer_idx,
+            )
+            output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
+        else:
+            # Prefill Phase: Use Standard Self-Attention on local data
+            output = scaled_dot_product_attention(
+                queries_rotated,
+                keys_rotated,
+                values_new.transpose(0, 2, 1, 3),
+                scale=self.scale,
+                mask=mask,
+                cache=None,
+            )
+            output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
+
+        return self.o_proj(output)
 
 
 class ParallaxLlamaBlock(MLXLlamaBlock):
@@ -99,14 +132,23 @@ class ParallaxLlamaBlock(MLXLlamaBlock):
         x: mx.array,
         mask: Optional[mx.array] = None,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
-        offset: int = 0,
-        lengths: Optional[mx.array] = None,
+        block_tables: Optional[mx.array] = None,
+        context_lengths: Optional[mx.array] = None,
+        slot_mapping: Optional[mx.array] = None,
     ):
-        r, (k_cache, v_cache) = self.self_attn(self.input_layernorm(x), mask, cache, offset=offset)
+        r = self.self_attn(
+            self.input_layernorm(x),
+            mask,
+            cache,
+            block_tables=block_tables,
+            context_lengths=context_lengths,
+            slot_mapping=slot_mapping,
+            layer_idx=self.layer_idx,
+        )
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
-        return out, (k_cache, v_cache)
+        return out
 
     @classmethod
     def get_architecture(cls):
