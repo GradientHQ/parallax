@@ -23,7 +23,7 @@ import tempfile
 import time
 
 from parallax.p2p.server import ServerState, launch_p2p_server_process, stop_p2p_server
-from parallax.server.executor import run_executor_process, stop_executor_process
+from parallax.server.executor.factory import run_executor_process, stop_executor_process
 from parallax.server.http_server import launch_http_server, stop_http_server
 from parallax.server.server_args import parse_args
 from parallax.utils.shared_state import SharedState

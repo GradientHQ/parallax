@@ -13,7 +13,6 @@ from mlx_lm.generate import generate
 from mlx_lm.utils import get_model_path, load_model
 
 from parallax.p2p.message_util import proto_to_request, request_to_proto
-from parallax.server.executor import Executor
 from parallax.server.request import InitialRequest
 from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.utils.utils import get_current_device
@@ -30,29 +29,39 @@ def create_executor(start_layer, end_layer, device):
     """Create a pipeline sharded executor"""
     if device == "mlx":
         model_repo = MLX_MODEL_REPO
+        from parallax.server.executor.executor_mlx import MLXExecutor
+        executor = MLXExecutor(
+            model_repo=model_repo,
+            start_layer=start_layer,
+            end_layer=end_layer,
+            kv_cache_memory_fraction=0.3,
+            dtype="bfloat16",
+            device=device,
+        )
     else:
         model_repo = CUDA_MODEL_REPO
-    executor = Executor(
-        model_repo=model_repo,
-        start_layer=start_layer,
-        end_layer=end_layer,
-        kv_cache_memory_fraction=0.3,
-        dtype="bfloat16",
-        device=device,
-    )
+        from parallax.server.executor.executor_sglang import SGLExecutor
+        executor = SGLExecutor(
+            model_repo=model_repo,
+            start_layer=start_layer,
+            end_layer=end_layer,
+            kv_cache_memory_fraction=0.3,
+            dtype="bfloat16",
+            device=device,
+        )
     return executor
 
 
 def run_executor_pipeline_stage(executor, requests, batch_type, is_last_peer):
     """Run executor pipeline stage. Input and output should be requests"""
-    executor._handle_input_requests(requests)
+    executor.handle_input_requests(requests)
     executor.scheduler.admit_requests()
     input_batch = executor.scheduler.form_batch()
-    prepared_batch = executor._prepare_batch_inputs(input_batch)
+    prepared_batch = executor.prepare_batch_inputs(input_batch)
     assert prepared_batch is not None, "Failed to prepare batch inputs"
     batch_data = prepared_batch[batch_type]
     hidden_states = executor.process_batch(batch_data, return_decoded_tokens=is_last_peer)
-    output_reqs = executor._prepare_next_batch_requests(
+    output_reqs = executor.prepare_next_batch_requests(
         requests=batch_data["requests"],
         hidden_states=hidden_states,
         lengths=batch_data["lengths"],
