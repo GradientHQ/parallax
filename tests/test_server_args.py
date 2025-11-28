@@ -136,7 +136,6 @@ class TestCreateExecutorConfig:
             lora_eviction_policy="lru",
             lora_backend="triton",
             max_lora_chunk_size=128,
-            adapters=None,
         )
 
         config = create_executor_config(args)
