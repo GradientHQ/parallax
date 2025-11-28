@@ -1,34 +1,35 @@
 """
-MLX-LM backend implementation of high level executor 
+MLX-LM backend implementation of high level executor
 """
 
 import time
-import mlx.core as mx
-
 from typing import Any, Dict, List, Optional, Tuple
+
+import mlx.core as mx
 
 from parallax.server.executor.executor_base import Executor
 from parallax.server.kv_cache import KVCacheManager
-from parallax.server.shard_loader import MLXModelLoader
 from parallax.server.radix_cache import RadixCache
-from parallax_utils.logging_config import get_logger
-from parallax.server.sampling.sampler import SamplingBatchInfo
 from parallax.server.request import (
     InitialRequest,
     IntermediateRequest,
     Request,
     RequestStatus,
 )
+from parallax.server.sampling.sampler import SamplingBatchInfo
+from parallax.server.shard_loader import MLXModelLoader
 from parallax.utils.utils import (
     combine_padding_and_causal_masks,
     create_causal_mask,
+    get_device_dtype,
     get_infinite_value_by_dtype,
     pad_inputs,
     pad_prefix_caches,
 )
-from parallax.utils.utils import get_device_dtype
+from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
 
 class MLXExecutor(Executor):
     def __init__(
@@ -94,9 +95,9 @@ class MLXExecutor(Executor):
 
         # Calculate feature dimensions for kv cache
         num_key_value_heads = self.config.get("num_key_value_heads")
-        head_dim = self.config.get("head_dim") or self.config.get(
-            "hidden_size"
-        ) // self.config.get("num_attention_heads")
+        head_dim = self.config.get("head_dim") or self.config.get("hidden_size") // self.config.get(
+            "num_attention_heads"
+        )
         qk_nope_head_dim = self.config.get("qk_nope_head_dim", None)
         qk_rope_head_dim = self.config.get("qk_rope_head_dim", None)
         v_head_dim = self.config.get("v_head_dim", None)
@@ -112,9 +113,7 @@ class MLXExecutor(Executor):
             value_dim = linear_value_head_dim * linear_num_value_heads
         if key_dim is not None and value_dim is not None:
             conv_dim = key_dim * 2 + value_dim
-        self.using_state_cache = (
-            linear_conv_kernel_dim is not None and conv_dim is not None
-        )
+        self.using_state_cache = linear_conv_kernel_dim is not None and conv_dim is not None
 
         logger.debug(
             "Initializing KVCacheManager (mlx) with block_size=%d, layers=%d",
@@ -179,7 +178,6 @@ class MLXExecutor(Executor):
         logger.debug(
             f"KVCacheManager ready; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}"
         )
-
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
@@ -267,9 +265,7 @@ class MLXExecutor(Executor):
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
 
-    def process_batch(
-        self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True
-    ):
+    def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """Process a batch of requests in MLX."""
         # Run model and get updated cache
         if self.using_state_cache:
@@ -331,7 +327,7 @@ class MLXExecutor(Executor):
             f"Processed batch (device={self.device}, return_tokens={return_decoded_tokens})"
         )
         return hidden_states
-    
+
     def _release_request(self, rid: str):
         """Release per-request resources in MLX."""
         try:
@@ -349,7 +345,6 @@ class MLXExecutor(Executor):
         next_token_id = int(hidden_states[0])
         hidden_states = hidden_states.astype(mx.int32)
         return next_token_id, hidden_states
-        
 
     def _prepare_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """Prepares inputs for ShardedModel from a batch of prefill requests."""
@@ -447,9 +442,7 @@ class MLXExecutor(Executor):
         )
         return ret
 
-    def _prepare_decode_batch(
-        self, batched_requests: List[Request]
-    ) -> Optional[Dict[str, Any]]:
+    def _prepare_decode_batch(self, batched_requests: List[Request]) -> Optional[Dict[str, Any]]:
         """Prepares inputs for ShardedModel from a batch of decode requests."""
         batch_size = len(batched_requests)
         if batch_size == 0:

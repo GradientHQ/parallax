@@ -1,26 +1,31 @@
 """
-SGLang backend implementation of high level executor 
+SGLang backend implementation of high level executor
 """
 
-import torch
 from typing import Any, Dict, List, Optional, Tuple
 
+import torch
+from sglang.srt.managers.schedule_batch import ScheduleBatch
+from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
+from sglang.srt.utils import broadcast_pyobj
+
 from parallax.server.executor.executor_base import Executor
-from parallax_utils.logging_config import get_logger
-from parallax.sglang.batch_info import release_sglang_request
 from parallax.server.request import (
     InitialRequest,
     IntermediateRequest,
     Request,
     RequestStatus,
 )
-from parallax.sglang.batch_info import form_sgl_batch_decode, form_sgl_batch_prefill
-from sglang.srt.managers.schedule_batch import ScheduleBatch
+from parallax.sglang.batch_info import (
+    form_sgl_batch_decode,
+    form_sgl_batch_prefill,
+    release_sglang_request,
+)
 from parallax.sglang.model_runner import initialize_sgl_model_runner
-from sglang.srt.utils import broadcast_pyobj
-from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
+from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
 
 class SGLExecutor(Executor):
     def __init__(
@@ -204,13 +209,9 @@ class SGLExecutor(Executor):
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
 
-    def process_batch(
-        self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True
-    ):
+    def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """Process a batch of requests in SGLang."""
-        assert (
-            "forward_batch" in prepared_inputs
-        ), "forward_batch should be in cuda prepared inputs"
+        assert "forward_batch" in prepared_inputs, "forward_batch should be in cuda prepared inputs"
         assert (
             "pp_proxy_tensors" in prepared_inputs
         ), "pp_proxy_tensors should be in cuda prepared inputs"
@@ -322,9 +323,7 @@ class SGLExecutor(Executor):
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
-        schedule_batch, forward_batch = form_sgl_batch_prefill(
-            batched_requests, self.model_runner
-        )
+        schedule_batch, forward_batch = form_sgl_batch_prefill(batched_requests, self.model_runner)
         self.cur_batch = schedule_batch
 
         ret = {

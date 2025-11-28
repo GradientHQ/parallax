@@ -30,6 +30,7 @@ def create_executor(start_layer, end_layer, device):
     if device == "mlx":
         model_repo = MLX_MODEL_REPO
         from parallax.server.executor.executor_mlx import MLXExecutor
+
         executor = MLXExecutor(
             model_repo=model_repo,
             start_layer=start_layer,
@@ -41,6 +42,7 @@ def create_executor(start_layer, end_layer, device):
     else:
         model_repo = CUDA_MODEL_REPO
         from parallax.server.executor.executor_sglang import SGLExecutor
+
         executor = SGLExecutor(
             model_repo=model_repo,
             start_layer=start_layer,

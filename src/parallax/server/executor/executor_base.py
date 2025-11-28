@@ -17,13 +17,11 @@ Executor handles
 7. Get the hidden-states from the model execution.
 """
 
-from abc import abstractmethod
 import time
+from abc import abstractmethod
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple
 
-
-import torch
 import zmq
 from jinja2 import TemplateError
 from mlx_lm.server import convert_chat, process_message_content
@@ -36,8 +34,6 @@ from parallax.p2p.message_util import (
 )
 from parallax.p2p.proto import forward_pb2
 from parallax.p2p.server import ServerState
-
-
 from parallax.server.request import (
     InitialRequest,
     IntermediateRequest,
@@ -47,12 +43,8 @@ from parallax.server.request import (
 from parallax.server.sampling.sampling_params import SamplingParams
 from parallax.server.scheduler import Scheduler
 from parallax.utils.shared_state import SharedState
-from parallax.utils.utils import (
-    get_current_device,
-    get_device_dtype,
-    get_zmq_socket,
-)
-from parallax_utils.logging_config import get_logger, set_log_level
+from parallax.utils.utils import get_current_device, get_device_dtype, get_zmq_socket
+from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
@@ -188,12 +180,9 @@ class Executor:
     @abstractmethod
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
-        pass
 
     @abstractmethod
-    def process_batch(
-        self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True
-    ):
+    def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """
         Process a batch of requests.
 
@@ -205,17 +194,14 @@ class Executor:
             A tensor of shape (B, L, D) containing the hidden states for the next peer.
             or (B,) containing the decoded tokens.
         """
-        pass
 
     @abstractmethod
     def _prepare_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """Prepares inputs for ShardedModel from a batch of prefill requests."""
-        pass
 
     @abstractmethod
     def _prepare_decode_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """Prepares inputs for ShardedModel from a batch of decode requests."""
-        pass
 
     @abstractmethod
     def _gen_token_id_from_hidden(self, hidden_states) -> Tuple[int, Any]:
@@ -223,12 +209,10 @@ class Executor:
         Inplace modifies hidden_states.
         Returns token_id, hidden_states
         """
-        pass
 
     @abstractmethod
     def _release_request(self, rid: str):
         """Release request in backend frameworks"""
-        pass
 
     def recv_requests_from_http(self) -> List[Request]:
         """Receives requests from http frontend"""

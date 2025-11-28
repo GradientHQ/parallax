@@ -3,12 +3,13 @@ Creates executor from factory for different backends.
 """
 
 import argparse
-
 from typing import Optional
+
 from parallax.utils.utils import get_current_device
 from parallax_utils.logging_config import get_logger, set_log_level
 
 logger = get_logger(__name__)
+
 
 def create_executor_config(args: argparse.Namespace, shared_state=None):
     """Create executor configuration from command line arguments."""
@@ -51,6 +52,7 @@ def create_executor_config(args: argparse.Namespace, shared_state=None):
     }
     return config
 
+
 class ExecutorFactory:
     @staticmethod
     def create_from_args(
@@ -68,16 +70,20 @@ class ExecutorFactory:
         if device == "cuda":
             if args.gpu_backend == "sglang":
                 from parallax.server.executor.executor_sglang import SGLExecutor
+
                 executor = SGLExecutor(config, shared_state)
             elif args.gpu_backend == "vllm":
                 from parallax.server.executor.executor_vllm import VLLMExecutor
+
                 executor = VLLMExecutor(config, shared_state)
             else:
                 raise ValueError(f"Unsupported GPU backend type: {args.gpu_backend}")
         else:
             from parallax.server.executor.executor_mlx import MLXExecutor
+
             executor = MLXExecutor(config, shared_state)
         return executor
+
 
 def run_executor_process(args, shared_state=None):
     """Run executor as a subprocess"""
@@ -103,4 +109,3 @@ def stop_executor_process(executor_process):
         executor_process.join()
     except Exception as e:
         logger.error(f"Failed to terminate executor subprocess: {e}")
-

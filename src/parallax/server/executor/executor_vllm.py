@@ -1,29 +1,31 @@
 """
-vLLM backend implementation of high level executor 
+vLLM backend implementation of high level executor
 """
 
-import torch
 from typing import Any, Dict, List, Optional, Tuple
 
+import torch
+from vllm.sequence import IntermediateTensors
+
 from parallax.server.executor.executor_base import Executor
-from parallax_utils.logging_config import get_logger
 from parallax.server.request import (
     InitialRequest,
     IntermediateRequest,
     Request,
     RequestStatus,
 )
-from parallax.vllm.model_runner import initialize_vllm_model_runner
-from vllm.sequence import IntermediateTensors
 from parallax.vllm.batch_info import (
-    release_vllm_request,
-    form_vllm_batch_decode,
     compute_expected_intermediate_tokens,
+    form_vllm_batch_decode,
     form_vllm_batch_prefill,
+    release_vllm_request,
     resize_intermediate_tensors,
 )
+from parallax.vllm.model_runner import initialize_vllm_model_runner
+from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
 
 class VLLMExecutor(Executor):
     def __init__(
@@ -127,7 +129,7 @@ class VLLMExecutor(Executor):
             tp_size=tp_size,
             shared_state=shared_state,
         )
-    
+
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
         if not requests:
@@ -195,9 +197,7 @@ class VLLMExecutor(Executor):
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
 
-    def process_batch(
-        self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True
-    ):
+    def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """Process a batch of requests in vLLM."""
         assert (
             "scheduler_output" in prepared_inputs
@@ -245,7 +245,6 @@ class VLLMExecutor(Executor):
         except Exception:
             pass
 
-
     def _gen_token_id_from_hidden(self, hidden_states) -> Tuple[int, Any]:
         """
         Inplace modifies hidden_states.
@@ -257,7 +256,7 @@ class VLLMExecutor(Executor):
         ), "Single node must generate an output_id."
         next_token_id = int(hidden_states[0])
         return next_token_id, hidden_states
-    
+
     def _prepare_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """
         Prepares inputs for CUDA backends from a batch of prefill requests.
