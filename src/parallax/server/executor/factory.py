@@ -53,36 +53,34 @@ def create_executor_config(args: argparse.Namespace, shared_state=None):
     return config
 
 
-class ExecutorFactory:
-    @staticmethod
-    def create_from_args(
-        args,
-        shared_state: Optional[dict] = None,
-        device: Optional[str] = None,
-    ):
-        """
-        Creat executor for different backend.
-        Lazy import here since CUDA modules cannot be import withough hardware support.
-        """
-        config = create_executor_config(args, shared_state)
-        if device is None:
-            device = get_current_device()
-        if device == "cuda":
-            if args.gpu_backend == "sglang":
-                from parallax.server.executor.executor_sglang import SGLExecutor
+def create_from_args(
+    args,
+    shared_state: Optional[dict] = None,
+    device: Optional[str] = None,
+):
+    """
+    Creat executor for different backend.
+    Lazy import here since CUDA modules cannot be import withough hardware support.
+    """
+    config = create_executor_config(args, shared_state)
+    if device is None:
+        device = get_current_device()
+    if device == "cuda":
+        if args.gpu_backend == "sglang":
+            from parallax.server.executor.executor_sglang import SGLExecutor
 
-                executor = SGLExecutor(config, shared_state)
-            elif args.gpu_backend == "vllm":
-                from parallax.server.executor.executor_vllm import VLLMExecutor
+            executor = SGLExecutor(config, shared_state)
+        elif args.gpu_backend == "vllm":
+            from parallax.server.executor.executor_vllm import VLLMExecutor
 
-                executor = VLLMExecutor(config, shared_state)
-            else:
-                raise ValueError(f"Unsupported GPU backend type: {args.gpu_backend}")
+            executor = VLLMExecutor(config, shared_state)
         else:
-            from parallax.server.executor.executor_mlx import MLXExecutor
+            raise ValueError(f"Unsupported GPU backend type: {args.gpu_backend}")
+    else:
+        from parallax.server.executor.executor_mlx import MLXExecutor
 
-            executor = MLXExecutor(config, shared_state)
-        return executor
+        executor = MLXExecutor(config, shared_state)
+    return executor
 
 
 def run_executor_process(args, shared_state=None):
@@ -90,7 +88,7 @@ def run_executor_process(args, shared_state=None):
     set_log_level(args.log_level)
     executor = None
     try:
-        executor = ExecutorFactory.create_from_args(args, shared_state)
+        executor = create_from_args(args, shared_state)
         executor.run_loop()
     except KeyboardInterrupt:
         logger.debug("Executor received interrupt signal, shutting down...")
