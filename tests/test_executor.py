@@ -29,7 +29,7 @@ def create_executor(start_layer, end_layer, device):
     """Create a pipeline sharded executor"""
     if device == "mlx":
         model_repo = MLX_MODEL_REPO
-        from parallax.server.executor.executor_mlx import MLXExecutor
+        from parallax.server.executor.mlx_executor import MLXExecutor
 
         executor = MLXExecutor(
             model_repo=model_repo,
@@ -41,7 +41,7 @@ def create_executor(start_layer, end_layer, device):
         )
     else:
         model_repo = CUDA_MODEL_REPO
-        from parallax.server.executor.executor_sglang import SGLExecutor
+        from parallax.server.executor.sglang_executor import SGLExecutor
 
         executor = SGLExecutor(
             model_repo=model_repo,

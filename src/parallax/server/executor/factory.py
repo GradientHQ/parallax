@@ -66,19 +66,22 @@ def create_from_args(
         device = get_current_device()
     if device == "cuda":
         if args.gpu_backend == "sglang":
-            from parallax.server.executor.executor_sglang import SGLExecutor
+            from parallax.server.executor.sglang_executor import SGLExecutor
 
             executor = SGLExecutor(**config)
         elif args.gpu_backend == "vllm":
-            from parallax.server.executor.executor_vllm import VLLMExecutor
+            from parallax.server.executor.vllm_executor import VLLMExecutor
 
             executor = VLLMExecutor(**config)
         else:
             raise ValueError(f"Unsupported GPU backend type: {args.gpu_backend}")
-    else:
-        from parallax.server.executor.executor_mlx import MLXExecutor
+    elif device == "mlx":
+        from parallax.server.executor.mlx_executor import MLXExecutor
+
         print(*config)
         executor = MLXExecutor(**config)
+    else:
+        raise ValueError(f"Unsupported backend type: {device}")
     return executor
 
 

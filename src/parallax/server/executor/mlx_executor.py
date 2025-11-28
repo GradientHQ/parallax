@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import mlx.core as mx
 
-from parallax.server.executor.executor_base import Executor
+from parallax.server.executor.base_executor import BaseExecutor
 from parallax.server.kv_cache import KVCacheManager
 from parallax.server.radix_cache import RadixCache
 from parallax.server.request import (
@@ -31,7 +31,7 @@ from parallax_utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-class MLXExecutor(Executor):
+class MLXExecutor(BaseExecutor):
     def __init__(
         self,
         # Model Configs

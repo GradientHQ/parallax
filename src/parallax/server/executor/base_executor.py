@@ -49,7 +49,7 @@ from parallax_utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-class Executor:
+class BaseExecutor:
     """High-level executor for managing model shards, scheduler, and cache pool on each Peer."""
 
     def __init__(

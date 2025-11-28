@@ -1,33 +1,33 @@
 """
-SGLang backend implementation of high level executor
+vLLM backend implementation of high level executor
 """
 
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
-from sglang.srt.managers.schedule_batch import ScheduleBatch
-from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
-from sglang.srt.utils import broadcast_pyobj
+from vllm.sequence import IntermediateTensors
 
-from parallax.server.executor.executor_base import Executor
+from parallax.server.executor.base_executor import BaseExecutor
 from parallax.server.request import (
     InitialRequest,
     IntermediateRequest,
     Request,
     RequestStatus,
 )
-from parallax.sglang.batch_info import (
-    form_sgl_batch_decode,
-    form_sgl_batch_prefill,
-    release_sglang_request,
+from parallax.vllm.batch_info import (
+    compute_expected_intermediate_tokens,
+    form_vllm_batch_decode,
+    form_vllm_batch_prefill,
+    release_vllm_request,
+    resize_intermediate_tensors,
 )
-from parallax.sglang.model_runner import initialize_sgl_model_runner
+from parallax.vllm.model_runner import initialize_vllm_model_runner
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
-class SGLExecutor(Executor):
+class VLLMExecutor(BaseExecutor):
     def __init__(
         self,
         # Model Configs
@@ -105,13 +105,10 @@ class SGLExecutor(Executor):
             "max_lora_chunk_size": max_lora_chunk_size,
         }
         logger.debug(
-            f"Initializing SGLang model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
+            f"Initializing vLLM model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
         )
-        self.model_runner, self.config, self.tokenizer = initialize_sgl_model_runner(
+        self.model_runner, self.config, self.tokenizer = initialize_vllm_model_runner(
             **model_runner_params
-        )
-        logger.debug(
-            f"SGLang model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
         )
         super().__init__(
             start_layer=start_layer,
@@ -134,20 +131,11 @@ class SGLExecutor(Executor):
             tp_size=tp_size,
             shared_state=shared_state,
         )
-        self.cur_batch = None
-        self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
-        self.tp_group = self.model_runner.tp_group
-        self.tp_cpu_group = self.tp_group.cpu_group
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
-        if self.tp_rank == 0 and not requests:
+        if not requests:
             return
-        if self.tp_size > 1:
-            requests = self._tensor_parallel_broadcast_byobj(requests)
-        if len(requests) > 0:
-            logger.debug(f"Handling {len(requests)} requests.")
-
         if self.is_first_peer:
             # First peer can receive InitialRequests from the client RPC,
             # or IntermediateRequests from the last peer.
@@ -212,50 +200,50 @@ class SGLExecutor(Executor):
                     self.scheduler.enque_request(req)
 
     def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
-        """Process a batch of requests in SGLang."""
-        assert "forward_batch" in prepared_inputs, "forward_batch should be in cuda prepared inputs"
+        """Process a batch of requests in vLLM."""
+        assert (
+            "scheduler_output" in prepared_inputs
+        ), "scheduler_output should be provided for vLLM backend"
         assert (
             "pp_proxy_tensors" in prepared_inputs
         ), "pp_proxy_tensors should be in cuda prepared inputs"
-
-        forward_batch = prepared_inputs["forward_batch"]
+        scheduler_output = prepared_inputs["scheduler_output"]
         pp_proxy_tensors = prepared_inputs["pp_proxy_tensors"]
+        # For vLLM, pp_proxy_tensors is already an IntermediateTensors object
+        intermediate_tensors = pp_proxy_tensors if pp_proxy_tensors is not None else None
+        if intermediate_tensors is not None:
+            logger.debug(f"vLLM: Using intermediate_tensors for PP (non-first peer)")
 
-        # Execute model with SGLang
-        logits_output, _ = self.model_runner.forward(
-            forward_batch=forward_batch,
-            pp_proxy_tensors=pp_proxy_tensors,
+        # Import IntermediateTensors for type checking
+
+        # Execute model with vLLM
+        output = self.model_runner.execute_model(
+            scheduler_output=scheduler_output,
+            intermediate_tensors=intermediate_tensors,
         )
-
-        # Merge prefill batch into running batch
-        if self.cur_batch:
-            if self.cur_batch.forward_mode.is_extend():
-                # Merge the new batch into the running batch
-                if not self.cur_batch.is_empty():
-                    if self.running_batch.is_empty():
-                        self.running_batch = self.cur_batch
-                    else:
-                        # Merge running_batch with prefill batch
-                        self.running_batch.merge_batch(self.cur_batch)
-            self.cur_batch = None
 
         # Return appropriate output based on peer position
         if return_decoded_tokens:
-            # Last peer: sample and return token IDs
-            next_token_ids = self.model_runner.sample(logits_output, forward_batch)
-            return next_token_ids
+            sampled_token_ids = output.sampled_token_ids
+            if isinstance(sampled_token_ids, list) and len(sampled_token_ids) > 0:
+                # Convert to tensor: pad sequences to same length
+                max_len = max(len(seq) for seq in sampled_token_ids)
+                padded_tokens = []
+                for seq in sampled_token_ids:
+                    padded_seq = seq + [-1] * (max_len - len(seq))  # Pad with -1
+                    padded_tokens.append(padded_seq)
+                return torch.tensor(padded_tokens, dtype=torch.int64)
+            else:
+                return torch.tensor(sampled_token_ids, dtype=torch.int64)
         else:
             # Intermediate peer: return hidden states for next peer
-            # Note: SGLang stores hidden_states + residual separately
-            final_hidden_states = (
-                logits_output.tensors["hidden_states"] + logits_output.tensors["residual"]
-            )
+            final_hidden_states = output.tensors["hidden_states"] + output.tensors["residual"]
             return final_hidden_states
 
     def _release_request(self, rid: str):
-        """Release per-request resources in SGLang."""
+        """Release per-request resources in vLLM."""
         try:
-            release_sglang_request(self.running_batch, rid)
+            release_vllm_request(self.model_runner, rid)
         except Exception:
             pass
 
@@ -271,47 +259,41 @@ class SGLExecutor(Executor):
         next_token_id = int(hidden_states[0])
         return next_token_id, hidden_states
 
-    def _tensor_parallel_broadcast_byobj(self, broadcast_obj):
-        """Wrapper for broadcast pyobject in TP group"""
-
-        broadcast_result = broadcast_pyobj(
-            broadcast_obj,
-            self.tp_group.rank,
-            self.tp_cpu_group,
-            src=self.tp_group.ranks[0],
-        )
-        return broadcast_result
-
     def _prepare_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """
         Prepares inputs for CUDA backends from a batch of prefill requests.
         """
-
         batch_size = len(batched_requests)
         if batch_size == 0:
             return None
 
-        # Prepare PP proxy tensors
+        # Prepare PP proxy tensors (common for both backends when not first peer)
         pp_proxy_tensors = None
         if not self.is_first_peer:
-            hidden_states = torch.cat(
-                [
-                    (
-                        req.hidden_states
-                        if req.hidden_states.ndim == 2
-                        else req.hidden_states.unsqueeze(0)
-                    )
-                    for req in batched_requests
-                ],
-                dim=0,
-            )
+            # Concatenate hidden states from all requests
+            # For vLLM, we need to flatten to (total_tokens, hidden_size)
+            hidden_states_list = []
+            for req in batched_requests:
+                hs = req.hidden_states
+                if hs.ndim == 2:
+                    # Already (seq_len, hidden_size) or (1, hidden_size)
+                    hidden_states_list.append(hs)
+                elif hs.ndim == 3:
+                    # (1, seq_len, hidden_size) -> (seq_len, hidden_size)
+                    hidden_states_list.append(hs.squeeze(0))
+                else:
+                    # (hidden_size,) -> (1, hidden_size)
+                    hidden_states_list.append(hs.unsqueeze(0))
+
+            # Concatenate along sequence dimension to get (total_tokens, hidden_size)
+            hidden_states = torch.cat(hidden_states_list, dim=0)
 
             # Create residual tensor with same shape
             residual = torch.zeros(
                 hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
             )
 
-            pp_proxy_tensors = PPProxyTensors(
+            pp_proxy_tensors = IntermediateTensors(
                 {
                     "hidden_states": hidden_states,
                     "residual": residual,
@@ -325,19 +307,24 @@ class SGLExecutor(Executor):
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
-        schedule_batch, forward_batch = form_sgl_batch_prefill(batched_requests, self.model_runner)
-        self.cur_batch = schedule_batch
+        schedule_outputs_prefill = form_vllm_batch_prefill(batched_requests, self.model_runner)
+
+        if not self.is_first_peer and pp_proxy_tensors is not None:
+            target_tokens = compute_expected_intermediate_tokens(
+                schedule_outputs_prefill, self.model_runner
+            )
+            pp_proxy_tensors = resize_intermediate_tensors(pp_proxy_tensors, target_tokens)
 
         ret = {
-            "forward_batch": forward_batch,
+            "scheduler_output": schedule_outputs_prefill,
             "pp_proxy_tensors": pp_proxy_tensors,
             "lengths": lengths_tensor,
             "requests": batched_requests,
         }
-        logger.debug(f"Prepared CUDA prefill batch (sglang, size={batch_size})")
+        logger.debug(f"Prepared CUDA prefill batch (vllm, size={batch_size})")
         return ret
 
-    def _prepare_decode_batch(self, batched_requests: List[Request]) -> Optional[Dict[str, Any]]:
+    def _prepare_decode_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """
         Prepares inputs for CUDA backends from a batch of decode requests.
         """
@@ -346,27 +333,33 @@ class SGLExecutor(Executor):
         if batch_size == 0:
             return None
 
-        # Prepare PP proxy tensors
+        # Prepare PP proxy tensors (common for both backends when not first peer)
         pp_proxy_tensors = None
         if not self.is_first_peer:
-            hidden_states = torch.cat(
-                [
-                    (
-                        req.hidden_states
-                        if req.hidden_states.ndim == 2
-                        else req.hidden_states.unsqueeze(0)
-                    )
-                    for req in batched_requests
-                ],
-                dim=0,
-            )
+            # Concatenate hidden states from all requests
+            # For vLLM, we need to flatten to (total_tokens, hidden_size)
+            hidden_states_list = []
+            for req in batched_requests:
+                hs = req.hidden_states
+                if hs.ndim == 2:
+                    # Already (seq_len, hidden_size) or (1, hidden_size)
+                    hidden_states_list.append(hs)
+                elif hs.ndim == 3:
+                    # (1, seq_len, hidden_size) -> (seq_len, hidden_size)
+                    hidden_states_list.append(hs.squeeze(0))
+                else:
+                    # (hidden_size,) -> (1, hidden_size)
+                    hidden_states_list.append(hs.unsqueeze(0))
+
+            # Concatenate along sequence dimension to get (total_tokens, hidden_size)
+            hidden_states = torch.cat(hidden_states_list, dim=0)
 
             # Create residual tensor with same shape
             residual = torch.zeros(
                 hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
             )
 
-            pp_proxy_tensors = PPProxyTensors(
+            pp_proxy_tensors = IntermediateTensors(
                 {
                     "hidden_states": hidden_states,
                     "residual": residual,
@@ -380,18 +373,12 @@ class SGLExecutor(Executor):
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
-        forward_batch = form_sgl_batch_decode(
-            batched_requests,
-            self.model_runner,
-            self.running_batch,
-            self.is_first_peer,
-        )
-
+        scheduler_outputs_decode = form_vllm_batch_decode(batched_requests, self.model_runner)
         ret = {
-            "forward_batch": forward_batch,
+            "scheduler_output": scheduler_outputs_decode,
             "pp_proxy_tensors": pp_proxy_tensors,
             "lengths": lengths_tensor,
             "requests": batched_requests,
         }
-        logger.debug(f"Prepared CUDA decode batch (sglang, size={batch_size})")
+        logger.debug(f"Prepared CUDA decode batch (vllm, size={batch_size})")
         return ret
