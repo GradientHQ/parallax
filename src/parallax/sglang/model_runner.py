@@ -204,6 +204,7 @@ class ParallaxModelRunner(SGLModelRunner):
 def form_sgl_server_args(
     model_path: str,
     dtype: str = "bfloat16",
+    kv_cache_memory_fraction: float = 0.85,
     tp_size: int = 1,
     attention_backend: str = "flashinfer",
     kv_block_size: int = 64,
@@ -224,7 +225,7 @@ def form_sgl_server_args(
         dtype=dtype,
         attention_backend=attention_backend,
         page_size=kv_block_size,
-        mem_fraction_static=0.85,
+        mem_fraction_static=kv_cache_memory_fraction,
         moe_runner_backend=moe_runner_backend,
         tp_size=tp_size,
         trust_remote_code=True,
@@ -309,6 +310,7 @@ def initialize_sgl_model_runner(
     server_args = form_sgl_server_args(
         str(model_path),
         dtype,
+        kv_cache_memory_fraction,
         tp_size,
         attention_backend,
         kv_block_size,

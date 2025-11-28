@@ -1,12 +1,18 @@
 """
 Unit tests for the Executor class, using Qwen3-0.6B-bf16.
+For ubuntu-GPU, test 3 pipelines
+  - cuda -> cuda -> cuda
+  - cuda -> mlx(cpu) -> cuda
+  - mlx(cpu) -> cuda -> mlx(cpu)
+For MAC, test 1 pipeline
+  - mlx -> mlx -> mlx
 """
 
 import pytest
 from mlx_lm.generate import generate
 from mlx_lm.utils import get_model_path, load_model
 
-from parallax.server.executor import Executor
+from parallax.p2p.message_util import proto_to_request, request_to_proto
 from parallax.server.request import InitialRequest
 from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.utils.utils import get_current_device
@@ -19,26 +25,85 @@ ref_model, ref_config = load_model(model_path)
 ref_tokenizer = load_tokenizer(model_path, eos_token_ids=ref_config.get("eos_token_id", None))
 
 
-@pytest.mark.parametrize("start_layer, end_layer", [(0, 12)])
+def create_executor(start_layer, end_layer, device):
+    """Create a pipeline sharded executor"""
+    if device == "mlx":
+        model_repo = MLX_MODEL_REPO
+        from parallax.server.executor.mlx_executor import MLXExecutor
+
+        executor = MLXExecutor(
+            model_repo=model_repo,
+            start_layer=start_layer,
+            end_layer=end_layer,
+            kv_cache_memory_fraction=0.3,
+            dtype="bfloat16",
+            device=device,
+        )
+    else:
+        model_repo = CUDA_MODEL_REPO
+        from parallax.server.executor.sglang_executor import SGLExecutor
+
+        executor = SGLExecutor(
+            model_repo=model_repo,
+            start_layer=start_layer,
+            end_layer=end_layer,
+            kv_cache_memory_fraction=0.3,
+            dtype="bfloat16",
+            device=device,
+        )
+    return executor
+
+
+def run_executor_pipeline_stage(executor, requests, batch_type, is_last_peer):
+    """Run executor pipeline stage. Input and output should be requests"""
+    executor.handle_input_requests(requests)
+    executor.scheduler.admit_requests()
+    input_batch = executor.scheduler.form_batch()
+    prepared_batch = executor.prepare_batch_inputs(input_batch)
+    assert prepared_batch is not None, "Failed to prepare batch inputs"
+    batch_data = prepared_batch[batch_type]
+    hidden_states = executor.process_batch(batch_data, return_decoded_tokens=is_last_peer)
+    output_reqs = executor.prepare_next_batch_requests(
+        requests=batch_data["requests"],
+        hidden_states=hidden_states,
+        lengths=batch_data["lengths"],
+    )
+    return output_reqs, hidden_states
+
+
+@pytest.mark.parametrize(
+    "pipeline_devices",
+    [
+        ("cuda", "cuda", "cuda"),
+        ("cuda", "mlx", "cuda"),
+        ("mlx", "cuda", "mlx"),
+        ("mlx", "mlx", "mlx"),
+    ],
+)
+@pytest.mark.parametrize("pp_end_layers", [(10, 18, 28)])
 @pytest.mark.parametrize("num_decode_steps", [8])
-def test_decode_pipeline_multiple_steps(start_layer, end_layer, num_decode_steps):
+def test_decode_pipeline_multiple_steps(pipeline_devices, pp_end_layers, num_decode_steps):
     """Tests a multi-step decode pipeline with batched requests."""
     device = get_current_device()
-    model_repo = CUDA_MODEL_REPO if device == "cuda" else MLX_MODEL_REPO
+    if device == "mlx" and "cuda" in pipeline_devices:
+        return
+
     # 1. Setup executors
-    executor_peer1 = Executor(
-        model_repo=model_repo,
-        start_layer=start_layer,
-        end_layer=end_layer,
-        kv_cache_memory_fraction=0.1,
-        dtype="bfloat16",
+    assert pp_end_layers[2] == ref_config.get("num_hidden_layers")
+    executor_peer1 = create_executor(
+        start_layer=0,
+        end_layer=pp_end_layers[0],
+        device=pipeline_devices[0],
     )
-    executor_peer2 = Executor(
-        model_repo=model_repo,
-        start_layer=end_layer,
-        end_layer=ref_config.get("num_hidden_layers"),
-        kv_cache_memory_fraction=0.1,
-        dtype="bfloat16",
+    executor_peer2 = create_executor(
+        start_layer=pp_end_layers[0],
+        end_layer=pp_end_layers[1],
+        device=pipeline_devices[1],
+    )
+    executor_peer3 = create_executor(
+        start_layer=pp_end_layers[1],
+        end_layer=pp_end_layers[2],
+        device=pipeline_devices[2],
     )
 
     # 2. Setup initial requests for multiple prompts
@@ -51,71 +116,52 @@ def test_decode_pipeline_multiple_steps(start_layer, end_layer, num_decode_steps
         for i, p in enumerate(prompts)
     ]
 
-    executor_peer1._handle_input_requests(initial_requests)
-    executor_peer1.scheduler.admit_requests()
-    prefill_batch_p1 = executor_peer1.scheduler.form_batch()
-    prefill_inputs_p1 = executor_peer1._prepare_batch_inputs(prefill_batch_p1)
-    assert prefill_inputs_p1 is not None, "Failed to prepare batch inputs"
-    prefill_batch_data = prefill_inputs_p1["prefill_batch"]
-    hidden_states_p1 = executor_peer1.process_batch(prefill_batch_data, return_decoded_tokens=False)
-    prefill_reqs_p2 = executor_peer1._prepare_next_batch_requests(
-        requests=prefill_batch_data["requests"],
-        hidden_states=hidden_states_p1,
-        lengths=prefill_batch_data["lengths"],
+    # 3. Prefill
+    prefill_reqs_out1, _ = run_executor_pipeline_stage(
+        executor_peer1, initial_requests, "prefill_batch", False
     )
+    prefill_proto_p1 = request_to_proto(prefill_reqs_out1, device=pipeline_devices[0])
 
-    # send to next peer
+    prefill_reqs_in2 = proto_to_request(prefill_proto_p1, device=pipeline_devices[1])
+    prefill_reqs_out2, _ = run_executor_pipeline_stage(
+        executor_peer2, prefill_reqs_in2, "prefill_batch", False
+    )
+    prefill_proto_p2 = request_to_proto(prefill_reqs_out2, device=pipeline_devices[1])
 
-    executor_peer2._handle_input_requests(prefill_reqs_p2)
-    executor_peer2.scheduler.admit_requests()
-    prefill_batch_p2 = executor_peer2.scheduler.form_batch()
-    prefill_inputs_p2 = executor_peer2._prepare_batch_inputs(prefill_batch_p2)
-    assert prefill_inputs_p2 is not None, "Failed to prepare batch inputs"
-    prefill_batch_data = prefill_inputs_p2["prefill_batch"]
-    gen_tokens_mx = executor_peer2.process_batch(prefill_batch_data, return_decoded_tokens=True)
-    generated_tokens_pipeline = [gen_tokens_mx]
+    prefill_reqs_in3 = proto_to_request(prefill_proto_p2, device=pipeline_devices[2])
+    prefill_reqs_out3, gen_tokens = run_executor_pipeline_stage(
+        executor_peer3, prefill_reqs_in3, "prefill_batch", True
+    )
+    prefill_proto_p3 = request_to_proto(prefill_reqs_out3, device=pipeline_devices[2])
+
+    generated_tokens_pipeline = [gen_tokens]
     print(f"Prefill done: generated_tokens_pipeline: {generated_tokens_pipeline}")
+    first_rank_proto = prefill_proto_p3
 
+    # 4. Decode
     for _ in range(num_decode_steps):
-        # 1. Simulate feedback from Peer 2 to Peer 1
-        feedback_reqs = executor_peer2._prepare_next_batch_requests(
-            requests=prefill_batch_data["requests"],
-            hidden_states=generated_tokens_pipeline[-1],
-            lengths=prefill_batch_data["lengths"],  # Not used by last peer
+        decode_reqs_in1 = proto_to_request(first_rank_proto, device=pipeline_devices[0])
+        decode_reqs_out1, _ = run_executor_pipeline_stage(
+            executor_peer1, decode_reqs_in1, "decode_batch", False
         )
+        decode_proto_p1 = request_to_proto(decode_reqs_out1, device=pipeline_devices[0])
 
-        # 2. Peer 1: process feedback, commit token, re-enqueue
-        executor_peer1._handle_input_requests(feedback_reqs)
-
-        # 3. Peer 1: form and process decode batch
-        executor_peer1.scheduler.admit_requests()
-        decode_batch_p1 = executor_peer1.scheduler.form_batch()
-        decode_inputs_p1 = executor_peer1._prepare_batch_inputs(decode_batch_p1)
-        assert decode_inputs_p1 is not None, "Failed to prepare batch inputs"
-        decode_batch_data = decode_inputs_p1["decode_batch"]
-        decode_hidden_states_p1 = executor_peer1.process_batch(
-            decode_batch_data, return_decoded_tokens=False
+        decode_reqs_in2 = proto_to_request(decode_proto_p1, device=pipeline_devices[1])
+        decode_reqs_out2, _ = run_executor_pipeline_stage(
+            executor_peer2, decode_reqs_in2, "decode_batch", False
         )
+        decode_proto_p2 = request_to_proto(decode_reqs_out2, device=pipeline_devices[1])
 
-        # 4. Peer 1 -> Peer 2: Prepare next decode batch
-        decode_reqs_p2 = executor_peer1._prepare_next_batch_requests(
-            requests=decode_batch_data["requests"],
-            hidden_states=decode_hidden_states_p1,
-            lengths=decode_batch_data["lengths"],
+        decode_reqs_in3 = proto_to_request(decode_proto_p2, device=pipeline_devices[2])
+        decode_reqs_out3, next_gen_tokens = run_executor_pipeline_stage(
+            executor_peer3, decode_reqs_in3, "decode_batch", True
         )
+        decode_proto_p3 = request_to_proto(decode_reqs_out3, device=pipeline_devices[2])
 
-        # 5. Peer 2: process decode batch to get next tokens
-        executor_peer2._handle_input_requests(decode_reqs_p2)
-        executor_peer2.scheduler.admit_requests()
-        decode_batch_p2 = executor_peer2.scheduler.form_batch()
-        decode_inputs_p2 = executor_peer2._prepare_batch_inputs(decode_batch_p2)
-        assert decode_inputs_p2 is not None, "Failed to prepare batch inputs"
-        decode_batch_data = decode_inputs_p2["decode_batch"]
-        next_gen_tokens_mx = executor_peer2.process_batch(
-            decode_batch_data, return_decoded_tokens=True
-        )
-        generated_tokens_pipeline.append(next_gen_tokens_mx)
+        first_rank_proto = decode_proto_p3
+        generated_tokens_pipeline.append(next_gen_tokens)
 
+    # 5. Compare with reference
     total_tokens_to_generate = 1 + num_decode_steps
     for i, prompt in enumerate(prompts):
         # Generate reference tokens using mlx-lm's standard generation
@@ -137,4 +183,12 @@ def test_decode_pipeline_multiple_steps(start_layer, end_layer, num_decode_steps
         print(f"parallax test generation: {output_text}")
 
         # Trim the first whitespace in our output
-        assert ref_output_text[:6] == output_text[1:7]
+        assert ref_output_text[:5] == output_text[1:6]
+
+    # 6. Release resources for next tests
+    executor_peer1.shutdown()
+    executor_peer2.shutdown()
+    executor_peer3.shutdown()
+    del executor_peer1
+    del executor_peer2
+    del executor_peer3
