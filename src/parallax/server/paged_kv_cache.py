@@ -66,10 +66,12 @@ class PagedKVCacheManager:
         cache_memory_fraction: float = 0.8,
         num_gpu_blocks: Optional[int] = None,
         max_num_seqs: int = 256,  # Max concurrent requests hint
+        head_dim_v: Optional[int] = None,
     ):
         self.num_layers = num_layers
         self.num_kv_heads = num_kv_heads
         self.head_dim = head_dim
+        self.head_dim_v = head_dim_v if head_dim_v is not None else head_dim
         self.dtype = dtype
         self.block_size = block_size
         self.max_num_seqs = max_num_seqs
@@ -84,13 +86,16 @@ class PagedKVCacheManager:
 
         # 2. Allocate Global Cache Tensors
         # Shape: (num_layers, num_blocks, num_kv_heads, block_size, head_dim)
-        logger.info(f"Allocating Paged KV Cache: {num_gpu_blocks} blocks, {block_size} block_size")
+        logger.info(
+            f"Allocating Paged KV Cache: {num_gpu_blocks} blocks, {block_size} block_size, "
+            f"k_head_dim={self.head_dim}, v_head_dim={self.head_dim_v}"
+        )
 
         self.key_cache = mx.zeros(
-            (num_layers, num_gpu_blocks, num_kv_heads, block_size, head_dim), dtype=dtype
+            (num_layers, num_gpu_blocks, num_kv_heads, block_size, self.head_dim), dtype=dtype
         )
         self.value_cache = mx.zeros(
-            (num_layers, num_gpu_blocks, num_kv_heads, block_size, head_dim), dtype=dtype
+            (num_layers, num_gpu_blocks, num_kv_heads, block_size, self.head_dim_v), dtype=dtype
         )
 
         # Ensure memory is materialized
@@ -108,13 +113,28 @@ class PagedKVCacheManager:
         total_mem = device_info["max_recommended_working_set_size"]
         current_mem = mx.metal.get_active_memory()
         free_mem = total_mem - current_mem
+
+        # We use a fraction of FREE memory, but for safety in multi-process/multi-model
+        # scenarios, we might want to base it on TOTAL memory fraction if we know
+        # what we are doing (as in Executor logic).
+        # However, to be safe and consistent with previous logic that tried to avoid OOM:
+        # Let's stick to the logic that available_for_kv is based on free memory
+        # OR total_memory * fraction if we trust the fraction to be per-process adjusted.
+
+        # If fraction is small (e.g. < 0.2), it likely means it's per-process adjusted.
+        # But here we stick to "use what is available" to be safe.
         available_for_kv = free_mem * cache_memory_fraction
 
         dtype_size = 2 if dtype in [mx.float16, mx.bfloat16] else 4
-        # 2x for Key and Value
-        block_bytes = (
-            self.num_layers * self.num_kv_heads * self.block_size * self.head_dim * dtype_size * 2
+
+        # Calculate bytes per block considering potentially different K and V head dimensions
+        key_block_bytes = (
+            self.num_layers * self.num_kv_heads * self.block_size * self.head_dim * dtype_size
         )
+        value_block_bytes = (
+            self.num_layers * self.num_kv_heads * self.block_size * self.head_dim_v * dtype_size
+        )
+        block_bytes = key_block_bytes + value_block_bytes
 
         num_gpu_blocks = int(available_for_kv // block_bytes)
 
@@ -132,7 +152,7 @@ class PagedKVCacheManager:
             f"total_mem={total_mem/1024**3:.2f} GB, "
             f"used_mem={current_mem/1024**3:.2f} GB, "
             f"free_mem={free_mem/1024**3:.2f} GB, "
-            f"available_for_kv={free_mem/1024**3:.2f} GB"
+            f"available_for_kv={available_for_kv/1024**3:.2f} GB"
         )
         return num_gpu_blocks
 

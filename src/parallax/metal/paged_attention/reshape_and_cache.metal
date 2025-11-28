@@ -12,13 +12,15 @@ int token_idx = gid.y;
 
 // Scalars are passed by value (int32), so no dereference needed
 int n_kv_heads = num_kv_heads;
-int h_dim = head_dim;
+int k_dim = k_head_dim;
+int v_dim = v_head_dim;
+int max_dim = (k_dim > v_dim) ? k_dim : v_dim;
 
-if (kv_head_dim_idx >= n_kv_heads * h_dim)
+if (kv_head_dim_idx >= n_kv_heads * max_dim)
   return;
 
-int head_idx = kv_head_dim_idx / h_dim;
-int dim_idx = kv_head_dim_idx % h_dim;
+int head_idx = kv_head_dim_idx / max_dim;
+int dim_idx = kv_head_dim_idx % max_dim;
 
 int64_t slot = slot_mapping[token_idx];
 
@@ -34,22 +36,40 @@ int64_t block_offset = slot % b_size;
 int l_idx = layer_idx;
 int n_blocks = num_blocks;
 
-// Calculate source index
-// key shape: (num_tokens, num_kv_heads, head_dim)
-int64_t src_idx =
-    (int64_t)token_idx * n_kv_heads * h_dim + head_idx * h_dim + dim_idx;
+// Handle Key
+if (dim_idx < k_dim) {
+    // Calculate source index
+    // key shape: (num_tokens, num_kv_heads, k_head_dim)
+    int64_t src_idx =
+        (int64_t)token_idx * n_kv_heads * k_dim + head_idx * k_dim + dim_idx;
 
-// Calculate destination index
-int64_t head_stride = b_size * h_dim;
-int64_t block_stride = n_kv_heads * head_stride;
-int64_t layer_stride = n_blocks * block_stride;
+    // Calculate destination index
+    int64_t head_stride = b_size * k_dim;
+    int64_t block_stride = n_kv_heads * head_stride;
+    int64_t layer_stride = n_blocks * block_stride;
 
-int64_t dest_idx = (int64_t)l_idx * layer_stride + block_idx * block_stride +
-                   (int64_t)head_idx * head_stride + block_offset * h_dim +
-                   dim_idx;
+    int64_t dest_idx = (int64_t)l_idx * layer_stride + block_idx * block_stride +
+                       (int64_t)head_idx * head_stride + block_offset * k_dim +
+                       dim_idx;
 
-// Cast away const for cache updates
-// 'key_cache' is 'const device {{T}}*' in inputs, we need 'device {{T}}*'
+    key_cache_mut[dest_idx] = key[src_idx];
+}
 
-key_cache_mut[dest_idx] = key[src_idx];
-value_cache_mut[dest_idx] = value[src_idx];
+// Handle Value
+if (dim_idx < v_dim) {
+    // Calculate source index
+    // value shape: (num_tokens, num_kv_heads, v_head_dim)
+    int64_t src_idx =
+        (int64_t)token_idx * n_kv_heads * v_dim + head_idx * v_dim + dim_idx;
+
+    // Calculate destination index
+    int64_t head_stride = b_size * v_dim;
+    int64_t block_stride = n_kv_heads * head_stride;
+    int64_t layer_stride = n_blocks * block_stride;
+
+    int64_t dest_idx = (int64_t)l_idx * layer_stride + block_idx * block_stride +
+                       (int64_t)head_idx * head_stride + block_offset * v_dim +
+                       dim_idx;
+
+    value_cache_mut[dest_idx] = value[src_idx];
+}

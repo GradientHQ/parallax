@@ -240,6 +240,12 @@ class Executor:
         ) // self.config.get("num_attention_heads")
         self.qk_nope_head_dim = self.config.get("qk_nope_head_dim", None)
         self.qk_rope_head_dim = self.config.get("qk_rope_head_dim", None)
+        if self.qk_nope_head_dim is not None and self.qk_rope_head_dim is not None:
+            logger.debug(
+                f"qk_nope_head_dim={self.qk_nope_head_dim}, qk_rope_head_dim={self.qk_rope_head_dim}"
+            )
+            self.head_dim = self.qk_nope_head_dim + self.qk_rope_head_dim
+
         self.v_head_dim = self.config.get("v_head_dim", None)
         self.enable_prefix_cache = enable_prefix_cache
         self.linear_key_head_dim = self.config.get("linear_key_head_dim", None)
@@ -273,6 +279,7 @@ class Executor:
                 dtype=self.dtype,
                 block_size=kv_block_size,
                 cache_memory_fraction=kv_cache_memory_fraction,
+                head_dim_v=self.v_head_dim,
             )
             try:
                 mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
@@ -316,6 +323,7 @@ class Executor:
         self.prefix_cache = RadixCache(
             num_kv_heads=self.num_key_value_heads,
             head_dim=self.head_dim,
+            head_dim_v=self.v_head_dim,
             num_layers=self.num_shard_layers,
             dtype=self.dtype,
             page_size=1,

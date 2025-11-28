@@ -56,7 +56,7 @@ using namespace metal;
 
 
 def reshape_and_cache(
-    key: mx.array,  #  (batch, num_kv_heads, 1, head_dim) or (batch, num_kv_heads, target_len, head_dim)
+    key: mx.array,  # (batch, target_len, num_kv_heads, head_dim)
     value: mx.array,  # ...
     key_cache: mx.array,  # (num_layers, num_blocks, num_kv_heads, block_size, head_dim)
     value_cache: mx.array,
@@ -95,7 +95,8 @@ def reshape_and_cache(
                 value = value.squeeze(2)
 
         num_kv_heads = key.shape[1]
-        head_dim = key.shape[2]
+        k_head_dim = key.shape[2]
+        v_head_dim = value.shape[2]
 
         # Compute slot_mapping internally
         indices = context_lengths - 1
@@ -107,10 +108,6 @@ def reshape_and_cache(
             mx.int64
         )
 
-        # Grid: One thread per token (batch_size) or per head/dim?
-        # Kernel implementation `reshape_and_cache_kernel`:
-        # Grid: (num_kv_heads * head_dim, num_tokens, 1)
-        # num_tokens = batch_size
         num_tokens = batch_size
 
     else:
@@ -121,11 +118,14 @@ def reshape_and_cache(
             # Input is (B, T, H, D) from optimized Qwen3
             B, T, H, D = key.shape
             key = key.reshape(B * T, H, D)
-            value = value.reshape(B * T, H, D)
+            # Value might have different D
+            V_D = value.shape[3]
+            value = value.reshape(B * T, H, V_D)
 
         num_tokens = key.shape[0]
         num_kv_heads = key.shape[1]
-        head_dim = key.shape[2]
+        k_head_dim = key.shape[2]
+        v_head_dim = value.shape[2]
 
         if slot_mapping.shape[0] != num_tokens:
             raise ValueError(f"Slot mapping length {slot_mapping.shape[0]} != tokens {num_tokens}")
@@ -134,8 +134,8 @@ def reshape_and_cache(
     num_blocks = key_cache.shape[1]
 
     # 2. Prepare Constants
-    key_stride = num_kv_heads * head_dim
-    value_stride = num_kv_heads * head_dim
+    key_stride = num_kv_heads * k_head_dim
+    value_stride = num_kv_heads * v_head_dim
 
     def mk_int(val):
         return mx.array(val, dtype=mx.int32)
@@ -143,7 +143,8 @@ def reshape_and_cache(
     c_key_stride = mk_int(key_stride)
     c_val_stride = mk_int(value_stride)
     c_num_kv = mk_int(num_kv_heads)
-    c_head_dim = mk_int(head_dim)
+    c_k_head_dim = mk_int(k_head_dim)
+    c_v_head_dim = mk_int(v_head_dim)
     c_block_size = mk_int(block_size)
     c_layer_idx = mk_int(layer_idx)
     c_num_layers = mk_int(num_layers)
@@ -159,7 +160,8 @@ def reshape_and_cache(
         c_key_stride,
         c_val_stride,
         c_num_kv,
-        c_head_dim,
+        c_k_head_dim,
+        c_v_head_dim,
         c_block_size,
         c_layer_idx,
         c_num_layers,
@@ -176,7 +178,8 @@ def reshape_and_cache(
         "key_stride",
         "value_stride",
         "num_kv_heads",
-        "head_dim",
+        "k_head_dim",
+        "v_head_dim",
         "block_size",
         "layer_idx",
         "num_layers",
@@ -192,19 +195,19 @@ def reshape_and_cache(
         dtype=dtype,
     )
 
-    # Grid: (num_kv_heads * head_dim, num_tokens, 1)
-    grid = (num_kv_heads * head_dim, num_tokens, 1)
-    thread_group = (min(1024, num_kv_heads * head_dim), 1, 1)
+    # Grid: (num_kv_heads * max_dim, num_tokens, 1)
+    max_dim = max(k_head_dim, v_head_dim)
+    grid = (num_kv_heads * max_dim, num_tokens, 1)
+    thread_group = (min(1024, num_kv_heads * max_dim), 1, 1)
 
     # Execute
     # We match output_shapes to the grid dimensions to ensure MLX generates 'index' variable
-    # corresponding to (num_tokens, num_kv_heads * head_dim).
-    # Assuming MLX uses index.x for last dim, index.y for second to last...
+    # corresponding to (num_tokens, num_kv_heads * max_dim).
     outputs = kernel(
         inputs=inputs,
         grid=grid,
         threadgroup=thread_group,
-        output_shapes=[(num_tokens, num_kv_heads * head_dim)],
+        output_shapes=[(num_tokens, num_kv_heads * max_dim)],
         output_dtypes=[mx.float32],  # Dummy output dtype usually doesn't matter
         verbose=False,
     )
@@ -224,6 +227,7 @@ def paged_attention(
     scale: float,
     num_kv_heads: int,
     layer_idx: int,
+    v_head_dim: Optional[int] = None,
 ) -> mx.array:
     """
     Paged Attention using Metal Kernel.
@@ -237,7 +241,10 @@ def paged_attention(
             pass
         queries = queries.squeeze(2)
 
-    head_dim = queries.shape[2]
+    k_head_dim = queries.shape[2]
+    if v_head_dim is None:
+        v_head_dim = k_head_dim
+
     num_layers = key_cache.shape[0]
     num_total_blocks = key_cache.shape[1]
     max_blocks = block_tables.shape[1]
@@ -248,7 +255,8 @@ def paged_attention(
 
     c_num_heads = mk_int(num_heads)
     c_num_kv_heads = mk_int(num_kv_heads)
-    c_head_dim = mk_int(head_dim)
+    c_k_head_dim = mk_int(k_head_dim)
+    c_v_head_dim = mk_int(v_head_dim)
     c_block_size = mk_int(block_size)
     c_max_blocks = mk_int(max_blocks)
     c_layer_idx = mk_int(layer_idx)
@@ -264,7 +272,8 @@ def paged_attention(
         context_lengths,
         c_num_heads,
         c_num_kv_heads,
-        c_head_dim,
+        c_k_head_dim,
+        c_v_head_dim,
         c_block_size,
         c_max_blocks,
         c_layer_idx,
@@ -281,7 +290,8 @@ def paged_attention(
         "context_lengths",
         "num_heads",
         "num_kv_heads",
-        "head_dim",
+        "k_head_dim",
+        "v_head_dim",
         "block_size",
         "max_blocks",
         "layer_idx",
@@ -316,7 +326,7 @@ def paged_attention(
         inputs=inputs,
         grid=grid,
         threadgroup=thread_group,
-        output_shapes=[(batch_size, num_heads, head_dim)],
+        output_shapes=[(batch_size, num_heads, v_head_dim)],
         output_dtypes=[dtype],  # Output matches input dtype
         verbose=False,
     )
