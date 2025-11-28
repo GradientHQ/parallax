@@ -31,7 +31,7 @@ const Stack = styled(MuiStack)(({ theme }) => {
 export default function PageJoin() {
   const [
     {
-      modelInfo,
+      config: { modelInfo },
       clusterInfo: { status: clusterStatus, initNodesNumber, needMoreNodes },
       nodeInfoList,
     },

@@ -73,6 +73,20 @@ class RPCConnectionHandler(ConnectionHandler):
         logger.debug(f"receive node_update request: {message}")
         try:
             node = self.build_node(message)
+            # Check if node exists in scheduler
+            if node.node_id not in self.scheduler.node_id_to_node:
+                # Node not found, automatically join it (e.g., after model switch)
+                logger.info(
+                    f"Node {node.node_id} not found in scheduler, auto-joining via node_update"
+                )
+                self.scheduler.enqueue_join(node)
+                # Wait a bit for join to be processed
+                time.sleep(0.1)
+                # Return layer allocation after join
+                layer_allocation = self.wait_layer_allocation(node.node_id, wait_seconds=5)
+                return layer_allocation
+
+            # Node exists, update its info
             self.scheduler.enqueue_node_update(
                 node.node_id,
                 current_requests=node.current_requests,

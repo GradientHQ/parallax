@@ -89,7 +89,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
 
   const [
     {
-      modelInfo,
+      config: { modelInfo },
       clusterInfo: { status: clusterStatus, needMoreNodes },
     },
   ] = useCluster();
@@ -351,7 +351,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
       </DrawerLayoutSide>
       <DrawerLayoutContainer>
         <DrawerLayoutHeader direction='row'>
-          <ModelSelect variant='text' />
+          <ModelSelect variant='text' autoCommit />
         </DrawerLayoutHeader>
         <DrawerLayoutContent>{children}</DrawerLayoutContent>
       </DrawerLayoutContainer>
