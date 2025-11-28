@@ -95,6 +95,12 @@ class MLXExecutor(BaseExecutor):
         )
         t0 = time.time()
         self.model_shard, self.config, self.tokenizer = self.shard_loader.load()
+
+        adapters = lora_paths[0] if lora_paths else None
+        if adapters:
+            logger.debug(f"mlx adapters is: {adapters}")
+            self.model_shard = self.shard_loader.load_lora(self.model_shard, adapters)
+
         logger.debug(
             f"MLX sharded model loaded in {(time.time() - t0) * 1000:.1f} ms; num_layers={self.config.get('num_hidden_layers')}"
         )
