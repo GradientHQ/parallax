@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from parallax.server.executor import create_executor_config
+from parallax.server.executor.factory import create_executor_config
 from parallax.server.server_args import parse_args, validate_args
 
 
