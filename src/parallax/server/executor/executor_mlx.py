@@ -65,9 +65,22 @@ class MLXExecutor(Executor):
         # IPC Communication Configs
         executor_input_ipc_addr: Optional[str] = None,
         executor_output_ipc_addr: Optional[str] = None,
+        # GPU Specialized Configs
+        attention_backend: Optional[str] = "flashinfer",
+        moe_runner_backend: Optional[str] = "auto",
+        enable_lora: Optional[bool] = False,
+        max_lora_rank: Optional[int] = None,
+        lora_target_modules: Optional[List[str]] = None,
+        lora_paths: Optional[List[str]] = None,
+        max_loras_per_batch: Optional[int] = None,
+        max_loaded_loras: Optional[int] = None,
+        lora_eviction_policy: Optional[str] = "lru",
+        lora_backend: Optional[str] = "triton",
+        max_lora_chunk_size: Optional[int] = 128,
         # Tensor Parallel Configs
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
+        nccl_port: Optional[int] = 4000,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
     ):

@@ -41,6 +41,7 @@ class SGLExecutor(Executor):
         # Scheduler Configs
         max_batch_size: Optional[int] = 8,
         max_sequence_length: Optional[int] = None,
+        max_tokens_in_kv_pool: Optional[int] = None,
         # Controlling perfill / decode ratio
         max_num_tokens_per_batch: int = 1024,
         prefill_priority: int = 0,
@@ -52,6 +53,7 @@ class SGLExecutor(Executor):
         # KV Cache Configs
         kv_block_size: int = 64,
         kv_cache_memory_fraction: float = 0.8,
+        enable_prefix_cache: Optional[bool] = False,
         # Communication Configs
         # P2P Communication Configs
         send_to_peer_addr: Optional[str] = None,

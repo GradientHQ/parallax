@@ -480,7 +480,7 @@ class Executor:
                             except Exception:
                                 pass
                         # 7. Prepare requests for the next stage in the pipeline
-                        next_batch = self._prepare_next_batch_requests(
+                        next_batch = self.prepare_next_batch_requests(
                             requests=prepared_inputs["requests"],
                             hidden_states=output,
                             lengths=prepared_inputs["lengths"],

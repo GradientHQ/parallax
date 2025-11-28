@@ -19,7 +19,6 @@ def create_executor_config(args: argparse.Namespace, shared_state=None):
         "start_layer": args.start_layer,
         "end_layer": args.end_layer,
         "dtype": args.dtype,
-        "gpu_backend": args.gpu_backend if hasattr(args, "gpu_backend") else "sglang",
         "max_sequence_length": args.max_sequence_length if "max_sequence_length" in args else None,
         "max_batch_size": args.max_batch_size if "max_batch_size" in args else None,
         "kv_block_size": args.kv_block_size,
@@ -69,17 +68,17 @@ def create_from_args(
         if args.gpu_backend == "sglang":
             from parallax.server.executor.executor_sglang import SGLExecutor
 
-            executor = SGLExecutor(config, shared_state)
+            executor = SGLExecutor(**config)
         elif args.gpu_backend == "vllm":
             from parallax.server.executor.executor_vllm import VLLMExecutor
 
-            executor = VLLMExecutor(config, shared_state)
+            executor = VLLMExecutor(**config)
         else:
             raise ValueError(f"Unsupported GPU backend type: {args.gpu_backend}")
     else:
         from parallax.server.executor.executor_mlx import MLXExecutor
-
-        executor = MLXExecutor(config, shared_state)
+        print(*config)
+        executor = MLXExecutor(**config)
     return executor
 
 
