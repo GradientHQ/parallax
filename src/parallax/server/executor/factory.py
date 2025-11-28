@@ -78,10 +78,9 @@ def create_from_args(
     elif device == "mlx":
         from parallax.server.executor.mlx_executor import MLXExecutor
 
-        print(*config)
         executor = MLXExecutor(**config)
     else:
-        raise ValueError(f"Unsupported backend type: {device}")
+        raise ValueError(f"Unsupported device type: {device}")
     return executor
 
 
