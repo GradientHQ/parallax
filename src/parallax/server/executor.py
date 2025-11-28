@@ -203,7 +203,7 @@ class Executor:
             t0 = time.time()
             self.model_shard, self.config, self.tokenizer = self.shard_loader.load()
 
-            adapters = lora_paths[0] if lora_paths else "None"
+            adapters = lora_paths[0] if lora_paths else None
             if adapters:
                 logger.debug(f"mlx adapters is: {adapters}")
                 self.model_shard = self.shard_loader.load_lora(self.model_shard, adapters)
