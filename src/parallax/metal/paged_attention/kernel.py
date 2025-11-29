@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import mlx.core as mx
 
@@ -56,42 +56,86 @@ using namespace metal;
 
 
 def reshape_and_cache(
-    key: mx.array,  # (batch, num_kv_heads, 1, head_dim)
-    value: mx.array,  # (batch, num_kv_heads, 1, head_dim)
+    key: mx.array,  # (batch, target_len, num_kv_heads, head_dim)
+    value: mx.array,  # ...
     key_cache: mx.array,  # (num_layers, num_blocks, num_kv_heads, block_size, head_dim)
     value_cache: mx.array,
     block_tables: mx.array,  # (batch, max_blocks)
     context_lengths: mx.array,  # (batch,)
     block_size: int,
     layer_idx: int,
+    slot_mapping: Optional[mx.array] = None,  # (batch,) or (batch * target_len,)
 ):
     """
     Writes new keys and values into the Paged KV Cache using a custom Metal kernel.
     NOTE: This performs an in-place update on key_cache/value_cache buffers.
-    """
-    batch_size = key.shape[0]
-    num_kv_heads = key.shape[1]
-    head_dim = key.shape[3]
-    num_layers = key_cache.shape[0]
-    num_blocks = key_cache.shape[1]
 
+    Supports two modes:
+    1. Decode (Single Token): slot_mapping is None. Calculated internally.
+       Input shape: (batch, num_kv_heads, 1, head_dim)
+    2. Prefill (Batch Tokens): slot_mapping is provided.
+       Input shape: (batch, num_kv_heads, target_len, head_dim)
+    """
     dtype = key.dtype
     if key_cache.dtype != dtype:
         raise ValueError(f"Key cache dtype {key_cache.dtype} does not match key dtype {dtype}")
 
-    # 1. Prepare inputs
-    indices = context_lengths - 1
-    block_indices_in_table = indices // block_size
-    offsets = indices % block_size
+    # Handle dimensions based on mode
+    if slot_mapping is None:
+        # Decode Mode
+        batch_size = key.shape[0]
+        if key.ndim == 4:
+            # (batch, 1, num_kv_heads, head_dim) -> (batch, num_kv_heads, head_dim)
+            if key.shape[1] == 1:
+                key = key.squeeze(1)
+                value = value.squeeze(1)
+            elif key.shape[2] == 1:
+                # Fallback for old layout (batch, num_kv_heads, 1, head_dim)
+                key = key.squeeze(2)
+                value = value.squeeze(2)
 
-    batch_indices = mx.arange(batch_size)
-    physical_block_numbers = block_tables[batch_indices, block_indices_in_table]
+        num_kv_heads = key.shape[1]
+        k_head_dim = key.shape[2]
+        v_head_dim = value.shape[2]
 
-    slot_mapping = physical_block_numbers.astype(mx.int64) * block_size + offsets.astype(mx.int64)
+        # Compute slot_mapping internally
+        indices = context_lengths - 1
+        block_indices_in_table = indices // block_size
+        offsets = indices % block_size
+        batch_indices = mx.arange(batch_size)
+        physical_block_numbers = block_tables[batch_indices, block_indices_in_table]
+        slot_mapping = physical_block_numbers.astype(mx.int64) * block_size + offsets.astype(
+            mx.int64
+        )
+
+        num_tokens = batch_size
+
+    else:
+        # Prefill Mode
+        # Key/Value input shape: (batch, target_len, num_kv_heads, head_dim) = BTHD
+        # We need to flatten to: (total_tokens, num_kv_heads, head_dim)
+        if key.ndim == 4:
+            # Input is (B, T, H, D) from optimized Qwen3
+            B, T, H, D = key.shape
+            key = key.reshape(B * T, H, D)
+            # Value might have different D
+            V_D = value.shape[3]
+            value = value.reshape(B * T, H, V_D)
+
+        num_tokens = key.shape[0]
+        num_kv_heads = key.shape[1]
+        k_head_dim = key.shape[2]
+        v_head_dim = value.shape[2]
+
+        if slot_mapping.shape[0] != num_tokens:
+            raise ValueError(f"Slot mapping length {slot_mapping.shape[0]} != tokens {num_tokens}")
+
+    num_layers = key_cache.shape[0]
+    num_blocks = key_cache.shape[1]
 
     # 2. Prepare Constants
-    key_stride = num_kv_heads * head_dim
-    value_stride = num_kv_heads * head_dim
+    key_stride = num_kv_heads * k_head_dim
+    value_stride = num_kv_heads * v_head_dim
 
     def mk_int(val):
         return mx.array(val, dtype=mx.int32)
@@ -99,7 +143,8 @@ def reshape_and_cache(
     c_key_stride = mk_int(key_stride)
     c_val_stride = mk_int(value_stride)
     c_num_kv = mk_int(num_kv_heads)
-    c_head_dim = mk_int(head_dim)
+    c_k_head_dim = mk_int(k_head_dim)
+    c_v_head_dim = mk_int(v_head_dim)
     c_block_size = mk_int(block_size)
     c_layer_idx = mk_int(layer_idx)
     c_num_layers = mk_int(num_layers)
@@ -115,7 +160,8 @@ def reshape_and_cache(
         c_key_stride,
         c_val_stride,
         c_num_kv,
-        c_head_dim,
+        c_k_head_dim,
+        c_v_head_dim,
         c_block_size,
         c_layer_idx,
         c_num_layers,
@@ -132,7 +178,8 @@ def reshape_and_cache(
         "key_stride",
         "value_stride",
         "num_kv_heads",
-        "head_dim",
+        "k_head_dim",
+        "v_head_dim",
         "block_size",
         "layer_idx",
         "num_layers",
@@ -148,15 +195,19 @@ def reshape_and_cache(
         dtype=dtype,
     )
 
-    grid = (num_kv_heads * head_dim, batch_size, 1)
-    thread_group = (min(1024, num_kv_heads * head_dim), 1, 1)
+    # Grid: (num_kv_heads * max_dim, num_tokens, 1)
+    max_dim = max(k_head_dim, v_head_dim)
+    grid = (num_kv_heads * max_dim, num_tokens, 1)
+    thread_group = (min(1024, num_kv_heads * max_dim), 1, 1)
 
     # Execute
+    # We match output_shapes to the grid dimensions to ensure MLX generates 'index' variable
+    # corresponding to (num_tokens, num_kv_heads * max_dim).
     outputs = kernel(
         inputs=inputs,
         grid=grid,
         threadgroup=thread_group,
-        output_shapes=[(1,)],
+        output_shapes=[(num_tokens, num_kv_heads * max_dim)],
         output_dtypes=[mx.float32],  # Dummy output dtype usually doesn't matter
         verbose=False,
     )
@@ -176,6 +227,7 @@ def paged_attention(
     scale: float,
     num_kv_heads: int,
     layer_idx: int,
+    v_head_dim: Optional[int] = None,
 ) -> mx.array:
     """
     Paged Attention using Metal Kernel.
@@ -189,7 +241,10 @@ def paged_attention(
             pass
         queries = queries.squeeze(2)
 
-    head_dim = queries.shape[2]
+    k_head_dim = queries.shape[2]
+    if v_head_dim is None:
+        v_head_dim = k_head_dim
+
     num_layers = key_cache.shape[0]
     num_total_blocks = key_cache.shape[1]
     max_blocks = block_tables.shape[1]
@@ -200,7 +255,8 @@ def paged_attention(
 
     c_num_heads = mk_int(num_heads)
     c_num_kv_heads = mk_int(num_kv_heads)
-    c_head_dim = mk_int(head_dim)
+    c_k_head_dim = mk_int(k_head_dim)
+    c_v_head_dim = mk_int(v_head_dim)
     c_block_size = mk_int(block_size)
     c_max_blocks = mk_int(max_blocks)
     c_layer_idx = mk_int(layer_idx)
@@ -216,7 +272,8 @@ def paged_attention(
         context_lengths,
         c_num_heads,
         c_num_kv_heads,
-        c_head_dim,
+        c_k_head_dim,
+        c_v_head_dim,
         c_block_size,
         c_max_blocks,
         c_layer_idx,
@@ -233,7 +290,8 @@ def paged_attention(
         "context_lengths",
         "num_heads",
         "num_kv_heads",
-        "head_dim",
+        "k_head_dim",
+        "v_head_dim",
         "block_size",
         "max_blocks",
         "layer_idx",
@@ -241,6 +299,17 @@ def paged_attention(
         "num_total_blocks",
         "scale",
     ]
+
+    # For paged_attention, we don't have explicit T in source,
+    # but if we use it in future or if we want to support half specialized logic.
+    # Currently paged_attention kernel uses `float` for computation but loads from `queries` (T*).
+    # Metal implicitly handles T* access if MLX generated correct input types.
+    # However, if we use `reshape_and_cache` style template, we should use it here too.
+    # But paged_attention_kernel.metal DOES NOT use {{T}} yet.
+    # It uses `float q_vec`.
+    # Let's keep it as is for now, as Metal handles implicit conversion on load.
+    # The only issue is if we write `output` as `float*` but requested `half` output?
+    # In Python we should set output_dtypes=[dtype].
 
     kernel = _get_kernel(
         name="paged_attention_kernel",
@@ -257,7 +326,7 @@ def paged_attention(
         inputs=inputs,
         grid=grid,
         threadgroup=thread_group,
-        output_shapes=[(batch_size, num_heads, head_dim)],
+        output_shapes=[(batch_size, num_heads, v_head_dim)],
         output_dtypes=[dtype],  # Output matches input dtype
         verbose=False,
     )

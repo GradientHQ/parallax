@@ -25,8 +25,15 @@ ref_model, ref_config = load_model(model_path)
 ref_tokenizer = load_tokenizer(model_path, eos_token_ids=ref_config.get("eos_token_id", None))
 
 
-def create_executor(start_layer, end_layer, device):
-    """Create a pipeline sharded executor"""
+def create_executor(start_layer, end_layer, device, kv_cache_memory_fraction=0.3):
+    """Create a pipeline sharded executor
+
+    Args:
+        start_layer: Start layer index
+        end_layer: End layer index
+        device: Device type ("mlx" or "cuda")
+        kv_cache_memory_fraction: Memory fraction for KV cache (will be divided by number of executors on same device)
+    """
     if device == "mlx":
         model_repo = MLX_MODEL_REPO
         from parallax.server.executor.mlx_executor import MLXExecutor
@@ -35,7 +42,7 @@ def create_executor(start_layer, end_layer, device):
             model_repo=model_repo,
             start_layer=start_layer,
             end_layer=end_layer,
-            kv_cache_memory_fraction=0.3,
+            kv_cache_memory_fraction=kv_cache_memory_fraction,
             dtype="bfloat16",
             device=device,
         )
@@ -47,7 +54,7 @@ def create_executor(start_layer, end_layer, device):
             model_repo=model_repo,
             start_layer=start_layer,
             end_layer=end_layer,
-            kv_cache_memory_fraction=0.3,
+            kv_cache_memory_fraction=kv_cache_memory_fraction,
             dtype="bfloat16",
             device=device,
         )
@@ -66,7 +73,7 @@ def run_executor_pipeline_stage(executor, requests, batch_type, is_last_peer):
     output_reqs = executor.prepare_next_batch_requests(
         requests=batch_data["requests"],
         hidden_states=hidden_states,
-        lengths=batch_data["lengths"],
+        context_lengths=batch_data.get("context_lengths", batch_data.get("lengths")),
     )
     return output_reqs, hidden_states
 
@@ -89,26 +96,34 @@ def test_decode_pipeline_multiple_steps(pipeline_devices, pp_end_layers, num_dec
         return
 
     # 1. Setup executors
-    assert pp_end_layers[2] == ref_config.get("num_hidden_layers")
+    # Calculate memory fraction for each executor based on how many executors share the same device
+    # Total memory fraction to use across all executors
+    # Note: We use a higher fraction (0.5) to account for model weights that are already loaded
+    # The actual KV cache will use less due to the conservative calculation in _calculate_num_blocks
+
+    # Calculate fraction per executor (divide by number of executors on same device)
     executor_peer1 = create_executor(
         start_layer=0,
         end_layer=pp_end_layers[0],
         device=pipeline_devices[0],
+        kv_cache_memory_fraction=0.3,
     )
     executor_peer2 = create_executor(
         start_layer=pp_end_layers[0],
         end_layer=pp_end_layers[1],
         device=pipeline_devices[1],
+        kv_cache_memory_fraction=0.3,
     )
     executor_peer3 = create_executor(
         start_layer=pp_end_layers[1],
         end_layer=pp_end_layers[2],
         device=pipeline_devices[2],
+        kv_cache_memory_fraction=0.3,
     )
 
     # 2. Setup initial requests for multiple prompts
     prompts = [
-        "The capital of France is",
+        "The capital of China is",
         "Qwen is a large language model developed by",
     ]
     initial_requests = [

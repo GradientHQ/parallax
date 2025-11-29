@@ -210,6 +210,7 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
         super().__init__(args)
         self.self_attn = ParallaxGPTOSSAttention(args)
         self.sliding_window = args.sliding_window
+        self.layer_idx = layer_idx
         if args.layer_types:
             self.layer_type = args.layer_types[layer_idx]
         else:

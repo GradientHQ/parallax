@@ -217,20 +217,24 @@ class Scheduler:
 
         Pushes admitted requests directly into the running set.
         """
+        # TODO: pop directly from wait queue ?
         while self._wait_queue and len(self._running_requests) < self.max_batch_size:
             req = self._wait_queue.pop(0)
             rid = req.request_id
             if rid in self._running_requests:
-                # Already inflight; chunked-prefill, skip
                 continue
+
             # Check kv cache pool
             if self.kv_cache_manager is not None:
                 if not self.kv_cache_manager.has_request(req.request_id):
-                    if not self.kv_cache_manager.add_request(req, req.total_length):
+                    # TODO: Handle chunked prefill, and support preemption.
+                    if not self.kv_cache_manager.allocate_request(req.request_id, req.total_length):
                         logger.warning(
                             f"Request {rid} can't be admit to running batch due to KV cache size."
                         )
                         continue
+
+            # Add request to running requests
             self._running_requests[rid] = req
             # Initialize timing for timeout enforcement
             req.last_updated_time = time.time()
@@ -261,7 +265,7 @@ class Scheduler:
             try:
                 if req.last_updated_time is None:
                     raise ValueError("Requests should have last updated time set.")
-                if now - req.last_updated_time > self.timeout_s:
+                if now - req.last_updated_time > self.request_timeout_s:
                     req.abort = True
                     timed_out.append(req)
             except Exception:

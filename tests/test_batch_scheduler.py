@@ -10,10 +10,11 @@ class FakeKVCacheManager:
     def has_request(self, request_id: str) -> bool:
         return request_id in self._reqs
 
-    def add_request(self, request: Request, num_tokens: int = 0) -> bool:
+    def allocate_request(self, request_id: str, num_tokens: int) -> bool:
+        """PagedKV interface."""
         if not self.allow:
             return False
-        self._reqs.add(request.request_id)
+        self._reqs.add(request_id)
         return True
 
 

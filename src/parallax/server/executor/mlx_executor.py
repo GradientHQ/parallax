@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import mlx.core as mx
 
 from parallax.server.executor.base_executor import BaseExecutor
-from parallax.server.kv_cache import KVCacheManager
+from parallax.server.paged_kv_cache import PagedKVCacheManager
 from parallax.server.radix_cache import RadixCache
 from parallax.server.request import (
     InitialRequest,
@@ -113,6 +113,12 @@ class MLXExecutor(BaseExecutor):
         )
         qk_nope_head_dim = self.config.get("qk_nope_head_dim", None)
         qk_rope_head_dim = self.config.get("qk_rope_head_dim", None)
+        if qk_nope_head_dim is not None and qk_rope_head_dim is not None:
+            logger.debug(
+                f"qk_nope_head_dim={qk_nope_head_dim}, qk_rope_head_dim={qk_rope_head_dim}"
+            )
+            head_dim = qk_nope_head_dim + qk_rope_head_dim
+
         v_head_dim = self.config.get("v_head_dim", None)
         linear_key_head_dim = self.config.get("linear_key_head_dim", None)
         linear_value_head_dim = self.config.get("linear_value_head_dim", None)
@@ -129,27 +135,18 @@ class MLXExecutor(BaseExecutor):
         self.using_state_cache = linear_conv_kernel_dim is not None and conv_dim is not None
 
         logger.debug(
-            "Initializing KVCacheManager (mlx) with block_size=%d, layers=%d",
+            "Initializing PagedKVCacheManager (mlx) with block_size=%d, layers=%d",
             kv_block_size,
             self.num_shard_layers,
         )
-        self.kv_cache_manager = KVCacheManager(
-            block_size=kv_block_size,
+        self.kv_cache_manager = PagedKVCacheManager(
+            num_layers=self.num_shard_layers,
             num_kv_heads=num_key_value_heads,
             head_dim=head_dim,
-            num_layers=self.num_shard_layers,
             dtype=self.dtype,
+            block_size=kv_block_size,
             cache_memory_fraction=kv_cache_memory_fraction,
-            conv_dim=conv_dim if conv_dim and conv_dim > 0 else None,
-            conv_kernel_size=linear_conv_kernel_dim,
-            linear_k_dim=linear_key_head_dim,
-            linear_v_dim=linear_value_head_dim,
-            linear_num_k_heads=linear_num_key_heads,
-            linear_num_v_heads=linear_num_value_heads,
-            qk_nope_head_dim=qk_nope_head_dim,
-            qk_rope_head_dim=qk_rope_head_dim,
-            v_head_dim=v_head_dim,
-            max_num_tokens=max_tokens_in_kv_pool,
+            head_dim_v=v_head_dim,
         )
         super().__init__(
             start_layer=start_layer,
@@ -180,13 +177,14 @@ class MLXExecutor(BaseExecutor):
 
         # Prefix Cache Manager
         self.enable_prefix_cache = enable_prefix_cache
-        self.prefix_cache = RadixCache(
-            num_kv_heads=num_key_value_heads,
-            head_dim=head_dim,
-            num_layers=self.num_shard_layers,
-            dtype=self.dtype,
-            page_size=1,
-        )
+        # self.prefix_cache = RadixCache(
+        #     num_kv_heads=num_key_value_heads,
+        #     head_dim=head_dim,
+        #     head_dim_v=v_head_dim,
+        #     num_layers=self.num_shard_layers,
+        #     dtype=self.dtype,
+        #     page_size=1,
+        # )
 
         logger.debug(
             f"KVCacheManager ready; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}"
@@ -281,54 +279,45 @@ class MLXExecutor(BaseExecutor):
     def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """Process a batch of requests in MLX."""
         # Run model and get updated cache
-        if self.using_state_cache:
-            hidden_states, (k_caches, v_caches, states0, states1) = self.model_shard(
-                h_or_tokens=prepared_inputs["h_or_tokens"],
-                cache=prepared_inputs["cache"],
-                lengths=prepared_inputs["lengths"],
-                mask=prepared_inputs["mask"],
-                state_cache=prepared_inputs["state_cache"],
-                using_state_cache=self.using_state_cache,
-            )
-        else:
-            hidden_states, (k_caches, v_caches) = self.model_shard(
-                h_or_tokens=prepared_inputs["h_or_tokens"],
-                cache=prepared_inputs["cache"],
-                lengths=prepared_inputs["lengths"],
-                mask=prepared_inputs["mask"],
-                using_state_cache=self.using_state_cache,
-            )
-            states0, states1 = [None for _ in range(len(k_caches))], [
-                None for _ in range(len(k_caches))
-            ]
-        # k_caches shape: (num_layers, B, num_kv_heads, L_padded, head_dim)
+        # Note: Paged Attention writes KV cache in-place within the model (via reshape_and_cache).
+        # The returned 'hidden_states' is what we need.
+        # The returned cache tuple (_, _) is ignored/unused here.
+        hidden_states = self.model_shard(
+            h_or_tokens=prepared_inputs["h_or_tokens"],
+            cache=prepared_inputs["cache"],
+            mask=prepared_inputs.get("mask"),
+            block_tables=prepared_inputs.get("block_tables"),
+            context_lengths=prepared_inputs.get("context_lengths"),
+            slot_mapping=prepared_inputs.get("slot_mapping"),
+        )
+
         logger.debug(
             f"Processing batch with {len(prepared_inputs['requests'])} requests, "
             f"request status: {prepared_inputs['requests'][0].status}, "
-            f"hidden_states shape: {hidden_states.shape}, "
-            f"k_caches shape: {k_caches.shape}, "
-            f"v_caches shape: {v_caches.shape}"
+            f"hidden_states shape: {hidden_states.shape}"
         )
 
         lengths = mx.zeros((len(prepared_inputs["requests"]),), dtype=mx.int32)
         requests = prepared_inputs["requests"]
         for i, req in enumerate(requests):
             if req.is_prefill:
-                lengths[i] = prepared_inputs["lengths"][i]
+                lengths[i] = prepared_inputs.get("context_lengths")[i]
             elif req.is_decoding:
                 lengths[i] = 1
             else:
                 continue
-        self.kv_cache_manager.update_requests(
-            requests, k_caches, v_caches, lengths, states0, states1
-        )
 
-        # Update prefix cache.
+        # Note: With PagedAttention, we don't need to explicitly update requests with new K/V
+        # because they are written in-place to the global cache.
+        # self.kv_cache_manager.update_requests(...) is REMOVED.
+
+        # Update prefix cache (TODO: Adapt to PagedKV)
         if self.enable_prefix_cache:
-            for _, req in enumerate(requests):
-                if req.is_prefill:
-                    keys, values = self.kv_cache_manager.gather_kv_cache(req.request_id)
-                    self.prefix_cache.cache_unfinished_request(req, keys, values)
+            pass
+            # for _, req in enumerate(requests):
+            #    if req.is_prefill:
+            #        keys, values = self.kv_cache_manager.gather_kv_cache(req.request_id)
+            #        self.prefix_cache.cache_unfinished_request(req, keys, values)
 
         # Process last peer: need additional sampling + detokenization
         if return_decoded_tokens:
@@ -336,9 +325,7 @@ class MLXExecutor(BaseExecutor):
             return mx.array(
                 self.model_shard.logits_to_tokens(hidden_states, lengths, sampling_info)
             )
-        logger.debug(
-            f"Processed batch (device={self.device}, return_tokens={return_decoded_tokens})"
-        )
+
         return hidden_states
 
     def _release_request(self, rid: str):
@@ -365,94 +352,84 @@ class MLXExecutor(BaseExecutor):
         if batch_size == 0:
             return None
 
-        h = []
-        lengths = []
-        actual_lengths = []
-        k_caches = []
-        v_caches = []
-        matched_prefix = False
+        h_or_tokens_list = []
+        block_tables_list = []
+        context_lengths_list = []
+
+        # TODO: Adapt Prefix Cache to PagedKV
+
         for req in batched_requests:
             assert req.is_prefill, f"Request {req.request_id} is not a prefill request."
             if self.is_first_peer:
-                assert hasattr(
-                    req, "input_ids"
-                ), f"Request {req.request_id} should has attribute input_ids in FirstPeer."
-                h.append(req.input_ids)
+                h_or_tokens_list.append(req.input_ids)
             else:
-                assert isinstance(
-                    req, IntermediateRequest
-                ), f"Request {req.request_id} should not be in FirstPeer."
-                h.append(req.hidden_states)
-            lengths.append(req.total_length)
+                h_or_tokens_list.append(req.hidden_states)
 
-            if self.enable_prefix_cache:
-                self.prefix_cache.update_req_to_token(req.request_id, req.input_ids)
-                value, node = self.prefix_cache.match_prefix(req.input_ids[:-1])
-                if value:
-                    kv = self.prefix_cache.fetch_kv_cache(node)
-                    k_caches.append(kv[0])
-                    v_caches.append(kv[1])
-                    assert len(value) == (
-                        kv[0].shape[2]
-                    ), f"Mached prefix length{len(value)} mismatches kv cache length {kv[0].shape[2]}."
-                    matched_prefix = True
-                    self.kv_cache_manager.add_matched_prefix_request(req, kv[0], kv[1], len(value))
-                    actual_lengths.append(req.total_length - len(value))
-                else:
-                    k_caches.append(
-                        mx.zeros(
-                            [
-                                self.prefix_cache.num_layers,
-                                self.prefix_cache.num_kv_heads,
-                                0,
-                                self.prefix_cache.head_dim,
-                            ],
-                            dtype=self.dtype,
-                        )
-                    )
-                    v_caches.append(
-                        mx.zeros(
-                            [
-                                self.prefix_cache.num_layers,
-                                self.prefix_cache.num_kv_heads,
-                                0,
-                                self.prefix_cache.head_dim,
-                            ],
-                            dtype=self.dtype,
-                        )
-                    )
-                    actual_lengths.append(req.total_length)
+            # Allocate Paged KV blocks
+            # For first peer and intermediate peers, we allocate based on prompt length
+            success = self.kv_cache_manager.allocate_request(req.request_id, req.total_length)
+            if not success:
+                raise RuntimeError(f"OOM during prefill allocation for {req.request_id}")
+
+            block_table = self.kv_cache_manager.get_block_table(req.request_id)
+            block_tables_list.append(block_table)
+            # For prefill, context length after this step will be total_length
+            context_lengths_list.append(req.total_length)
 
         if self.is_first_peer:
-            padded_inputs, padding_mask = pad_inputs(self.pad_token_id, h, self.dtype)
-        else:
-            padded_inputs, padding_mask = pad_inputs(0, h, self.dtype)
-
-        k_batched = None
-        v_batched = None
-        if matched_prefix:
-            k_batched, k_padding_mask = pad_prefix_caches(k_caches, lengths, self.dtype)
-            v_batched, _ = pad_prefix_caches(v_caches, lengths, self.dtype)
-            padding_mask = k_padding_mask
-            causal_mask = create_causal_mask(padded_inputs.shape[1], max(lengths), self.dtype)
-            mask = combine_padding_and_causal_masks(padding_mask, causal_mask, self.dtype)
-        else:
-            causal_mask = create_causal_mask(
-                padded_inputs.shape[1], padded_inputs.shape[1], self.dtype
+            padded_inputs, padding_mask = pad_inputs(
+                self.pad_token_id, h_or_tokens_list, self.dtype
             )
-            mask = combine_padding_and_causal_masks(padding_mask, causal_mask, self.dtype)
+        else:
+            padded_inputs, padding_mask = pad_inputs(0, h_or_tokens_list, self.dtype)
+
+        # Generate slot_mapping (Batch * MaxLen) for prefill
+        max_len = padded_inputs.shape[1]
+        slot_mapping_flat = []
+
+        for i, req in enumerate(batched_requests):
+            block_table = block_tables_list[i]
+            length = req.total_length
+
+            for seq_idx in range(max_len):
+                if seq_idx < length:
+                    # Valid token
+                    block_idx = seq_idx // self.kv_cache_manager.block_size
+                    block_offset = seq_idx % self.kv_cache_manager.block_size
+                    physical_block = block_table[block_idx]
+                    slot = physical_block * self.kv_cache_manager.block_size + block_offset
+                    slot_mapping_flat.append(slot)
+                else:
+                    # Padding token
+                    # Map to -1. The kernel should ignore this.
+                    slot_mapping_flat.append(-1)
+
+        slot_mapping_tensor = mx.array(slot_mapping_flat, dtype=mx.int64)
+
+        # Pad block tables
+        max_blocks = max(len(bt) for bt in block_tables_list)
+        padded_block_tables = []
+        for bt in block_tables_list:
+            padded_block_tables.append(bt + [0] * (max_blocks - len(bt)))
+
+        block_tables_tensor = mx.array(padded_block_tables, dtype=mx.int32)
+        context_lengths_tensor = mx.array(context_lengths_list, dtype=mx.int32)
+
+        # Create mask for standard attention (used during Prefill computation)
+        causal_mask = create_causal_mask(padded_inputs.shape[1], padded_inputs.shape[1], self.dtype)
+        mask = combine_padding_and_causal_masks(padding_mask, causal_mask, self.dtype)
 
         ret = {
             "h_or_tokens": padded_inputs,
-            "cache": (k_batched, v_batched) if matched_prefix else None,
-            "lengths": mx.array(actual_lengths) if matched_prefix else mx.array(lengths),
+            "cache": self.kv_cache_manager.get_cache(),
             "mask": mask,
             "requests": batched_requests,
+            "block_tables": block_tables_tensor,
+            "context_lengths": context_lengths_tensor,
+            "slot_mapping": slot_mapping_tensor,
             "state_cache": None,
         }
-        logger.debug(
-            f"Prepared MLX prefill batch (size={batch_size}, matched_prefix={matched_prefix})"
-        )
+        logger.debug(f"Prepared MLX prefill batch (size={batch_size})")
         return ret
 
     def _prepare_decode_batch(self, batched_requests: List[Request]) -> Optional[Dict[str, Any]]:
@@ -461,63 +438,56 @@ class MLXExecutor(BaseExecutor):
         if batch_size == 0:
             return None
 
-        h_list = []
-        cache_lengths = []
-        kv_cache_list = []
+        h_or_tokens_list = []
+        block_tables_list = []
+        context_lengths_list = []
 
         for req in batched_requests:
             assert req.is_decoding, f"Request {req.request_id} is not a decode request."
 
             if self.is_first_peer:
-                assert isinstance(req, InitialRequest)
                 # First peer input is the last generated token
-                h_list.append([req.output_ids[-1]])
+                h_or_tokens_list.append([req.output_ids[-1]])
             else:
-                assert isinstance(req, IntermediateRequest)
-                assert req.hidden_states is not None and req.hidden_states.shape[0] == 1
-                h_list.append(req.hidden_states)
-            if self.enable_prefix_cache:
-                self.prefix_cache.update_req_to_token(req.request_id, list([req.next_token_id]))
+                h_or_tokens_list.append(req.hidden_states)
 
-            num_tokens_in_cache = self.kv_cache_manager.request_length(req.request_id)
-            cache_lengths.append(num_tokens_in_cache)
-            kv_cache = self.kv_cache_manager.gather_kv_cache(req.request_id)
-            kv_cache_list.append(kv_cache)
+            # TODO: Prefix cache update
 
-        padded_inputs, _ = pad_inputs(0, h_list, self.dtype)
+            # Allocate slot for new token
+            success = self.kv_cache_manager.append_slot(req.request_id)
+            if not success:
+                raise RuntimeError(f"OOM during decode for {req.request_id}")
 
-        if not kv_cache_list:
-            raise ValueError("No KV cache found for request.")
+            block_table = self.kv_cache_manager.get_block_table(req.request_id)
+            block_tables_list.append(block_table)
+            context_lengths_list.append(self.kv_cache_manager.get_context_length(req.request_id))
 
-        k_caches = [kv[0] for kv in kv_cache_list]
-        v_caches = [kv[1] for kv in kv_cache_list]
-        states0 = [kv[2] for kv in kv_cache_list]
-        states1 = [kv[3] for kv in kv_cache_list]
+        if isinstance(h_or_tokens_list[0], list):
+            # First peer case: h_or_tokens_list is list of list of ints [[token_id], ...]
+            padded_inputs = mx.array(h_or_tokens_list, dtype=mx.int32)  # (Batch, 1)
+        else:
+            # Intermediate peer case: h_or_tokens_ list is list of mx.arrays (1, D)
+            padded_inputs = mx.concatenate(h_or_tokens_list, axis=0)  # (Batch, D)
+            padded_inputs = padded_inputs.reshape(batch_size, 1, -1)  # (Batch, 1, D)
 
-        k_batched, k_padding_mask = pad_inputs(0, k_caches, self.dtype)
-        v_batched, _ = pad_inputs(0, v_caches, self.dtype)
+        # Pad block tables
+        max_blocks = max(len(bt) for bt in block_tables_list)
+        padded_block_tables = []
+        for bt in block_tables_list:
+            padded_block_tables.append(bt + [0] * (max_blocks - len(bt)))
 
-        # The mask from padding K is for the PAST tokens. It has shape (B, 1, 1, source_len_padded).
-        # We need to add a '1' for the CURRENT token so the final mask can be broadcast
-        # to the attention weights of shape (B, n_heads, 1, source_len_padded + 1).
-        ones_for_current_token = mx.ones((k_padding_mask.shape[0], 1, 1, 1), dtype=self.dtype)
-        final_padding_mask = mx.concatenate([k_padding_mask, ones_for_current_token], axis=3)
-        inf_value = get_infinite_value_by_dtype(self.dtype)
-        attention_mask = (1.0 - final_padding_mask) * -inf_value
-
-        model_lengths = mx.array([kv[0].shape[2] for kv in kv_cache_list])
-
-        if self.using_state_cache:
-            states0 = mx.stack(states0, 0)
-            states1 = mx.stack(states1, 0)
+        block_tables_tensor = mx.array(padded_block_tables, dtype=mx.int32)
+        context_lengths_tensor = mx.array(context_lengths_list, dtype=mx.int32)
 
         ret = {
             "h_or_tokens": padded_inputs,
-            "cache": (k_batched, v_batched),
-            "lengths": model_lengths,
-            "mask": attention_mask,
+            "cache": self.kv_cache_manager.get_cache(),
+            "mask": None,
             "requests": batched_requests,
-            "state_cache": (states0, states1),
+            "block_tables": block_tables_tensor,
+            "context_lengths": context_lengths_tensor,
+            "slot_mapping": None,
+            "state_cache": None,
         }
         logger.debug(f"Prepared MLX decode batch (size={batch_size})")
         return ret

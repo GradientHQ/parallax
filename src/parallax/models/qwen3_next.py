@@ -201,6 +201,7 @@ class ParallaxQwen3NextBlock(MLXQwen3NextBlock):
 
     def __init__(self, args: ModelArgs, layer_idx: int):
         super().__init__(args, layer_idx)
+        self.layer_idx = layer_idx
         if self.is_linear:
             self.linear_attn = ParallaxQwen3NextGatedDeltaNet(args)
         else:
