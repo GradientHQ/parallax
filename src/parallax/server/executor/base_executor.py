@@ -341,7 +341,7 @@ class BaseExecutor:
         }
 
     def prepare_next_batch_requests(
-        self, requests: List[Request], hidden_states: Any, lengths: Any
+        self, requests: List[Request], hidden_states: Any, context_lengths: Any
     ) -> List[Request]:
         """Prepares a batch of requests for the next stage of the pipeline."""
         if self.tp_rank == 0:
@@ -354,7 +354,7 @@ class BaseExecutor:
                 else:
                     # Other peers get a 3D array of hidden states
                     if src_request.is_prefill:
-                        true_length = int(lengths[i])
+                        true_length = int(context_lengths[i])
                         if hidden_states.ndim == 3:
                             hidden_state_for_req = hidden_states[i, :true_length, :]
                         else:
@@ -483,7 +483,9 @@ class BaseExecutor:
                         next_batch = self.prepare_next_batch_requests(
                             requests=prepared_inputs["requests"],
                             hidden_states=output,
-                            lengths=prepared_inputs["lengths"],
+                            context_lengths=prepared_inputs.get(
+                                "context_lengths", prepared_inputs.get("lengths")
+                            ),
                         )
 
                         # 8. Dispatch to the appropriate destination
