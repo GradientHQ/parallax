@@ -35,19 +35,9 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
         """
         batch, target_len, _ = x.shape
 
-        print(f"Layer {layer_idx} x min/max: {x.min().item()}, {x.max().item()}")
         queries_new = self.q_proj(x)
         keys_new = self.k_proj(x)
         values_new = self.v_proj(x)
-        print(
-            f"Layer {layer_idx} queries_new min/max: {queries_new.min().item()}, {queries_new.max().item()}"
-        )
-        print(
-            f"Layer {layer_idx} keys_new min/max: {keys_new.min().item()}, {keys_new.max().item()}"
-        )
-        print(
-            f"Layer {layer_idx} values_new min/max: {values_new.min().item()}, {values_new.max().item()}"
-        )
 
         queries_new = queries_new.reshape(
             batch, target_len, self.num_attention_heads, -1
@@ -107,7 +97,7 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                 sinks=self.sinks,
             )
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
-            print(f"decode output: {output}")
+            # print(f"decode output: {output}")
         else:
 
             if window_size is not None:
@@ -122,18 +112,6 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                 else:
                     mask = mask_prefill
 
-            mx.eval(queries_rotated, keys_rotated, values_new)
-            print(
-                f"Layer {layer_idx} Q min/max: {queries_rotated.min().item()}, {queries_rotated.max().item()}"
-            )
-            print(
-                f"Layer {layer_idx} K min/max: {keys_rotated.min().item()}, {keys_rotated.max().item()}"
-            )
-            print(
-                f"Layer {layer_idx} V min/max: {values_new.min().item()}, {values_new.max().item()}"
-            )
-            print(f"Layer {layer_idx} sinks: {self.sinks}")
-
             if mask is not None:
                 mask = mask.astype(queries_rotated.dtype)
 
@@ -147,7 +125,7 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                 sinks=self.sinks,
             )
 
-            print(f"prefill output: {output}")
+            # print(f"prefill output: {output}")
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
 
         return self.o_proj(output)
