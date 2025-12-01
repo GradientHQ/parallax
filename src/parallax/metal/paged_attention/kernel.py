@@ -228,6 +228,7 @@ def paged_attention(
     num_kv_heads: int,
     layer_idx: int,
     v_head_dim: Optional[int] = None,
+    window_size: Optional[int] = None,
 ) -> mx.array:
     """
     Paged Attention using Metal Kernel.
@@ -244,6 +245,9 @@ def paged_attention(
     k_head_dim = queries.shape[2]
     if v_head_dim is None:
         v_head_dim = k_head_dim
+
+    # Use -1 to represent full attention (infinite window)
+    c_window_size_val = window_size if window_size is not None else -1
 
     num_layers = key_cache.shape[0]
     num_total_blocks = key_cache.shape[1]
@@ -263,6 +267,7 @@ def paged_attention(
     c_num_layers = mk_int(num_layers)
     c_num_total_blocks = mk_int(num_total_blocks)
     c_scale = mx.array(scale, dtype=mx.float32)
+    c_window_size = mk_int(c_window_size_val)
 
     inputs = [
         queries,
@@ -280,6 +285,7 @@ def paged_attention(
         c_num_layers,
         c_num_total_blocks,
         c_scale,
+        c_window_size,
     ]
 
     input_names = [
@@ -298,6 +304,7 @@ def paged_attention(
         "num_layers",
         "num_total_blocks",
         "scale",
+        "window_size",
     ]
 
     # For paged_attention, we don't have explicit T in source,

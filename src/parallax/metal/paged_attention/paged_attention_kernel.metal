@@ -3,7 +3,7 @@
 // queries, key_cache, value_cache, block_tables, context_lengths
 // output (output array)
 // num_heads, num_kv_heads, k_head_dim, v_head_dim, block_size, max_blocks, layer_idx,
-// num_layers, num_total_blocks, scale (All pointers)
+// num_layers, num_total_blocks, scale, window_size (All pointers)
 
 uint3 gid = thread_position_in_grid;
 uint3 tid = thread_position_in_threadgroup;
@@ -27,6 +27,7 @@ int _max_blocks = max_blocks;
 int _layer_idx = layer_idx;
 int _num_total_blocks = num_total_blocks;
 float _scale = scale;
+int _window_size = window_size;
 
 if (head_idx >= _num_heads)
   return;
@@ -76,6 +77,22 @@ long v_layer_offset = _layer_idx * v_layer_stride;
 for (int b = 0; b < num_context_blocks; b++) {
   int block_num = block_tables[batch_idx * _max_blocks + b];
 
+  // Calculate logic position range for this block
+  int block_start_pos = b * _block_size;
+  int block_end_pos = block_start_pos + _block_size; // exclusive
+
+  // Handle Window Attention Skip
+  // Current query position is at (context_len - 1)
+  // Window range is [context_len - 1 - window_size, context_len - 1]
+  // If window_size == -1, it means full attention (infinite window)
+  if (_window_size > 0) {
+      int window_start = context_len - 1 - _window_size;
+      if (block_end_pos <= window_start) {
+          // Entire block is out of window
+          continue;
+      }
+  }
+
   long k_block_base =
       k_layer_offset + block_num * k_block_stride + kv_head_idx * k_head_stride;
   long v_block_base =
@@ -89,6 +106,15 @@ for (int b = 0; b < num_context_blocks; b++) {
   }
 
   for (int t = 0; t < tokens_in_block; t++) {
+    // Check if token is within window
+    if (_window_size > 0) {
+        int token_pos = block_start_pos + t;
+        int window_start = context_len - 1 - _window_size;
+        if (token_pos < window_start) {
+            continue;
+        }
+    }
+
     // Compute Dot Product Q * K[t]
     float score = 0.0f;
     for (int i = tid.x; i < _k_head_dim; i += 32) {
