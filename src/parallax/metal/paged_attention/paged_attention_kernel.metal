@@ -3,7 +3,7 @@
 // queries, key_cache, value_cache, block_tables, context_lengths
 // output (output array)
 // num_heads, num_kv_heads, k_head_dim, v_head_dim, block_size, max_blocks, layer_idx,
-// num_layers, num_total_blocks, scale, window_size (All pointers)
+// num_layers, num_total_blocks, scale, window_size, sinks (All pointers)
 
 uint3 gid = thread_position_in_grid;
 uint3 tid = thread_position_in_threadgroup;
@@ -106,9 +106,11 @@ for (int b = 0; b < num_context_blocks; b++) {
   }
 
   for (int t = 0; t < tokens_in_block; t++) {
+    int token_pos = block_start_pos + t;
+    bool is_sink_token = (token_pos == 0);
+
     // Check if token is within window
-    if (_window_size > 0) {
-        int token_pos = block_start_pos + t;
+    if (_window_size > 0 && !is_sink_token) {
         int window_start = context_len - 1 - _window_size;
         if (token_pos < window_start) {
             continue;
@@ -129,6 +131,12 @@ for (int b = 0; b < num_context_blocks; b++) {
     // SIMD Reduction for score
     score = simd_sum(score);
     score *= _scale;
+
+    // Apply Sinks Bias for the first token
+    if (is_sink_token) {
+       // Sinks buffer assumed to be bound at index 14
+       score += sinks[head_idx];
+    }
 
     // Softmax update
     float m_prev = m_i;

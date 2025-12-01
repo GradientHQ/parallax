@@ -229,6 +229,7 @@ def paged_attention(
     layer_idx: int,
     v_head_dim: Optional[int] = None,
     window_size: Optional[int] = None,
+    sinks: Optional[mx.array] = None,
 ) -> mx.array:
     """
     Paged Attention using Metal Kernel.
@@ -269,6 +270,13 @@ def paged_attention(
     c_scale = mx.array(scale, dtype=mx.float32)
     c_window_size = mk_int(c_window_size_val)
 
+    if sinks is None:
+        # Pass a dummy array if no sinks provided (e.g. zeros)
+        # Assuming num_heads is enough to cover head_idx access
+        c_sinks = mx.zeros((num_heads,), dtype=mx.float32)
+    else:
+        c_sinks = sinks.astype(mx.float32)
+
     inputs = [
         queries,
         key_cache,
@@ -286,6 +294,7 @@ def paged_attention(
         c_num_total_blocks,
         c_scale,
         c_window_size,
+        c_sinks,
     ]
 
     input_names = [
@@ -305,6 +314,7 @@ def paged_attention(
         "num_total_blocks",
         "scale",
         "window_size",
+        "sinks",
     ]
 
     # For paged_attention, we don't have explicit T in source,

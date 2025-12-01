@@ -104,6 +104,7 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                 self.num_key_value_heads,
                 layer_idx,
                 window_size=window_size,
+                sinks=self.sinks,
             )
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
             print(f"decode output: {output}")
@@ -121,11 +122,6 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                 else:
                     mask = mask_prefill
 
-            # Debug Prints
-            if mask is not None:
-                mx.eval(mask)
-                print(f"Layer {layer_idx} Mask min/max: {mask.min().item()}, {mask.max().item()}")
-
             mx.eval(queries_rotated, keys_rotated, values_new)
             print(
                 f"Layer {layer_idx} Q min/max: {queries_rotated.min().item()}, {queries_rotated.max().item()}"
@@ -136,11 +132,7 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
             print(
                 f"Layer {layer_idx} V min/max: {values_new.min().item()}, {values_new.max().item()}"
             )
-
-            # print(f"mask: {mask}")
-            # print(f"queries_rotated: {queries_rotated}")
-            # print(f"keys_rotated: {keys_rotated}")
-            # print(f"values_new: {values_new}")
+            print(f"Layer {layer_idx} sinks: {self.sinks}")
 
             if mask is not None:
                 mask = mask.astype(queries_rotated.dtype)
@@ -152,10 +144,8 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                 scale=self.sm_scale,
                 mask=mask,
                 cache=None,
-            ).astype(queries_rotated.dtype)
-
-            if mx.isnan(output).any():
-                print(f"!!! Layer {layer_idx} Output contains NaN !!!")
+                sinks=self.sinks,
+            )
 
             print(f"prefill output: {output}")
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
@@ -207,11 +197,8 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
             window_size=window_size,
         )
         h = x + r
-        print(f"Layer {self.layer_idx} h min/max: {h.min().item()}, {h.max().item()}")
         r = self.mlp(self.post_attention_layernorm(h))
-        print(f"Layer {self.layer_idx} r min/max: {r.min().item()}, {r.max().item()}")
         out = h + r
-        print(f"Layer {self.layer_idx} out min/max: {out.min().item()}, {out.max().item()}")
         return out
 
     @classmethod
