@@ -73,7 +73,7 @@ def run_executor_pipeline_stage(executor, requests, batch_type, is_last_peer):
     output_reqs = executor.prepare_next_batch_requests(
         requests=batch_data["requests"],
         hidden_states=hidden_states,
-        context_lengths=batch_data.get("context_lengths", batch_data.get("lengths")),
+        context_lengths=batch_data.get("context_lengths"),
     )
     return output_reqs, hidden_states
 

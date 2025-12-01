@@ -318,7 +318,7 @@ class VLLMExecutor(BaseExecutor):
         ret = {
             "scheduler_output": schedule_outputs_prefill,
             "pp_proxy_tensors": pp_proxy_tensors,
-            "lengths": lengths_tensor,
+            "context_lengths": lengths_tensor,
             "requests": batched_requests,
         }
         logger.debug(f"Prepared CUDA prefill batch (vllm, size={batch_size})")
@@ -377,7 +377,7 @@ class VLLMExecutor(BaseExecutor):
         ret = {
             "scheduler_output": scheduler_outputs_decode,
             "pp_proxy_tensors": pp_proxy_tensors,
-            "lengths": lengths_tensor,
+            "context_lengths": lengths_tensor,
             "requests": batched_requests,
         }
         logger.debug(f"Prepared CUDA decode batch (vllm, size={batch_size})")

@@ -483,9 +483,7 @@ class BaseExecutor:
                         next_batch = self.prepare_next_batch_requests(
                             requests=prepared_inputs["requests"],
                             hidden_states=output,
-                            context_lengths=prepared_inputs.get(
-                                "context_lengths", prepared_inputs.get("lengths")
-                            ),
+                            context_lengths=prepared_inputs.get("context_lengths"),
                         )
 
                         # 8. Dispatch to the appropriate destination

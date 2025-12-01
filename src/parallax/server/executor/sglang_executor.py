@@ -331,7 +331,7 @@ class SGLExecutor(BaseExecutor):
         ret = {
             "forward_batch": forward_batch,
             "pp_proxy_tensors": pp_proxy_tensors,
-            "lengths": lengths_tensor,
+            "context_lengths": lengths_tensor,
             "requests": batched_requests,
         }
         logger.debug(f"Prepared CUDA prefill batch (sglang, size={batch_size})")
@@ -390,7 +390,7 @@ class SGLExecutor(BaseExecutor):
         ret = {
             "forward_batch": forward_batch,
             "pp_proxy_tensors": pp_proxy_tensors,
-            "lengths": lengths_tensor,
+            "context_lengths": lengths_tensor,
             "requests": batched_requests,
         }
         logger.debug(f"Prepared CUDA decode batch (sglang, size={batch_size})")
