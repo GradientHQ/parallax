@@ -66,9 +66,6 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
         # Update Paged Cache
         block_size = key_cache_global.shape[3]
 
-        # print(f"keys_rotated: {keys_rotated}")
-        # print(f"values_new: {values_new}")
-
         reshape_and_cache(
             keys_rotated.transpose(0, 2, 1, 3),
             values_new,
@@ -97,24 +94,13 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                 sinks=self.sinks,
             )
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
-            # print(f"decode output: {output}")
         else:
-
             if window_size is not None:
                 mask_prefill = create_causal_mask(target_len, offset=0, window_size=window_size)
-                # Ensure mask is additive (0, -inf)
-                if mask_prefill.max() > 0:
-                    # Assume it is (1, 0) or similar, convert to (0, -1e9)
-                    mask_prefill = (1 - mask_prefill) * -1e9
+                mask_prefill = (1 - mask_prefill) * -1e9
+                mask = mask + mask_prefill
 
-                if mask is not None:
-                    mask = mask + mask_prefill
-                else:
-                    mask = mask_prefill
-
-            if mask is not None:
-                mask = mask.astype(queries_rotated.dtype)
-
+            mask = mask.astype(queries_rotated.dtype)
             output = scaled_dot_product_attention(
                 queries_rotated,
                 keys_rotated,
@@ -124,8 +110,6 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                 cache=None,
                 sinks=self.sinks,
             )
-
-            # print(f"prefill output: {output}")
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
 
         return self.o_proj(output)
