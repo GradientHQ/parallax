@@ -171,7 +171,6 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
     def __init__(self, args: ModelArgs, layer_idx: int):
         super().__init__(args)
         self.self_attn = ParallaxGPTOSSAttention(args)
-        self.mlp = ParallaxMLPBlock(args)
         self.sliding_window = args.sliding_window
         self.layer_idx = layer_idx
         if args.layer_types:
