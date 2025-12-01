@@ -9,7 +9,6 @@ import mlx.core as mx
 
 from parallax.server.executor.base_executor import BaseExecutor
 from parallax.server.paged_kv_cache import PagedKVCacheManager
-from parallax.server.radix_cache import RadixCache
 from parallax.server.request import (
     InitialRequest,
     IntermediateRequest,
@@ -22,9 +21,7 @@ from parallax.utils.utils import (
     combine_padding_and_causal_masks,
     create_causal_mask,
     get_device_dtype,
-    get_infinite_value_by_dtype,
     pad_inputs,
-    pad_prefix_caches,
 )
 from parallax_utils.logging_config import get_logger
 
