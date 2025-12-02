@@ -214,13 +214,13 @@ if __name__ == "__main__":
                 display_parallax_join(args.model_path)
             check_latest_release()
 
-            # only launch http server on head node
-            if args.start_layer == 0:
-                http_server_process = launch_http_server(args)
-
             # Main execution loop with layer reallocation support
             while True:
                 try:
+                    # only launch http server on head node
+                    if args.start_layer == 0:
+                        http_server_process = launch_http_server(args)
+                    
                     # Launch all executor processes (including tp_rank=0)
                     executor_subprocs = []
                     for tp_rank in range(args.tp_size):
@@ -245,6 +245,8 @@ if __name__ == "__main__":
                             status=ServerState.INITIALIZING.value,
                         )
                         _stop_executor_processes(executor_subprocs)
+                        if http_server_process is not None:
+                            stop_http_server(http_server_process)
                         _update_args_from_shared_state(args, shared_state)
                         logger.info(
                             f"Reloading executor with layers [{args.start_layer}, {args.end_layer})"
