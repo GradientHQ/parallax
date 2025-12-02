@@ -54,6 +54,26 @@ float m_i = -INFINITY;
 float l_i = 0.0f;
 float acc_vec[8] = {0.0f};
 
+// -------------------------------------------------------------------------
+// Handle Implicit Sink Token (KV = 0, Not in Block Table)
+// -------------------------------------------------------------------------
+// The sink token is assumed to be an extra token (logical pos 0? or just extra)
+// that is NOT stored in the paged KV blocks.
+// Its Key is 0, Value is 0.
+// Its Attention Score = (Q * K_sink) * scale + sinks_bias
+//                     = (Q * 0) * scale + sinks[head_idx]
+//                     = sinks[head_idx]
+
+float sink_score = sinks[head_idx];
+
+// Initialize Softmax stats with Sink Token if it's not masked out (-inf)
+// We use a threshold slightly larger than -INFINITY to avoid precision issues
+if (sink_score > -3.40282e+38f) { // roughly > -FLT_MAX
+    m_i = sink_score;
+    l_i = 1.0f;
+    // acc_vec remains 0.0f because V_sink is 0.
+}
+
 int context_len = context_lengths[batch_idx];
 int num_context_blocks = (context_len + _block_size - 1) / _block_size;
 
@@ -84,7 +104,10 @@ for (int b = 0; b < num_context_blocks; b++) {
   // Handle Window Attention Skip
   // Current query position is at (context_len - 1)
   // Window range is [context_len - 1 - window_size, context_len - 1]
-  // If window_size == -1, it means full attention (infinite window)
+  
+  // NOTE: Sink token is handled separately above, so we don't need to protect block 0
+  // unless block 0 also contains other vital tokens (it usually does).
+  
   if (_window_size > 0) {
       int window_start = context_len - 1 - _window_size;
       if (block_end_pos <= window_start) {
@@ -107,10 +130,9 @@ for (int b = 0; b < num_context_blocks; b++) {
 
   for (int t = 0; t < tokens_in_block; t++) {
     int token_pos = block_start_pos + t;
-    bool is_sink_token = (token_pos == 0);
 
     // Check if token is within window
-    if (_window_size > 0 && !is_sink_token) {
+    if (_window_size > 0) {
         int window_start = context_len - 1 - _window_size;
         if (token_pos < window_start) {
             continue;
@@ -131,12 +153,6 @@ for (int b = 0; b < num_context_blocks; b++) {
     // SIMD Reduction for score
     score = simd_sum(score);
     score *= _scale;
-
-    // Apply Sinks Bias for the first token
-    if (is_sink_token) {
-       // Sinks buffer assumed to be bound at index 14
-       score += sinks[head_idx];
-    }
 
     // Softmax update
     float m_prev = m_i;
