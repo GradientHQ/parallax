@@ -105,6 +105,7 @@ class Request:
         self.abort = False
         self.ready_for_next_step = False
         self.last_updated_time: Optional[float] = None
+        self.lora_id: Optional[str] = None
 
     @property
     def is_finished(self) -> bool:

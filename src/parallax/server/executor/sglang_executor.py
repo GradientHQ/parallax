@@ -5,9 +5,11 @@ SGLang backend implementation of high level executor
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
+from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.managers.schedule_batch import ScheduleBatch
 from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
 from sglang.srt.utils import broadcast_pyobj
+from sglang.srt.utils.common import SUPPORTED_LORA_TARGET_MODULES
 
 from parallax.server.executor.base_executor import BaseExecutor
 from parallax.server.request import (
@@ -80,6 +82,24 @@ class SGLExecutor(BaseExecutor):
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
     ):
+
+        self.enable_lora = True if lora_paths is not None else enable_lora
+        self.lora_paths = lora_paths
+        self.max_lora_rank = max_lora_rank
+        self.lora_target_modules = lora_target_modules
+        self.max_loras_per_batch = 1 if max_loras_per_batch is None else max_loras_per_batch
+        self.max_loaded_loras = max_loaded_loras
+        self.lora_eviction_policy = lora_eviction_policy
+        self.lora_backend = lora_backend
+        self.max_lora_chunk_size = max_lora_chunk_size
+
+        if self.lora_paths is not None and len(self.lora_paths) > 0:
+            self.check_lora_server_args()
+
+        # output lora paths
+        if self.lora_paths is not None:
+            logger.info(f"LoRA paths provided: {[str(lora_path) for lora_path in self.lora_paths]}")
+
         model_runner_params = {
             "model_repo": model_repo,
             "start_layer": start_layer,
@@ -94,15 +114,15 @@ class SGLExecutor(BaseExecutor):
             "tp_size": tp_size,
             "nccl_port": nccl_port,
             "using_hfcache": use_hfcache,
-            "enable_lora": enable_lora,
-            "max_lora_rank": max_lora_rank,
-            "lora_target_modules": lora_target_modules,
-            "lora_paths": lora_paths,
-            "max_loras_per_batch": max_loras_per_batch,
-            "max_loaded_loras": max_loaded_loras,
-            "lora_eviction_policy": lora_eviction_policy,
-            "lora_backend": lora_backend,
-            "max_lora_chunk_size": max_lora_chunk_size,
+            "enable_lora": self.enable_lora,
+            "max_lora_rank": self.max_lora_rank,
+            "lora_target_modules": self.lora_target_modules,
+            "lora_paths": self.lora_paths,
+            "max_loras_per_batch": self.max_loras_per_batch,
+            "max_loaded_loras": self.max_loaded_loras,
+            "lora_eviction_policy": self.lora_eviction_policy,
+            "lora_backend": self.lora_backend,
+            "max_lora_chunk_size": self.max_lora_chunk_size,
         }
         logger.debug(
             f"Initializing SGLang model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
@@ -138,7 +158,92 @@ class SGLExecutor(BaseExecutor):
         self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
         self.tp_group = self.model_runner.tp_group
         self.tp_cpu_group = self.tp_group.cpu_group
-        self.lora_paths = lora_paths
+
+    def check_lora_server_args(self):
+        assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
+
+        # Enable LoRA if any LoRA paths are provided for backward compatibility.
+        if self.lora_paths:
+            if self.enable_lora is None:
+                self.enable_lora = True
+                logger.warning("--enable-lora is set to True because --lora-paths is provided.")
+            elif self.enable_lora is False:
+                logger.warning(
+                    "--enable-lora is set to False, any provided lora_paths will be ignored."
+                )
+
+        if self.enable_lora:
+            # Parse lora_paths
+            if isinstance(self.lora_paths, list):
+                lora_paths = self.lora_paths
+                self.lora_paths = []
+                for lora_path in lora_paths:
+                    if isinstance(lora_path, str):
+                        if "=" in lora_path:
+                            name, path = lora_path.split("=", 1)
+                            lora_ref = LoRARef(lora_name=name, lora_path=path, pinned=False)
+                        else:
+                            lora_ref = LoRARef(
+                                lora_name=lora_path, lora_path=lora_path, pinned=False
+                            )
+                    elif isinstance(lora_path, dict):
+                        assert (
+                            "lora_name" in lora_path and "lora_path" in lora_path
+                        ), f"When providing LoRA paths as a list of dict, each dict should contain 'lora_name' and 'lora_path' keys. Got: {lora_path}"
+                        lora_ref = LoRARef(
+                            lora_name=lora_path["lora_name"],
+                            lora_path=lora_path["lora_path"],
+                            pinned=lora_path.get("pinned", False),
+                        )
+                    else:
+                        raise ValueError(
+                            f"Invalid type for item in --lora-paths list: {type(lora_path)}. "
+                            "Expected a string or a dictionary."
+                        )
+                    self.lora_paths.append(lora_ref)
+            elif isinstance(self.lora_paths, dict):
+                self.lora_paths = [
+                    LoRARef(lora_name=k, lora_path=v, pinned=False)
+                    for k, v in self.lora_paths.items()
+                ]
+            elif self.lora_paths is None:
+                self.lora_paths = []
+            else:
+                raise ValueError(
+                    f"Invalid type for --lora-paths: {type(self.lora_paths)}. "
+                    "Expected a list or a dictionary."
+                )
+
+            # Expand target modules
+            if self.lora_target_modules:
+                self.lora_target_modules = set(self.lora_target_modules)
+                if "all" in self.lora_target_modules:
+                    assert (
+                        len(self.lora_target_modules) == 1
+                    ), "If 'all' is specified in --lora-target-modules, it should be the only module specified."
+                    self.lora_target_modules = set(SUPPORTED_LORA_TARGET_MODULES)
+
+            # Ensure sufficient information is provided for LoRA initialization.
+            assert self.lora_paths or (
+                self.max_lora_rank and self.lora_target_modules
+            ), "When no initial --lora-paths is provided, you need to specify both --max-lora-rank and --lora-target-modules for LoRA initialization."
+
+            # Validate max_loaded_loras
+            if self.max_loaded_loras is not None:
+                assert self.max_loaded_loras >= self.max_loras_per_batch, (
+                    "max_loaded_loras should be greater than or equal to max_loras_per_batch. "
+                    f"max_loaded_loras={self.max_loaded_loras}, max_loras_per_batch={self.max_loras_per_batch}"
+                )
+                assert len(self.lora_paths) <= self.max_loaded_loras, (
+                    "The number of LoRA paths should not exceed max_loaded_loras. "
+                    f"max_loaded_loras={self.max_loaded_loras}, lora_paths={len(self.lora_paths)}"
+                )
+
+            if self.max_lora_chunk_size is not None:
+                assert (
+                    16 <= self.max_lora_chunk_size <= 128
+                    and (self.max_lora_chunk_size & (self.max_lora_chunk_size - 1)) == 0
+                ), "--max-lora-chunk-size must be a power of 2 between 16 and 128."
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
@@ -323,11 +428,15 @@ class SGLExecutor(BaseExecutor):
         # Prepare lengths (common for both backends)
         lengths = []
         for req in batched_requests:
+            req.lora_id = (
+                self.lora_paths[0].lora_id if self.lora_paths and len(self.lora_paths) > 0 else None
+            )
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
         schedule_batch, forward_batch = form_sgl_batch_prefill(
-            batched_requests, self.model_runner, self.lora_paths
+            batched_requests,
+            self.model_runner,
         )
         self.cur_batch = schedule_batch
 
