@@ -326,7 +326,9 @@ class SGLExecutor(BaseExecutor):
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
-        schedule_batch, forward_batch = form_sgl_batch_prefill(batched_requests, self.model_runner, self.lora_paths)
+        schedule_batch, forward_batch = form_sgl_batch_prefill(
+            batched_requests, self.model_runner, self.lora_paths
+        )
         self.cur_batch = schedule_batch
 
         ret = {

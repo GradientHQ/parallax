@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import List, Optional
 
 import torch
+from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_executor.model_runner import ModelRunner
@@ -17,7 +18,6 @@ from sglang.srt.sampling.sampling_batch_info import (
 )
 from sglang.srt.sampling.sampling_params import SamplingParams as SGLSamplingParams
 from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
-from sglang.srt.lora.lora_registry import LoRARef
 
 from parallax.server.request import Request
 from parallax.server.sampling.sampling_params import (
@@ -28,41 +28,38 @@ from parallax_utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-def ensure_lora_loaded(model_runner: ModelRunner, lora_path: str) -> str:  
-    """  
-    detect lora if loaded, if not load and return lora_id  
-      
-    Args:  
-        model_runner: ModelRunner  
-        lora_path: LoRA Path  
-        lora_name: LoRA Name, if it's None use lora_path as name  
-      
-    Returns:  
+def ensure_lora_loaded(model_runner: ModelRunner, lora_path: str) -> str:
+    """
+    detect lora if loaded, if not load and return lora_id
+
+    Args:
+        model_runner: ModelRunner
+        lora_path: LoRA Path
+        lora_name: LoRA Name, if it's None use lora_path as name
+
+    Returns:
         str: LoRA ID
-    """   
-    lora_name = lora_path  
-      
-    # detect lora if loaded  
-    for lora_id, lora_ref in model_runner.lora_manager.lora_refs.items():  
-        if lora_ref.lora_path == lora_path:  
-            logger.info(f"LoRA adapter already loaded: {lora_name}")  
+    """
+    lora_name = lora_path
+
+    # detect lora if loaded
+    for lora_id, lora_ref in model_runner.lora_manager.lora_refs.items():
+        if lora_ref.lora_path == lora_path:
+            logger.info(f"LoRA adapter already loaded: {lora_name}")
             return lora_id
-      
-    # if not load 
-    new_lora_ref = LoRARef(  
-        lora_name=lora_name,  
-        lora_path=lora_path,  
-        pinned=False  
-    )  
-      
-    # load adapter  
-    result = model_runner.load_lora_adapter(new_lora_ref)  
-      
-    if not result.success:  
-        raise RuntimeError(f"Failed to load LoRA adapter {lora_name}: {result.error_message}")  
-      
-    logger.info(f"Successfully loaded LoRA adapter: {lora_name}")  
+
+    # if not load
+    new_lora_ref = LoRARef(lora_name=lora_name, lora_path=lora_path, pinned=False)
+
+    # load adapter
+    result = model_runner.load_lora_adapter(new_lora_ref)
+
+    if not result.success:
+        raise RuntimeError(f"Failed to load LoRA adapter {lora_name}: {result.error_message}")
+
+    logger.info(f"Successfully loaded LoRA adapter: {lora_name}")
     return new_lora_ref.lora_id
+
 
 def transform_sampling_params_to_sglang(old_params: ParallaxSamplingParams) -> SGLSamplingParams:
     """Transforms Parallax SamplingParams to SGLang.SamplingParams format"""
@@ -83,7 +80,9 @@ def transform_sampling_params_to_sglang(old_params: ParallaxSamplingParams) -> S
     return params
 
 
-def transform_requests_to_sglang(old_requests: List[Request], lora_id: Optional[str] = None) -> List[Req]:
+def transform_requests_to_sglang(
+    old_requests: List[Request], lora_id: Optional[str] = None
+) -> List[Req]:
     """Transforms Parallax Request to SGLang.Req format"""
     reqs = []
     for old_req in old_requests:
@@ -106,12 +105,12 @@ def form_sgl_batch_prefill(
     lora_paths: Optional[List[str]] = None,
 ) -> ForwardBatch:
     """Initialize a prefill ScheduleBatch -> ModelWorkerBatch -> ForwardBatch workflow"""
-    
+
     lora_id = None
     if lora_paths is not None and len(lora_paths) > 0:
         # just use the first lora adapter for now
         lora_id = ensure_lora_loaded(model_runner, lora_paths[0])
-    
+
     sgl_reqs = transform_requests_to_sglang(requests, lora_id)
 
     def dummy_evict(*args):
