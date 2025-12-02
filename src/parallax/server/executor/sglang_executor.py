@@ -138,6 +138,7 @@ class SGLExecutor(BaseExecutor):
         self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
         self.tp_group = self.model_runner.tp_group
         self.tp_cpu_group = self.tp_group.cpu_group
+        self.lora_paths = lora_paths
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
@@ -325,7 +326,7 @@ class SGLExecutor(BaseExecutor):
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
-        schedule_batch, forward_batch = form_sgl_batch_prefill(batched_requests, self.model_runner)
+        schedule_batch, forward_batch = form_sgl_batch_prefill(batched_requests, self.model_runner, self.lora_paths)
         self.cur_batch = schedule_batch
 
         ret = {
