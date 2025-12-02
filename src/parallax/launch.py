@@ -220,7 +220,7 @@ if __name__ == "__main__":
                     # only launch http server on head node
                     if args.start_layer == 0:
                         http_server_process = launch_http_server(args)
-                    
+
                     # Launch all executor processes (including tp_rank=0)
                     executor_subprocs = []
                     for tp_rank in range(args.tp_size):
