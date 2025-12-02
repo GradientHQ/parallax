@@ -489,6 +489,9 @@ class SGLExecutor(BaseExecutor):
         # Prepare lengths (common for both backends)
         lengths = []
         for req in batched_requests:
+            req.lora_id = (
+                self.lora_paths[0].lora_id if self.lora_paths and len(self.lora_paths) > 0 else None
+            )
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)
 

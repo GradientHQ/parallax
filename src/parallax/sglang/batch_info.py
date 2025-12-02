@@ -202,6 +202,8 @@ def form_sgl_batch_decode(
     running_batch.orig_seq_lens[ready_indices] += 1
 
     model_worker_batch = ret.get_model_worker_batch()
+    if requests[0].lora_id is not None:
+        model_worker_batch.lora_ids = [req.lora_id or "" for req in requests]
     forward_batch = ForwardBatch.init_new(model_worker_batch, model_runner)
 
     return forward_batch
