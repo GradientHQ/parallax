@@ -104,10 +104,10 @@ for (int b = 0; b < num_context_blocks; b++) {
   // Handle Window Attention Skip
   // Current query position is at (context_len - 1)
   // Window range is [context_len - 1 - window_size, context_len - 1]
-  
+
   // NOTE: Sink token is handled separately above, so we don't need to protect block 0
   // unless block 0 also contains other vital tokens (it usually does).
-  
+
   if (_window_size > 0) {
       int window_start = context_len - 1 - _window_size;
       if (block_end_pos <= window_start) {

@@ -9,6 +9,7 @@ from mlx_lm.models.base import create_causal_mask, scaled_dot_product_attention
 from mlx_lm.models.gpt_oss import AttentionBlock as MLXGPTOSSAttention
 from mlx_lm.models.gpt_oss import ModelArgs
 from mlx_lm.models.gpt_oss import TransformerBlock as MLXGPTOSSBlock
+
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
 
 
