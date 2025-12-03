@@ -86,6 +86,7 @@ class Indexer(nn.Module):
         context_lengths: Optional[mx.array] = None,
         block_size: int = 1024,
         layer_idx: int = 0,
+        slot_mapping: Optional[mx.array] = None,
     ):
         # Computes top_k indices for attention
         b, s, _ = x.shape
@@ -391,6 +392,7 @@ class ParallaxDeepSeekV32Attention(DeepseekV32Attention):
             context_lengths=context_lengths,
             block_size=block_size,
             layer_idx=layer_idx,
+            slot_mapping=slot_mapping,
         )
 
         if target_len == 1:
