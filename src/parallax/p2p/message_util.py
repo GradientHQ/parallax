@@ -42,6 +42,7 @@ def request_to_proto(
         proto_req.input_ids.extend(request.input_ids)
         proto_req.routing_table.extend(request.routing_table)
         proto_req.sampling_params.CopyFrom(sampling_params_to_proto(request.sampling_params))
+        proto_req.lora_path = request.lora_path if request.lora_path is not None else ""
 
         if request.hidden_states is not None:
             proto_req.hidden_states = tensor_to_bytes(request.hidden_states, device=device)
@@ -94,7 +95,7 @@ def proto_to_request(
             routing_table=list(proto_req.routing_table),
             next_token_id=next_token_id,
             sampling_params=sampling_params,
-            lora_path=proto_req.lora_path if proto_req.HasField("lora_path") else None,
+            lora_path = proto_req.lora_path if proto_req.lora_path != "" else None,
         )
 
         requests.append(request)
