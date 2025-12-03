@@ -228,6 +228,7 @@ def paged_attention(
     num_kv_heads: int,
     layer_idx: int,
     v_head_dim: Optional[int] = None,
+    top_k_indices: Optional[mx.array] = None,
     window_size: Optional[int] = None,
     sinks: Optional[mx.array] = None,
 ) -> mx.array:
@@ -247,9 +248,6 @@ def paged_attention(
     if v_head_dim is None:
         v_head_dim = k_head_dim
 
-    # Use -1 to represent full attention (infinite window)
-    c_window_size_val = window_size if window_size is not None else -1
-
     num_layers = key_cache.shape[0]
     num_total_blocks = key_cache.shape[1]
     max_blocks = block_tables.shape[1]
@@ -268,54 +266,132 @@ def paged_attention(
     c_num_layers = mk_int(num_layers)
     c_num_total_blocks = mk_int(num_total_blocks)
     c_scale = mx.array(scale, dtype=queries.dtype)
-    c_window_size = mk_int(c_window_size_val)
 
-    if sinks is None:
-        # Pass -inf if no sinks provided to mask it out
-        # Assuming num_heads is enough to cover head_idx access
-        c_sinks = mx.full((num_heads,), -float("inf"), dtype=queries.dtype)
+    if top_k_indices is not None:
+        index_topk = top_k_indices.shape[1]
+        c_index_topk = mk_int(index_topk)
+
+        inputs = [
+            queries,
+            key_cache,
+            value_cache,
+            block_tables,
+            context_lengths,
+            top_k_indices,
+            c_num_heads,
+            c_num_kv_heads,
+            c_k_head_dim,
+            c_v_head_dim,
+            c_block_size,
+            c_max_blocks,
+            c_layer_idx,
+            c_num_layers,
+            c_num_total_blocks,
+            c_scale,
+            c_index_topk,
+        ]
+
+        input_names = [
+            "queries",
+            "key_cache",
+            "value_cache",
+            "block_tables",
+            "context_lengths",
+            "top_k_indices",
+            "num_heads",
+            "num_kv_heads",
+            "k_head_dim",
+            "v_head_dim",
+            "block_size",
+            "max_blocks",
+            "layer_idx",
+            "num_layers",
+            "num_total_blocks",
+            "scale",
+            "index_topk",
+        ]
+        kernel_name = "paged_attention_deepseek_v32_kernel"
+        filename = "paged_attention_deepseek_v32.metal"
+    elif window_size is not None and sinks is not None:
+        inputs = [
+            queries,
+            key_cache,
+            value_cache,
+            block_tables,
+            context_lengths,
+            c_num_heads,
+            c_num_kv_heads,
+            c_k_head_dim,
+            c_v_head_dim,
+            c_block_size,
+            c_max_blocks,
+            c_layer_idx,
+            c_num_layers,
+            c_num_total_blocks,
+            c_scale,
+            c_window_size,
+            c_sinks,
+        ]
+
+        input_names = [
+            "queries",
+            "key_cache",
+            "value_cache",
+            "block_tables",
+            "context_lengths",
+            "num_heads",
+            "num_kv_heads",
+            "k_head_dim",
+            "v_head_dim",
+            "block_size",
+            "max_blocks",
+            "layer_idx",
+            "num_layers",
+            "num_total_blocks",
+            "scale",
+            "window_size",
+            "sinks",
+        ]
+        name="paged_attention_gpt_oss_kernel",
+        filename="paged_attention_gpt_oss.metal",
     else:
-        c_sinks = sinks
+        inputs = [
+            queries,
+            key_cache,
+            value_cache,
+            block_tables,
+            context_lengths,
+            c_num_heads,
+            c_num_kv_heads,
+            c_k_head_dim,
+            c_v_head_dim,
+            c_block_size,
+            c_max_blocks,
+            c_layer_idx,
+            c_num_layers,
+            c_num_total_blocks,
+            c_scale,
+        ]
 
-    inputs = [
-        queries,
-        key_cache,
-        value_cache,
-        block_tables,
-        context_lengths,
-        c_num_heads,
-        c_num_kv_heads,
-        c_k_head_dim,
-        c_v_head_dim,
-        c_block_size,
-        c_max_blocks,
-        c_layer_idx,
-        c_num_layers,
-        c_num_total_blocks,
-        c_scale,
-        c_window_size,
-        c_sinks,
-    ]
-
-    input_names = [
-        "queries",
-        "key_cache",
-        "value_cache",
-        "block_tables",
-        "context_lengths",
-        "num_heads",
-        "num_kv_heads",
-        "k_head_dim",
-        "v_head_dim",
-        "block_size",
-        "max_blocks",
-        "layer_idx",
-        "num_layers",
-        "num_total_blocks",
-        "scale",
-        "window_size",
-        "sinks",
-    ]
+        input_names = [
+            "queries",
+            "key_cache",
+            "value_cache",
+            "block_tables",
+            "context_lengths",
+            "num_heads",
+            "num_kv_heads",
+            "k_head_dim",
+            "v_head_dim",
+            "block_size",
+            "max_blocks",
+            "layer_idx",
+            "num_layers",
+            "num_total_blocks",
+            "scale",
+        ]
+        kernel_name = "paged_attention_kernel"
+        filename = "paged_attention.metal"
 
     # For paged_attention, we don't have explicit T in source,
     # but if we use it in future or if we want to support half specialized logic.
@@ -329,8 +405,8 @@ def paged_attention(
     # In Python we should set output_dtypes=[dtype].
 
     kernel = _get_kernel(
-        name="paged_attention_kernel",
-        filename="paged_attention_kernel.metal",
+        name=kernel_name,
+        filename=filename,
         input_names=input_names,
         output_names=["output"],
         dtype=dtype,  # This will generate paged_attention_kernel_half etc.

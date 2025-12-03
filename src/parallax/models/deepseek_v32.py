@@ -17,6 +17,10 @@ def store_indexer_cache(**kwargs):
     pass
 
 
+def q_dot_k(q, k, block_size, block_table, context_length, layer_idx):
+    pass
+
+
 @dataclass
 class ModelArgs(BaseModelArgs):
     model_type: str = "deepseek_v32"
@@ -127,15 +131,48 @@ class Indexer(nn.Module):
             slot_mapping=slot_mapping,
         )
 
-        scores = q @ k.swapaxes(-1, -2)
-        scores = mx.maximum(scores, 0)
-        weights = self.weights_proj(x) * (self.n_heads**-0.5)
-        weights = (weights * self.softmax_scale).swapaxes(-1, -2)[..., None]
-        scores = scores * weights
-        scores = scores.sum(axis=1)
-        if mask is not None:
-            scores = mx.where(mask, scores, -float("inf"))
-        return mx.argpartition(scores, kth=-self.index_topk, axis=-1)[..., -self.index_topk :]
+        if target_len == 1:
+            topk_list = []
+            for i in range(batch):
+                current_pos = int(context_lengths[i]) - 1
+                if current_pos < self.index_topk:
+                    topk_list.append([-1] * self.index_topk)
+                else:
+                    score = q_dot_k(
+                        q[i],
+                        k[i],
+                        block_size=block_size,
+                        block_table=block_tables[i],
+                        context_length=context_lengths[i],
+                        layer_idx=layer_idx,
+                    )  # shape: (n_heads, 1, context_len)
+                    score = mx.maximum(score, 0)
+                    weight = self.weights_proj(x[i : i + 1]) * (
+                        self.n_heads**-0.5
+                    )  # shape: (1, 1, n_heads)
+                    weight = (weight * self.softmax_scale).swapaxes(-1, -2)[
+                        ..., None
+                    ]  # shape: (1, n_heads, 1, 1)
+                    score = score * weight.squeeze(0)  # shape: (n_heads, 1, context_len)
+                    score = score.sum(axis=0)  # shape: (1, context_len)
+                    score = score.squeeze(0)  # shape: (context_len,)
+                    topk_indices = mx.argpartition(score, kth=-self.index_topk, axis=-1)[
+                        -self.index_topk :
+                    ]
+                    topk_list.append(topk_indices)
+            return mx.array(topk_list)
+        else:
+            if target_len < self.index_topk:
+                return mx.array([[-1] * self.index_topk] * batch)
+            scores = q @ k.swapaxes(-1, -2)
+            scores = mx.maximum(scores, 0)
+            weights = self.weights_proj(x) * (self.n_heads**-0.5)
+            weights = (weights * self.softmax_scale).swapaxes(-1, -2)[..., None]
+            scores = scores * weights
+            scores = scores.sum(axis=1)
+            if mask is not None:
+                scores = mx.where(mask, scores, -float("inf"))
+            return mx.argpartition(scores, kth=-self.index_topk, axis=-1)[..., -self.index_topk :]
 
 
 class DeepseekV32Attention(nn.Module):
@@ -425,7 +462,7 @@ class ParallaxDeepSeekV32Attention(DeepseekV32Attention):
                 self.num_heads,
                 layer_idx,
                 v_head_dim=values.shape[-1],
-                mask=mask,
+                top_k_indices=topk_indices,
             )
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
         else:
