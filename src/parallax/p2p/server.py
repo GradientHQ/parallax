@@ -642,6 +642,11 @@ class GradientServer:
                                 logger.warning(
                                     f"Heartbeat: No layer allocation received yet, response: {response}"
                                 )
+                                self.status = ServerState.INITIALIZING
+                                self._sync_to_shared_state()
+                                logger.debug(
+                                    "Status set to INITIALIZING because no valid layer allocation received yet."
+                                )
                         else:
                             self.lattica.store(
                                 key=self.prefix_id,

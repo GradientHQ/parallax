@@ -136,18 +136,12 @@ class SchedulerManage:
         if self.scheduler is None:
             return []
 
-        # Check if cluster has a full pipeline
-        has_full_pipeline = self.scheduler.layer_allocator.has_full_pipeline(active_only=True)
-        return [self.build_node_info(node, has_full_pipeline) for node in self.scheduler.nodes]
+        return [self.build_node_info(node) for node in self.scheduler.nodes]
 
-    def build_node_info(self, node, has_full_pipeline=True):
-        # Node is only "available" if:
-        # 1. Node itself is active
-        # 2. Cluster has a full pipeline (enough resources to run the model)
-        is_available = node.is_active and has_full_pipeline
+    def build_node_info(self, node):
         return {
             "node_id": node.node_id,
-            "status": NODE_STATUS_AVAILABLE if is_available else NODE_STATUS_WAITING,
+            "status": NODE_STATUS_AVAILABLE if node.is_active else NODE_STATUS_WAITING,
             "gpu_num": node.hardware.num_gpus,
             "gpu_name": node.hardware.gpu_name,
             "gpu_memory": node.hardware.memory_gb,
