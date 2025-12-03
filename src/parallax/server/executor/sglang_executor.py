@@ -435,7 +435,9 @@ class SGLExecutor(BaseExecutor):
                         break
             else:
                 req.lora_id = (
-                    self.lora_paths[0].lora_id if self.lora_paths and len(self.lora_paths) > 0 else None
+                    self.lora_paths[0].lora_id
+                    if self.lora_paths and len(self.lora_paths) > 0
+                    else None
                 )
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)
@@ -502,7 +504,9 @@ class SGLExecutor(BaseExecutor):
                         break
             else:
                 req.lora_id = (
-                    self.lora_paths[0].lora_id if self.lora_paths and len(self.lora_paths) > 0 else None
+                    self.lora_paths[0].lora_id
+                    if self.lora_paths and len(self.lora_paths) > 0
+                    else None
                 )
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)

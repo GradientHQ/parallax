@@ -297,7 +297,10 @@ class IntermediateRequest(Request):
 
     @classmethod
     def from_initial_request(
-        cls, initial_request: InitialRequest, hidden_states: Optional[Any] = None, lora_path: Optional[str] = None
+        cls,
+        initial_request: InitialRequest,
+        hidden_states: Optional[Any] = None,
+        lora_path: Optional[str] = None,
     ) -> "IntermediateRequest":
         """Convert an InitialRequest to an IntermediateRequest.
 

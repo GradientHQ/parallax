@@ -574,7 +574,7 @@ class BaseExecutor:
         if max_new_tokens is None:
             max_new_tokens = 2048
         max_total_length = len(prompt) + max_new_tokens
-        
+
         lora_path = raw_request.get("lora_path")
 
         raw_sampling_params = raw_request.get("sampling_params")
@@ -686,8 +686,12 @@ class BaseExecutor:
             assert isinstance(request, InitialRequest), "First peer must process an InitialRequest."
             if request.is_finished:
                 hidden_states = None
-            return IntermediateRequest.from_initial_request(request, hidden_states=hidden_states, lora_path=request.lora_path)
+            return IntermediateRequest.from_initial_request(
+                request, hidden_states=hidden_states, lora_path=request.lora_path
+            )
         assert isinstance(
             request, IntermediateRequest
         ), "Intermediate peer must process an IntermediateRequest."
-        return IntermediateRequest.from_intermediate_request(request, hidden_states, lora_path=request.lora_path)
+        return IntermediateRequest.from_intermediate_request(
+            request, hidden_states, lora_path=request.lora_path
+        )
