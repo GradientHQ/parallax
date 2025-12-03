@@ -83,8 +83,6 @@ class ParallaxDeepSeekV3Attention(MLXDeepseekV3Attention):
 
         k_pe = mx.repeat(k_pe, self.num_heads, axis=1)
         queries = mx.concatenate([q_nope, q_pe], axis=-1)
-
-        # Construct full keys
         keys = mx.concatenate([k_nope, k_pe], axis=-1)
 
         block_size = key_cache_global.shape[3]
@@ -149,7 +147,6 @@ class ParallaxDeepSeekV3Block(MLXDeepseekV3Block):
         x: mx.array,
         mask: Optional[mx.array] = None,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
-        offset: int = 0,
         lengths: Optional[mx.array] = None,
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
@@ -159,7 +156,6 @@ class ParallaxDeepSeekV3Block(MLXDeepseekV3Block):
             self.input_layernorm(x),
             mask,
             cache,
-            offset=offset,
             block_tables=block_tables,
             context_lengths=context_lengths,
             slot_mapping=slot_mapping,
