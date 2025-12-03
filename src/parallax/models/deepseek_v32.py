@@ -13,6 +13,10 @@ from mlx_lm.models.switch_layers import SwitchGLU
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
 
 
+def store_indexer_cache(**kwargs):
+    pass
+
+
 @dataclass
 class ModelArgs(BaseModelArgs):
     model_type: str = "deepseek_v32"
@@ -89,26 +93,40 @@ class Indexer(nn.Module):
         slot_mapping: Optional[mx.array] = None,
     ):
         # Computes top_k indices for attention
-        b, s, _ = x.shape
+        batch, target_len, _ = x.shape
         q = self.wq_b(qr)
-        q = q.reshape(b, s, self.n_heads, self.head_dim).swapaxes(1, 2)
+        q = q.reshape(batch, target_len, self.n_heads, self.head_dim).swapaxes(1, 2)
         q_pe, q_nope = mx.split(q, [self.rope_head_dim], axis=-1)
-
-        offset = cache.offset if cache is not None else 0
-
-        q_pe = self.rope(q_pe, offset=offset)
-        q = mx.concatenate([q_pe, q_nope], axis=-1)
-
         k = self.wk(x)
         k = self.k_norm(k)
-        k = mx.reshape(k, (b, 1, s, self.head_dim))
+        k = mx.reshape(k, (batch, 1, target_len, self.head_dim))
         k_pe, k_nope = mx.split(k, [self.rope_head_dim], axis=-1)
-        k_pe = self.rope(k_pe, offset=offset)
+
+        q_pe_list = []
+        k_pe_list = []
+        for i in range(batch):
+            current_pos = int(context_lengths[i]) - 1 if target_len == 1 else 0
+            q_slice = q_pe[i : i + 1]
+            k_slice = k_pe[i : i + 1]
+            q_rot = self.rope(q_slice, offset=current_pos)
+            k_rot = self.rope(k_slice, offset=current_pos)
+            q_pe_list.append(q_rot)
+            k_pe_list.append(k_rot)
+        q_pe = mx.concatenate(q_pe_list, axis=0)
+        k_pe = mx.concatenate(k_pe_list, axis=0)
+        q = mx.concatenate([q_pe, q_nope], axis=-1)
         k = mx.concatenate([k_pe, k_nope], axis=-1)
-        if cache is not None:
-            k, _ = cache.update_and_fetch(k, mx.zeros([b, 1, s, 0]))
-        if k.shape[2] <= self.index_topk:
-            return None
+
+        store_indexer_cache(
+            k.transpose(0, 2, 1, 3),
+            cache,
+            block_tables,
+            context_lengths,
+            block_size=block_size,
+            layer_idx=layer_idx,
+            slot_mapping=slot_mapping,
+        )
+
         scores = q @ k.swapaxes(-1, -2)
         scores = mx.maximum(scores, 0)
         weights = self.weights_proj(x) * (self.n_heads**-0.5)
@@ -116,7 +134,7 @@ class Indexer(nn.Module):
         scores = scores * weights
         scores = scores.sum(axis=1)
         if mask is not None:
-            scores = scores + mask
+            scores = mx.where(mask, scores, -float("inf"))
         return mx.argpartition(scores, kth=-self.index_topk, axis=-1)[..., -self.index_topk :]
 
 
