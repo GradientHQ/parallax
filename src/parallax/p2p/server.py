@@ -633,6 +633,14 @@ class GradientServer:
                                             "Layer allocation updated. Executor will reload on next check. "
                                             "Status set to INITIALIZING to prevent new requests."
                                         )
+                                    else:
+                                        if self.status != ServerState.READY:
+                                            self.status = ServerState.READY
+                                            if self._shared_state is not None:
+                                                self._shared_state.set_status(self.status.value)
+                                            logger.info(
+                                                "Status set to READY because no need reload executor."
+                                            )
                                 else:
                                     logger.debug(
                                         f"Heartbeat: Missing layer info - start_layer={start_layer}, "
@@ -643,7 +651,8 @@ class GradientServer:
                                     f"Heartbeat: No layer allocation received yet, response: {response}"
                                 )
                                 self.status = ServerState.INITIALIZING
-                                self._sync_to_shared_state()
+                                if self._shared_state is not None:
+                                    self._shared_state.set_status(self.status.value)
                                 logger.debug(
                                     "Status set to INITIALIZING because no valid layer allocation received yet."
                                 )
