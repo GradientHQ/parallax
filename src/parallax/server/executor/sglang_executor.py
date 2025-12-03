@@ -428,9 +428,15 @@ class SGLExecutor(BaseExecutor):
         # Prepare lengths (common for both backends)
         lengths = []
         for req in batched_requests:
-            req.lora_id = (
-                self.lora_paths[0].lora_id if self.lora_paths and len(self.lora_paths) > 0 else None
-            )
+            if req.lora_path is not None and self.lora_paths is not None:
+                for lora_ref in self.lora_paths:
+                    if lora_ref.lora_path == req.lora_path:
+                        req.lora_id = lora_ref.lora_id
+                        break
+            else:
+                req.lora_id = (
+                    self.lora_paths[0].lora_id if self.lora_paths and len(self.lora_paths) > 0 else None
+                )
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
@@ -489,9 +495,15 @@ class SGLExecutor(BaseExecutor):
         # Prepare lengths (common for both backends)
         lengths = []
         for req in batched_requests:
-            req.lora_id = (
-                self.lora_paths[0].lora_id if self.lora_paths and len(self.lora_paths) > 0 else None
-            )
+            if req.lora_path is not None and self.lora_paths is not None:
+                for lora_ref in self.lora_paths:
+                    if lora_ref.lora_path == req.lora_path:
+                        req.lora_id = lora_ref.lora_id
+                        break
+            else:
+                req.lora_id = (
+                    self.lora_paths[0].lora_id if self.lora_paths and len(self.lora_paths) > 0 else None
+                )
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)
 

@@ -94,6 +94,7 @@ def proto_to_request(
             routing_table=list(proto_req.routing_table),
             next_token_id=next_token_id,
             sampling_params=sampling_params,
+            lora_path=proto_req.lora_path if proto_req.HasField("lora_path") else None,
         )
 
         requests.append(request)

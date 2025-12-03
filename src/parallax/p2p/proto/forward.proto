@@ -35,6 +35,7 @@ message Req {
 
   int32 next_token_id = 6;
   bytes hidden_states = 7;
+  string lora_path = 8;
 }
 
 message SamplingParams {
