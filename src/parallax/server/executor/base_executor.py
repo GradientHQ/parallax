@@ -176,6 +176,8 @@ class BaseExecutor:
                 )
         if self.shared_state is not None:
             self.shared_state.set_status(ServerState.READY.value)
+            # Mark executor as initialized so P2P server knows it's safe to set READY status
+            self.shared_state.set("_executor_initialized", True)
 
     @abstractmethod
     def handle_input_requests(self, requests: List[Request]):

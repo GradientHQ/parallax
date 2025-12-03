@@ -243,6 +243,7 @@ if __name__ == "__main__":
                         shared_state.update(
                             _layer_allocation_changed=False,
                             status=ServerState.INITIALIZING.value,
+                            _executor_initialized=False,  # Reset since we're reloading
                         )
                         _stop_executor_processes(executor_subprocs)
                         if http_server_process is not None:

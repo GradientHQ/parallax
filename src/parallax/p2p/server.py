@@ -254,6 +254,7 @@ class GradientServer:
         logger.debug(f"manual_layer_assignment: {self.manual_layer_assignment}")
         self._layer_allocation_changed = False
         self._shared_state = None  # Will be set if running in subprocess mode
+        self._executor_initialized = False  # Track if executor has completed initial loading
 
     def _sync_to_shared_state(self):
         """Sync current layer allocation and status to shared state if available"""
@@ -265,6 +266,7 @@ class GradientServer:
                 tp_size=self.tp_size,
                 status=self.status.value,
                 _layer_allocation_changed=self._layer_allocation_changed,
+                _executor_initialized=self._executor_initialized,
             )
 
     def build_lattica(self):
@@ -622,6 +624,8 @@ class GradientServer:
                                             self.model_name = model_name
                                         # Set flag to trigger executor reload
                                         self._layer_allocation_changed = True
+                                        # Reset executor initialized flag since we need to reload
+                                        self._executor_initialized = False
                                         # Set status to INITIALIZING to prevent scheduler from sending requests
                                         # during rebalancing
                                         self.status = ServerState.INITIALIZING
@@ -634,12 +638,23 @@ class GradientServer:
                                             "Status set to INITIALIZING to prevent new requests."
                                         )
                                     else:
-                                        if self.status != ServerState.READY:
+                                        # Only set to READY if executor has completed initial loading
+                                        # Check executor_initialized from shared_state if available
+                                        executor_initialized = self._executor_initialized
+                                        if self._shared_state is not None:
+                                            executor_initialized = self._shared_state.get(
+                                                "_executor_initialized", False
+                                            )
+
+                                        if (
+                                            executor_initialized
+                                            and self.status != ServerState.READY
+                                        ):
                                             self.status = ServerState.READY
                                             if self._shared_state is not None:
                                                 self._shared_state.set_status(self.status.value)
                                             logger.info(
-                                                "Status set to READY because no need reload executor."
+                                                "Status set to READY because executor is initialized and no reload needed."
                                             )
                                 else:
                                     logger.debug(
