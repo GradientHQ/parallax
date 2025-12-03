@@ -47,6 +47,7 @@ class TestMessageUtil:
             hidden_states=hidden_states,
             sampling_params=self.sampling_params,
             routing_table=["layer1", "layer2"],
+            lora_path=None,
         )
 
         forward_request = request_to_proto([request])
@@ -79,6 +80,7 @@ class TestMessageUtil:
             hidden_states=hidden_states,
             next_token_id=42,
             sampling_params=self.sampling_params,
+            lora_path=None,
         )
 
         forward_request = request_to_proto([request])
@@ -102,6 +104,7 @@ class TestMessageUtil:
             next_token_id=50,
             sampling_params=self.sampling_params,
             routing_table=["nodeA"],
+            lora_path=None,
         )
 
         proto_request = request_to_proto([original_request])
@@ -148,6 +151,7 @@ class TestMessageUtil:
             current_position=1,
             status=RequestStatus.PREFILLING,
             hidden_states=mx.array([[1.0]], dtype=mx.float32),
+            lora_path=None,
         )
         req2 = IntermediateRequest(
             request_id="req2",
@@ -155,6 +159,7 @@ class TestMessageUtil:
             current_position=1,
             status=RequestStatus.PREFILLING,
             hidden_states=mx.array([[2.0]], dtype=mx.float32),
+            lora_path=None,
         )
 
         forward_request = request_to_proto([req1, req2])
