@@ -13,7 +13,7 @@ int head_idx = dim_idx / head_dim;
 int d_idx = dim_idx % head_dim;
 
 long slot = slot_mapping[token_idx];
-if (slot < 0) return; 
+if (slot < 0) return;
 
 long block_idx = slot / block_size;
 long block_offset = slot % block_size;
@@ -25,10 +25,10 @@ long k_head_stride = block_size * head_dim;
 
 long k_layer_stride = (long)num_blocks * k_block_stride;
 
-long dest_idx = (long)layer_idx * k_layer_stride + 
-                block_idx * k_block_stride + 
-                head_idx * k_head_stride + 
-                block_offset * head_dim + 
+long dest_idx = (long)layer_idx * k_layer_stride +
+                block_idx * k_block_stride +
+                head_idx * k_head_stride +
+                block_offset * head_dim +
                 d_idx;
-                
+
 key_cache[dest_idx] = key[src_idx];

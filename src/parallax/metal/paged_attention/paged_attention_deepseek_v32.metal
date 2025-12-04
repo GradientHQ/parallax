@@ -133,7 +133,7 @@ if (first_topk_idx == -1) {
     // -------------------------------------------------------------------------
     for (int k = 0; k < _index_topk; k++) {
         int token_idx = top_k_indices[batch_idx * _index_topk + k];
-        
+
         // Map logical token index to physical location
         int block_idx_in_table = token_idx / _block_size;
         int block_offset = token_idx % _block_size;
@@ -187,4 +187,3 @@ for (int i = tid.x; i < _v_head_dim; i += 32) {
     output[out_offset + i] = ({{T}})acc_vec[i / 32];
   }
 }
-

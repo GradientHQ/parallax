@@ -1,7 +1,6 @@
 # Copyright © 2025 Apple Inc.
 import math
 from dataclasses import dataclass
-from tkinter import NO
 from typing import Any, Dict, Optional, Tuple
 
 import mlx.core as mx

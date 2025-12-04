@@ -20,20 +20,20 @@ long layer_offset = (long)layer_idx * k_layer_stride;
 for (int b = 0; b < num_valid_blocks; b++) {
     int block_num = block_table[b];
     int logical_idx = b * block_size + token_in_block;
-    
+
     if (logical_idx >= context_len) continue;
-    
-    long k_base = layer_offset + 
-                  (long)block_num * k_block_stride + 
-                  head_idx * k_head_stride + 
+
+    long k_base = layer_offset +
+                  (long)block_num * k_block_stride +
+                  head_idx * k_head_stride +
                   token_in_block * head_dim;
-                  
+
     float score = 0.0f;
     int q_base = head_idx * head_dim;
-    
+
     for (int d = 0; d < head_dim; d++) {
         score += (float)q[q_base + d] * (float)key_cache[k_base + d];
     }
-    
+
     output[head_idx * context_len + logical_idx] = score;
 }
