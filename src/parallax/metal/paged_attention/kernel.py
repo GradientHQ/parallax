@@ -313,6 +313,8 @@ def paged_attention(
         kernel_name = "paged_attention_deepseek_v32_kernel"
         filename = "paged_attention_deepseek_v32.metal"
     elif window_size is not None and sinks is not None:
+        c_window_size = mk_int(window_size)
+        c_sinks = sinks
         inputs = [
             queries,
             key_cache,
@@ -352,8 +354,8 @@ def paged_attention(
             "window_size",
             "sinks",
         ]
-        name="paged_attention_gpt_oss_kernel",
-        filename="paged_attention_gpt_oss.metal",
+        kernel_name = "paged_attention_gpt_oss_kernel"
+        filename = "paged_attention_gpt_oss.metal"
     else:
         inputs = [
             queries,
@@ -393,16 +395,6 @@ def paged_attention(
         kernel_name = "paged_attention_kernel"
         filename = "paged_attention.metal"
 
-    # For paged_attention, we don't have explicit T in source,
-    # but if we use it in future or if we want to support half specialized logic.
-    # Currently paged_attention kernel uses `float` for computation but loads from `queries` (T*).
-    # Metal implicitly handles T* access if MLX generated correct input types.
-    # However, if we use `reshape_and_cache` style template, we should use it here too.
-    # But paged_attention_kernel.metal DOES NOT use {{T}} yet.
-    # It uses `float q_vec`.
-    # Let's keep it as is for now, as Metal handles implicit conversion on load.
-    # The only issue is if we write `output` as `float*` but requested `half` output?
-    # In Python we should set output_dtypes=[dtype].
 
     kernel = _get_kernel(
         name=kernel_name,
