@@ -60,14 +60,43 @@ def store_indexer_cache(
     layer_idx: int,
     slot_mapping: Optional[mx.array] = None,
 ):
+    dtype = key.dtype
     # key: (batch, target_len, num_heads, head_dim) or flattened
-    if key.ndim == 4:
-        B, T, H, D = key.shape
-        key = key.reshape(B * T, H, D)
 
-    num_tokens = key.shape[0]
-    num_heads = key.shape[1]
-    head_dim = key.shape[2]
+    if slot_mapping is None:
+        # Decode Mode
+        batch_size = key.shape[0]
+        if key.ndim == 4:
+            # (batch, 1, num_kv_heads, head_dim) -> (batch, num_kv_heads, head_dim)
+            if key.shape[1] == 1:
+                key = key.squeeze(1)
+            elif key.shape[2] == 1:
+                # Fallback for old layout (batch, num_kv_heads, 1, head_dim)
+                key = key.squeeze(2)
+
+        num_heads = key.shape[1]
+        head_dim = key.shape[2]
+
+        # Compute slot_mapping internally
+        indices = context_lengths - 1
+        block_indices_in_table = indices // block_size
+        offsets = indices % block_size
+        batch_indices = mx.arange(batch_size)
+        physical_block_numbers = block_tables[batch_indices, block_indices_in_table]
+        slot_mapping = physical_block_numbers.astype(mx.int32) * block_size + offsets.astype(
+            mx.int32
+        )
+
+        num_tokens = batch_size
+    else:
+        # Prefill Mode
+        if key.ndim == 4:
+            B, T, H, D = key.shape
+            key = key.reshape(B * T, H, D)
+
+        num_tokens = key.shape[0]
+        num_heads = key.shape[1]
+        head_dim = key.shape[2]
 
     num_layers = key_cache.shape[0]
     num_blocks = key_cache.shape[1]
@@ -108,7 +137,7 @@ def store_indexer_cache(
         filename="store_key.metal",
         input_names=input_names,
         output_names=["dummy_out"],
-        dtype=key.dtype,
+        dtype=dtype,
     )
 
     grid = (num_heads * head_dim, num_tokens, 1)
@@ -118,7 +147,7 @@ def store_indexer_cache(
         inputs=inputs,
         grid=grid,
         threadgroup=thread_group,
-        output_shapes=[(1,)],  # Dummy output
+        output_shapes=[(num_tokens, num_heads * head_dim)],  # Dummy output
         output_dtypes=[mx.float32],
         verbose=False,
     )

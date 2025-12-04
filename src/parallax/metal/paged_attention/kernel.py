@@ -104,8 +104,8 @@ def reshape_and_cache(
         offsets = indices % block_size
         batch_indices = mx.arange(batch_size)
         physical_block_numbers = block_tables[batch_indices, block_indices_in_table]
-        slot_mapping = physical_block_numbers.astype(mx.int64) * block_size + offsets.astype(
-            mx.int64
+        slot_mapping = physical_block_numbers.astype(mx.int32) * block_size + offsets.astype(
+            mx.int32
         )
 
         num_tokens = batch_size
@@ -213,8 +213,6 @@ def reshape_and_cache(
     )
 
     mx.eval(outputs)
-
-    return key_cache, value_cache
 
 
 def paged_attention(
