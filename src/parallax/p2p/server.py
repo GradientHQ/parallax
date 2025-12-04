@@ -648,7 +648,7 @@ class GradientServer:
                                     self._shared_state.set_status(self.status.value)
                                     self._shared_state.set("model_name", None)
                                 logger.debug(
-                                    "Status set to INITIALIZING because no valid layer allocation received yet."
+                                    "Status set to INITIALIZING and model_name to None because no valid layer allocation received yet."
                                 )
                         else:
                             self.lattica.store(
