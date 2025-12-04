@@ -254,7 +254,6 @@ class GradientServer:
         logger.debug(f"manual_layer_assignment: {self.manual_layer_assignment}")
         self._layer_allocation_changed = False
         self._shared_state = None  # Will be set if running in subprocess mode
-        self._executor_initialized = False  # Track if executor has completed initial loading
 
     def _sync_to_shared_state(self):
         """Sync current layer allocation and status to shared state if available"""
@@ -266,7 +265,6 @@ class GradientServer:
                 tp_size=self.tp_size,
                 status=self.status.value,
                 _layer_allocation_changed=self._layer_allocation_changed,
-                _executor_initialized=self._executor_initialized,
             )
 
     def build_lattica(self):
@@ -624,8 +622,6 @@ class GradientServer:
                                             self.model_name = model_name
                                         # Set flag to trigger executor reload
                                         self._layer_allocation_changed = True
-                                        # Reset executor initialized flag since we need to reload
-                                        self._executor_initialized = False
                                         # Set status to INITIALIZING to prevent scheduler from sending requests
                                         # during rebalancing
                                         self.status = ServerState.INITIALIZING
@@ -637,25 +633,6 @@ class GradientServer:
                                             "Layer allocation updated. Executor will reload on next check. "
                                             "Status set to INITIALIZING to prevent new requests."
                                         )
-                                    else:
-                                        # Only set to READY if executor has completed initial loading
-                                        # Check executor_initialized from shared_state if available
-                                        executor_initialized = self._executor_initialized
-                                        if self._shared_state is not None:
-                                            executor_initialized = self._shared_state.get(
-                                                "_executor_initialized", False
-                                            )
-
-                                        if (
-                                            executor_initialized
-                                            and self.status != ServerState.READY
-                                        ):
-                                            self.status = ServerState.READY
-                                            if self._shared_state is not None:
-                                                self._shared_state.set_status(self.status.value)
-                                            logger.info(
-                                                "Status set to READY because executor is initialized and no reload needed."
-                                            )
                                 else:
                                     logger.debug(
                                         f"Heartbeat: Missing layer info - start_layer={start_layer}, "
@@ -666,8 +643,10 @@ class GradientServer:
                                     f"Heartbeat: No layer allocation received yet, response: {response}"
                                 )
                                 self.status = ServerState.INITIALIZING
+                                self.model_name = None
                                 if self._shared_state is not None:
                                     self._shared_state.set_status(self.status.value)
+                                    self._shared_state.set("model_name", None)
                                 logger.debug(
                                     "Status set to INITIALIZING because no valid layer allocation received yet."
                                 )
