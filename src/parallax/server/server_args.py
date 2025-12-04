@@ -265,7 +265,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--use-hfcache",
-        action="store_true",
+        type=bool,
         default=False,
         help="Use local Hugging Face cache only (no network download)",
     )

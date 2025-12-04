@@ -107,7 +107,7 @@ if __name__ == "__main__":
                 display_parallax_join(args.model_path)
             check_latest_release()
 
-            config = fetch_model_from_hf(args.model_path)
+            config = fetch_model_from_hf(args.model_path, local_files_only=args.use_hfcache)
             # only launch http server on head node
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
