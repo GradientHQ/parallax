@@ -42,6 +42,7 @@ MODELS = {
     "deepseek-ai/DeepSeek-V3": "mlx-community/DeepSeek-V3-4bit",
     "deepseek-ai/DeepSeek-V2.5-1210": "mlx-community/DeepSeek-V2.5-1210-4bit",
     "deepseek-ai/DeepSeek-R1": "mlx-community/DeepSeek-R1-4bit",
+    "deepseek-ai/DeepSeek-V3.2": "mlx-community/DeepSeek-V3.2-4bit",
     # Qwen 2.5 Series
     "Qwen/Qwen2.5-0.5B-Instruct": "Qwen/Qwen2.5-0.5B-Instruct",
     "Qwen/Qwen2.5-1.5B-Instruct": "Qwen/Qwen2.5-1.5B-Instruct",
