@@ -213,6 +213,7 @@ def reshape_and_cache(
     )
 
     mx.eval(outputs)
+    return key_cache, value_cache
 
 
 def paged_attention(
