@@ -321,6 +321,7 @@ def paged_attention(
             value_cache,
             block_tables,
             context_lengths,
+            c_sinks,
             c_num_heads,
             c_num_kv_heads,
             c_k_head_dim,
@@ -332,7 +333,6 @@ def paged_attention(
             c_num_total_blocks,
             c_scale,
             c_window_size,
-            c_sinks,
         ]
 
         input_names = [
@@ -341,6 +341,7 @@ def paged_attention(
             "value_cache",
             "block_tables",
             "context_lengths",
+            "sinks",
             "num_heads",
             "num_kv_heads",
             "k_head_dim",
@@ -352,7 +353,6 @@ def paged_attention(
             "num_total_blocks",
             "scale",
             "window_size",
-            "sinks",
         ]
         kernel_name = "paged_attention_gpt_oss_kernel"
         filename = "paged_attention_gpt_oss.metal"
@@ -394,7 +394,6 @@ def paged_attention(
         ]
         kernel_name = "paged_attention_kernel"
         filename = "paged_attention.metal"
-
 
     kernel = _get_kernel(
         name=kernel_name,

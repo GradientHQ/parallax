@@ -1,9 +1,9 @@
 
 // Inputs:
-// queries, key_cache, value_cache, block_tables, context_lengths
+// queries, key_cache, value_cache, block_tables, context_lengths, sinks
 // output (output array)
 // num_heads, num_kv_heads, k_head_dim, v_head_dim, block_size, max_blocks, layer_idx,
-// num_layers, num_total_blocks, scale, window_size, sinks (All pointers)
+// num_layers, num_total_blocks, scale, window_size (All pointers)
 
 uint3 gid = thread_position_in_grid;
 uint3 tid = thread_position_in_threadgroup;
