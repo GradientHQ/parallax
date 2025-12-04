@@ -9,7 +9,7 @@ import numpy as np
 import psutil
 import torch
 import zmq
-from mlx_lm.utils import load_config, get_model_path
+from mlx_lm.utils import get_model_path, load_config
 
 from parallax.utils.selective_download import download_metadata_only
 
