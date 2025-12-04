@@ -67,11 +67,15 @@ class PagedKVCacheManager:
         num_gpu_blocks: Optional[int] = None,
         max_num_seqs: int = 256,  # Max concurrent requests hint
         head_dim_v: Optional[int] = None,
+        indexer_key_head_dim: Optional[int] = None,
+        indexer_num_kv_heads: Optional[int] = None,
     ):
         self.num_layers = num_layers
         self.num_kv_heads = num_kv_heads
         self.head_dim = head_dim
         self.head_dim_v = head_dim_v if head_dim_v is not None else head_dim
+        self.indexer_key_head_dim = indexer_key_head_dim
+        self.indexer_num_kv_heads = indexer_num_kv_heads
         self.dtype = dtype
         self.block_size = block_size
         self.max_num_seqs = max_num_seqs
@@ -97,6 +101,25 @@ class PagedKVCacheManager:
         self.value_cache = mx.zeros(
             (num_layers, num_gpu_blocks, num_kv_heads, block_size, self.head_dim_v), dtype=dtype
         )
+
+        if self.indexer_key_head_dim is not None and self.indexer_num_kv_heads is not None:
+            logger.info(
+                f"Allocating Indexer Key Cache: {self.indexer_key_head_dim} head_dim, "
+                f"{self.indexer_num_kv_heads} heads"
+            )
+            self.indexer_key_cache = mx.zeros(
+                (
+                    num_layers,
+                    num_gpu_blocks,
+                    self.indexer_num_kv_heads,
+                    block_size,
+                    self.indexer_key_head_dim,
+                ),
+                dtype=dtype,
+            )
+            mx.eval(self.indexer_key_cache)
+        else:
+            self.indexer_key_cache = None
 
         # Ensure memory is materialized
         mx.eval(self.key_cache, self.value_cache)
@@ -134,7 +157,17 @@ class PagedKVCacheManager:
         value_block_bytes = (
             self.num_layers * self.num_kv_heads * self.block_size * self.head_dim_v * dtype_size
         )
-        block_bytes = key_block_bytes + value_block_bytes
+        indexer_block_bytes = 0
+        if self.indexer_key_head_dim is not None and self.indexer_num_kv_heads is not None:
+            indexer_block_bytes = (
+                self.num_layers
+                * self.indexer_num_kv_heads
+                * self.block_size
+                * self.indexer_key_head_dim
+                * dtype_size
+            )
+
+        block_bytes = key_block_bytes + value_block_bytes + indexer_block_bytes
 
         num_gpu_blocks = int(available_for_kv // block_bytes)
 
@@ -227,3 +260,7 @@ class PagedKVCacheManager:
     def get_cache(self) -> Tuple[mx.array, mx.array]:
         """Returns the global cache tensors."""
         return self.key_cache, self.value_cache
+
+    def get_indexer_cache(self) -> Optional[mx.array]:
+        """Returns the global indexer key cache tensor."""
+        return self.indexer_key_cache

@@ -215,6 +215,7 @@ class ParallaxQwen3NextBlock(MLXQwen3NextBlock):
         offset: int = 0,
         lengths: Optional[mx.array] = None,
         state_cache: Optional[Tuple[mx.array, mx.array]] = None,
+        **kwargs,
     ):
         if self.is_linear:
             r, (k_cache, v_cache, state0, state1) = self.linear_attn(
@@ -235,4 +236,4 @@ class ParallaxQwen3NextBlock(MLXQwen3NextBlock):
         return "Qwen3NextForCausalLM"
 
 
-EntryClass = ParallaxQwen3NextBlock
+# EntryClass = ParallaxQwen3NextBlock

@@ -137,6 +137,9 @@ class MLXExecutor(BaseExecutor):
             conv_dim = key_dim * 2 + value_dim
         self.using_state_cache = linear_conv_kernel_dim is not None and conv_dim is not None
 
+        indexer_key_head_dim = self.config.get("indexer_key_head_dim", None)
+        indexer_num_kv_heads = self.config.get("indexer_num_kv_heads", None)
+
         logger.debug(
             "Initializing PagedKVCacheManager (mlx) with block_size=%d, layers=%d",
             kv_block_size,
@@ -150,6 +153,8 @@ class MLXExecutor(BaseExecutor):
             block_size=kv_block_size,
             cache_memory_fraction=kv_cache_memory_fraction,
             head_dim_v=v_head_dim,
+            indexer_key_head_dim=indexer_key_head_dim,
+            indexer_num_kv_heads=indexer_num_kv_heads,
         )
         super().__init__(
             start_layer=start_layer,
@@ -291,6 +296,7 @@ class MLXExecutor(BaseExecutor):
             block_tables=prepared_inputs.get("block_tables"),
             context_lengths=prepared_inputs.get("context_lengths"),
             slot_mapping=prepared_inputs.get("slot_mapping"),
+            indexer_cache=prepared_inputs.get("indexer_cache"),
         )
 
         logger.debug(
@@ -424,6 +430,7 @@ class MLXExecutor(BaseExecutor):
         ret = {
             "h_or_tokens": padded_inputs,
             "cache": self.kv_cache_manager.get_cache(),
+            "indexer_cache": self.kv_cache_manager.get_indexer_cache(),
             "mask": mask,
             "requests": batched_requests,
             "block_tables": block_tables_tensor,
@@ -484,6 +491,7 @@ class MLXExecutor(BaseExecutor):
         ret = {
             "h_or_tokens": padded_inputs,
             "cache": self.kv_cache_manager.get_cache(),
+            "indexer_cache": self.kv_cache_manager.get_indexer_cache(),
             "mask": None,
             "requests": batched_requests,
             "block_tables": block_tables_tensor,

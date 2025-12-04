@@ -137,6 +137,7 @@ class ParallaxQwen3MoeBlock(MLXQwen3MoeBlock):
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
+        **kwargs,
     ):
         r = self.self_attn(
             self.input_layernorm(x),

@@ -142,6 +142,7 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
+        **kwargs,
     ):
         # Determine window size for this layer
         if self.layer_type == "sliding_attention":

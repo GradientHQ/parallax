@@ -501,7 +501,9 @@ class ParallaxDeepSeekV32Block(DeepseekV32DecoderLayer):
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
+        **kwargs,
     ):
+        indexer_cache = kwargs.get("indexer_cache")
         r = self.self_attn(
             self.input_layernorm(x),
             mask,
@@ -510,6 +512,7 @@ class ParallaxDeepSeekV32Block(DeepseekV32DecoderLayer):
             context_lengths=context_lengths,
             slot_mapping=slot_mapping,
             layer_idx=self.layer_idx,
+            indexer_cache=indexer_cache,
         )
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))

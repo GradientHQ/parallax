@@ -115,6 +115,7 @@ class ShardedModel(nn.Module):
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
         window_size: Optional[int] = None,
+        **kwargs,
     ) -> mx.array:
         """
         Args:
@@ -152,6 +153,7 @@ class ShardedModel(nn.Module):
                 block_tables=block_tables,
                 context_lengths=context_lengths,
                 slot_mapping=slot_mapping,
+                **kwargs,
             )
 
         if self.is_last_shard:
