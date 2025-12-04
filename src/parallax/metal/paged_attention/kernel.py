@@ -216,7 +216,7 @@ def reshape_and_cache(
 
     return key_cache, value_cache
 
-
+@mx.compile
 def paged_attention(
     queries: mx.array,
     key_cache: mx.array,
@@ -232,7 +232,77 @@ def paged_attention(
     sinks: Optional[mx.array] = None,
 ) -> mx.array:
     """
-    Paged Attention using Metal Kernel.
+    Paged Attention using mx.fast.scaled_dot_product_attention.
+
+    Args:
+        queries: (B, H, 1, D) or (B, H, D)
+        key_cache: (num_layers, num_blocks, num_kv_heads, block_size, head_dim)
+        value_cache: (num_layers, num_blocks, num_kv_heads, block_size, head_dim)
+        block_tables: (B, max_blocks)
+        context_lengths: (B,)
+        block_size: block size
+        scale: attention scale
+        num_kv_heads: number of KV heads
+        layer_idx: layer index
+        v_head_dim: optional value head dimension (if different from key)
+        window_size: optional sliding window size
+        sinks: unused, kept for API compatibility
+    """
+    batch_size = queries.shape[0]
+    dtype = queries.dtype
+
+    if queries.ndim == 3:
+        queries = queries[:, :, None, :]
+
+    k_head_dim = queries.shape[3]
+    if v_head_dim is None:
+        v_head_dim = k_head_dim
+
+    # Use slice indexing to create a VIEW instead of COPY
+    # key_cache[i] creates a copy (slow), key_cache[i:i+1] creates a view (fast)
+    layer_keys = key_cache[layer_idx : layer_idx + 1].squeeze(0)
+    layer_vals = value_cache[layer_idx : layer_idx + 1].squeeze(0)
+
+    max_blocks = block_tables.shape[1]
+    T_kv = max_blocks * block_size
+
+    # Gather blocks: (B, max_blocks, num_kv_heads, block_size, head_dim)
+    keys = layer_keys[block_tables]
+    vals = layer_vals[block_tables]
+
+    # Reshape to SDPA format: (B, num_kv_heads, T_kv, head_dim)
+    keys = keys.transpose(0, 2, 1, 3, 4).reshape(batch_size, num_kv_heads, T_kv, k_head_dim)
+    vals = vals.transpose(0, 2, 1, 3, 4).reshape(batch_size, num_kv_heads, T_kv, v_head_dim)
+
+    # Build mask
+    indices = mx.arange(T_kv)
+    valid = indices < context_lengths[:, None]
+
+    if window_size is not None and window_size > 0:
+        valid = valid & (indices >= (context_lengths - 1 - window_size)[:, None])
+
+    mask = mx.where(valid[:, None, None, :], 0.0, -1e9).astype(dtype)
+
+    return mx.fast.scaled_dot_product_attention(queries, keys, vals, scale=scale, mask=mask)
+
+
+def metal_paged_attention(
+    queries: mx.array,
+    key_cache: mx.array,
+    value_cache: mx.array,
+    block_tables: mx.array,
+    context_lengths: mx.array,
+    block_size: int,
+    scale: float,
+    num_kv_heads: int,
+    layer_idx: int,
+    v_head_dim: Optional[int] = None,
+    window_size: Optional[int] = None,
+    sinks: Optional[mx.array] = None,
+) -> mx.array:
+    """
+    Paged Attention using custom Metal Kernel.
+    This is the original implementation for performance comparison.
     """
     batch_size = queries.shape[0]
     num_heads = queries.shape[1]
@@ -272,7 +342,6 @@ def paged_attention(
 
     if sinks is None:
         # Pass -inf if no sinks provided to mask it out
-        # Assuming num_heads is enough to cover head_idx access
         c_sinks = mx.full((num_heads,), -float("inf"), dtype=queries.dtype)
     else:
         c_sinks = sinks
@@ -317,23 +386,12 @@ def paged_attention(
         "sinks",
     ]
 
-    # For paged_attention, we don't have explicit T in source,
-    # but if we use it in future or if we want to support half specialized logic.
-    # Currently paged_attention kernel uses `float` for computation but loads from `queries` (T*).
-    # Metal implicitly handles T* access if MLX generated correct input types.
-    # However, if we use `reshape_and_cache` style template, we should use it here too.
-    # But paged_attention_kernel.metal DOES NOT use {{T}} yet.
-    # It uses `float q_vec`.
-    # Let's keep it as is for now, as Metal handles implicit conversion on load.
-    # The only issue is if we write `output` as `float*` but requested `half` output?
-    # In Python we should set output_dtypes=[dtype].
-
     kernel = _get_kernel(
         name="paged_attention_kernel",
         filename="paged_attention_kernel.metal",
         input_names=input_names,
         output_names=["output"],
-        dtype=dtype,  # This will generate paged_attention_kernel_half etc.
+        dtype=dtype,
     )
 
     grid = (num_heads * 32, batch_size, 1)
@@ -344,7 +402,7 @@ def paged_attention(
         grid=grid,
         threadgroup=thread_group,
         output_shapes=[(batch_size, num_heads, v_head_dim)],
-        output_dtypes=[dtype],  # Output matches input dtype
+        output_dtypes=[dtype],
         verbose=False,
     )
 

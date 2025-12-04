@@ -524,6 +524,14 @@ class ParallaxHttpServer:
         1. The HTTP server and executor both run in the main process.
         2. Inter-process communication is done through IPC (each process uses a different port) via the ZMQ library.
         """
+        import resource
+
+        # Increase file descriptor limit for handling more concurrent connections
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        new_limit = min(4096, hard)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (new_limit, hard))
+        logger.info(f"Set file descriptor limit to {new_limit}")
+
         asyncio.run(
             init_app_states(
                 app.state,

@@ -64,14 +64,10 @@ async def async_request_openai_completions(
                 else request_func_input.model
             ),
             "prompt": request_func_input.prompt,
-            "temperature": 0.0,
             "best_of": request_func_input.best_of,
             "max_tokens": request_func_input.output_len,
             "logprobs": request_func_input.logprobs,
             "stream": True,
-            "stream_options": {
-                "include_usage": True,
-            },
         }
         if request_func_input.ignore_eos:
             payload["ignore_eos"] = request_func_input.ignore_eos
@@ -131,6 +127,7 @@ async def async_request_openai_completions(
                     output.generated_text = generated_text
                     output.latency = most_recent_timestamp - st
                 else:
+                    print(response.status, response.reason)
                     output.error = response.reason or ""
                     output.success = False
         except Exception:
@@ -186,9 +183,9 @@ async def async_request_openai_chat_completions(
             "temperature": 0.0,
             "max_tokens": request_func_input.output_len,
             "stream": True,
-            "stream_options": {
-                "include_usage": True,
-            },
+            "sampling_params": {
+                "ignore_eos": request_func_input.ignore_eos,
+            }
         }
         if request_func_input.ignore_eos:
             payload["ignore_eos"] = request_func_input.ignore_eos

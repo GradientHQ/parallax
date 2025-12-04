@@ -378,6 +378,155 @@ class TestPagedAttention:
         paged_time = (end - start) / 100 * 1000
         print(f"Paged Attention: {paged_time:.3f} ms")
 
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"bs": 1, "len": 128, "heads": 16, "kv_heads": 2, "dim": 128, "desc": "Small GQA"},
+            {"bs": 8, "len": 512, "heads": 32, "kv_heads": 8, "dim": 128, "desc": "Medium GQA"},
+            {"bs": 4, "len": 2048, "heads": 32, "kv_heads": 8, "dim": 128, "desc": "Large GQA"},
+            {"bs": 2, "len": 4096, "heads": 16, "kv_heads": 2, "dim": 128, "desc": "Very Long GQA"},
+        ],
+    )
+    def test_benchmark_sdpa_vs_metal(self, params):
+        """
+        Benchmark SDPA-based paged_attention vs Metal-based metal_paged_attention.
+        Compares correctness and performance.
+        """
+        from parallax.metal.paged_attention.kernel import metal_paged_attention
 
-if __name__ == "__main__":
-    unittest.main()
+        batch_size = params["bs"]
+        seq_len = params["len"]
+        num_heads = params["heads"]
+        num_kv_heads = params["kv_heads"]
+        head_dim = params["dim"]
+        block_size = 32
+        dtype = mx.bfloat16
+        scale = 1.0 / math.sqrt(head_dim)
+        num_iters = 50
+
+        # Setup cache
+        num_blocks_per_req = (seq_len + block_size - 1) // block_size
+        total_blocks = 1024  # Fixed large value for benchmarking
+
+        key_cache = mx.random.normal((1, total_blocks, num_kv_heads, block_size, head_dim)).astype(
+            dtype
+        )
+        value_cache = mx.random.normal(
+            (1, total_blocks, num_kv_heads, block_size, head_dim)
+        ).astype(dtype)
+
+        # Use scattered block indices from the large pool to simulate real usage
+        all_blocks = np.random.choice(total_blocks, size=(batch_size, num_blocks_per_req), replace=False).astype(np.int32)
+        block_tables = mx.array(all_blocks)
+        context_lengths = mx.array([seq_len] * batch_size, dtype=mx.int32)
+
+        q = mx.random.normal((batch_size, num_heads, 1, head_dim)).astype(dtype)
+
+        mx.eval(key_cache, value_cache, q, block_tables, context_lengths)
+
+        # Verify correctness first
+        out_sdpa = paged_attention(
+            q,
+            key_cache,
+            value_cache,
+            block_tables,
+            context_lengths,
+            block_size,
+            scale,
+            num_kv_heads,
+            0,
+        )
+        out_metal = metal_paged_attention(
+            q,
+            key_cache,
+            value_cache,
+            block_tables,
+            context_lengths,
+            block_size,
+            scale,
+            num_kv_heads,
+            0,
+        )
+        mx.eval(out_sdpa, out_metal)
+
+        diff = mx.abs(out_sdpa.astype(mx.float32) - out_metal.astype(mx.float32))
+        max_diff = mx.max(diff).item()
+        mean_diff = mx.mean(diff).item()
+
+        # Warmup SDPA
+        for _ in range(5):
+            _ = paged_attention(
+                q,
+                key_cache,
+                value_cache,
+                block_tables,
+                context_lengths,
+                block_size,
+                scale,
+                num_kv_heads,
+                0,
+            )
+            mx.eval(_)
+
+        # Benchmark SDPA
+        start = time.perf_counter()
+        for _ in range(num_iters):
+            out = paged_attention(
+                q,
+                key_cache,
+                value_cache,
+                block_tables,
+                context_lengths,
+                block_size,
+                scale,
+                num_kv_heads,
+                0,
+            )
+            mx.eval(out)
+        end = time.perf_counter()
+        sdpa_time = (end - start) / num_iters * 1000
+
+        # Warmup Metal
+        for _ in range(5):
+            _ = metal_paged_attention(
+                q,
+                key_cache,
+                value_cache,
+                block_tables,
+                context_lengths,
+                block_size,
+                scale,
+                num_kv_heads,
+                0,
+            )
+            mx.eval(_)
+
+        # Benchmark Metal
+        start = time.perf_counter()
+        for _ in range(num_iters):
+            out = metal_paged_attention(
+                q,
+                key_cache,
+                value_cache,
+                block_tables,
+                context_lengths,
+                block_size,
+                scale,
+                num_kv_heads,
+                0,
+            )
+            mx.eval(out)
+        end = time.perf_counter()
+        metal_time = (end - start) / num_iters * 1000
+
+        speedup = metal_time / sdpa_time if sdpa_time > 0 else 0
+
+        print(f"\n[{params['desc']}] BS={batch_size}, Len={seq_len}, H={num_heads}, KV_H={num_kv_heads}")
+        print(f"  Max diff: {max_diff:.6f}, Mean diff: {mean_diff:.6f}")
+        print(f"  SDPA Paged:  {sdpa_time:.3f} ms")
+        print(f"  Metal Paged: {metal_time:.3f} ms")
+        print(f"  Speedup (SDPA vs Metal): {speedup:.2f}x")
+
+        # Assert correctness (allow small diff due to float32 vs native precision)
+        assert max_diff < 0.01, f"Results differ too much: max_diff={max_diff}"
+

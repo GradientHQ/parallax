@@ -401,6 +401,7 @@ def calculate_metrics(
             e2els.append(outputs[i].latency)
             completed += 1
         else:
+            print(f"Request {i} failed: {outputs[i].error}")
             actual_output_lens.append(0)
 
     if goodput_config_dict:
@@ -726,6 +727,14 @@ def parse_goodput(slo_pairs):
 
 
 def main(args: argparse.Namespace):
+    import resource
+
+    # Increase file descriptor limit for handling many concurrent connections
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    new_limit = min(4096, hard)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (new_limit, hard))
+    print(f"Set file descriptor limit to {new_limit}")
+
     print(args)
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -927,7 +936,7 @@ if __name__ == "__main__":
         default=None,
         help="Server or API base url if not using http host and port.",
     )
-    parser.add_argument("--host", type=str, default="localhost")
+    parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument(
         "--endpoint",
