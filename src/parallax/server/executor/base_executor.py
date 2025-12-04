@@ -575,6 +575,8 @@ class BaseExecutor:
             max_new_tokens = 2048
         max_total_length = len(prompt) + max_new_tokens
 
+        lora_path = raw_request.get("lora_path")
+
         raw_sampling_params = raw_request.get("sampling_params")
         if raw_sampling_params is None:
             sampling_params = SamplingParams()
@@ -597,6 +599,7 @@ class BaseExecutor:
             sampling_params=sampling_params,
             max_new_tokens=max_new_tokens,
             max_total_length=max_total_length,
+            lora_path=lora_path,
         )
         if "routing_table" in raw_request:
             req.routing_table = raw_request["routing_table"]
@@ -658,6 +661,7 @@ class BaseExecutor:
                 hidden_states=hidden_states,
                 next_token_id=next_token_id,
                 routing_table=request.routing_table,
+                lora_path=request.lora_path,
             )
         if self.is_last_peer:
             # Last peer decodes a token and sends it back to the first peer.
@@ -675,14 +679,19 @@ class BaseExecutor:
                 hidden_states=hidden_states,
                 next_token_id=next_token_id,
                 routing_table=request.routing_table,
+                lora_path=request.lora_path,
             )
         # This peer is the first or an intermediate peer.
         if self.is_first_peer:
             assert isinstance(request, InitialRequest), "First peer must process an InitialRequest."
             if request.is_finished:
                 hidden_states = None
-            return IntermediateRequest.from_initial_request(request, hidden_states=hidden_states)
+            return IntermediateRequest.from_initial_request(
+                request, hidden_states=hidden_states, lora_path=request.lora_path
+            )
         assert isinstance(
             request, IntermediateRequest
         ), "Intermediate peer must process an IntermediateRequest."
-        return IntermediateRequest.from_intermediate_request(request, hidden_states)
+        return IntermediateRequest.from_intermediate_request(
+            request, hidden_states, lora_path=request.lora_path
+        )

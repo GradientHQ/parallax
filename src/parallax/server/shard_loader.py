@@ -383,11 +383,7 @@ class MLXModelLoader:
                         # Only convert dtype for non-quantized weights
                         # Quantized weights (uint32, int32) and their scales/biases should keep their original dtype
                         # Scales are typically float32 and should not be downcast to bfloat16
-                        is_quantized_param = (
-                            weight_array.dtype in (mx.uint32, mx.int32)
-                            or ".scales" in remapped_key
-                            or ".bias" in remapped_key
-                        )
+                        is_quantized_param = weight_array.dtype in (mx.uint32, mx.int32, mx.uint8)
                         if not is_quantized_param:
                             weight_array = weight_array.astype(dtype)
 

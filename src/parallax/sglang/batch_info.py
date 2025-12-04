@@ -56,6 +56,7 @@ def transform_requests_to_sglang(old_requests: List[Request]) -> List[Req]:
             origin_input_text="",
             origin_input_ids=old_req.input_ids,
             sampling_params=sampling_params,
+            lora_id=old_req.lora_id,
         )
         req.init_next_round_input()
         reqs.append(req)
@@ -67,6 +68,7 @@ def form_sgl_batch_prefill(
     model_runner: ModelRunner,
 ) -> ForwardBatch:
     """Initialize a prefill ScheduleBatch -> ModelWorkerBatch -> ForwardBatch workflow"""
+
     sgl_reqs = transform_requests_to_sglang(requests)
 
     def dummy_evict(*args):
@@ -200,6 +202,8 @@ def form_sgl_batch_decode(
     running_batch.orig_seq_lens[ready_indices] += 1
 
     model_worker_batch = ret.get_model_worker_batch()
+    if requests[0].lora_id is not None:
+        model_worker_batch.lora_ids = [req.lora_id or "" for req in requests]
     forward_batch = ForwardBatch.init_new(model_worker_batch, model_runner)
 
     return forward_batch
