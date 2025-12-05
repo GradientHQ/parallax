@@ -17,7 +17,7 @@ from mlx.utils import tree_unflatten
 from mlx_lm.models.switch_layers import QuantizedSwitchLinear, SwitchLinear
 from mlx_lm.tuner.dora import DoRAEmbedding, DoRALinear
 from mlx_lm.tuner.lora import LoRAEmbedding, LoRALinear, LoRASwitchLinear
-from mlx_lm.utils import get_model_path, load_config
+from mlx_lm.utils import _download, load_config
 
 from parallax.server.model import ShardedModel
 from parallax.utils.tokenizer_utils import load_tokenizer
@@ -240,7 +240,7 @@ class MLXModelLoader:
                 local_files_only=self.use_hfcache,
             )
         else:
-            model_path = get_model_path(self.model_path_str)[0]
+            model_path = _download(self.model_path_str)
 
         config = load_config(model_path)
         tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))

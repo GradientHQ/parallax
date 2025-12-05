@@ -9,7 +9,7 @@ import numpy as np
 import psutil
 import torch
 import zmq
-from mlx_lm.utils import get_model_path, load_config
+from mlx_lm.utils import _download, load_config
 
 from parallax.utils.selective_download import download_metadata_only
 
@@ -279,7 +279,7 @@ def fetch_model_from_hf(name: str, local_files_only: bool = False):
     if local_files_only:
         model_path = download_metadata_only(name, local_files_only=local_files_only)
     else:
-        model_path = get_model_path(name)[0]
+        model_path = _download(name)
     config = load_config(model_path)
     return config
 
