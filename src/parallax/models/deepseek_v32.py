@@ -10,14 +10,7 @@ from mlx_lm.models.rope_utils import initialize_rope
 from mlx_lm.models.switch_layers import SwitchGLU
 
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
-
-
-def store_indexer_cache(**kwargs):
-    pass
-
-
-def q_dot_k(q, k, block_size, block_table, context_length, layer_idx):
-    pass
+from parallax.metal.indexer.kernel import store_indexer_cache, q_dot_k
 
 
 @dataclass
@@ -472,9 +465,9 @@ class ParallaxDeepSeekV32Attention(DeepseekV32Attention):
                 sparse_mask = sparse_mask[:, None, :, :]
                 if mask is not None:
                     mask = mask + (1 - sparse_mask) * -1e9
+                    mask = mask.astype(queries.dtype)
                 else:
                     mask = sparse_mask
-            mask = mask.astype(queries.dtype)
             output = scaled_dot_product_attention(
                 queries,
                 keys,
