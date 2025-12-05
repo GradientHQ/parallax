@@ -9,8 +9,8 @@ from mlx_lm.models.base import BaseModelArgs, scaled_dot_product_attention
 from mlx_lm.models.rope_utils import initialize_rope
 from mlx_lm.models.switch_layers import SwitchGLU
 
+from parallax.metal.indexer.kernel import q_dot_k, store_indexer_cache
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
-from parallax.metal.indexer.kernel import store_indexer_cache, q_dot_k
 
 
 @dataclass
