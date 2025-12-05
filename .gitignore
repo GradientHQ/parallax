@@ -11,3 +11,6 @@ build/
 *.key
 .cache
 .vscode/
+
+# Ruff
+.ruff_cache/
