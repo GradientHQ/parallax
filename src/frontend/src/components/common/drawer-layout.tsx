@@ -153,7 +153,7 @@ export const DrawerLayout: FC<PropsWithChildren> = ({ children }) => {
           Your selected model requires more nodes.
           {(!!modelInfo
             && modelInfo.vram > 0 && [
-              `You’ll need a `,
+              ` You’ll need a `,
               <strong>{`minimum of ${modelInfo.vram} GB of total VRAM`}</strong>,
               ` to host this model.`,
             ])
