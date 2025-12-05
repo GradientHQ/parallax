@@ -137,7 +137,8 @@ class Indexer(nn.Module):
                         block_table=block_tables[i],
                         context_length=context_lengths[i],
                         layer_idx=layer_idx,
-                    )  # shape: (n_heads, 1, context_len)
+                    )  # shape: (n_heads, context_len)
+                    score = score[:, None, :]  # shape: (n_heads, 1, context_len)
                     score = mx.maximum(score, 0)
                     weight = self.weights_proj(x[i : i + 1]) * (
                         self.n_heads**-0.5
