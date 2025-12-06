@@ -346,30 +346,23 @@ class MLXExecutor(BaseExecutor):
                 self.model_shard.logits_to_tokens(hidden_states, lengths, sampling_info)
             )
 
-            # Extract logit values for sampled tokens only if requested
-            need_logits = any(
-                hasattr(req, "return_logits") and req.return_logits for req in requests
-            )
+            # Extract logit values for sampled tokens
+            try:
+                # Get last position logits for each request
+                batch_logits = []
+                for i, req in enumerate(requests):
+                    if lengths[i] > 0:
+                        # Get logit at last position
+                        last_idx = int(lengths[i]) - 1
+                        last_logits = hidden_states[i, last_idx, :]  # [vocab_size]
+                        # Extract logit for the sampled token
+                        token_id = int(token_ids[i])
+                        logit_value = float(last_logits[token_id])
+                        batch_logits.append(logit_value)
 
-            if need_logits:
-                try:
-                    # Get last position logits for each request
-                    batch_logits = []
-                    for i, req in enumerate(requests):
-                        if lengths[i] > 0:
-                            # Get logit at last position
-                            last_idx = int(lengths[i]) - 1
-                            last_logits = hidden_states[i, last_idx, :]  # [vocab_size]
-                            # Extract logit for the sampled token
-                            token_id = int(token_ids[i])
-                            logit_value = float(last_logits[token_id])
-                            batch_logits.append(logit_value)
-
-                    self._latest_token_logits = batch_logits if batch_logits else None
-                except Exception as e:
-                    logger.debug(f"Failed to extract token logits: {e}")
-                    self._latest_token_logits = None
-            else:
+                self._latest_token_logits = batch_logits if batch_logits else None
+            except Exception as e:
+                logger.debug(f"Failed to extract token logits: {e}")
                 self._latest_token_logits = None
 
             return token_ids

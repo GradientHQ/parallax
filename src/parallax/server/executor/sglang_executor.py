@@ -359,14 +359,8 @@ class SGLExecutor(BaseExecutor):
             # Last peer: sample and return token IDs
             next_token_ids = self.model_runner.sample(logits_output, forward_batch)
 
-            # Extract logits for the sampled tokens only if requested
-            # Check if any request in the batch needs logits
-            need_logits = any(
-                hasattr(req, "return_logits") and req.return_logits
-                for req in prepared_inputs["requests"]
-            )
-
-            if need_logits and hasattr(logits_output, "next_token_logits"):
+            # Extract logits for the sampled tokens
+            if hasattr(logits_output, "next_token_logits"):
                 # Get logits for sampled tokens
                 real_logits = logits_output.next_token_logits[
                     torch.arange(len(next_token_ids)), next_token_ids
