@@ -22,7 +22,7 @@ import traceback
 import uuid
 from dataclasses import dataclass, field
 from http import HTTPStatus
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import fastapi
 import uvicorn
@@ -87,6 +87,9 @@ class HTTPRequestInfo:
     error_message: Optional[str] = None
     error_type: Optional[str] = None
     error_status: HTTPStatus = HTTPStatus.INTERNAL_SERVER_ERROR
+    # logits support
+    return_logits: bool = False  # Whether to return logits
+    logits_list: List = field(default_factory=list)  # Store logits for each token
 
 
 class HTTPHandler:
@@ -128,6 +131,7 @@ class HTTPHandler:
         rid = request["rid"]
         stream = request.get("stream", False)
         model = request.get("model", "default")
+        return_logits = request.get("return_logits", False)  # Check if logits requested
         chat_object = "chat.completion.chunk" if stream else "chat.completion"
         detokenizer = self.detokenizer_class(self.tokenizer, self.tokenmap)
         create_time = time.time()
@@ -140,6 +144,7 @@ class HTTPHandler:
             create_time=create_time,
             update_time=update_time,
             detokenizer=detokenizer,
+            return_logits=return_logits,
         )
         if stream:
             request_info.token_queue = asyncio.Queue()
@@ -151,6 +156,11 @@ class HTTPHandler:
 
     def send_request(self, request: Dict):
         """Sends the request to model executor using IPC."""
+        # Ensure return_logits is included in the request sent to executor
+        rid = request.get("rid")
+        if rid and rid in self.processing_requests:
+            request_info = self.processing_requests[rid]
+            request["return_logits"] = request_info.return_logits
         self.send_to_executor.send_pyobj(request)
 
     def abort_request(self, request_id: str):
@@ -280,6 +290,9 @@ class HTTPHandler:
             "reasoning_content": None,
             "tool_calls": None,
         }
+        # Add logits if requested
+        if request_info.return_logits:
+            choice["logits"] = request_info.logits_list
         return response
 
     async def _handle_executor_error(self, rid: str, recv_dict: Dict):
@@ -330,6 +343,10 @@ class HTTPHandler:
             request_info.completion_tokens += 1
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
+
+            # Store logits if requested
+            if request_info.return_logits and "logits" in recv_dict:
+                request_info.logits_list.append(recv_dict["logits"])
 
             is_finished = recv_dict.get("eos", False) or recv_dict.get("length", False)
 
