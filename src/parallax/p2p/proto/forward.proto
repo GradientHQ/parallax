@@ -36,6 +36,7 @@ message Req {
   int32 next_token_id = 6;
   bytes hidden_states = 7;
   string lora_path = 8;
+  optional float token_logit = 9;  // Logit value for the sampled token
 }
 
 message SamplingParams {

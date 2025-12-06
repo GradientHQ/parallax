@@ -198,6 +198,9 @@ class MLXExecutor(BaseExecutor):
             f"KVCacheManager ready; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}"
         )
 
+        # Store latest sampled token logit values (not full distribution)
+        self._latest_token_logits = None
+
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
         if not requests:
@@ -253,6 +256,12 @@ class MLXExecutor(BaseExecutor):
                             req_dict["eos"] = True
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
+
+                        # Add logit value for the sampled token (if requested and available)
+                        if hasattr(original_req, "return_logits") and original_req.return_logits:
+                            if hasattr(req, "token_logit") and req.token_logit is not None:
+                                req_dict["logits"] = req.token_logit
+
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:
@@ -330,9 +339,40 @@ class MLXExecutor(BaseExecutor):
         # Process last peer: need additional sampling + detokenization
         if return_decoded_tokens:
             sampling_info = SamplingBatchInfo.from_reqs(requests)
-            return mx.array(
+
+            # For MLX, hidden_states at last shard is already logits (after lm_head)
+            # hidden_states shape: [batch_size, seq_len, vocab_size]
+            token_ids = mx.array(
                 self.model_shard.logits_to_tokens(hidden_states, lengths, sampling_info)
             )
+
+            # Extract logit values for sampled tokens only if requested
+            need_logits = any(
+                hasattr(req, "return_logits") and req.return_logits for req in requests
+            )
+
+            if need_logits:
+                try:
+                    # Get last position logits for each request
+                    batch_logits = []
+                    for i, req in enumerate(requests):
+                        if lengths[i] > 0:
+                            # Get logit at last position
+                            last_idx = int(lengths[i]) - 1
+                            last_logits = hidden_states[i, last_idx, :]  # [vocab_size]
+                            # Extract logit for the sampled token
+                            token_id = int(token_ids[i])
+                            logit_value = float(last_logits[token_id])
+                            batch_logits.append(logit_value)
+
+                    self._latest_token_logits = batch_logits if batch_logits else None
+                except Exception as e:
+                    logger.debug(f"Failed to extract token logits: {e}")
+                    self._latest_token_logits = None
+            else:
+                self._latest_token_logits = None
+
+            return token_ids
 
         return hidden_states
 
