@@ -21,7 +21,7 @@ Our scheduler also handles tokenization and pre-processing for the First Peer's 
 
 import time
 from collections import OrderedDict, deque
-from typing import Deque, Dict, Optional
+from typing import Deque, Dict, List, Optional
 
 from parallax.server.kv_cache import KVCacheManager
 from parallax.server.request import InitialRequest, Request, RequestStatus
