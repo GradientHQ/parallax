@@ -63,7 +63,6 @@ def reshape_and_cache(
     block_tables: mx.array,  # (batch, max_blocks)
     context_lengths: mx.array,  # (batch,)
     block_size: int,
-    layer_idx: int,
     slot_mapping: Optional[mx.array] = None,  # (batch,) or (batch * target_len,)
 ):
     """
@@ -146,7 +145,6 @@ def reshape_and_cache(
     c_k_head_dim = mk_int(k_head_dim)
     c_v_head_dim = mk_int(v_head_dim)
     c_block_size = mk_int(block_size)
-    c_layer_idx = mk_int(layer_idx)
     c_num_layers = mk_int(num_layers)
     c_num_blocks = mk_int(num_blocks)
 
@@ -163,7 +161,6 @@ def reshape_and_cache(
         c_k_head_dim,
         c_v_head_dim,
         c_block_size,
-        c_layer_idx,
         c_num_layers,
         c_num_blocks,
     ]
@@ -181,7 +178,6 @@ def reshape_and_cache(
         "k_head_dim",
         "v_head_dim",
         "block_size",
-        "layer_idx",
         "num_layers",
         "num_blocks",
     ]
@@ -225,7 +221,6 @@ def paged_attention(
     block_size: int,
     scale: float,
     num_kv_heads: int,
-    layer_idx: int,
     v_head_dim: Optional[int] = None,
     top_k_indices: Optional[mx.array] = None,
     window_size: Optional[int] = None,
@@ -261,7 +256,6 @@ def paged_attention(
     c_v_head_dim = mk_int(v_head_dim)
     c_block_size = mk_int(block_size)
     c_max_blocks = mk_int(max_blocks)
-    c_layer_idx = mk_int(layer_idx)
     c_num_layers = mk_int(num_layers)
     c_num_total_blocks = mk_int(num_total_blocks)
     c_scale = mx.array(scale, dtype=queries.dtype)
@@ -283,7 +277,6 @@ def paged_attention(
             c_v_head_dim,
             c_block_size,
             c_max_blocks,
-            c_layer_idx,
             c_num_layers,
             c_num_total_blocks,
             c_scale,
@@ -303,7 +296,6 @@ def paged_attention(
             "v_head_dim",
             "block_size",
             "max_blocks",
-            "layer_idx",
             "num_layers",
             "num_total_blocks",
             "scale",
@@ -327,7 +319,6 @@ def paged_attention(
             c_v_head_dim,
             c_block_size,
             c_max_blocks,
-            c_layer_idx,
             c_num_layers,
             c_num_total_blocks,
             c_scale,
@@ -347,7 +338,6 @@ def paged_attention(
             "v_head_dim",
             "block_size",
             "max_blocks",
-            "layer_idx",
             "num_layers",
             "num_total_blocks",
             "scale",
@@ -368,7 +358,6 @@ def paged_attention(
             c_v_head_dim,
             c_block_size,
             c_max_blocks,
-            c_layer_idx,
             c_num_layers,
             c_num_total_blocks,
             c_scale,
@@ -386,7 +375,6 @@ def paged_attention(
             "v_head_dim",
             "block_size",
             "max_blocks",
-            "layer_idx",
             "num_layers",
             "num_total_blocks",
             "scale",

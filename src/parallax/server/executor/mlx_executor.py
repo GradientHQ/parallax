@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import mlx.core as mx
 
 from parallax.server.executor.base_executor import BaseExecutor
-from parallax.server.paged_kv_cache import PagedKVCacheManager
+from parallax.server.cache_manager import CacheManager
 from parallax.server.request import (
     InitialRequest,
     IntermediateRequest,
@@ -140,12 +140,37 @@ class MLXExecutor(BaseExecutor):
         indexer_key_head_dim = self.config.get("indexer_key_head_dim", None)
         indexer_num_kv_heads = self.config.get("indexer_num_kv_heads", None)
 
+        layer_types = self.config.get("layers_block_type", None)
+
+        # New Kimi-style linear attention config parsing
+        linear_attn_config = self.config.get("linear_attn_config")
+        if linear_attn_config and layer_types is None:
+            num_layers = self.config.get("num_hidden_layers", 0)
+            full_attn_layers = linear_attn_config.get("full_attn_layers", [])
+            # Construct layer_types: default "linear", but "attention" for full_attn_layers
+            layer_types = []
+            for i in range(num_layers):
+                if i in full_attn_layers:
+                    layer_types.append("attention")
+                else:
+                    layer_types.append("linear")
+
+        if layer_types is None:
+            layer_types = ["attention"] * self.num_shard_layers
+        elif len(layer_types) >= end_layer:
+            layer_types = layer_types[start_layer:end_layer]
+
+        layer_types = [
+            "linear" if t in ["mamba", "linear_attention", "linear"] else "attention"
+            for t in layer_types
+        ]
+
         logger.debug(
-            "Initializing PagedKVCacheManager (mlx) with block_size=%d, layers=%d",
+            "Initializing CacheManager (mlx) with block_size=%d, layers=%d",
             kv_block_size,
             self.num_shard_layers,
         )
-        self.kv_cache_manager = PagedKVCacheManager(
+        self.kv_cache_manager = CacheManager(
             num_layers=self.num_shard_layers,
             num_kv_heads=num_key_value_heads,
             head_dim=head_dim,
@@ -155,6 +180,13 @@ class MLXExecutor(BaseExecutor):
             head_dim_v=v_head_dim,
             indexer_key_head_dim=indexer_key_head_dim,
             indexer_num_kv_heads=indexer_num_kv_heads,
+            layer_types=layer_types,
+            conv_dim=conv_dim,
+            conv_kernel_size=linear_conv_kernel_dim,
+            linear_k_dim=linear_key_head_dim,
+            linear_v_dim=linear_value_head_dim,
+            linear_num_k_heads=linear_num_key_heads,
+            linear_num_v_heads=linear_num_value_heads,
         )
         super().__init__(
             start_layer=start_layer,
@@ -296,7 +328,7 @@ class MLXExecutor(BaseExecutor):
             block_tables=prepared_inputs.get("block_tables"),
             context_lengths=prepared_inputs.get("context_lengths"),
             slot_mapping=prepared_inputs.get("slot_mapping"),
-            indexer_cache=prepared_inputs.get("indexer_cache"),
+            state_slot_mapping=prepared_inputs.get("state_slot_mapping"),
         )
 
         logger.debug(
@@ -427,16 +459,22 @@ class MLXExecutor(BaseExecutor):
         causal_mask = create_causal_mask(padded_inputs.shape[1], padded_inputs.shape[1], self.dtype)
         mask = combine_padding_and_causal_masks(padding_mask, causal_mask, self.dtype)
 
+        # Prepare state slot mapping if needed
+        state_slot_mapping = None
+        if self.kv_cache_manager.needs_slots:
+            req_ids = [r.request_id for r in batched_requests]
+            slots = [self.kv_cache_manager.get_slot(rid) for rid in req_ids]
+            state_slot_mapping = mx.array(slots, dtype=mx.int32)
+
         ret = {
             "h_or_tokens": padded_inputs,
-            "cache": self.kv_cache_manager.get_cache(),
-            "indexer_cache": self.kv_cache_manager.get_indexer_cache(),
+            "cache": self.kv_cache_manager.get_caches(),
             "mask": mask,
             "requests": batched_requests,
             "block_tables": block_tables_tensor,
             "context_lengths": context_lengths_tensor,
             "slot_mapping": slot_mapping_tensor,
-            "state_cache": None,
+            "state_slot_mapping": state_slot_mapping,
         }
         logger.debug(f"Prepared MLX prefill batch (size={batch_size})")
         return ret
@@ -488,16 +526,22 @@ class MLXExecutor(BaseExecutor):
         block_tables_tensor = mx.array(padded_block_tables, dtype=mx.int32)
         context_lengths_tensor = mx.array(context_lengths_list, dtype=mx.int32)
 
+        # Prepare state slot mapping if needed
+        state_slot_mapping = None
+        if self.kv_cache_manager.needs_slots:
+            req_ids = [r.request_id for r in batched_requests]
+            slots = [self.kv_cache_manager.get_slot(rid) for rid in req_ids]
+            state_slot_mapping = mx.array(slots, dtype=mx.int32)
+
         ret = {
             "h_or_tokens": padded_inputs,
-            "cache": self.kv_cache_manager.get_cache(),
-            "indexer_cache": self.kv_cache_manager.get_indexer_cache(),
+            "cache": self.kv_cache_manager.get_caches(),
             "mask": None,
             "requests": batched_requests,
             "block_tables": block_tables_tensor,
             "context_lengths": context_lengths_tensor,
             "slot_mapping": None,
-            "state_cache": None,
+            "state_slot_mapping": state_slot_mapping,
         }
         logger.debug(f"Prepared MLX decode batch (size={batch_size})")
         return ret

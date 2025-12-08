@@ -212,23 +212,22 @@ class ParallaxQwen3NextBlock(MLXQwen3NextBlock):
         x: mx.array,
         mask: Optional[mx.array] = None,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
-        offset: int = 0,
-        lengths: Optional[mx.array] = None,
-        state_cache: Optional[Tuple[mx.array, mx.array]] = None,
+        block_tables: Optional[mx.array] = None,
+        context_lengths: Optional[mx.array] = None,
+        slot_mapping: Optional[mx.array] = None,
         **kwargs,
     ):
         if self.is_linear:
-            r, (k_cache, v_cache, state0, state1) = self.linear_attn(
-                self.input_layernorm(x), cache, state_cache
-            )
+            state_slot_mapping = kwargs.get("state_slot_mapping")
+            r = self.linear_attn(self.input_layernorm(x), cache, state_slot_mapping)
         else:
-            r, (k_cache, v_cache, state0, state1) = self.self_attn(
-                self.input_layernorm(x), mask, cache, offset, state_cache
+            r = self.self_attn(
+                self.input_layernorm(x), mask, cache, block_tables, context_lengths, slot_mapping
             )
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
-        return out, (k_cache, v_cache, state0, state1)
+        return out
 
     @classmethod
     def get_architecture(cls):
@@ -236,4 +235,4 @@ class ParallaxQwen3NextBlock(MLXQwen3NextBlock):
         return "Qwen3NextForCausalLM"
 
 
-# EntryClass = ParallaxQwen3NextBlock
+EntryClass = ParallaxQwen3NextBlock

@@ -23,7 +23,7 @@ import time
 from collections import OrderedDict
 from typing import Dict, List, Optional
 
-from parallax.server.kv_cache import KVCacheManager
+from parallax.server.cache_manager import CacheManager
 from parallax.server.request import InitialRequest, Request, RequestStatus
 from parallax.utils.shared_state import SharedState
 from parallax_utils.logging_config import get_logger
@@ -45,7 +45,7 @@ class Scheduler:
         scheduler_wait_ms: int = 200,
         micro_batch_ratio: int = 2,
         is_first_peer: bool = False,
-        kv_cache_manager: Optional[KVCacheManager] = None,
+        kv_cache_manager: Optional[CacheManager] = None,
         request_timeout_s: Optional[int] = 600,
         shared_state: Optional[SharedState] = None,
         **kwargs,

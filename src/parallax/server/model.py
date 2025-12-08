@@ -2,7 +2,7 @@
 Defines the ShardedModel class for distributing MLX models across multiple devices.
 """
 
-from typing import Optional, Tuple, Type
+from typing import Optional, Tuple, Type, List, Any
 
 import mlx.core as mx
 from mlx import nn
@@ -58,7 +58,8 @@ class ShardedModel(nn.Module):
             self.norm_in = None
 
         self.layers = [
-            block_class(config, layer_idx) for layer_idx in range(start_layer, end_layer)
+            block_class(config, layer_idx, layer_idx - start_layer)
+            for layer_idx in range(start_layer, end_layer)
         ]
 
         if self.is_last_shard:
@@ -109,12 +110,11 @@ class ShardedModel(nn.Module):
     def __call__(
         self,
         h_or_tokens: mx.array,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
+        cache: Optional[List[Any]] = None,
         mask: Optional[mx.array] = None,
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
-        window_size: Optional[int] = None,
         **kwargs,
     ) -> mx.array:
         """
@@ -122,9 +122,8 @@ class ShardedModel(nn.Module):
             h_or_tokens:
                 (batch, target_len_padded, D) or (batch, target_len_padded) for prefill,
                 (batch, 1, D) or (batch, 1) for decode.
-            cache: PagedAttention:
-                   (key_cache_global, value_cache_global)
-                   has for shape: (num_layers, num_blocks, num_kv_heads, block_size, head_dim)
+            cache: List of layer caches (KVCache or LinearCache).
+                   Legacy mode: (key_cache_global, value_cache_global) tuple.
             lengths: (batch,) true lengths of each sequence in batch.
             mask: Optional causal mask for the current segment.
             window_size: Optional int, if provided, will use a sliding window attention mask.

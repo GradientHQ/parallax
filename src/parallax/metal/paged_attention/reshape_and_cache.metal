@@ -33,7 +33,6 @@ int b_size = block_size;
 int block_idx = slot / b_size;
 int block_offset = slot % b_size;
 
-int l_idx = layer_idx;
 int n_blocks = num_blocks;
 
 // Handle Key
@@ -46,9 +45,8 @@ if (dim_idx < k_dim) {
     // Calculate destination index
     int64_t head_stride = b_size * k_dim;
     int64_t block_stride = n_kv_heads * head_stride;
-    int64_t layer_stride = n_blocks * block_stride;
 
-    int64_t dest_idx = (int64_t)l_idx * layer_stride + (int64_t)block_idx * block_stride +
+    int64_t dest_idx = (int64_t)block_idx * block_stride +
                        (int64_t)head_idx * head_stride + block_offset * k_dim +
                        dim_idx;
 
@@ -65,9 +63,8 @@ if (dim_idx < v_dim) {
     // Calculate destination index
     int64_t head_stride = b_size * v_dim;
     int64_t block_stride = n_kv_heads * head_stride;
-    int64_t layer_stride = n_blocks * block_stride;
 
-    int64_t dest_idx = (int64_t)l_idx * layer_stride + (int64_t)block_idx * block_stride +
+    int64_t dest_idx = (int64_t)block_idx * block_stride +
                        (int64_t)head_idx * head_stride + block_offset * v_dim +
                        dim_idx;
 

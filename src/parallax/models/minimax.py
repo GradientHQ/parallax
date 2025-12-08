@@ -1,6 +1,6 @@
 # Copyright © 2025 Apple Inc.
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Any
 
 import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention
@@ -9,6 +9,7 @@ from mlx_lm.models.minimax import MiniMaxDecoderLayer as MLXMiniMaxBlock
 from mlx_lm.models.minimax import ModelArgs
 
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
+from parallax.server.cache.base import BaseCache
 
 
 class ParallaxMiniMaxAttention(MLXMiniMaxAttention):
@@ -17,11 +18,11 @@ class ParallaxMiniMaxAttention(MLXMiniMaxAttention):
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
+        cache: Optional[BaseCache] = None,
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
-        layer_idx: int = 0,
+        **kwargs,
     ) -> mx.array:
 
         batch, target_len, _ = x.shape
@@ -42,7 +43,7 @@ class ParallaxMiniMaxAttention(MLXMiniMaxAttention):
         )
         values_new = values.reshape(batch, target_len, self.num_key_value_heads, -1)
 
-        key_cache_global, value_cache_global = cache
+        key_cache_global, value_cache_global = cache.get_cache()
 
         queries_rotated_list = []
         keys_rotated_list = []
@@ -69,7 +70,6 @@ class ParallaxMiniMaxAttention(MLXMiniMaxAttention):
             block_tables,
             context_lengths,
             block_size,
-            layer_idx,
             slot_mapping=slot_mapping,
         )
 
@@ -85,7 +85,6 @@ class ParallaxMiniMaxAttention(MLXMiniMaxAttention):
                 block_size,
                 self.scale,
                 self.num_key_value_heads,
-                layer_idx,
             )
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
         else:
@@ -108,16 +107,17 @@ class ParallaxMiniMaxBlock(MLXMiniMaxBlock):
     This version handles the KV cache explicitly and returns new K and V states.
     """
 
-    def __init__(self, args: ModelArgs, layer_idx: int):
+    def __init__(self, args: ModelArgs, layer_idx: int, local_layer_idx: int):
         super().__init__(args)
         self.self_attn = ParallaxMiniMaxAttention(args)
         self.layer_idx = layer_idx
+        self.local_layer_idx = local_layer_idx
 
     def __call__(
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
+        cache: Optional[List[Any]] = None,
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
@@ -126,11 +126,11 @@ class ParallaxMiniMaxBlock(MLXMiniMaxBlock):
         r = self.self_attn(
             self.input_layernorm(x),
             mask,
-            cache,
+            cache[self.local_layer_idx],
             block_tables=block_tables,
             context_lengths=context_lengths,
             slot_mapping=slot_mapping,
-            layer_idx=self.layer_idx,
+            **kwargs,
         )
         h = x + r
         r = self.block_sparse_moe(self.post_attention_layernorm(h))
