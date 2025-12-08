@@ -312,3 +312,40 @@ def initialize_nccl_port():
         else:
             nccl_port -= 43
     return nccl_port
+
+
+def get_layer_types(config: dict, start_layer: int, end_layer: int) -> List[str]:
+    num_shard_layers = end_layer - start_layer
+
+    # Case 1: Explicit layer types (e.g., DeepSeek with layers_block_type)
+    layer_types = config.get("layers_block_type", None)
+    if layer_types is not None:
+        if len(layer_types) >= end_layer:
+            layer_types = layer_types[start_layer:end_layer]
+        return [
+            "linear" if t in ["mamba", "linear_attention"] else "attention" for t in layer_types
+        ]
+
+    # Case 2: linear_attn_config with full_attn_layers (e.g., Kimi)
+    linear_attn_config = config.get("linear_attn_config")
+    if linear_attn_config:
+        full_attn_layers = set(linear_attn_config.get("full_attn_layers", []))
+        layer_types = []
+        for i in range(start_layer, end_layer):
+            if i in full_attn_layers:
+                layer_types.append("attention")
+            else:
+                layer_types.append("linear")
+        return layer_types
+
+    # Case 3: full_attention_interval (e.g., Qwen3Next)
+    full_attention_interval = config.get("full_attention_interval")
+    if full_attention_interval:
+        layer_types = []
+        for i in range(start_layer, end_layer):
+            is_linear = (i + 1) % full_attention_interval != 0
+            layer_types.append("linear" if is_linear else "attention")
+        return layer_types
+
+    # Default: all attention layers
+    return ["attention"] * num_shard_layers

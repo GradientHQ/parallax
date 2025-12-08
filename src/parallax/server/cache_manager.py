@@ -50,6 +50,14 @@ class CacheManager:
         self.block_size = block_size
         self.max_num_seqs = max_num_seqs
 
+        # Linear cache params (store for memory calculation)
+        self.conv_dim = conv_dim
+        self.conv_kernel_size = conv_kernel_size
+        self.linear_k_dim = linear_k_dim
+        self.linear_v_dim = linear_v_dim
+        self.linear_num_k_heads = linear_num_k_heads
+        self.linear_num_v_heads = linear_num_v_heads
+
         # Determine layer types
         if layer_types is None:
             self.layer_types = ["attention"] * num_layers
@@ -124,14 +132,60 @@ class CacheManager:
         # Mapping: request_id -> state slot index
         self.request_slots: Dict[str, int] = {}
 
+    def _calculate_linear_cache_bytes(self, dtype_size: int) -> int:
+        """Calculate total memory needed for linear cache across all linear layers."""
+        num_linear_layers = self.layer_types.count("linear")
+        if num_linear_layers == 0:
+            return 0
+
+        one_layer_bytes = 0
+
+        # conv_state: (1, max_num_seqs, conv_kernel_size - 1, conv_dim)
+        if self.conv_dim is not None and self.conv_kernel_size is not None:
+            conv_state_len = self.conv_kernel_size - 1
+            one_layer_bytes += self.max_num_seqs * conv_state_len * self.conv_dim * dtype_size
+
+        # linear_state: (1, max_num_seqs, linear_num_v_heads, linear_v_dim, linear_k_dim)
+        if (
+            self.linear_k_dim is not None
+            and self.linear_v_dim is not None
+            and self.linear_num_v_heads is not None
+        ):
+            one_layer_bytes += (
+                self.max_num_seqs
+                * self.linear_num_v_heads
+                * self.linear_v_dim
+                * self.linear_k_dim
+                * dtype_size
+            )
+
+        total_bytes = one_layer_bytes * num_linear_layers
+
+        if total_bytes > 0:
+            logger.info(
+                f"Linear cache will use {total_bytes / 1024**3:.2f} GB "
+                f"for {num_linear_layers} layers"
+            )
+
+        return total_bytes
+
     def _calculate_num_blocks(self, cache_memory_fraction: float, dtype: mx.Dtype) -> int:
         device_info = mx.metal.device_info()
         total_mem = device_info["max_recommended_working_set_size"]
         current_mem = mx.metal.get_active_memory()
         free_mem = total_mem - current_mem
-        available_for_kv = free_mem * cache_memory_fraction
+        available_for_cache = free_mem * cache_memory_fraction
 
         dtype_size = 2 if dtype in [mx.float16, mx.bfloat16] else 4
+
+        # First, calculate linear cache memory (fixed size, allocated upfront)
+        linear_cache_bytes = self._calculate_linear_cache_bytes(dtype_size)
+
+        # Remaining memory for KV cache
+        available_for_kv = available_for_cache - linear_cache_bytes
+        if available_for_kv <= 0:
+            logger.warning("Linear cache uses all available memory. No room for KV cache blocks.")
+            return 0
 
         # Calculate bytes per block for ONE attention layer
         one_layer_block_bytes = (
@@ -143,7 +197,8 @@ class CacheManager:
             )
 
         # Total bytes per block = Sum over all attention layers
-        total_block_bytes = one_layer_block_bytes * self.layer_types.count("attention")
+        num_attention_layers = self.layer_types.count("attention")
+        total_block_bytes = one_layer_block_bytes * num_attention_layers
 
         if total_block_bytes == 0:
             return 0
@@ -153,6 +208,11 @@ class CacheManager:
         if num_gpu_blocks <= 0:
             logger.warning("Not enough memory for KV cache. Defaulting to 16 blocks.")
             num_gpu_blocks = 16
+
+        logger.info(
+            f"KV cache will use {num_gpu_blocks * total_block_bytes / 1024**3:.2f} GB "
+            f"for {num_attention_layers} layers ({num_gpu_blocks} blocks)"
+        )
 
         return num_gpu_blocks
 

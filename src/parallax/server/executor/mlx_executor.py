@@ -21,6 +21,7 @@ from parallax.utils.utils import (
     combine_padding_and_causal_masks,
     create_causal_mask,
     get_device_dtype,
+    get_layer_types,
     pad_inputs,
 )
 from parallax_utils.logging_config import get_logger
@@ -135,36 +136,13 @@ class MLXExecutor(BaseExecutor):
             value_dim = linear_value_head_dim * linear_num_value_heads
         if key_dim is not None and value_dim is not None:
             conv_dim = key_dim * 2 + value_dim
-        self.using_state_cache = linear_conv_kernel_dim is not None and conv_dim is not None
 
         indexer_key_head_dim = self.config.get("indexer_key_head_dim", None)
         indexer_num_kv_heads = self.config.get("indexer_num_kv_heads", None)
 
-        layer_types = self.config.get("layers_block_type", None)
-
-        # New Kimi-style linear attention config parsing
-        linear_attn_config = self.config.get("linear_attn_config")
-        if linear_attn_config and layer_types is None:
-            num_layers = self.config.get("num_hidden_layers", 0)
-            full_attn_layers = linear_attn_config.get("full_attn_layers", [])
-            # Construct layer_types: default "linear", but "attention" for full_attn_layers
-            layer_types = []
-            for i in range(num_layers):
-                if i in full_attn_layers:
-                    layer_types.append("attention")
-                else:
-                    layer_types.append("linear")
-
-        if layer_types is None:
-            layer_types = ["attention"] * self.num_shard_layers
-        elif len(layer_types) >= end_layer:
-            layer_types = layer_types[start_layer:end_layer]
-
-        layer_types = [
-            "linear" if t in ["mamba", "linear_attention", "linear"] else "attention"
-            for t in layer_types
-        ]
-
+        layer_types = get_layer_types(self.config, start_layer, end_layer)
+        logger.debug(f"layer_types: {layer_types}")
+        time.sleep(5)
         logger.debug(
             "Initializing CacheManager (mlx) with block_size=%d, layers=%d",
             kv_block_size,
@@ -181,6 +159,7 @@ class MLXExecutor(BaseExecutor):
             indexer_key_head_dim=indexer_key_head_dim,
             indexer_num_kv_heads=indexer_num_kv_heads,
             layer_types=layer_types,
+            max_num_seqs=max_batch_size // micro_batch_ratio,
             conv_dim=conv_dim,
             conv_kernel_size=linear_conv_kernel_dim,
             linear_k_dim=linear_key_head_dim,
