@@ -2,7 +2,7 @@
 Defines the ShardedModel class for distributing MLX models across multiple devices.
 """
 
-from typing import Optional, Tuple, Type, List, Any
+from typing import Any, List, Optional, Type
 
 import mlx.core as mx
 from mlx import nn

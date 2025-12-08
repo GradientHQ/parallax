@@ -6,7 +6,7 @@ exposes the same block interface as Qwen implementations, so that
 `ShardedModel` can drive it uniformly.
 """
 
-from typing import Optional, Tuple
+from typing import Optional
 
 import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention

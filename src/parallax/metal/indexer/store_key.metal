@@ -1,6 +1,6 @@
 // Inputs provided by MLX wrapper:
 // key, key_cache, slot_mapping (pointers)
-// key_stride, num_heads, head_dim, block_size, layer_idx, num_layers, num_blocks (scalars)
+// key_stride, num_heads, head_dim, block_size, num_layers, num_blocks (scalars)
 
 device {{T}} *key_cache_mut = (device {{T}} *)key_cache;
 
@@ -27,8 +27,7 @@ long k_head_stride = block_size * head_dim;
 
 long k_layer_stride = (long)num_blocks * k_block_stride;
 
-long dest_idx = (long)layer_idx * k_layer_stride +
-                block_idx * k_block_stride +
+long dest_idx = block_idx * k_block_stride +
                 head_idx * k_head_stride +
                 block_offset * head_dim +
                 d_idx;

@@ -1,5 +1,7 @@
-from typing import Tuple, Optional
+from typing import Optional, Tuple
+
 import mlx.core as mx
+
 from parallax.server.cache.base import BaseCache
 
 

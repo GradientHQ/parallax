@@ -1,6 +1,6 @@
 // Inputs provided by MLX wrapper:
 // q, key_cache, block_table, output (pointers)
-// context_len, block_size, num_heads, head_dim, layer_idx, num_layers, num_total_blocks, max_blocks (scalars)
+// context_len, block_size, num_heads, head_dim, num_layers, num_total_blocks, max_blocks (scalars)
 
 uint3 gid = thread_position_in_grid;
 
@@ -15,16 +15,13 @@ long k_block_stride = num_heads * block_size * head_dim;
 long k_head_stride = block_size * head_dim;
 long k_layer_stride = (long)num_total_blocks * k_block_stride;
 
-long layer_offset = (long)layer_idx * k_layer_stride;
-
 for (int b = 0; b < num_valid_blocks; b++) {
     int block_num = block_table[b];
     int logical_idx = b * block_size + token_in_block;
 
     if (logical_idx >= context_len) continue;
 
-    long k_base = layer_offset +
-                  (long)block_num * k_block_stride +
+    long k_base = (long)block_num * k_block_stride +
                   head_idx * k_head_stride +
                   token_in_block * head_dim;
 

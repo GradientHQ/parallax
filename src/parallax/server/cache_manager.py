@@ -2,10 +2,10 @@ from typing import Dict, List, Optional
 
 import mlx.core as mx
 
+from parallax.server.cache.allocator import BlockAllocator, SlotAllocator
 from parallax.server.cache.base import BaseCache
 from parallax.server.cache.kv_cache import KVCache
 from parallax.server.cache.linear_cache import LinearCache
-from parallax.server.cache.allocator import BlockAllocator, SlotAllocator
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)

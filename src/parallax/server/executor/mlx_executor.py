@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import mlx.core as mx
 
-from parallax.server.executor.base_executor import BaseExecutor
 from parallax.server.cache_manager import CacheManager
+from parallax.server.executor.base_executor import BaseExecutor
 from parallax.server.request import (
     InitialRequest,
     IntermediateRequest,

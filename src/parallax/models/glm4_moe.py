@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, List, Any
+from typing import Any, List, Optional
 
 import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention
