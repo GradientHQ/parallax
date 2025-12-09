@@ -9,7 +9,7 @@ import pytest
 from mlx_lm.models.base import create_attention_mask
 from mlx_lm.utils import _download, load_model
 
-from parallax.server.paged_kv_cache import PagedKVCacheManager
+from parallax.server.cache_manager import CacheManager
 from parallax.server.shard_loader import MLXModelLoader
 from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.utils.utils import pad_inputs
@@ -92,7 +92,7 @@ def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
     for shard in model_shards:
         num_shard_layers = shard.end_layer - shard.start_layer
         cache_memory_fraction += 0.1
-        kv_mgr = PagedKVCacheManager(
+        kv_mgr = CacheManager(
             num_layers=num_shard_layers,
             num_kv_heads=num_kv_heads,
             head_dim=head_dim,
@@ -145,7 +145,7 @@ def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
         block_tables = mx.array(padded_block_tables, dtype=mx.int32)
         context_lengths = mx.array(context_lengths_list, dtype=mx.int32)
         slot_mapping = mx.array(slot_mapping_flat, dtype=mx.int64)
-        cache = kv_cache_manager.get_cache()
+        cache = kv_cache_manager.get_caches()
 
         # Forward pass
         input_data = ref_ids if shard.start_layer == 0 else x
