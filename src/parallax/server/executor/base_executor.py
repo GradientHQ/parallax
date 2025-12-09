@@ -147,7 +147,7 @@ class BaseExecutor:
             is_first_peer=self.is_first_peer,
             tokenizer=self.tokenizer,
             eos_token_id=self.eos_token_id,
-            kv_cache_manager=self.kv_cache_manager if self.device == "mlx" else None,
+            cache_manager=self.cache_manager if self.device == "mlx" else None,
             request_timeout_s=request_timeout_s,
             shared_state=self.shared_state,
         )

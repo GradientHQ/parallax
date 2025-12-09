@@ -45,7 +45,7 @@ class Scheduler:
         scheduler_wait_ms: int = 200,
         micro_batch_ratio: int = 2,
         is_first_peer: bool = False,
-        kv_cache_manager: Optional[CacheManager] = None,
+        cache_manager: Optional[CacheManager] = None,
         request_timeout_s: Optional[int] = 600,
         shared_state: Optional[SharedState] = None,
         **kwargs,
@@ -57,7 +57,7 @@ class Scheduler:
             scheduler_wait_ms: The minimum time to wait before dispatching a batch;
             micro_batch_ratio: micro_batch_size = max_batch_size // micro_batch_ratio;
             tokenizer: The tokenizer to use for the model;
-            kv_cache_manager: The KV cache manager to use for the scheduler.
+            cache_manager: The KV cache manager to use for the scheduler.
             request_timeout_s: timeout for each inflight request (default 10mins).
         """
         self.max_batch_size = max_batch_size
@@ -77,7 +77,7 @@ class Scheduler:
         # Keeps track of all in-flight requests
         self._running_requests: Dict[str, Request] = OrderedDict()
 
-        self.kv_cache_manager = kv_cache_manager
+        self.cache_manager = cache_manager
         self.shared_state = shared_state
         # Default timeout for requests if not set on request object
         self.request_timeout_s = request_timeout_s
@@ -225,10 +225,10 @@ class Scheduler:
                 continue
 
             # Check kv cache pool
-            if self.kv_cache_manager is not None:
-                if not self.kv_cache_manager.has_request(req.request_id):
+            if self.cache_manager is not None:
+                if not self.cache_manager.has_request(req.request_id):
                     # TODO: Handle chunked prefill, and support preemption.
-                    if not self.kv_cache_manager.allocate_request(req.request_id, req.total_length):
+                    if not self.cache_manager.allocate_request(req.request_id, req.total_length):
                         logger.warning(
                             f"Request {rid} can't be admit to running batch due to KV cache size."
                         )

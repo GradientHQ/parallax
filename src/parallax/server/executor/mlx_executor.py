@@ -148,7 +148,7 @@ class MLXExecutor(BaseExecutor):
             kv_block_size,
             self.num_shard_layers,
         )
-        self.kv_cache_manager = CacheManager(
+        self.cache_manager = CacheManager(
             num_layers=self.num_shard_layers,
             num_kv_heads=num_key_value_heads,
             head_dim=head_dim,
@@ -206,7 +206,7 @@ class MLXExecutor(BaseExecutor):
         # )
 
         logger.debug(
-            f"KVCacheManager ready; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}"
+            f"CacheManager ready; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}"
         )
 
     def handle_input_requests(self, requests: List[Request]):
@@ -228,7 +228,7 @@ class MLXExecutor(BaseExecutor):
                             "It might have been cancelled or finished."
                         )
                         continue
-                    if not self.kv_cache_manager.has_request(req.request_id):
+                    if not self.cache_manager.has_request(req.request_id):
                         logger.warning(
                             f"Received IntermediateRequest {req.request_id}. "
                             "But no corresponding request found in cache manager. "
@@ -243,7 +243,7 @@ class MLXExecutor(BaseExecutor):
 
                     # Check for termination.
                     if self.scheduler.check_and_update_request_status(original_req):
-                        self.kv_cache_manager.release_request(original_req.request_id)
+                        self.cache_manager.release_request(original_req.request_id)
                         logger.debug(
                             f"Released resources for finished request {req.request_id}, "
                             f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
@@ -277,14 +277,14 @@ class MLXExecutor(BaseExecutor):
                 ), "Non-first peers must receive IntermediateRequests."
                 if req.is_finished or req.hidden_states is None:
                     if self.enable_prefix_cache:
-                        keys, values = self.kv_cache_manager.gather_kv_cache(req.request_id)
+                        keys, values = self.cache_manager.gather_kv_cache(req.request_id)
                         self.prefix_cache.cache_finished_request(req, keys, values)
                         self.prefix_cache.evict_request(req.request_id)
 
-                    self.kv_cache_manager.release_request(req.request_id)
+                    self.cache_manager.release_request(req.request_id)
                     logger.debug(
                         f"Released resources for finished request {req.request_id}, "
-                        f"kv cache manager has {self.kv_cache_manager.tokens_in_cache} tokens, "
+                        f"kv cache manager has {self.cache_manager.tokens_in_cache} tokens, "
                         f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
                     )
                     self.scheduler.evict_request(req.request_id)
@@ -328,14 +328,14 @@ class MLXExecutor(BaseExecutor):
 
         # Note: With PagedAttention, we don't need to explicitly update requests with new K/V
         # because they are written in-place to the global cache.
-        # self.kv_cache_manager.update_requests(...) is REMOVED.
+        # self.cache_manager.update_requests(...) is REMOVED.
 
         # Update prefix cache (TODO: Adapt to PagedKV)
         if self.enable_prefix_cache:
             pass
             # for _, req in enumerate(requests):
             #    if req.is_prefill:
-            #        keys, values = self.kv_cache_manager.gather_kv_cache(req.request_id)
+            #        keys, values = self.cache_manager.gather_kv_cache(req.request_id)
             #        self.prefix_cache.cache_unfinished_request(req, keys, values)
 
         # Process last peer: need additional sampling + detokenization
@@ -350,8 +350,8 @@ class MLXExecutor(BaseExecutor):
     def _release_request(self, rid: str):
         """Release per-request resources in MLX."""
         try:
-            if hasattr(self, "kv_cache_manager") and self.kv_cache_manager is not None:
-                self.kv_cache_manager.release_request(rid)
+            if hasattr(self, "cache_manager") and self.cache_manager is not None:
+                self.cache_manager.release_request(rid)
         except Exception:
             pass
 
@@ -386,11 +386,11 @@ class MLXExecutor(BaseExecutor):
 
             # Allocate Paged KV blocks
             # For first peer and intermediate peers, we allocate based on prompt length
-            success = self.kv_cache_manager.allocate_request(req.request_id, req.total_length)
+            success = self.cache_manager.allocate_request(req.request_id, req.total_length)
             if not success:
                 raise RuntimeError(f"OOM during prefill allocation for {req.request_id}")
 
-            block_table = self.kv_cache_manager.get_block_table(req.request_id)
+            block_table = self.cache_manager.get_block_table(req.request_id)
             block_tables_list.append(block_table)
             # For prefill, context length after this step will be total_length
             context_lengths_list.append(req.total_length)
@@ -413,10 +413,10 @@ class MLXExecutor(BaseExecutor):
             for seq_idx in range(max_len):
                 if seq_idx < length:
                     # Valid token
-                    block_idx = seq_idx // self.kv_cache_manager.block_size
-                    block_offset = seq_idx % self.kv_cache_manager.block_size
+                    block_idx = seq_idx // self.cache_manager.block_size
+                    block_offset = seq_idx % self.cache_manager.block_size
                     physical_block = block_table[block_idx]
-                    slot = physical_block * self.kv_cache_manager.block_size + block_offset
+                    slot = physical_block * self.cache_manager.block_size + block_offset
                     slot_mapping_flat.append(slot)
                 else:
                     # Padding token
@@ -440,14 +440,14 @@ class MLXExecutor(BaseExecutor):
 
         # Prepare state slot mapping if needed
         state_slot_mapping = None
-        if self.kv_cache_manager.needs_slots:
+        if self.cache_manager.needs_slots:
             req_ids = [r.request_id for r in batched_requests]
-            slots = [self.kv_cache_manager.get_slot(rid) for rid in req_ids]
+            slots = [self.cache_manager.get_slot(rid) for rid in req_ids]
             state_slot_mapping = mx.array(slots, dtype=mx.int32)
 
         ret = {
             "h_or_tokens": padded_inputs,
-            "cache": self.kv_cache_manager.get_caches(),
+            "cache": self.cache_manager.get_caches(),
             "mask": mask,
             "requests": batched_requests,
             "block_tables": block_tables_tensor,
@@ -480,13 +480,13 @@ class MLXExecutor(BaseExecutor):
             # TODO: Prefix cache update
 
             # Allocate slot for new token
-            success = self.kv_cache_manager.append_slot(req.request_id)
+            success = self.cache_manager.append_slot(req.request_id)
             if not success:
                 raise RuntimeError(f"OOM during decode for {req.request_id}")
 
-            block_table = self.kv_cache_manager.get_block_table(req.request_id)
+            block_table = self.cache_manager.get_block_table(req.request_id)
             block_tables_list.append(block_table)
-            context_lengths_list.append(self.kv_cache_manager.get_context_length(req.request_id))
+            context_lengths_list.append(self.cache_manager.get_context_length(req.request_id))
 
         if isinstance(h_or_tokens_list[0], list):
             # First peer case: h_or_tokens_list is list of list of ints [[token_id], ...]
@@ -507,14 +507,14 @@ class MLXExecutor(BaseExecutor):
 
         # Prepare state slot mapping if needed
         state_slot_mapping = None
-        if self.kv_cache_manager.needs_slots:
+        if self.cache_manager.needs_slots:
             req_ids = [r.request_id for r in batched_requests]
-            slots = [self.kv_cache_manager.get_slot(rid) for rid in req_ids]
+            slots = [self.cache_manager.get_slot(rid) for rid in req_ids]
             state_slot_mapping = mx.array(slots, dtype=mx.int32)
 
         ret = {
             "h_or_tokens": padded_inputs,
-            "cache": self.kv_cache_manager.get_caches(),
+            "cache": self.cache_manager.get_caches(),
             "mask": None,
             "requests": batched_requests,
             "block_tables": block_tables_tensor,
