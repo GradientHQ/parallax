@@ -24,8 +24,12 @@ import { useRefCallback } from '../hooks';
 export default function PageSetup() {
   const [
     {
-      config: { networkType, initNodesNumber, modelInfo },
-      clusterInfo: { status: clusterStatus },
+      config: { networkType, initNodesNumber, modelInfo, modelName: selectedModelName },
+      clusterInfo: {
+        status: clusterStatus,
+        initNodesNumber: clusterInitNodesNumber,
+        modelName: clusterModelName,
+      },
     },
     {
       config: { setNetworkType, setInitNodesNumber },
@@ -38,7 +42,13 @@ export default function PageSetup() {
   const [loading, setLoading] = useState(false);
 
   const onContinue = useRefCallback(async () => {
-    if (clusterStatus === 'idle' || clusterStatus === 'failed') {
+    const shouldInit =
+      clusterStatus === 'idle'
+      || clusterStatus === 'failed'
+      || clusterInitNodesNumber !== initNodesNumber
+      || clusterModelName !== selectedModelName;
+
+    if (shouldInit) {
       setLoading(true);
       Promise.resolve()
         .then(() => init())
