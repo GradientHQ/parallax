@@ -73,12 +73,8 @@ class TestPagedAttention:
         atol = 1e-2 if dtype != mx.float32 else 1e-4
 
         # Setup Memory (single layer cache, shape: (1, num_blocks, num_kv_heads, block_size, head_dim))
-        key_cache = mx.zeros(
-            (1, NUM_BLOCKS, NUM_KV_HEADS, BLOCK_SIZE, HEAD_DIM), dtype=dtype
-        )
-        value_cache = mx.zeros(
-            (1, NUM_BLOCKS, NUM_KV_HEADS, BLOCK_SIZE, HEAD_DIM), dtype=dtype
-        )
+        key_cache = mx.zeros((1, NUM_BLOCKS, NUM_KV_HEADS, BLOCK_SIZE, HEAD_DIM), dtype=dtype)
+        value_cache = mx.zeros((1, NUM_BLOCKS, NUM_KV_HEADS, BLOCK_SIZE, HEAD_DIM), dtype=dtype)
 
         # Mock Block Tables
         max_blocks_per_req = 2

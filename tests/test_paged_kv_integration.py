@@ -126,7 +126,9 @@ class TestPagedKVIntegration(unittest.TestCase):
         block_idx_req1 = block_tables[0][0]
         # Check first token
         # key_cache shape: (1, num_blocks, num_kv_heads, block_size, head_dim)
-        cached_k_0 = key_cache[0, block_idx_req1, :, 0, :]  # dim0=placeholder, block, heads, offset 0, dim
+        cached_k_0 = key_cache[
+            0, block_idx_req1, :, 0, :
+        ]  # dim0=placeholder, block, heads, offset 0, dim
         expected_k_0 = mx.array(keys_np[0, 0, :, :])
         self.assertTrue(mx.allclose(cached_k_0, expected_k_0).item(), "Req1 Token 0 Key Mismatch")
 

@@ -2,7 +2,7 @@
 hidden_dimefines the Qwen3 model.
 """
 
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -13,7 +13,7 @@ from mlx_lm.models.qwen3_next import Qwen3NextAttention as MLXQwen3NextAttention
 from mlx_lm.models.qwen3_next import Qwen3NextDecoderLayer as MLXQwen3NextBlock
 from mlx_lm.models.qwen3_next import Qwen3NextGatedDeltaNet as MLXQwen3NextGatedDeltaNet
 
-from parallax.metal.paged_attention.kernel import reshape_and_cache, paged_attention
+from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
 from parallax.server.cache.base import BaseCache
 
 
