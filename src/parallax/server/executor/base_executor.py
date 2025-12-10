@@ -176,7 +176,7 @@ class BaseExecutor:
                 )
         if self.shared_state is not None:
             self.shared_state.set_status(ServerState.READY.value)
-            
+
         # store max_sequence_length
         self.max_sequence_length = max_sequence_length
         self.model_path = None
@@ -573,12 +573,12 @@ class BaseExecutor:
         else:
             prompt = convert_chat(raw_request["messages"], raw_request.get("role_mapping"))
             prompt = self.tokenizer.encode(prompt)
-        
+
         max_req_len = self.max_sequence_length if self.max_sequence_length is not None else 2048
         input_token_num = len(prompt)
-        if (input_token_num >= max_req_len):
+        if input_token_num >= max_req_len:
             logger.warning(
-            f"Input token length {input_token_num} exceeds max_sequence_length {max_req_len}. Truncating input."
+                f"Input token length {input_token_num} exceeds max_sequence_length {max_req_len}. Truncating input."
             )
             now_prompt_len = max(5, max_req_len - 10)
             del prompt[now_prompt_len:]
