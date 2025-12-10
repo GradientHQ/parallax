@@ -129,24 +129,14 @@ def reshape_and_cache(
         if slot_mapping.shape[0] != num_tokens:
             raise ValueError(f"Slot mapping length {slot_mapping.shape[0]} != tokens {num_tokens}")
 
-    num_layers = key_cache.shape[0]
-    num_blocks = key_cache.shape[1]
-
     # 2. Prepare Constants
-    key_stride = num_kv_heads * k_head_dim
-    value_stride = num_kv_heads * v_head_dim
-
     def mk_int(val):
         return mx.array(val, dtype=mx.int32)
 
-    c_key_stride = mk_int(key_stride)
-    c_val_stride = mk_int(value_stride)
     c_num_kv = mk_int(num_kv_heads)
     c_k_head_dim = mk_int(k_head_dim)
     c_v_head_dim = mk_int(v_head_dim)
     c_block_size = mk_int(block_size)
-    c_num_layers = mk_int(num_layers)
-    c_num_blocks = mk_int(num_blocks)
 
     # Inputs list
     inputs = [
@@ -155,14 +145,10 @@ def reshape_and_cache(
         key_cache,
         value_cache,
         slot_mapping,
-        c_key_stride,
-        c_val_stride,
         c_num_kv,
         c_k_head_dim,
         c_v_head_dim,
         c_block_size,
-        c_num_layers,
-        c_num_blocks,
     ]
 
     # Input names (just for declaration)
@@ -172,14 +158,10 @@ def reshape_and_cache(
         "key_cache",
         "value_cache",
         "slot_mapping",
-        "key_stride",
-        "value_stride",
         "num_kv_heads",
         "k_head_dim",
         "v_head_dim",
         "block_size",
-        "num_layers",
-        "num_blocks",
     ]
 
     # 3. Get and Launch Kernel

@@ -33,8 +33,6 @@ int b_size = block_size;
 int block_idx = slot / b_size;
 int block_offset = slot % b_size;
 
-int n_blocks = num_blocks;
-
 // Handle Key
 if (dim_idx < k_dim) {
     // Calculate source index

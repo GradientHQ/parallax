@@ -41,10 +41,10 @@ class ParallaxLlamaAttention(MLXLlamaAttention):
         Args:
             x: (batch, target_len, hidden_dim) - Input hidden states for the current query segment.
             mask: (batch, n_q_heads, target_len, source_len)
-            cache: contains (key_cache, value_cache) global.
+            cache: BaseCache object containing the layer cache.
             block_tables: (batch, max_blocks) - PagedKV block tables.
             context_lengths: (batch,) - PagedKV sequence lengths.
-            layer_idx: Layer index for PagedKV access.
+            slot_mapping: (batch * target_len,) - Flattened slot mapping.
 
         Returns:
             output: (batch, target_len, hidden_dim) - Output hidden states.
