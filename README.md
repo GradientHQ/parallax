@@ -49,6 +49,10 @@ The backend architecture:
 - [Installation](./docs/user_guide/install.md)
 - [Getting Started](./docs/user_guide/quick_start.md)
 
+## Logs
+
+Parallax mirrors every log message to both the terminal and a rotating log file stored at `logs/parallax.log` inside your project directory (created automatically). Override the location via `PARALLAX_LOG_DIR` or `PARALLAX_LOG_FILE`, and tweak rotation with `PARALLAX_LOG_MAX_BYTES` and `PARALLAX_LOG_BACKUP_COUNT`.
+
 ## Contributing
 
 We warmly welcome contributions of all kinds! For guidelines on how to get involved, please refer to our [Contributing Guide](./docs/CONTRIBUTING.md).
