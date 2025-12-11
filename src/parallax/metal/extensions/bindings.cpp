@@ -10,7 +10,7 @@ NB_MODULE(_ext, m) {
   m.doc() = "vLLM PagedAttentionV1";
 
   m.def(
-      "PagedAttentionV1",
+      "paged_attention_v1",
       &parallax_ext::paged_attention_v1,
       "query"_a,
       "key_cache"_a,
