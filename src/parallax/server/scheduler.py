@@ -20,8 +20,8 @@ Our scheduler also handles tokenization and pre-processing for the First Peer's 
 """
 
 import time
-from collections import OrderedDict
-from typing import Dict, List, Optional
+from collections import OrderedDict, deque
+from typing import Deque, Dict, List, Optional
 
 from parallax.server.cache_manager import CacheManager
 from parallax.server.request import InitialRequest, Request, RequestStatus
@@ -73,7 +73,7 @@ class Scheduler:
             self.max_total_length = kwargs.get("max_total_length", 1024)
 
         # Prefill wait queue (FIFO) for admission
-        self._wait_queue: List[Request] = []
+        self._wait_queue: Deque[Request] = deque()
         # Keeps track of all in-flight requests
         self._running_requests: Dict[str, Request] = OrderedDict()
 
@@ -217,9 +217,8 @@ class Scheduler:
 
         Pushes admitted requests directly into the running set.
         """
-        # TODO: pop directly from wait queue ?
         while self._wait_queue and len(self._running_requests) < self.max_batch_size:
-            req = self._wait_queue.pop(0)
+            req = self._wait_queue.popleft()
             rid = req.request_id
             if rid in self._running_requests:
                 continue

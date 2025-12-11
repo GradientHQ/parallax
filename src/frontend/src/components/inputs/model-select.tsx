@@ -157,17 +157,16 @@ export const ModelSelect: FC<ModelSelectProps> = ({ variant = 'outlined', autoCo
     //   openDialog();
     //   return;
     // }
+    if (autoCommit) {
+      setCanAutoCommit(true);
+    }
     setModelName(String(e.target.value));
   });
 
   const [canAutoCommit, setCanAutoCommit] = useState(false);
   useEffect(() => {
-    if (autoCommit) {
-      setCanAutoCommit(autoCommit);
-    }
-  }, [autoCommit]);
-  useEffect(() => {
     if (canAutoCommit && configModelName !== clusterModelName) {
+      setCanAutoCommit(false);
       init();
     }
   }, [canAutoCommit, configModelName]);
