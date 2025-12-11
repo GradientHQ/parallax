@@ -68,8 +68,7 @@ benchmark = [
 ]
 
 dev = [
-  "black>=24.3",
-  "ruff>=0.4",
+  "ruff>=0.14.6",
   "pytest>=8.2",
   "pytest-mock>=3.14",
   "pytest-cov>=5.0",
@@ -79,12 +78,4 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]                # put your code under ./src/…
 
-[tool.black]
-line-length = 100
-
-[tool.isort]
-profile = "black"
-
-[tool.ruff]
-ignore = ["E501"]              # line length handled by Black
-line-length = 100
+# Ruff configuration moved to ruff.toml
