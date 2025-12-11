@@ -72,29 +72,29 @@ def compute_max_tokens_in_cache(
     return max(0, available_cache_size // per_token_cache_size)
 
 
-def derive_max_batch_size(
+def derive_max_concurrent_requests(
     *,
-    requested_max_batch_size: Optional[int],
+    requested_max_concurrent_requests: Optional[int],
     max_sequence_length: Optional[int],
     max_tokens_in_cache: Optional[int],
 ) -> int:
-    """Derive final max_batch_size clamped by KV capacity if sequence length known."""
+    """Derive final max_concurrent_requests clamped by KV capacity if sequence length known."""
     max_batch_capacity: Optional[int] = None
     if max_sequence_length and max_tokens_in_cache:
         max_batch_capacity = max(1, max_tokens_in_cache // int(max_sequence_length))
-    if requested_max_batch_size is None:
+    if requested_max_concurrent_requests is None:
         if max_batch_capacity is None:
-            logger.warning("Overriding max_batch_size to 16 due to no max_sequence_length provided")
+            logger.warning("Overriding max_concurrent_requests to 16 due to no max_sequence_length provided")
             return 16
         return max_batch_capacity
     if max_batch_capacity is not None:
-        return min(requested_max_batch_size, max_batch_capacity)
-    return requested_max_batch_size
+        return min(requested_max_concurrent_requests, max_batch_capacity)
+    return requested_max_concurrent_requests
 
 
-def compute_max_batch_size(
+def compute_max_concurrent_requests(
     *,
-    requested_max_batch_size: Optional[int],
+    requested_max_concurrent_requests: Optional[int],
     max_sequence_length: Optional[int],
     device: Optional[str],
     kv_cache_memory_fraction: float,
@@ -107,7 +107,7 @@ def compute_max_batch_size(
     head_dim_k: Optional[int] = None,
     head_dim_v: Optional[int] = None,
 ) -> int:
-    """Compute final max_batch_size by chaining dtype->elem_bytes, KV capacity, and clamping.
+    """Compute final max_concurrent_requests by chaining dtype->elem_bytes, KV capacity, and clamping.
 
     If memory_gb is provided, we compute available_cache_bytes from it; otherwise we use device heuristics.
     """
@@ -116,7 +116,7 @@ def compute_max_batch_size(
     if memory_gb is not None:
         available_cache_bytes = int(memory_gb * 1024**3 * kv_cache_memory_fraction)
     ## This is an Error due to kv may have different head_dim
-    max_tokens = compute_max_tokens_in_cache(
+    max_tokens_in_cache = compute_max_tokens_in_cache(
         device=device or "",  # empty means non-cuda path
         kv_cache_memory_fraction=kv_cache_memory_fraction,
         num_shard_layers=num_shard_layers,
@@ -126,8 +126,8 @@ def compute_max_batch_size(
         elem_bytes=eb,
         available_cache_bytes=available_cache_bytes,
     )
-    return derive_max_batch_size(
-        requested_max_batch_size=requested_max_batch_size,
+    return derive_max_concurrent_requests(
+        requested_max_concurrent_requests=requested_max_concurrent_requests,
         max_sequence_length=max_sequence_length,
-        max_tokens_in_cache=max_tokens,
+        max_tokens_in_cache=max_tokens_in_cache,
     )

@@ -29,8 +29,8 @@ def make_decode(rid: str, ready: bool = True) -> Request:
 
 
 def test_prefill_fifo_and_micro_batch():
-    sched = Scheduler(max_batch_size=8, max_num_tokens_per_batch=10_000, micro_batch_ratio=1)
-    # micro_batch_size = max_batch_size // ratio = 8
+    sched = Scheduler(max_concurrent_requests=8, max_num_tokens_per_batch=10_000, micro_batch_ratio=1)
+    # micro_batch_size = max_concurrent_requests // ratio = 8
     # Enqueue 3 prefills in order
     r1 = make_prefill("r1", 5)
     r2 = make_prefill("r2", 6)
@@ -46,7 +46,7 @@ def test_prefill_fifo_and_micro_batch():
 
 def test_decode_ready_order_and_prefill_first():
     # micro_batch_size = 3
-    sched = Scheduler(max_batch_size=3, max_num_tokens_per_batch=10_000, micro_batch_ratio=1)
+    sched = Scheduler(max_concurrent_requests=3, max_num_tokens_per_batch=10_000, micro_batch_ratio=1)
 
     # Two decodes already running
     d1 = make_decode("d1")
@@ -72,7 +72,7 @@ def test_decode_ready_order_and_prefill_first():
 
 def test_token_budget_prefill_skipped_decode_taken():
     # Token budget too small for prefill, but enough for decodes (cost=1)
-    sched = Scheduler(max_batch_size=2, max_num_tokens_per_batch=1, micro_batch_ratio=1)
+    sched = Scheduler(max_concurrent_requests=2, max_num_tokens_per_batch=1, micro_batch_ratio=1)
 
     # One large prefill
     p_big = make_prefill("p_big", 5)
@@ -94,7 +94,7 @@ def test_kv_cache_admission_guard_blocks_prefill():
     # A KV manager that rejects additions
     cache_mgr = FakeCacheManager(allow=False)
     sched = Scheduler(
-        max_batch_size=2,
+        max_concurrent_requests=2,
         max_num_tokens_per_batch=100,
         micro_batch_ratio=1,
         cache_manager=cache_mgr,

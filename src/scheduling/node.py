@@ -4,7 +4,7 @@ Scheduling primitives for distributed LLM inference.
 - `NodeHardwareInfo`: static hardware properties
 - `RequestSignal`: minimal request envelope (id, received timestamp)
 - `RooflinePerformanceModel`: compute/IO roofline estimator with configurable
-  sequence/batch shape
+  sequence/request count shape
 - `Node`: worker serving state; manages layer allocation, capacity helpers,
   latency tracking, and RTT cache for network-aware request routing
 """
@@ -15,7 +15,7 @@ from math import floor
 from typing import Dict, List, Optional
 
 from parallax_utils.logging_config import get_logger
-from parallax_utils.utils import bytes_per_element, compute_max_batch_size
+from parallax_utils.utils import bytes_per_element, compute_max_concurrent_requests
 from scheduling.model_info import ModelInfo
 
 logger = get_logger(__name__)
@@ -60,7 +60,7 @@ class RooflinePerformanceModel:
     Lightweight roofline-based performance estimator.
 
     Encapsulates compute- and IO-bound latency estimations for a given
-    `(hardware, model_info)` pair. Sequence/batch shape can be updated to
+    `(hardware, model_info)` pair. Sequence/request count shape can be updated to
     reflect current request context.
     """
 
@@ -70,7 +70,7 @@ class RooflinePerformanceModel:
         model_info: ModelInfo,
         quantization_speedup: float = 1.0,
         *,
-        batch_size: int = 1,
+        max_concurrent_requests: int = 1,
         target_seq_len: int = 1,
         source_seq_len: int = 256,
         using_mlx: bool = False,
@@ -79,7 +79,7 @@ class RooflinePerformanceModel:
         self.io_bandwidth = hardware.memory_bandwidth_gbps
         self.model_info = model_info
         self.quantization_speedup = quantization_speedup
-        self.batch_size = batch_size
+        self.max_concurrent_requests = max_concurrent_requests
         self.target_seq_len = target_seq_len
         self.source_seq_len = source_seq_len
         self.using_mlx = using_mlx
@@ -95,13 +95,13 @@ class RooflinePerformanceModel:
     def set_sequence_shape(
         self,
         *,
-        batch_size: Optional[int] = None,
+        max_concurrent_requests: Optional[int] = None,
         target_seq_len: Optional[int] = None,
         source_seq_len: Optional[int] = None,
     ) -> None:
-        """Convenience setter to update any of batch/target/source sequence sizes."""
-        if batch_size is not None:
-            self.batch_size = batch_size
+        """Convenience setter to update any of max concurrent requests/target/source sequence sizes."""
+        if max_concurrent_requests is not None:
+            self.max_concurrent_requests = max_concurrent_requests
         if target_seq_len is not None:
             self.target_seq_len = target_seq_len
         if source_seq_len is not None:
@@ -125,14 +125,14 @@ class RooflinePerformanceModel:
         """
         decoder_layer_compute_latency = self.get_compute_roofline_latency_ms(
             self.model_info.decoder_layer_flops(
-                batch_size=self.batch_size,
+                max_concurrent_requests=self.max_concurrent_requests,
                 target_seq_len=self.target_seq_len,
                 source_seq_len=self.source_seq_len,
             )
         )
         model_btyes = self.model_info.decoder_layer_io_bytes(
             roofline=True,
-            batch_size=self.batch_size,
+            max_concurrent_requests=self.max_concurrent_requests,
             target_seq_len=self.target_seq_len,
             source_seq_len=self.source_seq_len,
         )
@@ -217,8 +217,8 @@ class Node:
             )
         except Exception:
             elem_bytes = 2
-        derived_max = compute_max_batch_size(
-            requested_max_batch_size=self.max_concurrent_requests,
+        derived_max = compute_max_concurrent_requests(
+            requested_max_concurrent_requests=self.max_concurrent_requests,
             max_sequence_length=self.max_sequence_length,
             device=None,
             kv_cache_memory_fraction=self.kvcache_mem_ratio,
@@ -344,7 +344,7 @@ class Node:
             hardware=self.hardware,
             model_info=self.model_info,
             quantization_speedup=quantization_speedup,
-            batch_size=self.current_requests,
+            max_concurrent_requests=self.current_requests,
             target_seq_len=1,
             source_seq_len=self.max_sequence_length,
             using_mlx=self.hardware.device == "mlx",

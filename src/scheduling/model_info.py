@@ -86,15 +86,15 @@ class ModelInfo:
         """Return bytes per token for KV cache."""
         return self.cache_bytes_per_element * (self.k_dim + self.v_dim)
 
-    def per_layer_kv_cache_size(self, *, batch_size: int = 1, source_seq_len: int = 256) -> int:
+    def per_layer_kv_cache_size(self, *, max_concurrent_requests: int = 1, source_seq_len: int = 256) -> int:
         """Return size of KV cache in bytes for given request dimensions."""
-        return self.per_token_per_layer_kv_size * batch_size * source_seq_len
+        return self.per_token_per_layer_kv_size * max_concurrent_requests * source_seq_len
 
     def expected_num_activated_experts(
-        self, *, batch_size: int = 1, target_seq_len: int = 1
+        self, *, max_concurrent_requests: int = 1, target_seq_len: int = 1
     ) -> Optional[int]:
         """Return expected number of activated experts for a request size."""
-        num_tokens = batch_size * target_seq_len
+        num_tokens = max_concurrent_requests * target_seq_len
         if self.num_local_experts is not None and self.num_experts_per_tok is not None:
             return int(
                 self.num_local_experts
@@ -105,7 +105,7 @@ class ModelInfo:
     def decoder_layer_flops(
         self,
         *,
-        batch_size: int = 1,
+        max_concurrent_requests: int = 1,
         target_seq_len: int = 1,
         source_seq_len: int = 256,
     ) -> int:
@@ -134,18 +134,18 @@ class ModelInfo:
         )
         # Sparse MoE FFN, if applicable
         expected_experts = self.expected_num_activated_experts(
-            batch_size=batch_size, target_seq_len=target_seq_len
+            max_concurrent_requests=max_concurrent_requests, target_seq_len=target_seq_len
         )
         if expected_experts is not None:
             ffn_flops *= expected_experts
 
-        return batch_size * (attention_flops + ffn_flops)
+        return max_concurrent_requests * (attention_flops + ffn_flops)
 
     def decoder_layer_io_bytes(
         self,
         roofline: Optional[bool] = None,
         *,
-        batch_size: int = 1,
+        max_concurrent_requests: int = 1,
         target_seq_len: int = 1,
         source_seq_len: int = 256,
     ) -> int:
@@ -154,7 +154,7 @@ class ModelInfo:
 
         Args:
             roofline: True if calculation is for roofline io latency, otherwise for param size estimation.
-            batch_size: Request batch size
+            max_concurrent_requests: Maximum number of concurrent requests
             target_seq_len: Target sequence length (tokens to generate)
             source_seq_len: Source sequence length (prompt tokens)
         """
@@ -172,12 +172,12 @@ class ModelInfo:
 
         if roofline:
             expected_experts = self.expected_num_activated_experts(
-                batch_size=batch_size, target_seq_len=target_seq_len
+                max_concurrent_requests=max_concurrent_requests, target_seq_len=target_seq_len
             )
             if expected_experts is not None:
                 ffn_params *= expected_experts
             kv_cache_size = self.per_layer_kv_cache_size(
-                batch_size=batch_size, source_seq_len=source_seq_len
+                max_concurrent_requests=max_concurrent_requests, source_seq_len=source_seq_len
             )
         else:
             if self.num_local_experts is not None:

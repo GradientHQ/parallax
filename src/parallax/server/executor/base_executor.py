@@ -127,8 +127,8 @@ class BaseExecutor:
 
         # Scheduler: derive final max_concurrent_requests with KV constraints
         # Remove this for now as it's not working on gpu devices
-        # max_concurrent_requests = compute_max_batch_size(
-        #     requested_max_batch_size=max_concurrent_requests,
+        # max_concurrent_requests = compute_max_concurrent_requests(
+        #     requested_max_concurrent_requests=max_concurrent_requests,
         #     max_sequence_length=max_sequence_length,
         #     device=self.device,
         #     kv_cache_memory_fraction=kv_cache_memory_fraction,
