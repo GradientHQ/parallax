@@ -1,4 +1,6 @@
+#include <dlfcn.h>
 #include <iostream>
+#include <filesystem>
 #include <sstream>
 #include <string>
 
@@ -7,6 +9,17 @@
 #include "mlx/backend/metal/utils.h"
 
 namespace parallax_ext {
+
+std::string current_binary_dir() {
+  static std::string binary_dir = []() {
+    Dl_info info;
+    if (!dladdr(reinterpret_cast<void*>(&current_binary_dir), &info)) {
+      throw std::runtime_error("Unable to get current binary dir.");
+    }
+    return std::filesystem::path(info.dli_fname).parent_path().string();
+  }();
+  return binary_dir;
+}
 
 mx::array paged_attention_v1(
     const mx::array& query,         // [num_seqs, num_heads, head_size]
@@ -20,8 +33,8 @@ mx::array paged_attention_v1(
     const float scale,
     mx::StreamOrDevice s /* = {} */ // Stream on which to schedule the operation
 ) {
-    out_dtype = query.dtype();
-    out_shape = query.shape();
+    auto out_dtype = query.dtype();
+    auto out_shape = query.shape();
     const std::vector<mx::array> inputs = {query, key_cache, value_cache, block_tables, seq_lens};
     // Construct the array as the output of the PagedAttentionV1 primitive
     return mx::array(
@@ -30,6 +43,14 @@ mx::array paged_attention_v1(
         /* std::unique_ptr<Primitive> primitive = */
         std::make_shared<PagedAttentionV1>(to_stream(s), num_kv_heads, block_size, max_seq_len, scale),
         /* const std::vector<array>& inputs = */ inputs);
+}
+
+/** Evaluate primitive on CPU */
+void PagedAttentionV1::eval_cpu(
+  const std::vector<mx::array>& inputs,
+  std::vector<mx::array>& outputs) {
+    // Currently not implemented
+    return;
 }
 
 /** Evaluate primitive on GPU */
@@ -49,10 +70,10 @@ void PagedAttentionV1::eval_gpu(
     // and each stream carries its device identifiers
     auto& s = stream();
     // We get the needed metal device using the stream
-    auto& d = metal::device(s.device);
+    auto& d = mx::metal::device(s.device);
 
     // Allocate output memory
-    out.set_data(allocator::malloc(out.nbytes()));
+    out.set_data(mlx::core::allocator::malloc(out.nbytes()));
 
     // Set kernel paramas
     const int num_threads = 256;
@@ -108,8 +129,8 @@ void PagedAttentionV1::eval_gpu(
 
     // Dispatch configuration
     // Grid: (num_heads, num_seqs, 1) - no partitioning for v1
-    MTL::Size grid = MTLSizeMake(num_heads, num_seqs, 1);
-    MTL::Size threadgroup = MTLSizeMake(num_threads, 1, 1);
+    MTL::Size grid = MTL::Size(num_heads, num_seqs, 1);
+    MTL::Size threadgroup = MTL::Size(num_threads, 1, 1);
 
     // Launch the grid with the given number of threads divided among
     // the given threadgroups

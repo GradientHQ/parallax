@@ -23,9 +23,9 @@ class PagedAttentionV1 : public mx::Primitive {
     explicit PagedAttentionV1(mx::Stream stream, int64_t num_kv_heads, int64_t block_size, int64_t max_seq_len, float scale)
         : mx::Primitive(stream), num_kv_heads_(num_kv_heads), block_size_(block_size), max_seq_len_(max_seq_len), scale_(scale){};
 
-    // void eval_cpu(
-    //     const std::vector<mx::array>& inputs,
-    //     std::vector<mx::array>& outputs) override;
+    void eval_cpu(
+        const std::vector<mx::array>& inputs,
+        std::vector<mx::array>& outputs) override;
     void eval_gpu(
         const std::vector<mx::array>& inputs,
         std::vector<mx::array>& outputs) override;
