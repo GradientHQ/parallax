@@ -27,7 +27,8 @@ class CacheManager:
         block_size: int = 16,
         cache_memory_fraction: float = 0.8,
         num_gpu_blocks: Optional[int] = None,
-        max_num_seqs: int = 256,  # Max concurrent requests hint
+        max_concurrent_requests: int = 256,  # Maximum number of concurrent requests (for slot allocation).
+        # This should equal max_concurrent_requests in scheduler to ensure proper cache allocation for all inflight requests.
         head_dim_v: Optional[int] = None,
         indexer_key_head_dim: Optional[int] = None,
         indexer_num_kv_heads: Optional[int] = None,
@@ -49,7 +50,7 @@ class CacheManager:
         self.indexer_num_kv_heads = indexer_num_kv_heads
         self.dtype = dtype
         self.block_size = block_size
-        self.max_num_seqs = max_num_seqs
+        self.max_concurrent_requests = max_concurrent_requests
 
         # Linear cache params (store for memory calculation)
         self.conv_dim = conv_dim
@@ -79,7 +80,7 @@ class CacheManager:
 
         # 1. Initialize Allocators
         self.allocator = BlockAllocator(num_gpu_blocks, block_size) if self.needs_blocks else None
-        self.slot_allocator = SlotAllocator(max_num_seqs) if self.needs_slots else None
+        self.slot_allocator = SlotAllocator(max_concurrent_requests) if self.needs_slots else None
 
         # 2. Initialize Layer Caches
         self.caches: List[BaseCache] = []
@@ -95,7 +96,7 @@ class CacheManager:
         if self.needs_slots:
             logger.info(
                 f"Allocated Linear State Cache for {self.layer_types.count('linear')} layers: "
-                f"{max_num_seqs} max slots"
+                f"{max_concurrent_requests} max slots"
             )
 
         # 3. Request State Management
@@ -132,7 +133,7 @@ class CacheManager:
         elif layer_type == "linear":
             # We assume uniform linear config for all linear layers for now
             return LinearCache(
-                max_num_seqs=self.max_num_seqs,
+                max_concurrent_requests=self.max_concurrent_requests,
                 conv_dim=self.conv_dim,
                 conv_kernel_size=self.conv_kernel_size,
                 linear_k_dim=self.linear_k_dim,
@@ -152,19 +153,19 @@ class CacheManager:
 
         one_layer_bytes = 0
 
-        # conv_state: (1, max_num_seqs, conv_kernel_size - 1, conv_dim)
+        # conv_state: (1, max_concurrent_requests, conv_kernel_size - 1, conv_dim)
         if self.conv_dim is not None and self.conv_kernel_size is not None:
             conv_state_len = self.conv_kernel_size - 1
-            one_layer_bytes += self.max_num_seqs * conv_state_len * self.conv_dim * dtype_size
+            one_layer_bytes += self.max_concurrent_requests * conv_state_len * self.conv_dim * dtype_size
 
-        # linear_state: (1, max_num_seqs, linear_num_v_heads, linear_v_dim, linear_k_dim)
+        # linear_state: (1, max_concurrent_requests, linear_num_v_heads, linear_v_dim, linear_k_dim)
         if (
             self.linear_k_dim is not None
             and self.linear_v_dim is not None
             and self.linear_num_v_heads is not None
         ):
             one_layer_bytes += (
-                self.max_num_seqs
+                self.max_concurrent_requests
                 * self.linear_num_v_heads
                 * self.linear_v_dim
                 * self.linear_k_dim

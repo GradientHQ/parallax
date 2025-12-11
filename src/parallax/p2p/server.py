@@ -61,8 +61,8 @@ class ServerInfo:
 
     state: ServerState
     throughput: Optional[float] = None
-    max_batch_size: Optional[int] = None
-    max_sequence_len: Optional[int] = None
+    max_concurrent_requests: Optional[int] = None
+    max_sequence_length: Optional[int] = None
     error_message: Optional[str] = None
 
 
@@ -209,7 +209,7 @@ class GradientServer:
         announce_maddrs: List[str] = [],
         notify_url: str = None,
         model_name: Optional[str] = None,
-        max_batch_size: Optional[int] = None,
+        max_concurrent_requests: Optional[int] = None,
         max_sequence_length: Optional[int] = None,
         param_mem_ratio: float = 0.65,
         kvcache_mem_ratio: float = 0.25,
@@ -229,7 +229,7 @@ class GradientServer:
         self.http_port = http_port
         self.notify_url = notify_url
         self.model_name = model_name
-        self.max_batch_size = max_batch_size
+        self.max_concurrent_requests = max_concurrent_requests
         self.max_sequence_length = max_sequence_length
         self.param_mem_ratio = param_mem_ratio
         self.kvcache_mem_ratio = kvcache_mem_ratio
@@ -727,7 +727,7 @@ class GradientServer:
             "hardware": detect_node_hardware(self.lattica.peer_id()),
             "kvcache_mem_ratio": self.kvcache_mem_ratio,
             "param_mem_ratio": self.param_mem_ratio,
-            "max_concurrent_requests": self.max_batch_size,
+            "max_concurrent_requests": self.max_concurrent_requests,
             "max_sequence_length": (
                 1024 if self.max_sequence_length is None else self.max_sequence_length
             ),
@@ -795,7 +795,7 @@ def _run_p2p_server_process(
     recv_from_peer_addr: str,
     send_to_peer_addr: str,
     model_name: Optional[str],
-    max_batch_size: Optional[int] = None,
+    max_concurrent_requests: Optional[int] = None,
     max_sequence_length: Optional[int] = None,
     param_mem_ratio: float = 0.65,
     kvcache_mem_ratio: float = 0.25,
@@ -826,7 +826,7 @@ def _run_p2p_server_process(
             http_port=http_port,
             notify_url=notify_url,
             model_name=model_name,
-            max_batch_size=max_batch_size,
+            max_concurrent_requests=max_concurrent_requests,
             max_sequence_length=max_sequence_length,
             param_mem_ratio=param_mem_ratio,
             kvcache_mem_ratio=kvcache_mem_ratio,
@@ -871,7 +871,7 @@ def launch_p2p_server_process(
     recv_from_peer_addr: str,
     send_to_peer_addr: str,
     model_name: Optional[str],
-    max_batch_size: Optional[int] = None,
+    max_concurrent_requests: Optional[int] = None,
     max_sequence_length: Optional[int] = None,
     param_mem_ratio: float = 0.65,
     kvcache_mem_ratio: float = 0.25,
@@ -904,7 +904,7 @@ def launch_p2p_server_process(
             recv_from_peer_addr,
             send_to_peer_addr,
             model_name,
-            max_batch_size,
+            max_concurrent_requests,
             max_sequence_length,
             param_mem_ratio,
             kvcache_mem_ratio,

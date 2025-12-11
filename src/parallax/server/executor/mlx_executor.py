@@ -41,7 +41,7 @@ class MLXExecutor(BaseExecutor):
         device: Optional[str] = None,
         use_hfcache: bool = False,
         # Scheduler Configs
-        max_batch_size: Optional[int] = 8,
+        max_concurrent_requests: Optional[int] = 8,
         max_sequence_length: Optional[int] = None,
         max_tokens_in_kv_pool: Optional[int] = None,
         # Controlling perfill / decode ratio
@@ -159,7 +159,7 @@ class MLXExecutor(BaseExecutor):
             indexer_key_head_dim=indexer_key_head_dim,
             indexer_num_kv_heads=indexer_num_kv_heads,
             layer_types=layer_types,
-            max_num_seqs=max_batch_size // micro_batch_ratio,
+            max_concurrent_requests=max_concurrent_requests,
             conv_dim=conv_dim,
             conv_kernel_size=linear_conv_kernel_dim,
             linear_k_dim=linear_key_head_dim,
@@ -172,7 +172,7 @@ class MLXExecutor(BaseExecutor):
             end_layer=end_layer,
             dtype=dtype,
             device=device,
-            max_batch_size=max_batch_size,
+            max_concurrent_requests=max_concurrent_requests,
             max_sequence_length=max_sequence_length,
             max_num_tokens_per_batch=max_num_tokens_per_batch,
             prefill_priority=prefill_priority,

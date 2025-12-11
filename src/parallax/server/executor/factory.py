@@ -20,7 +20,7 @@ def create_executor_config(args: argparse.Namespace, shared_state=None):
         "end_layer": args.end_layer,
         "dtype": args.dtype,
         "max_sequence_length": args.max_sequence_length if "max_sequence_length" in args else None,
-        "max_batch_size": args.max_batch_size if "max_batch_size" in args else None,
+        "max_concurrent_requests": args.max_concurrent_requests if "max_concurrent_requests" in args else None,
         "kv_block_size": args.kv_block_size,
         "kv_cache_memory_fraction": args.kv_cache_memory_fraction,
         "enable_prefix_cache": args.enable_prefix_cache,

@@ -11,7 +11,7 @@ On the worker side (parallax worker nodes),
           --model-path Qwen/Qwen3-0.6B \
           --max-num-tokens-per-batch 16384 \
           --kv-block-size 1024 \
-          --max-batch-size 128 \
+          --max-concurrent-requests 128 \
           --port 3000 \
           --scheduler-addr /ip4/127.0.0.1/tcp/40145/p2p/12D3KooWGCoaHpKfK99BFPzFmuJZ5UQ3UDkJMKFTFzRhawnrXXzD
 

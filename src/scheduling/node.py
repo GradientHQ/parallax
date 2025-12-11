@@ -219,7 +219,7 @@ class Node:
             elem_bytes = 2
         derived_max = compute_max_batch_size(
             requested_max_batch_size=self.max_concurrent_requests,
-            max_sequence_len=self.max_sequence_length,
+            max_sequence_length=self.max_sequence_length,
             device=None,
             kv_cache_memory_fraction=self.kvcache_mem_ratio,
             num_shard_layers=self.num_current_layers,

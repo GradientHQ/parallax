@@ -41,7 +41,7 @@ class SGLExecutor(BaseExecutor):
         device: Optional[str] = None,
         use_hfcache: bool = False,
         # Scheduler Configs
-        max_batch_size: Optional[int] = 8,
+        max_concurrent_requests: Optional[int] = 8,
         max_sequence_length: Optional[int] = None,
         max_tokens_in_kv_pool: Optional[int] = None,
         # Controlling perfill / decode ratio
@@ -138,7 +138,7 @@ class SGLExecutor(BaseExecutor):
             end_layer=end_layer,
             dtype=dtype,
             device=device,
-            max_batch_size=max_batch_size,
+            max_concurrent_requests=max_concurrent_requests,
             max_sequence_length=max_sequence_length,
             max_num_tokens_per_batch=max_num_tokens_per_batch,
             prefill_priority=prefill_priority,

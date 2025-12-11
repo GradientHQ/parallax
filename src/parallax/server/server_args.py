@@ -111,10 +111,11 @@ def parse_args() -> argparse.Namespace:
 
     # Scheduler configuration
     parser.add_argument(
-        "--max-batch-size",
+        "--max-concurrent-requests",
         type=int,
         default=8,
-        help="Maximum batch size for processing requests",
+        help="Maximum number of concurrent requests (inflight requests)",
+        dest="max_concurrent_requests",
     )
 
     parser.add_argument(
@@ -300,15 +301,15 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("kv_cache_memory_fraction must be between 0.0 and 1.0")
 
     # Validate batch sizes
-    if getattr(args, "max_batch_size", None) is not None and args.max_batch_size <= 0:
-        raise ValueError("max_batch_size must be positive")
+    if getattr(args, "max_concurrent_requests", None) is not None and args.max_concurrent_requests <= 0:
+        raise ValueError("max_concurrent_requests must be positive")
 
-    max_seq_len = getattr(args, "max_sequence_length", None)
-    if max_seq_len is not None and max_seq_len <= 0:
-        raise ValueError("max_sequence_len must be positive")
+    max_sequence_length = getattr(args, "max_sequence_length", None)
+    if max_sequence_length is not None and max_sequence_length <= 0:
+        raise ValueError("max_sequence_length must be positive")
 
-    if max_seq_len is None and getattr(args, "max_batch_size", None) is None:
-        raise ValueError("max_sequence_len or max_batch_size must be provided")
+    if max_sequence_length is None and getattr(args, "max_concurrent_requests", None) is None:
+        raise ValueError("max_sequence_length or max_concurrent_requests must be provided")
 
     if args.max_num_tokens_per_batch <= 0:
         raise ValueError("max_num_tokens_per_batch must be positive")

@@ -11,7 +11,7 @@ Example command:
 python src/parallax/launch.py \
     --model-path Qwen/Qwen3-0.6B \
     --max-num-tokens-per-batch 16384 \
-    --max-batch-size 128 \
+    --max-concurrent-requests 128 \
     --start-layer 0 \
     --end-layer 28
 """
@@ -129,7 +129,7 @@ if __name__ == "__main__":
                 recv_from_peer_addr=args.recv_from_peer_addr,
                 send_to_peer_addr=args.send_to_peer_addr,
                 model_name=args.model_path,
-                max_batch_size=args.max_batch_size,
+                max_concurrent_requests=args.max_concurrent_requests,
                 max_sequence_length=args.max_sequence_length,
                 param_mem_ratio=args.param_mem_ratio,
                 kvcache_mem_ratio=args.kvcache_mem_ratio,
@@ -177,7 +177,7 @@ if __name__ == "__main__":
                 recv_from_peer_addr=args.recv_from_peer_addr,
                 send_to_peer_addr=args.send_to_peer_addr,
                 model_name=args.model_path,
-                max_batch_size=args.max_batch_size,
+                max_concurrent_requests=args.max_concurrent_requests,
                 max_sequence_length=args.max_sequence_length,
                 param_mem_ratio=args.param_mem_ratio,
                 kvcache_mem_ratio=args.kvcache_mem_ratio,

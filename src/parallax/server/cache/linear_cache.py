@@ -9,7 +9,7 @@ class LinearCache(BaseCache):
 
     def __init__(
         self,
-        max_num_seqs: int = 128,
+        max_concurrent_requests: int = 128,
         conv_dim: Optional[int] = None,
         conv_kernel_size: Optional[int] = None,
         linear_k_dim: Optional[int] = None,
@@ -18,7 +18,7 @@ class LinearCache(BaseCache):
         linear_num_v_heads: Optional[int] = None,
         dtype: mx.Dtype = mx.float16,
     ):
-        self.max_num_seqs = max_num_seqs
+        self.max_concurrent_requests = max_concurrent_requests
         self.dtype = dtype
 
         self.conv_state_cache = None
@@ -27,7 +27,7 @@ class LinearCache(BaseCache):
         if conv_dim is not None and conv_kernel_size is not None:
             conv_state_len = conv_kernel_size - 1
             self.conv_state_cache = mx.zeros(
-                (1, max_num_seqs, conv_state_len, conv_dim), dtype=dtype
+                (1, max_concurrent_requests, conv_state_len, conv_dim), dtype=dtype
             )
             mx.eval(self.conv_state_cache)
 
@@ -40,7 +40,7 @@ class LinearCache(BaseCache):
             self.linear_state_cache = mx.zeros(
                 (
                     1,
-                    max_num_seqs,
+                    max_concurrent_requests,
                     linear_num_v_heads,
                     linear_v_dim,
                     linear_k_dim,

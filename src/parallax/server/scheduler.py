@@ -40,7 +40,7 @@ class Scheduler:
 
     def __init__(
         self,
-        max_batch_size: int = 16,
+        max_concurrent_requests: int = 16,
         max_num_tokens_per_batch: int = 4096,
         scheduler_wait_ms: int = 200,
         micro_batch_ratio: int = 2,
@@ -52,17 +52,24 @@ class Scheduler:
     ):
         """
         Args:
-            max_batch_size: Maximum number of running / inflight requests;
-            max_num_tokens_per_batch: Maxmimum number of prefill + decode tokens in a single batch;
+            max_concurrent_requests: Maximum number of running / inflight requests (concurrent requests
+                that scheduler can manage). This should match max_concurrent_requests in cache_manager.
+            max_num_tokens_per_batch: Maximum number of tokens (prefill + decode) processed in a single batch;
             scheduler_wait_ms: The minimum time to wait before dispatching a batch;
-            micro_batch_ratio: micro_batch_size = max_batch_size // micro_batch_ratio;
+            micro_batch_ratio: Ratio to compute micro_batch_size = max_concurrent_requests // micro_batch_ratio.
+                micro_batch_size is the actual batch size processed in each forward pass.
             tokenizer: The tokenizer to use for the model;
             cache_manager: The KV cache manager to use for the scheduler.
             request_timeout_s: timeout for each inflight request (default 10mins).
+        
+        Note on batch size terminology:
+            - max_concurrent_requests: Maximum concurrent inflight requests (all requests being processed)
+            - micro_batch_size: Actual batch size per forward pass (subset of inflight requests)
         """
-        self.max_batch_size = max_batch_size
+        
+        self.max_concurrent_requests = max_concurrent_requests
         self.max_num_tokens_per_batch = max_num_tokens_per_batch
-        self.micro_batch_size = max(1, max_batch_size // micro_batch_ratio)
+        self.micro_batch_size = max(1, max_concurrent_requests // micro_batch_ratio)
         self.scheduler_wait_ms = scheduler_wait_ms
         self.is_first_peer = is_first_peer
         if is_first_peer:
@@ -86,7 +93,7 @@ class Scheduler:
         # Track last reported running requests to avoid redundant metric updates
         self._last_reported_running_requests: int = 0
         logger.debug(
-            f"Scheduler initialized: max_batch_size={self.max_batch_size}, "
+            f"Scheduler initialized: max_concurrent_requests={self.max_concurrent_requests}, "
             f"max_num_tokens_per_batch={self.max_num_tokens_per_batch}"
         )
 
@@ -217,7 +224,7 @@ class Scheduler:
 
         Pushes admitted requests directly into the running set.
         """
-        while self._wait_queue and len(self._running_requests) < self.max_batch_size:
+        while self._wait_queue and len(self._running_requests) < self.max_concurrent_requests:
             req = self._wait_queue.popleft()
             rid = req.request_id
             if rid in self._running_requests:
@@ -226,10 +233,20 @@ class Scheduler:
             # Check kv cache pool
             if self.cache_manager is not None:
                 if not self.cache_manager.has_request(req.request_id):
+                    # Determine the size to allocate: use max_total_length for pre-allocation if available
+                    alloc_len = req.total_length
+                    if hasattr(req, "max_total_length"):
+                        alloc_len = req.max_total_length
+                    # Fallback for IntermediateRequest or others: try to estimate using max_new_tokens
+                    elif hasattr(req, "sampling_params") and req.sampling_params.max_new_tokens:
+                        # For IntermediateRequest, current_position usually reflects processed length
+                        current_pos = getattr(req, "current_position", req.prompt_len)
+                        alloc_len = current_pos + req.sampling_params.max_new_tokens
+
                     # TODO: Handle chunked prefill, and support preemption.
-                    if not self.cache_manager.allocate_request(req.request_id, req.total_length):
+                    if not self.cache_manager.allocate_request(req.request_id, alloc_len):
                         logger.warning(
-                            f"Request {rid} can't be admit to running batch due to KV cache size."
+                            f"Request {rid} can't be admit to running batch due to KV cache size (needed {alloc_len} blocks)."
                         )
                         continue
 

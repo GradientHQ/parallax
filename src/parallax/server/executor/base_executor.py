@@ -61,7 +61,7 @@ class BaseExecutor:
         # Device override
         device: Optional[str] = None,
         # Scheduler Configs
-        max_batch_size: Optional[int] = 8,
+        max_concurrent_requests: Optional[int] = 8,
         max_sequence_length: Optional[int] = None,
         # Controlling perfill / decode ratio
         max_num_tokens_per_batch: int = 1024,
@@ -125,11 +125,11 @@ class BaseExecutor:
 
         self.eos_token_id = self.config.get("eos_token_id", None)
 
-        # Scheduler: derive final max_batch_size with KV constraints
+        # Scheduler: derive final max_concurrent_requests with KV constraints
         # Remove this for now as it's not working on gpu devices
-        # max_batch_size = compute_max_batch_size(
-        #     requested_max_batch_size=max_batch_size,
-        #     max_sequence_len=max_sequence_length,
+        # max_concurrent_requests = compute_max_batch_size(
+        #     requested_max_batch_size=max_concurrent_requests,
+        #     max_sequence_length=max_sequence_length,
         #     device=self.device,
         #     kv_cache_memory_fraction=kv_cache_memory_fraction,
         #     num_shard_layers=self.num_shard_layers,
@@ -139,7 +139,7 @@ class BaseExecutor:
         # )
 
         self.scheduler = Scheduler(
-            max_batch_size=max_batch_size,
+            max_concurrent_requests=max_concurrent_requests,
             max_num_tokens_per_batch=max_num_tokens_per_batch,
             prefill_priority=prefill_priority,
             scheduler_wait_ms=scheduler_wait_ms,
@@ -152,7 +152,7 @@ class BaseExecutor:
             shared_state=self.shared_state,
         )
         logger.debug(
-            f"Scheduler initialized (max_batch_size={max_batch_size}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"
+            f"Scheduler initialized (max_concurrent_requests={max_concurrent_requests}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"
         )
 
         # Communication Related
@@ -574,23 +574,23 @@ class BaseExecutor:
             prompt = convert_chat(raw_request["messages"], raw_request.get("role_mapping"))
             prompt = self.tokenizer.encode(prompt)
 
-        max_req_len = self.max_sequence_length if self.max_sequence_length is not None else 2048
+        max_sequence_length = self.max_sequence_length if self.max_sequence_length is not None else 2048
         input_token_num = len(prompt)
-        if input_token_num >= max_req_len:
+        if input_token_num >= max_sequence_length:
             logger.warning(
-                f"Input token length {input_token_num} exceeds max_sequence_length {max_req_len}. Truncating input."
+                f"Input token length {input_token_num} exceeds max_sequence_length {max_sequence_length}. Truncating input."
             )
-            now_prompt_len = max(5, max_req_len - 10)
+            now_prompt_len = max(5, max_sequence_length - 10)
             del prompt[now_prompt_len:]
             input_token_num = len(prompt)
 
         max_new_tokens = raw_request.get("max_tokens")
         logger.debug(f"max_new_tokens from request: {max_new_tokens}")
-        if max_new_tokens is None or (input_token_num + max_new_tokens) >= max_req_len:
+        if max_new_tokens is None or (input_token_num + max_new_tokens) >= max_sequence_length:
             logger.warning(
-                f"max_new_tokens {max_new_tokens} is None or input length + max_new_tokens exceeds max_sequence_length {max_req_len}. Adjusting max_new_tokens."
+                f"max_new_tokens {max_new_tokens} is None or input length + max_new_tokens exceeds max_sequence_length {max_sequence_length}. Adjusting max_new_tokens."
             )
-            max_new_tokens = max(0, max_req_len - input_token_num)
+            max_new_tokens = max(0, max_sequence_length - input_token_num)
         max_total_length = len(prompt) + max_new_tokens
         logger.debug(f"Final max_new_tokens for request ID {rid}: {max_new_tokens}")
         logger.debug(f"Final input token length for request ID {rid}: {input_token_num}")

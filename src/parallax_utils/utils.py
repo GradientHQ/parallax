@@ -75,16 +75,16 @@ def compute_max_tokens_in_cache(
 def derive_max_batch_size(
     *,
     requested_max_batch_size: Optional[int],
-    max_sequence_len: Optional[int],
+    max_sequence_length: Optional[int],
     max_tokens_in_cache: Optional[int],
 ) -> int:
     """Derive final max_batch_size clamped by KV capacity if sequence length known."""
     max_batch_capacity: Optional[int] = None
-    if max_sequence_len and max_tokens_in_cache:
-        max_batch_capacity = max(1, max_tokens_in_cache // int(max_sequence_len))
+    if max_sequence_length and max_tokens_in_cache:
+        max_batch_capacity = max(1, max_tokens_in_cache // int(max_sequence_length))
     if requested_max_batch_size is None:
         if max_batch_capacity is None:
-            logger.warning("Overriding max_batch_size to 16 due to no max_sequence_len provided")
+            logger.warning("Overriding max_batch_size to 16 due to no max_sequence_length provided")
             return 16
         return max_batch_capacity
     if max_batch_capacity is not None:
@@ -95,7 +95,7 @@ def derive_max_batch_size(
 def compute_max_batch_size(
     *,
     requested_max_batch_size: Optional[int],
-    max_sequence_len: Optional[int],
+    max_sequence_length: Optional[int],
     device: Optional[str],
     kv_cache_memory_fraction: float,
     num_shard_layers: int,
@@ -128,6 +128,6 @@ def compute_max_batch_size(
     )
     return derive_max_batch_size(
         requested_max_batch_size=requested_max_batch_size,
-        max_sequence_len=max_sequence_len,
+        max_sequence_length=max_sequence_length,
         max_tokens_in_cache=max_tokens,
     )
