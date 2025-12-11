@@ -4,6 +4,7 @@ import mlx.core as mx
 
 from parallax.server.cache.allocator import BlockAllocator, SlotAllocator
 from parallax.server.cache.base import BaseCache
+from parallax.server.cache.dsa_cache import DeepSeekSparseCache
 from parallax.server.cache.kv_cache import KVCache
 from parallax.server.cache.linear_cache import LinearCache
 from parallax_utils.logging_config import get_logger
@@ -84,34 +85,7 @@ class CacheManager:
         self.caches: List[BaseCache] = []
 
         for layer_type in self.layer_types:
-            if layer_type == "attention":
-                cache = KVCache(
-                    num_blocks=num_gpu_blocks,
-                    block_size=block_size,
-                    num_kv_heads=num_kv_heads,
-                    head_dim=self.head_dim,
-                    head_dim_v=self.head_dim_v,
-                    dtype=dtype,
-                    indexer_key_head_dim=indexer_key_head_dim,
-                    indexer_num_kv_heads=indexer_num_kv_heads,
-                )
-                self.caches.append(cache)
-
-            elif layer_type == "linear":
-                # We assume uniform linear config for all linear layers for now
-                cache = LinearCache(
-                    max_num_seqs=max_num_seqs,
-                    conv_dim=conv_dim,
-                    conv_kernel_size=conv_kernel_size,
-                    linear_k_dim=linear_k_dim,
-                    linear_v_dim=linear_v_dim,
-                    linear_num_k_heads=linear_num_k_heads,
-                    linear_num_v_heads=linear_num_v_heads,
-                    dtype=dtype,
-                )
-                self.caches.append(cache)
-            else:
-                raise ValueError(f"Unknown layer type: {layer_type}")
+            self.caches.append(self._create_cache(layer_type))
 
         if self.needs_blocks:
             logger.info(
@@ -131,6 +105,44 @@ class CacheManager:
         self.context_lengths: Dict[str, int] = {}
         # Mapping: request_id -> state slot index
         self.request_slots: Dict[str, int] = {}
+
+    def _create_cache(self, layer_type: str) -> BaseCache:
+        if layer_type == "attention":
+            if self.indexer_key_head_dim is not None and self.indexer_num_kv_heads is not None:
+                return DeepSeekSparseCache(
+                    num_blocks=self.num_gpu_blocks,
+                    block_size=self.block_size,
+                    num_kv_heads=self.num_kv_heads,
+                    head_dim=self.head_dim,
+                    head_dim_v=self.head_dim_v,
+                    dtype=self.dtype,
+                    indexer_key_head_dim=self.indexer_key_head_dim,
+                    indexer_num_kv_heads=self.indexer_num_kv_heads,
+                )
+            else:
+                return KVCache(
+                    num_blocks=self.num_gpu_blocks,
+                    block_size=self.block_size,
+                    num_kv_heads=self.num_kv_heads,
+                    head_dim=self.head_dim,
+                    head_dim_v=self.head_dim_v,
+                    dtype=self.dtype,
+                )
+
+        elif layer_type == "linear":
+            # We assume uniform linear config for all linear layers for now
+            return LinearCache(
+                max_num_seqs=self.max_num_seqs,
+                conv_dim=self.conv_dim,
+                conv_kernel_size=self.conv_kernel_size,
+                linear_k_dim=self.linear_k_dim,
+                linear_v_dim=self.linear_v_dim,
+                linear_num_k_heads=self.linear_num_k_heads,
+                linear_num_v_heads=self.linear_num_v_heads,
+                dtype=self.dtype,
+            )
+        else:
+            raise ValueError(f"Unknown layer type: {layer_type}")
 
     def _calculate_linear_cache_bytes(self, dtype_size: int) -> int:
         """Calculate total memory needed for linear cache across all linear layers."""
