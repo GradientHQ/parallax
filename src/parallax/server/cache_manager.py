@@ -156,7 +156,9 @@ class CacheManager:
         # conv_state: (1, max_concurrent_requests, conv_kernel_size - 1, conv_dim)
         if self.conv_dim is not None and self.conv_kernel_size is not None:
             conv_state_len = self.conv_kernel_size - 1
-            one_layer_bytes += self.max_concurrent_requests * conv_state_len * self.conv_dim * dtype_size
+            one_layer_bytes += (
+                self.max_concurrent_requests * conv_state_len * self.conv_dim * dtype_size
+            )
 
         # linear_state: (1, max_concurrent_requests, linear_num_v_heads, linear_v_dim, linear_k_dim)
         if (
@@ -318,7 +320,8 @@ class CacheManager:
             raise ValueError(f"Request {request_id} not found")
 
         current_len = self.context_lengths[request_id]
-        if current_len % self.block_size == 0:
+        num_blocks = current_len // self.block_size + 1
+        if current_len % self.block_size == 0 and num_blocks > len(self.block_tables[request_id]):
             new_blocks = self.allocator.allocate(1)
             if not new_blocks:
                 return False
