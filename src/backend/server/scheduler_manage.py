@@ -113,6 +113,19 @@ class SchedulerManage:
         if self.lattica is None:
             return None
         return self.lattica.peer_id()
+    
+    def weight_refit(self, request_data):
+        """
+        Trigger weight refit on every nodes.
+        """
+        if self.scheduler is None:
+            return False
+        self.scheduler.refit_request = request_data
+        self.scheduler.refit_set = set()
+        return True
+
+    def get_last_refit_time(self):
+        return self.scheduler.update_last_refit_time()
 
     def need_more_nodes(self):
         return self.scheduler.need_more_nodes() if self.scheduler else False

@@ -147,6 +147,11 @@ def parse_args() -> argparse.Namespace:
         help="Per-request timeout in seconds before automatic abort",
     )
 
+    # Online weight refit configuration
+    parser.add_argument(
+        "--enable-weight-refit", action="store_true", help="Enable runtime weight refit"
+    )
+
     # GPU/SGLang specialized configuration
     parser.add_argument(
         "--attention-backend",

@@ -83,6 +83,8 @@ class BaseExecutor:
         tp_size: Optional[int] = 1,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
+        # Weight Refit
+        enable_weight_refit: Optional[bool] = False,
     ):
         # Backend
         if device is not None:
@@ -101,6 +103,10 @@ class BaseExecutor:
             self.shared_state = SharedState(shared_state)  # Auto-converts dict to SharedState
         else:
             self.shared_state = None
+
+        # Runtime weight refit for RL
+        self.enable_weight_refit = enable_weight_refit
+        self.weight_version = 0
 
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
@@ -215,6 +221,10 @@ class BaseExecutor:
         """
 
     @abstractmethod
+    def check_and_refit_weight(self, refit_weight_path: str):
+        """Run weight if triggered"""
+
+    @abstractmethod
     def _release_request(self, rid: str):
         """Release request in backend frameworks"""
 
@@ -247,8 +257,9 @@ class BaseExecutor:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
         return recv_reqs
 
-    def recv_requests_from_peer(self) -> List[Request]:
+    def recv_requests_from_peer(self) -> Tuple[List[Request], str]:
         """Receives requests from the RPC server."""
+        refit_weight_path = ""
         if self.tp_rank == 0:
             recv_reqs = []
             while True:
@@ -288,6 +299,9 @@ class BaseExecutor:
                         abort_request.ParseFromString(recv_req[1])
                         recv_req = proto_to_abort_request(abort_request)
                         recv_reqs.extend(recv_req)
+                    elif recv_req[0] == b"refit":
+                        refit_weight_path = recv_req[1].decode("ascii")
+                        self.weight_version = recv_req[2]
                     else:
                         raise ValueError(f"Unknown request type: {recv_req[0]}")
                     # First peer is responsible for tokenization
@@ -305,7 +319,7 @@ class BaseExecutor:
         else:
             recv_reqs = []
 
-        return recv_reqs
+        return recv_reqs, refit_weight_path
 
     def prepare_batch_inputs(self, batched_requests: List[Request]) -> Optional[Dict[str, Any]]:
         """Prepares inputs for ShardedModel from a batch of requests.
@@ -405,7 +419,10 @@ class BaseExecutor:
                 received_requests = self.recv_requests_from_http()
 
             # Receive requests from peer
-            received_requests.extend(self.recv_requests_from_peer())
+            incoming_requests, refit_weight_path = self.recv_requests_from_peer()
+            received_requests.extend(incoming_requests)
+            if self.enable_weight_refit:
+                self.check_and_refit_weight(refit_weight_path)
 
             self.handle_input_requests(received_requests)
 

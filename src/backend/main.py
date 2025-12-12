@@ -37,6 +37,38 @@ logger = get_logger(__name__)
 scheduler_manage = None
 request_handler = RequestHandler()
 
+@app.post("/weight/refit")
+async def weight_refit(raw_request: Request):
+    request_data = await raw_request.json()
+    status = scheduler_manage.weight_refit(request_data)
+    if status:
+        return JSONResponse(
+            content={
+                "type": "weight_refit",
+                "data": None,
+            },
+            status_code=200,
+        )
+    else:
+        return JSONResponse(
+            content={
+                "type": "weight_refit",
+                "data": "Sever not ready",
+            },
+            status_code=500,
+        )
+
+
+@app.get("/weight/refit/timestamp")
+async def weight_refit_timstamp():
+    last_refit_time = scheduler_manage.get_last_refit_time()
+
+    return JSONResponse(
+        content={
+            "latest_timestamp": last_refit_time,
+        },
+        status_code=200,
+    )
 
 @app.get("/model/list")
 async def model_list():
