@@ -355,13 +355,13 @@ class MLXExecutor(BaseExecutor):
                         # Get logit at last position
                         last_idx = int(lengths[i]) - 1
                         last_logits = hidden_states[i, last_idx, :]  # [vocab_size]
-                        logprobe = last_logits / sampling_info.temperatures.reshape(-1, 1)
-                        logprobe[:] = mx.softmax(logprobe, axis=-1)
+                        probs = last_logits / sampling_info.temperatures.reshape(-1, 1)
+                        probs[:] = mx.softmax(probs, axis=-1)
                         # Extract logit for the sampled token
                         token_id = int(token_ids[i])
                         # logit_value = float(last_logits[token_id])
                         # batch_logits.append(logit_value)
-                        batch_logits.append(float(logprobe[i, token_id]))
+                        batch_logits.append(float(probs[i, token_id]))
 
                 self._latest_token_probs = batch_logits if batch_logits else None
             except Exception as e:
