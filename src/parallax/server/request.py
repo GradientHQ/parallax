@@ -158,7 +158,7 @@ class InitialRequest(Request):
         max_total_length: int = 1024,
         status: RequestStatus = RequestStatus.PREFILLING,
         lora_path: Optional[str] = None,
-        return_logits: bool = False,
+        return_probs: bool = False,
     ):
         if not prompt and not input_ids:
             raise ValueError("prompt or input_ids cannot be empty.")
@@ -171,7 +171,7 @@ class InitialRequest(Request):
             lora_path=lora_path,
         )
         self.prompt = prompt
-        self.return_logits = return_logits
+        self.return_probs = return_probs
 
         if max_new_tokens < 1:
             raise ValueError("max_new_tokens must be at least 1.")
@@ -264,7 +264,7 @@ class IntermediateRequest(Request):
         routing_table: Optional[List[str]] = [],
         sampling_params: Optional[SamplingParams] = None,
         lora_path: Optional[str] = None,
-        token_logit: Optional[float] = None,
+        token_prob: Optional[float] = None,
     ):
         super().__init__(
             request_id=request_id,
@@ -286,7 +286,7 @@ class IntermediateRequest(Request):
         self.current_position = current_position
         self.hidden_states = hidden_states
         self.next_token_id = next_token_id
-        self.token_logit = token_logit
+        self.token_prob = token_prob
 
     @property
     def input_length(self) -> int:
@@ -305,7 +305,7 @@ class IntermediateRequest(Request):
         initial_request: InitialRequest,
         hidden_states: Optional[Any] = None,
         lora_path: Optional[str] = None,
-        token_logit: Optional[float] = None,
+        token_prob: Optional[float] = None,
     ) -> "IntermediateRequest":
         """Convert an InitialRequest to an IntermediateRequest.
 
@@ -338,7 +338,7 @@ class IntermediateRequest(Request):
             sampling_params=initial_request.sampling_params,
             routing_table=initial_request.routing_table,
             lora_path=lora_path,
-            token_logit=token_logit,
+            token_prob=token_prob,
         )
 
     @classmethod
@@ -347,7 +347,7 @@ class IntermediateRequest(Request):
         old_request: "IntermediateRequest",
         new_hidden_states: Any,
         lora_path: Optional[str] = None,
-        token_logit: Optional[float] = None,
+        token_prob: Optional[float] = None,
     ) -> "IntermediateRequest":
         """
         Creates a new IntermediateRequest from an old one, with updated hidden states.
@@ -363,7 +363,7 @@ class IntermediateRequest(Request):
             routing_table=old_request.routing_table,
             sampling_params=old_request.sampling_params,
             lora_path=lora_path,
-            token_logit=token_logit,
+            token_prob=token_prob,
         )
 
     def __repr__(self):

@@ -199,7 +199,7 @@ class MLXExecutor(BaseExecutor):
         )
 
         # Store latest sampled token logit values (not full distribution)
-        self._latest_token_logits = None
+        self._latest_token_probs = None
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
@@ -257,10 +257,10 @@ class MLXExecutor(BaseExecutor):
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
 
-                        # Add logit value for the sampled token (if requested and available)
-                        if hasattr(original_req, "return_logits") and original_req.return_logits:
-                            if hasattr(req, "token_logit") and req.token_logit is not None:
-                                req_dict["logits"] = req.token_logit
+                        # Add prob value for the sampled token (if requested and available)
+                        if hasattr(original_req, "return_probs") and original_req.return_probs:
+                            if hasattr(req, "token_prob") and req.token_prob is not None:
+                                req_dict["probs"] = req.token_prob
 
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
@@ -363,10 +363,10 @@ class MLXExecutor(BaseExecutor):
                         # batch_logits.append(logit_value)
                         batch_logits.append(float(logprobe[i, token_id]))
 
-                self._latest_token_logits = batch_logits if batch_logits else None
+                self._latest_token_probs = batch_logits if batch_logits else None
             except Exception as e:
-                logger.debug(f"Failed to extract token logits: {e}")
-                self._latest_token_logits = None
+                logger.debug(f"Failed to extract token probs: {e}")
+                self._latest_token_probs = None
 
             return token_ids
 

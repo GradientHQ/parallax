@@ -369,14 +369,14 @@ class BaseExecutor:
                             hidden_state_for_req = hidden_states[pre_length : pre_length + 1, :]
                         pre_length += 1
 
-                # Get logit for this request if available
-                token_logit = None
-                if self.is_last_peer and hasattr(self, "_latest_token_logits"):
-                    if self._latest_token_logits is not None and len(self._latest_token_logits) > i:
-                        token_logit = self._latest_token_logits[i]
+                # Get prob for this request if available
+                token_prob = None
+                if self.is_last_peer and hasattr(self, "_latest_token_probs"):
+                    if self._latest_token_probs is not None and len(self._latest_token_probs) > i:
+                        token_prob = self._latest_token_probs[i]
 
                 next_req = self._prepare_next_single_request(
-                    src_request, hidden_state_for_req, token_logit
+                    src_request, hidden_state_for_req, token_prob
                 )
                 batched_requests.append(next_req)
         else:
@@ -584,7 +584,7 @@ class BaseExecutor:
         max_total_length = len(prompt) + max_new_tokens
 
         lora_path = raw_request.get("lora_path")
-        return_logits = raw_request.get("return_logits", False)  # Get return_logits parameter
+        return_probs = raw_request.get("return_probs", False)  # Get return_probs parameter
 
         raw_sampling_params = raw_request.get("sampling_params")
         if raw_sampling_params is None:
@@ -609,7 +609,7 @@ class BaseExecutor:
             max_new_tokens=max_new_tokens,
             max_total_length=max_total_length,
             lora_path=lora_path,
-            return_logits=return_logits,
+            return_probs=return_probs,
         )
         if "routing_table" in raw_request:
             req.routing_table = raw_request["routing_table"]
@@ -644,7 +644,7 @@ class BaseExecutor:
             logger.debug("Failed to send error notification to HTTP handler", exc_info=True)
 
     def _prepare_next_single_request(
-        self, request: Request, hidden_states: Any, token_logit: Optional[float] = None
+        self, request: Request, hidden_states: Any, token_prob: Optional[float] = None
     ) -> Request:
         """Handle request state changes both inter and intra peers.
 
@@ -654,7 +654,7 @@ class BaseExecutor:
         Args:
             request: The request that was just processed by this peer.
             hidden_states: The output hidden_states/output_ids from the model for this request.
-            token_logit: The logit value for the sampled token (optional).
+            token_prob: The probability value for the sampled token (optional).
 
         Returns:
             A new Request object ready to be sent to the next destination.
@@ -675,7 +675,7 @@ class BaseExecutor:
                 next_token_id=next_token_id,
                 routing_table=request.routing_table,
                 lora_path=request.lora_path,
-                token_logit=token_logit,
+                token_prob=token_prob,
             )
         if self.is_last_peer:
             # Last peer decodes a token and sends it back to the first peer.
@@ -694,7 +694,7 @@ class BaseExecutor:
                 next_token_id=next_token_id,
                 routing_table=request.routing_table,
                 lora_path=request.lora_path,
-                token_logit=token_logit,
+                token_prob=token_prob,
             )
         # This peer is the first or an intermediate peer.
         if self.is_first_peer:

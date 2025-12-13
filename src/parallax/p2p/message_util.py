@@ -50,9 +50,9 @@ def request_to_proto(
         if request.next_token_id is not None:
             proto_req.next_token_id = request.next_token_id
 
-        # Add token_logit if available
-        if hasattr(request, "token_logit") and request.token_logit is not None:
-            proto_req.token_logit = request.token_logit
+        # Add token_prob if available
+        if hasattr(request, "token_prob") and request.token_prob is not None:
+            proto_req.token_prob = request.token_prob
 
         forward_request.reqs.append(proto_req)
 
@@ -90,10 +90,10 @@ def proto_to_request(
 
         sampling_params = proto_to_sampling_params(proto_req.sampling_params)
 
-        # Extract token_logit if present
-        token_logit = None
-        if proto_req.HasField("token_logit"):
-            token_logit = proto_req.token_logit
+        # Extract token_prob if present
+        token_prob = None
+        if proto_req.HasField("token_prob"):
+            token_prob = proto_req.token_prob
 
         request = IntermediateRequest(
             request_id=proto_req.rid,
@@ -105,7 +105,7 @@ def proto_to_request(
             next_token_id=next_token_id,
             sampling_params=sampling_params,
             lora_path=proto_req.lora_path if proto_req.lora_path != "" else None,
-            token_logit=token_logit,
+            token_prob=token_prob,
         )
 
         requests.append(request)

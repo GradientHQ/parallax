@@ -160,7 +160,7 @@ class SGLExecutor(BaseExecutor):
         self.tp_cpu_group = self.tp_group.cpu_group
 
         # Store latest sampled token logits (not full distribution)
-        self._latest_token_logits = None
+        self._latest_token_probs = None
 
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
@@ -303,10 +303,10 @@ class SGLExecutor(BaseExecutor):
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
 
-                        # Add logit value for the sampled token (if requested and available)
-                        if hasattr(original_req, "return_logits") and original_req.return_logits:
-                            if hasattr(req, "token_logit") and req.token_logit is not None:
-                                req_dict["logits"] = req.token_logit
+                        # Add prob value for the sampled token (if requested and available)
+                        if hasattr(original_req, "return_probs") and original_req.return_probs:
+                            if hasattr(req, "token_prob") and req.token_prob is not None:
+                                req_dict["probs"] = req.token_prob
 
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
@@ -359,15 +359,15 @@ class SGLExecutor(BaseExecutor):
             # Last peer: sample and return token IDs
             next_token_ids = self.model_runner.sample(logits_output, forward_batch)
 
-            # Extract logits for the sampled tokens
+            # Extract probs for the sampled tokens
             if hasattr(logits_output, "next_token_logits"):
-                # Get logits for sampled tokens
-                real_logits = logits_output.next_token_logits[
+                # Get probs for sampled tokens
+                real_probs = logits_output.next_token_logits[
                     torch.arange(len(next_token_ids)), next_token_ids
                 ]
-                self._latest_token_logits = real_logits.cpu().float().tolist()
+                self._latest_token_probs = real_probs.cpu().float().tolist()
             else:
-                self._latest_token_logits = None
+                self._latest_token_probs = None
 
             return next_token_ids
         else:
