@@ -159,6 +159,9 @@ class SGLExecutor(BaseExecutor):
         self.tp_group = self.model_runner.tp_group
         self.tp_cpu_group = self.tp_group.cpu_group
 
+        # Store latest sampled token logits (not full distribution)
+        self._latest_token_probs = None
+
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
 
@@ -299,6 +302,12 @@ class SGLExecutor(BaseExecutor):
                             req_dict["eos"] = True
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
+
+                        # Add prob value for the sampled token (if requested and available)
+                        if hasattr(original_req, "return_probs") and original_req.return_probs:
+                            if hasattr(req, "token_prob") and req.token_prob is not None:
+                                req_dict["probs"] = req.token_prob
+
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:
@@ -349,6 +358,17 @@ class SGLExecutor(BaseExecutor):
         if return_decoded_tokens:
             # Last peer: sample and return token IDs
             next_token_ids = self.model_runner.sample(logits_output, forward_batch)
+
+            # Extract probs for the sampled tokens
+            if hasattr(logits_output, "next_token_logits"):
+                # Get probs for sampled tokens
+                real_probs = logits_output.next_token_logits[
+                    torch.arange(len(next_token_ids)), next_token_ids
+                ]
+                self._latest_token_probs = real_probs.cpu().float().tolist()
+            else:
+                self._latest_token_probs = None
+
             return next_token_ids
         else:
             # Intermediate peer: return hidden states for next peer
