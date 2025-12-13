@@ -285,10 +285,15 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
 
     debugLog('initScheduler', params);
     await initScheduler(params);
-    // setClusterInfo((prev) => ({
-    //   ...prev,
-    //   status: 'waiting',
-    // }));
+    setClusterInfo((prev) => ({
+      ...prev,
+      status: 'waiting',
+      initNodesNumber,
+      modelName,
+      modelInfo: modelInfoList.find((model) => model.name === modelName),
+      needMoreNodes: false,
+    }));
+    setNodeInfoList([]);
   });
 
   // ================================
