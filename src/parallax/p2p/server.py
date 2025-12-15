@@ -731,16 +731,6 @@ class GradientServer:
                                         f"Heartbeat: Missing layer info - start_layer={start_layer}, "
                                         f"end_layer={end_layer}, response={response}"
                                     )
-                            elif refit_message and isinstance(refit_message, dict):
-                                if self.enable_weight_refit:
-                                    logger.info(
-                                        f"Server begin weight refit process."
-                                    )
-                                    self.check_and_run_weight_refit(response)
-                                else:
-                                    logger.warning(
-                                        f"Received weight refit request but enable_weight_refit is set to {self.enable_weight_refit}."
-                                    )
                             else:
                                 logger.warning(
                                     f"Heartbeat: No layer allocation received yet, response: {response}"
@@ -753,6 +743,18 @@ class GradientServer:
                                 logger.debug(
                                     "Status set to JOINING and model_name to None because no valid layer allocation received yet."
                                 )
+                            if refit_message and isinstance(refit_message, dict):
+                                if self.enable_weight_refit:
+                                    logger.info(
+                                        f"Server begin weight refit process."
+                                    )
+                                    self.check_and_run_weight_refit(response)
+                                else:
+                                    logger.warning(
+                                        f"Received weight refit request but enable_weight_refit is set to {self.enable_weight_refit}."
+                                    )
+                            else:
+                                continue
                         else:
                             self.lattica.store(
                                 key=self.prefix_id,
