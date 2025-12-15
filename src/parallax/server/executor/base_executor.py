@@ -265,7 +265,6 @@ class BaseExecutor:
             while True:
                 try:
                     recv_req = self.recv_from_peer_socket.recv_multipart(zmq.NOBLOCK)
-                    assert len(recv_req) == 2, f"Received invalid request: {recv_req}"
                     if recv_req[0] == b"forward":
                         # Create a new ForwardRequest instance and parse from bytes
                         forward_request = forward_pb2.ForwardRequest()
