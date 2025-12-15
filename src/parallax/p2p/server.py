@@ -163,10 +163,12 @@ class TransformerConnectionHandler(ConnectionHandler):
         refit_weight_path: str,
         weight_version: int,
     ):
+        encoded_weight_version = str(weight_version).encode("ascii")
+        encoded_refit_weight_path = refit_weight_path.encode("ascii")
         try:
             with self._recv_from_peer_lock:
                 self.recv_from_peer.send_multipart(
-                    [b"refit", refit_weight_path.encode("ascii"), weight_version]
+                    [b"refit", encoded_refit_weight_path, encoded_weight_version]
                 )
         except Exception as e:
             logger.exception(f"Error in ipc_weight_refit: {e}")

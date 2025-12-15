@@ -301,7 +301,7 @@ class BaseExecutor:
                         recv_reqs.extend(recv_req)
                     elif recv_req[0] == b"refit":
                         refit_weight_path = recv_req[1].decode("ascii")
-                        self.weight_version = recv_req[2]
+                        self.weight_version = int(recv_req[2].decode("ascii"))
                     else:
                         raise ValueError(f"Unknown request type: {recv_req[0]}")
                     # First peer is responsible for tokenization
