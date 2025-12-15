@@ -674,11 +674,11 @@ class GradientServer:
                     # Announce the range ID
                     try:
                         if self.scheduler_peer_id is not None:
-                            response_future, refit_message = self.scheduler_stub.node_update(
+                            response_future = self.scheduler_stub.node_update(
                                 self.get_node_info(is_update=True)
                             )
                             # Get the response result
-                            response = (
+                            response, refit_message = (
                                 response_future.result(timeout=30)
                                 if hasattr(response_future, "result")
                                 else response_future

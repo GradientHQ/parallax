@@ -109,7 +109,7 @@ class RPCConnectionHandler(ConnectionHandler):
             return layer_allocation, refit_request
         except Exception as e:
             logger.exception(f"node_update error: {e}")
-            return {}
+            return {}, {}
 
     @rpc_stream_iter
     def chat_completion(
