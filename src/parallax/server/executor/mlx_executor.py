@@ -346,26 +346,33 @@ class MLXExecutor(BaseExecutor):
                 self.model_shard.logits_to_tokens(hidden_states, lengths, sampling_info)
             )
 
-            # Extract logit values for sampled tokens
-            try:
-                # Get last position logits for each request
-                batch_logits = []
-                for i, req in enumerate(requests):
-                    if lengths[i] > 0:
-                        # Get logit at last position
-                        last_idx = int(lengths[i]) - 1
-                        last_logits = hidden_states[i, last_idx, :]  # [vocab_size]
-                        probs = last_logits / sampling_info.temperatures.reshape(-1, 1)
-                        probs[:] = mx.softmax(probs, axis=-1)
-                        # Extract logit for the sampled token
-                        token_id = int(token_ids[i])
-                        # logit_value = float(last_logits[token_id])
-                        # batch_logits.append(logit_value)
-                        batch_logits.append(float(probs[i, token_id]))
+            needs_probs = any(
+                isinstance(req, InitialRequest) and req.return_probs for req in requests
+            )
 
-                self._latest_token_probs = batch_logits if batch_logits else None
-            except Exception as e:
-                logger.debug(f"Failed to extract token probs: {e}")
+            if needs_probs:
+                # Extract logit values for sampled tokens
+                try:
+                    # Get last position logits for each request
+                    batch_logits = []
+                    for i, req in enumerate(requests):
+                        if lengths[i] > 0:
+                            # Get logit at last position
+                            last_idx = int(lengths[i]) - 1
+                            last_logits = hidden_states[i, last_idx, :]  # [vocab_size]
+                            probs = last_logits / sampling_info.temperatures.reshape(-1, 1)
+                            probs[:] = mx.softmax(probs, axis=-1)
+                            # Extract logit for the sampled token
+                            token_id = int(token_ids[i])
+                            # logit_value = float(last_logits[token_id])
+                            # batch_logits.append(logit_value)
+                            batch_logits.append(float(probs[i, token_id]))
+
+                    self._latest_token_probs = batch_logits if batch_logits else None
+                except Exception as e:
+                    logger.debug(f"Failed to extract token probs: {e}")
+                    self._latest_token_probs = None
+            else:
                 self._latest_token_probs = None
 
             return token_ids

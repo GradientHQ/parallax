@@ -335,6 +335,7 @@ class SGLExecutor(BaseExecutor):
 
         forward_batch = prepared_inputs["forward_batch"]
         pp_proxy_tensors = prepared_inputs["pp_proxy_tensors"]
+        requests = prepared_inputs.get("requests", [])
 
         # Execute model with SGLang
         logits_output, _ = self.model_runner.forward(
@@ -359,9 +360,15 @@ class SGLExecutor(BaseExecutor):
             # Last peer: sample and return token IDs
             next_token_ids = self.model_runner.sample(logits_output, forward_batch)
 
-            # Extract probs for the sampled tokens
-            if hasattr(logits_output, "next_token_logits"):
-                # Get probs for sampled tokens
+            # Only compute probs if any request in the batch needs it
+            # Check if any InitialRequest has return_probs=True
+            needs_probs = any(
+                isinstance(req, InitialRequest) and req.return_probs for req in requests
+            )
+
+            # Extract log probs for the sampled tokens only if needed
+            if needs_probs and hasattr(logits_output, "next_token_logits"):
+                # Get probs for sampled tokens (next_token_logits contains probabilities)
                 real_probs = logits_output.next_token_logits[
                     torch.arange(len(next_token_ids)), next_token_ids
                 ]
