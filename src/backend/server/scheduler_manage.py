@@ -115,7 +115,7 @@ class SchedulerManage:
         if self.lattica is None:
             return None
         return self.lattica.peer_id()
-    
+
     def weight_refit(self, request_data):
         """
         Trigger weight refit on every nodes.
@@ -178,11 +178,11 @@ class SchedulerManage:
 
         model_info = get_model_info(model_name, self.use_hfcache)
         self.scheduler = Scheduler(
-                model_info,
-                [],
-                min_nodes_bootstrapping=init_nodes_num,
-                enable_weight_refit=self.enable_weight_refit,
-            )
+            model_info,
+            [],
+            min_nodes_bootstrapping=init_nodes_num,
+            enable_weight_refit=self.enable_weight_refit,
+        )
 
         # Run the scheduler's event/dispatch loops in background so the process
         # can continue to serve RPCs and HTTP traffic.

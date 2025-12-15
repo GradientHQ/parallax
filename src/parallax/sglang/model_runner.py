@@ -363,6 +363,7 @@ def initialize_sgl_model_runner(
     )
     return model_runner, config, tokenizer
 
+
 def concat_weight_partition(weight_files, refit_weight_path):
     """
     Concat partial weight into one safetensor.
@@ -397,12 +398,13 @@ def concat_weight_partition(weight_files, refit_weight_path):
             else:
                 concate_list.append(val)
                 concate_result = torch.cat(concate_list, 0)
-                final_key = '.'.join(cur_name_list.append("weight"))
+                final_key = ".".join(cur_name_list.append("weight"))
                 tensors[final_key] = concate_result
-                concate_list=[]
+                concate_list = []
         prev_key = key
     save_file_path = refit_weight_path + "/model.safetensors"
     save_file(tensors, save_file_path)
+
 
 def refit_sgl_model(
     model_runner: ParallaxModelRunner,

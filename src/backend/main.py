@@ -37,6 +37,7 @@ logger = get_logger(__name__)
 scheduler_manage = None
 request_handler = RequestHandler()
 
+
 @app.post("/weight/refit")
 async def weight_refit(raw_request: Request):
     request_data = await raw_request.json()
@@ -69,6 +70,7 @@ async def weight_refit_timstamp():
         },
         status_code=200,
     )
+
 
 @app.get("/model/list")
 async def model_list():

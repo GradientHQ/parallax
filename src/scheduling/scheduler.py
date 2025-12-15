@@ -182,7 +182,7 @@ class Scheduler:
         action = "rebalance" if clear_existing else "bootstrapping"
         logger.debug(f"{action.capitalize()} completed successfully; full pipeline established")
         return True
-    
+
     def update_last_refit_time(self):
         min_refit_time = None
         for node in self.node_id_to_node.values():
@@ -299,7 +299,14 @@ class Scheduler:
     ) -> None:
         """Enqueue a node update event."""
         self._pending_node_updates.put(
-            (node_id, current_requests, layer_latency_ms, new_rtt_to_nodes, is_active, last_refit_time)
+            (
+                node_id,
+                current_requests,
+                layer_latency_ms,
+                new_rtt_to_nodes,
+                is_active,
+                last_refit_time,
+            )
         )
         self._wake_event.set()
 
@@ -573,7 +580,9 @@ class Scheduler:
         """Apply pending node stats updates from the queue."""
         while True:
             try:
-                node_id, cur, lat, rtts, is_active, last_refit_time = self._pending_node_updates.get_nowait()
+                node_id, cur, lat, rtts, is_active, last_refit_time = (
+                    self._pending_node_updates.get_nowait()
+                )
             except queue.Empty:
                 break
             if node_id not in self.node_id_to_node:

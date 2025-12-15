@@ -157,7 +157,7 @@ class TransformerConnectionHandler(ConnectionHandler):
         except Exception as e:
             logger.exception(f"Error in rpc_abort: {e}")
         return forward_pb2.AbortResponse()
-    
+
     def ipc_weight_refit(
         self,
         refit_weight_path: str,
@@ -165,7 +165,9 @@ class TransformerConnectionHandler(ConnectionHandler):
     ):
         try:
             with self._recv_from_peer_lock:
-                self.recv_from_peer.send_multipart([b"refit", refit_weight_path.encode("ascii"), weight_version])
+                self.recv_from_peer.send_multipart(
+                    [b"refit", refit_weight_path.encode("ascii"), weight_version]
+                )
         except Exception as e:
             logger.exception(f"Error in ipc_weight_refit: {e}")
 
@@ -342,7 +344,7 @@ class GradientServer:
                 return False
 
         return True
-    
+
     def check_and_run_weight_refit(self, message):
         """
         Check and trigger weight refit process.
@@ -351,6 +353,7 @@ class GradientServer:
             cid:        List[str],  cid list.
             index_map:  Dict[str],  key(weight_name): value(cid)
         """
+
         def _download_weight_thread(weight_dir, cid):
             raw_data = None
             time_begin_get_block = time.time()
@@ -360,7 +363,7 @@ class GradientServer:
                     raw_data = self.lattica.get_block(cid)
                     time_end_get_block = time.time()
                     break
-                except Exception as e:
+                except Exception:
                     logger.warning(f"Failed to get block: {cid}. Retry in 1 second.")
                     time.sleep(1)
             if raw_data is None:
@@ -375,7 +378,9 @@ class GradientServer:
             time_end_write_file = time.time()
             interval_get_block = time_end_get_block - time_begin_get_block
             interval_write_file = time_end_write_file - time_end_get_block
-            logger.info(f"Finish download cid={cid}, file_size={file_size_mb}MB, get_block={interval_get_block}s, write_file={interval_write_file}s")
+            logger.info(
+                f"Finish download cid={cid}, file_size={file_size_mb}MB, get_block={interval_get_block}s, write_file={interval_write_file}s"
+            )
 
         # add sleep 60s for direct connection first
         logger.info(f"Start dealing weight refit message: {message}.")
@@ -408,7 +413,9 @@ class GradientServer:
                     else:
                         cid = cid_list.pop()
                     logger.info(f"Start downloading refit weight {cid}")
-                    download_thread = threading.Thread(target=_download_weight_thread, args=(weight_dir, cid), daemon=True)
+                    download_thread = threading.Thread(
+                        target=_download_weight_thread, args=(weight_dir, cid), daemon=True
+                    )
                     download_thread.start()
                     thread_pool.append(download_thread)
                 for t in thread_pool:
@@ -744,9 +751,7 @@ class GradientServer:
                                 )
                             if refit_message and isinstance(refit_message, dict):
                                 if self.enable_weight_refit:
-                                    logger.info(
-                                        f"Server begin weight refit process."
-                                    )
+                                    logger.info(f"Server begin weight refit process.")
                                     self.check_and_run_weight_refit(refit_message)
                                 else:
                                     logger.warning(
