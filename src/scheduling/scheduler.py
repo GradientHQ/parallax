@@ -61,6 +61,7 @@ class Scheduler:
         self.model_info = model_info
         self.num_layers = model_info.num_layers
         self.enable_weight_refit = enable_weight_refit
+        self.refit_request = {}
 
         allocator_class = (
             GreedyLayerAllocator if strategy == "greedy" else DynamicProgrammingLayerAllocator
