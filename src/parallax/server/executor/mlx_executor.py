@@ -329,13 +329,13 @@ class MLXExecutor(BaseExecutor):
         # because they are written in-place to the global cache.
         # self.cache_manager.update_requests(...) is REMOVED.
 
-        # Update prefix cache (TODO: Adapt to PagedKV)
+        # Update prefix cache: insert full blocks after prefill
         if self.enable_prefix_cache:
-            pass
-            # for _, req in enumerate(requests):
-            #    if req.is_prefill:
-            #        keys, values = self.cache_manager.gather_kv_cache(req.request_id)
-            #        self.prefix_cache.cache_unfinished_request(req, keys, values)
+            for req in requests:
+                if req.is_prefill:
+                    # Insert all full blocks from this prefill into the prefix cache
+                    self.cache_manager.insert_full_blocks_to_cache(req.request_id)
+                    logger.debug(f"Inserted full blocks for request {req.request_id} to prefix cache")
 
         # Process last peer: need additional sampling + detokenization
         if return_decoded_tokens:
@@ -374,8 +374,6 @@ class MLXExecutor(BaseExecutor):
         block_tables_list = []
         context_lengths_list = []
 
-        # TODO: Adapt Prefix Cache to PagedKV
-
         for req in batched_requests:
             assert req.is_prefill, f"Request {req.request_id} is not a prefill request."
             if self.is_first_peer:
@@ -383,9 +381,17 @@ class MLXExecutor(BaseExecutor):
             else:
                 h_or_tokens_list.append(req.hidden_states)
 
-            # Allocate Paged KV blocks
-            # For first peer and intermediate peers, we allocate based on prompt length
-            success = self.cache_manager.allocate_request(req.request_id, req.total_length)
+            # Allocate Paged KV blocks with prefix cache support
+            # For first peer, pass input_ids for prefix matching
+            token_ids = None
+            if self.is_first_peer and self.enable_prefix_cache:
+                token_ids = req.input_ids
+            
+            success = self.cache_manager.allocate_request(
+                req.request_id, 
+                req.total_length,
+                token_ids=token_ids
+            )
             if not success:
                 raise RuntimeError(f"OOM during prefill allocation for {req.request_id}")
 
@@ -476,9 +482,13 @@ class MLXExecutor(BaseExecutor):
             else:
                 h_or_tokens_list.append(req.hidden_states)
 
-            # TODO: Prefix cache update
+            # Update token_ids for prefix cache (if enabled)
+            if self.enable_prefix_cache and self.is_first_peer:
+                # Add the new token to the request's token_ids
+                self.cache_manager.update_request_tokens(req.request_id, [req.output_ids[-1]])
 
             # Allocate slot for new token
+            # Note: append_slot will automatically insert full blocks to prefix cache
             success = self.cache_manager.append_slot(req.request_id)
             if not success:
                 raise RuntimeError(f"OOM during decode for {req.request_id}")
