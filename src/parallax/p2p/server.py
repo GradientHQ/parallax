@@ -377,8 +377,8 @@ class GradientServer:
             interval_write_file = time_end_write_file - time_end_get_block
             logger.info(f"Finish download cid={cid}, file_size={file_size_mb}MB, get_block={interval_get_block}s, write_file={interval_write_file}s")
 
-        # add sleep 10s for direct connection first
-        time.sleep(10)
+        # add sleep 60s for direct connection first
+        time.sleep(60)
         message = message.result(timeout=300)
         # step1. Check weight refit trigger message
         time_stamp = message.get("time_stamp", None)
