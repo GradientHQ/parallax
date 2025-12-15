@@ -159,9 +159,6 @@ class SGLExecutor(BaseExecutor):
         self.tp_group = self.model_runner.tp_group
         self.tp_cpu_group = self.tp_group.cpu_group
 
-        # Store latest sampled token logits (not full distribution)
-        self._latest_token_probs = None
-
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
 
@@ -366,17 +363,17 @@ class SGLExecutor(BaseExecutor):
                 isinstance(req, InitialRequest) and req.return_probs for req in requests
             )
 
-            # Extract log probs for the sampled tokens only if needed
+            token_probs = None
+            # Extract probs for the sampled tokens only if needed
             if needs_probs and hasattr(logits_output, "next_token_logits"):
                 # Get probs for sampled tokens (next_token_logits contains probabilities)
                 real_probs = logits_output.next_token_logits[
                     torch.arange(len(next_token_ids)), next_token_ids
                 ]
-                self._latest_token_probs = real_probs.cpu().float().tolist()
-            else:
-                self._latest_token_probs = None
+                token_probs = real_probs.cpu().float().tolist()
 
-            return next_token_ids
+            # Return dict with token_ids and optional probs
+            return {"hidden_states": next_token_ids, "probs": token_probs}
         else:
             # Intermediate peer: return hidden states for next peer
             # Note: SGLang stores hidden_states + residual separately

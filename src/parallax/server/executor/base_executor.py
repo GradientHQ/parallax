@@ -341,10 +341,26 @@ class BaseExecutor:
         }
 
     def prepare_next_batch_requests(
-        self, requests: List[Request], hidden_states: Any, context_lengths: Any
+        self, requests: List[Request], batch_output: Any, context_lengths: Any
     ) -> List[Request]:
-        """Prepares a batch of requests for the next stage of the pipeline."""
+        """Prepares a batch of requests for the next stage of the pipeline.
+
+        Args:
+            requests: List of requests in the batch
+            batch_output: Output from process_batch. Can be:
+                - For intermediate peers: hidden_states tensor
+                - For last peer: dict with 'hidden_states' and optional 'probs'
+            context_lengths: Context lengths for each request
+        """
         if self.tp_rank == 0:
+            # Extract hidden_states and probs from output
+            if isinstance(batch_output, dict):
+                hidden_states = batch_output["hidden_states"]
+                token_probs = batch_output.get("probs", None)
+            else:
+                hidden_states = batch_output
+                token_probs = None
+
             batched_requests = []
             pre_length = 0
             for i, src_request in enumerate(requests):
@@ -371,9 +387,8 @@ class BaseExecutor:
 
                 # Get prob for this request if available
                 token_prob = None
-                if self.is_last_peer and hasattr(self, "_latest_token_probs"):
-                    if self._latest_token_probs is not None and len(self._latest_token_probs) > i:
-                        token_prob = self._latest_token_probs[i]
+                if self.is_last_peer and token_probs is not None and len(token_probs) > i:
+                    token_prob = token_probs[i]
 
                 next_req = self._prepare_next_single_request(
                     src_request, hidden_state_for_req, token_prob
@@ -490,7 +505,7 @@ class BaseExecutor:
                         # 7. Prepare requests for the next stage in the pipeline
                         next_batch = self.prepare_next_batch_requests(
                             requests=prepared_inputs["requests"],
-                            hidden_states=output,
+                            batch_output=output,
                             context_lengths=prepared_inputs.get("context_lengths"),
                         )
 
