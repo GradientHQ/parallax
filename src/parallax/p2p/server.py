@@ -381,7 +381,6 @@ class GradientServer:
         logger.info(f"Start dealing weight refit message: {message}.")
         logger.info(f"Wait for lattica direct connection.")
         time.sleep(60)
-        message = message.result(timeout=300)
         # step1. Check weight refit trigger message
         time_stamp = message.get("time_stamp", None)
         cid_list = message.get("cid", None)
@@ -748,13 +747,11 @@ class GradientServer:
                                     logger.info(
                                         f"Server begin weight refit process."
                                     )
-                                    self.check_and_run_weight_refit(response)
+                                    self.check_and_run_weight_refit(refit_message)
                                 else:
                                     logger.warning(
                                         f"Received weight refit request but enable_weight_refit is set to {self.enable_weight_refit}."
                                     )
-                            else:
-                                continue
                         else:
                             self.lattica.store(
                                 key=self.prefix_id,
