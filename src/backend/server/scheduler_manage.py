@@ -33,6 +33,7 @@ class SchedulerManage:
         announce_maddrs: List[str] = [],
         http_port: int = 3001,
         use_hfcache: bool = False,
+        enable_weight_refit: bool = False,
     ):
         """Initialize the manager with networking bootstrap parameters."""
         self.initial_peers = initial_peers
@@ -42,6 +43,7 @@ class SchedulerManage:
         self.announce_maddrs = announce_maddrs
         self.http_port = http_port
         self.use_hfcache = use_hfcache
+        self.enable_weight_refit = enable_weight_refit
         self.model_name = None
         self.init_nodes_num = None
         self.scheduler = None
@@ -175,7 +177,12 @@ class SchedulerManage:
         self.init_nodes_num = init_nodes_num
 
         model_info = get_model_info(model_name, self.use_hfcache)
-        self.scheduler = Scheduler(model_info, [], min_nodes_bootstrapping=init_nodes_num)
+        self.scheduler = Scheduler(
+                model_info,
+                [],
+                min_nodes_bootstrapping=init_nodes_num,
+                enable_weight_refit=self.enable_weight_refit,
+            )
 
         # Run the scheduler's event/dispatch loops in background so the process
         # can continue to serve RPCs and HTTP traffic.

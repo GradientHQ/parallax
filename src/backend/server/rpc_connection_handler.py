@@ -178,6 +178,7 @@ class RPCConnectionHandler(ConnectionHandler):
                         "start_layer": start_layer,
                         "end_layer": end_layer,
                         "tp_size": node.hardware.num_gpus,
+                        "enable_weight_refit": self.scheduler.enable_weight_refit,
                     }
         return {}
 

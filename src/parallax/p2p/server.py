@@ -278,6 +278,7 @@ class GradientServer:
                 block_end_index=self.block_end_index,
                 model_name=self.model_name,
                 tp_size=self.tp_size,
+                enable_weight_refit=self.enable_weight_refit,
                 status=self.status.value,
                 _layer_allocation_changed=self._layer_allocation_changed,
             )
@@ -452,6 +453,7 @@ class GradientServer:
                     self.block_end_index = response.get("end_layer")
                 self.model_name = response.get("model_name")
                 self.tp_size = response.get("tp_size")
+                self.enable_weight_refit = response.get("enable_weight_refit")
 
                 # Sync to shared state if available
                 self._sync_to_shared_state()

@@ -33,6 +33,7 @@ class Scheduler:
         model_info: ModelInfo,
         nodes: List[Node],
         min_nodes_bootstrapping: int = 1,
+        enable_weight_refit: bool = False,
         strategy: Literal["greedy", "dp"] = "dp",
         routing_strategy: Literal["rr", "dp"] = "rr",
         *,
@@ -59,6 +60,7 @@ class Scheduler:
         """
         self.model_info = model_info
         self.num_layers = model_info.num_layers
+        self.enable_weight_refit = enable_weight_refit
 
         allocator_class = (
             GreedyLayerAllocator if strategy == "greedy" else DynamicProgrammingLayerAllocator
