@@ -58,6 +58,7 @@ class CacheManager:
         self.linear_v_dim = linear_v_dim
         self.linear_num_k_heads = linear_num_k_heads
         self.linear_num_v_heads = linear_num_v_heads
+        self.cache_memory_fraction = cache_memory_fraction
 
         # Determine layer types
         if layer_types is None:
@@ -71,15 +72,17 @@ class CacheManager:
         self.needs_slots = any(t == "linear" for t in self.layer_types)
 
         if num_gpu_blocks is None and self.needs_blocks:
-            num_gpu_blocks = self._calculate_num_blocks(cache_memory_fraction, dtype)
+            num_gpu_blocks = self._calculate_num_blocks(self.cache_memory_fraction, self.dtype)
         elif not self.needs_blocks:
             num_gpu_blocks = 0
 
-        self.num_gpu_blocks = num_gpu_blocks
+        self.num_gpu_blocks = 2
 
         # 1. Initialize Allocators
-        self.allocator = BlockAllocator(num_gpu_blocks, block_size) if self.needs_blocks else None
-        self.slot_allocator = SlotAllocator(max_num_seqs) if self.needs_slots else None
+        self.allocator = (
+            BlockAllocator(self.num_gpu_blocks, self.block_size) if self.needs_blocks else None
+        )
+        self.slot_allocator = SlotAllocator(self.max_num_seqs) if self.needs_slots else None
 
         # 2. Initialize Layer Caches
         self.caches: List[BaseCache] = []
@@ -90,12 +93,12 @@ class CacheManager:
         if self.needs_blocks:
             logger.info(
                 f"Allocated Paged KV Cache for {self.layer_types.count('attention')} layers: "
-                f"{num_gpu_blocks} blocks, {block_size} block_size"
+                f"{self.num_gpu_blocks} blocks, {self.block_size} block_size"
             )
         if self.needs_slots:
             logger.info(
                 f"Allocated Linear State Cache for {self.layer_types.count('linear')} layers: "
-                f"{max_num_seqs} max slots"
+                f"{self.max_num_seqs} max slots"
             )
 
         # 3. Request State Management

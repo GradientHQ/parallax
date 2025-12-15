@@ -181,12 +181,20 @@ class Scheduler:
         finished = False
         last_token_id = request.output_ids[-1] if request.output_ids else None
         if request.abort:
+            request.update_status(RequestStatus.FINISHED_ABORT)
             finished = True
-        if not request.sampling_params.ignore_eos and (
-            self.eos_token_id
+        elif request.status == RequestStatus.FINISHED_ABORT:
+            # Already marked as ABORT by executor (e.g. OOM)
+            finished = True
+        if (
+            not finished
+            and not request.sampling_params.ignore_eos
             and (
-                last_token_id == self.eos_token_id
-                or (isinstance(self.eos_token_id, list) and last_token_id in self.eos_token_id)
+                self.eos_token_id
+                and (
+                    last_token_id == self.eos_token_id
+                    or (isinstance(self.eos_token_id, list) and last_token_id in self.eos_token_id)
+                )
             )
         ):
             request.update_status(RequestStatus.FINISHED_EOS)
@@ -231,7 +239,10 @@ class Scheduler:
                         logger.warning(
                             f"Request {rid} can't be admit to running batch due to KV cache size."
                         )
-                        continue
+                        # Put back to wait queue if allocation fails
+                        self._wait_queue.appendleft(req)
+                        # Stop admitting since we are out of memory
+                        break
 
             # Add request to running requests
             self._running_requests[rid] = req

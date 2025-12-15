@@ -286,8 +286,16 @@ class BaseExecutor:
                     elif recv_req[0] == b"abort":
                         abort_request = forward_pb2.AbortRequest()
                         abort_request.ParseFromString(recv_req[1])
-                        recv_req = proto_to_abort_request(abort_request)
-                        recv_reqs.extend(recv_req)
+                        recv_req_list = proto_to_abort_request(abort_request)
+                        recv_reqs.extend(recv_req_list)
+
+                        # Propagate abort to downstream peers if not last peer
+                        if not self.is_last_peer:
+                            logger.info(
+                                f"Propagating abort for {len(recv_req_list)} requests to downstream."
+                            )
+                            self.finished_batch.extend(recv_req_list)
+
                     else:
                         raise ValueError(f"Unknown request type: {recv_req[0]}")
                     # First peer is responsible for tokenization
@@ -409,8 +417,9 @@ class BaseExecutor:
 
             self.handle_input_requests(received_requests)
 
-            # Send finished batch to next peer
-            if len(self.finished_batch) > 0 and self.is_first_peer and self.tp_rank == 0:
+            # Send finished batch to next peer (or back to first peer for Last Peer)
+            # All nodes can propagate abort signals along the pipeline
+            if len(self.finished_batch) > 0 and self.tp_rank == 0:
                 self.send_to_peer_socket.send_multipart(
                     [b"abort", abort_request_to_proto(self.finished_batch).SerializeToString()]
                 )

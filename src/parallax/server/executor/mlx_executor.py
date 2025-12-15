@@ -236,12 +236,18 @@ class MLXExecutor(BaseExecutor):
                         )
                         continue
 
-                    assert req.next_token_id is not None
-                    original_req.commit_new_token(req.next_token_id)
+                    # If it's an abort signal (e.g. from OOM), next_token_id might be None or dummy
+                    if not req.abort and req.next_token_id is not None:
+                        original_req.commit_new_token(req.next_token_id)
+
                     if len(req.routing_table) > 0:
                         original_req.routing_table = req.routing_table
 
                     # Check for termination.
+                    # Force update if received abort signal
+                    if req.abort:
+                        original_req.abort = True
+
                     if self.scheduler.check_and_update_request_status(original_req):
                         self.cache_manager.release_request(original_req.request_id)
                         logger.debug(
@@ -255,15 +261,19 @@ class MLXExecutor(BaseExecutor):
 
                     # detokenize and send to http server
                     if self.tp_rank == 0:
+                        # Only send token if it's valid
+                        token_to_send = req.next_token_id if req.next_token_id is not None else -1
                         req_dict = {
                             "prompt_tokens": len(req.input_ids),
-                            "next_token_id": req.next_token_id,
+                            "next_token_id": token_to_send,
                             "rid": req.request_id,
                         }
                         if original_req.status == RequestStatus.FINISHED_EOS:
                             req_dict["eos"] = True
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
+                        if original_req.status == RequestStatus.FINISHED_ABORT:
+                            req_dict["abort"] = True
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:
@@ -466,9 +476,42 @@ class MLXExecutor(BaseExecutor):
         h_or_tokens_list = []
         block_tables_list = []
         context_lengths_list = []
+        valid_requests = []
 
         for req in batched_requests:
             assert req.is_decoding, f"Request {req.request_id} is not a decode request."
+
+            # Allocate slot for new token
+            success = self.cache_manager.append_slot(req.request_id)
+            if not success:
+                logger.error(
+                    f"OOM during decode for {req.request_id}. Aborting request and notifying other nodes."
+                )
+                req.update_status(RequestStatus.FINISHED_ABORT)
+                self.cache_manager.free_request(req.request_id)
+                self.scheduler.evict_request(req.request_id)
+                # Add to finished_batch to trigger abort notification
+                # - For First/Middle Peer: send to downstream
+                # - For Last Peer: send back to First Peer
+                self.finished_batch.append(req)
+
+                # If this is First Peer, we must also notify HTTP Server immediately
+                if self.is_first_peer and self.tp_rank == 0:
+                    req_dict = {
+                        "prompt_tokens": req.prompt_len,
+                        "next_token_id": (
+                            req.output_ids[-1] if req.output_ids else -1
+                        ),  # Best effort to return last token
+                        "rid": req.request_id,
+                        "abort": True,
+                    }
+                    if hasattr(self, "send_to_ipc_socket"):
+                        self.send_to_ipc_socket.send_pyobj(req_dict)
+
+                continue
+
+            # Allocation successful, proceed with batch preparation
+            valid_requests.append(req)
 
             if self.is_first_peer:
                 # First peer input is the last generated token
@@ -476,16 +519,15 @@ class MLXExecutor(BaseExecutor):
             else:
                 h_or_tokens_list.append(req.hidden_states)
 
-            # TODO: Prefix cache update
-
-            # Allocate slot for new token
-            success = self.cache_manager.append_slot(req.request_id)
-            if not success:
-                raise RuntimeError(f"OOM during decode for {req.request_id}")
-
             block_table = self.cache_manager.get_block_table(req.request_id)
             block_tables_list.append(block_table)
             context_lengths_list.append(self.cache_manager.get_context_length(req.request_id))
+
+        # Check if we have any valid requests left
+        if not valid_requests:
+            return None
+
+        batch_size = len(valid_requests)
 
         if isinstance(h_or_tokens_list[0], list):
             # First peer case: h_or_tokens_list is list of list of ints [[token_id], ...]
@@ -507,7 +549,7 @@ class MLXExecutor(BaseExecutor):
         # Prepare state slot mapping if needed
         state_slot_mapping = None
         if self.cache_manager.needs_slots:
-            req_ids = [r.request_id for r in batched_requests]
+            req_ids = [r.request_id for r in valid_requests]
             slots = [self.cache_manager.get_slot(rid) for rid in req_ids]
             state_slot_mapping = mx.array(slots, dtype=mx.int32)
 
@@ -515,7 +557,7 @@ class MLXExecutor(BaseExecutor):
             "h_or_tokens": padded_inputs,
             "cache": self.cache_manager.get_caches(),
             "mask": None,
-            "requests": batched_requests,
+            "requests": valid_requests,
             "block_tables": block_tables_tensor,
             "context_lengths": context_lengths_tensor,
             "slot_mapping": None,

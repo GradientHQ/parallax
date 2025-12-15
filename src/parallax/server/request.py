@@ -75,6 +75,7 @@ class RequestStatus(Enum):
     DECODING = "DECODING"
     FINISHED_EOS = "FINISHED_EOS"
     FINISHED_MAX_LENGTH = "FINISHED_MAX_LENGTH"
+    FINISHED_ABORT = "FINISHED_ABORT"
     ERROR = "ERROR"
     CANCELLED = "CANCELLED"
 
@@ -115,6 +116,7 @@ class Request:
         return self.status in [
             RequestStatus.FINISHED_EOS,
             RequestStatus.FINISHED_MAX_LENGTH,
+            RequestStatus.FINISHED_ABORT,
             RequestStatus.ERROR,
             RequestStatus.CANCELLED,
         ]
