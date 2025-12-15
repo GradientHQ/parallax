@@ -378,12 +378,14 @@ class GradientServer:
             logger.info(f"Finish download cid={cid}, file_size={file_size_mb}MB, get_block={interval_get_block}s, write_file={interval_write_file}s")
 
         # add sleep 60s for direct connection first
+        logger.info(f"Start dealing weight refit message: {message}.")
+        logger.info(f"Wait for lattica direct connection.")
         time.sleep(60)
         message = message.result(timeout=300)
         # step1. Check weight refit trigger message
         time_stamp = message.get("time_stamp", None)
         cid_list = message.get("cid", None)
-        weight_version = message.get("weight_version", 0)
+        weight_version = message.get("version", 0)
         if time_stamp is None or cid_list is None:
             return
         if self.last_refit_time >= float(time_stamp):
@@ -731,6 +733,9 @@ class GradientServer:
                                     )
                             elif refit_message and isinstance(refit_message, dict):
                                 if self.enable_weight_refit:
+                                    logger.info(
+                                        f"Server begin weight refit process."
+                                    )
                                     self.check_and_run_weight_refit(response)
                                 else:
                                     logger.warning(
