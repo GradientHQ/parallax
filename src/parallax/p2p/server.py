@@ -362,7 +362,7 @@ class GradientServer:
             time_end_get_block = None
             while True:
                 try:
-                    raw_data = self.lattica.get_block(cid)
+                    raw_data = self.lattica.get_block(cid, timeout_secs=30)
                     time_end_get_block = time.time()
                     break
                 except Exception:
