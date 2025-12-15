@@ -12,6 +12,7 @@ import enum
 import json
 import multiprocessing
 import os
+import random
 import threading
 import time
 from typing import List, Optional
@@ -398,7 +399,9 @@ class GradientServer:
             # Weight already updated
             return
 
-        max_concurrency = 6
+        random.seed(time.time())
+        random.shuffle(cid_list)
+        max_concurrency = 1
         count = len(cid_list)
 
         # step2. save weight to disk
