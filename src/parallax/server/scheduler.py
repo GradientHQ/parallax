@@ -158,7 +158,8 @@ class Scheduler:
             except Exception:
                 pass
         else:
-            raise ValueError(f"Attempted to evict non-existent request {request_id}.")
+            logger.warning(f"Attempted to evict non-existent request {request_id}. It might have been already evicted.")
+            return
 
     def cancel_request(self, request_id: str):
         """Cancels a request from the scheduler."""

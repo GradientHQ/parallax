@@ -76,7 +76,7 @@ class CacheManager:
         elif not self.needs_blocks:
             num_gpu_blocks = 0
 
-        self.num_gpu_blocks = 2
+        self.num_gpu_blocks = num_gpu_blocks
 
         # 1. Initialize Allocators
         self.allocator = (
