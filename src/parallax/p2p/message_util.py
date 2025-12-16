@@ -61,6 +61,8 @@ def proto_to_request(
 ) -> List[IntermediateRequest]:
     """
     Convert a ForwardRequest protobuf message to a IntermediateRequest object.
+    
+    If CUDA is in error state, returns requests marked as aborted.
     """
 
     requests = []
@@ -71,11 +73,21 @@ def proto_to_request(
         next_token_id = proto_req.next_token_id
 
         hidden_states = None
+        cuda_error_occurred = False
+        
         if proto_req.hidden_states:
-            hidden_states = bytes_to_tensor(proto_req.hidden_states, device)
+            try:
+                hidden_states = bytes_to_tensor(proto_req.hidden_states, device)
+            except TensorDeserializationError as e:
+                # CUDA is in error state - mark request as aborted
+                cuda_error_occurred = True
+                hidden_states = None
 
         status = None
-        if hidden_states is None:
+        if cuda_error_occurred:
+            # CUDA error - mark as aborted so receiving peer can handle gracefully
+            status = RequestStatus.FINISHED_ABORT
+        elif hidden_states is None:
             status = RequestStatus.FINISHED_EOS
         elif proto_request.forward_mode == forward_pb2.ForwardMode.EXTEND:
             status = RequestStatus.PREFILLING
@@ -97,6 +109,10 @@ def proto_to_request(
             sampling_params=sampling_params,
             lora_path=proto_req.lora_path if proto_req.lora_path != "" else None,
         )
+        
+        # Mark as abort if CUDA error occurred
+        if cuda_error_occurred:
+            request.abort = True
 
         requests.append(request)
 
@@ -202,16 +218,90 @@ def tensor_to_bytes(tensor: Any, device: Optional[str] = "mlx") -> bytes:
         return buffer.getvalue()
 
 
+class TensorDeserializationError(Exception):
+    """Raised when tensor deserialization fails due to CUDA or other errors."""
+    pass
+
+
+# Track CUDA error state for recovery attempts
+_cuda_error_state = {"in_error": False, "recovery_attempts": 0}
+
+
+def reset_cuda_error_state():
+    """Reset the CUDA error tracking state."""
+    global _cuda_error_state
+    _cuda_error_state = {"in_error": False, "recovery_attempts": 0}
+
+
 def bytes_to_tensor(
     tensor: bytes,
     device: Optional[str] = "mlx",
 ) -> Any:
-    """Convert bytes (safetensor format) to tensor."""
+    """Convert bytes (safetensor format) to tensor.
+    
+    Raises:
+        TensorDeserializationError: If CUDA is in error state or deserialization fails.
+    """
+    global _cuda_error_state
+    
     if device == "cuda":
+        import torch
         from safetensors.torch import load
 
-        tensor_dict = load(tensor)
-        tensor = tensor_dict["tensor"].to(device)
+        # If we know CUDA is in error state, try a more aggressive recovery first
+        if _cuda_error_state["in_error"]:
+            try:
+                # Try to reset CUDA state before attempting tensor operation
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+                # Test if CUDA is working with a small allocation
+                test_tensor = torch.zeros(1, device="cuda")
+                del test_tensor
+                torch.cuda.empty_cache()
+                # CUDA seems to be working again
+                _cuda_error_state["in_error"] = False
+                _cuda_error_state["recovery_attempts"] = 0
+            except Exception:
+                _cuda_error_state["recovery_attempts"] += 1
+                if _cuda_error_state["recovery_attempts"] > 10:
+                    raise TensorDeserializationError(
+                        "CUDA device is in unrecoverable error state. Service restart required."
+                    )
+
+        try:
+            tensor_dict = load(tensor)
+            # First load to CPU, then move to GPU - more robust
+            cpu_tensor = tensor_dict["tensor"]
+            if cpu_tensor.device.type != "cpu":
+                cpu_tensor = cpu_tensor.cpu()
+            tensor = cpu_tensor.to(device)
+            # Success - reset error state
+            _cuda_error_state["in_error"] = False
+            _cuda_error_state["recovery_attempts"] = 0
+        except (RuntimeError, Exception) as e:
+            error_msg = str(e).lower()
+            if "cuda" in error_msg or "illegal memory" in error_msg or "accelerator" in error_msg:
+                # Mark CUDA as in error state
+                _cuda_error_state["in_error"] = True
+                
+                # Try to recover
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                try:
+                    torch.cuda.reset_peak_memory_stats()
+                    torch.cuda.reset_accumulated_memory_stats()
+                except Exception:
+                    pass
+                
+                raise TensorDeserializationError(f"CUDA error during tensor deserialization: {e}")
+            raise
     else:
         buffer = io.BytesIO(tensor)
         tensors_dict = mx.load(buffer, format="safetensors")
