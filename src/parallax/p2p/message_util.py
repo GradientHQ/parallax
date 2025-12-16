@@ -80,6 +80,10 @@ def proto_to_request(
                 hidden_states = bytes_to_tensor(proto_req.hidden_states, device)
             except TensorDeserializationError as e:
                 # CUDA is in error state - mark request as aborted
+                import logging
+                logging.getLogger(__name__).error(
+                    f"TensorDeserializationError for request {proto_req.rid}: {e}"
+                )
                 cuda_error_occurred = True
                 hidden_states = None
 
@@ -280,6 +284,10 @@ def bytes_to_tensor(
             _cuda_error_state["in_error"] = False
             _cuda_error_state["recovery_attempts"] = 0
         except (RuntimeError, Exception) as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error in bytes_to_tensor: {type(e).__name__}: {e}")
+            
             error_msg = str(e).lower()
             if "cuda" in error_msg or "illegal memory" in error_msg or "accelerator" in error_msg:
                 # Mark CUDA as in error state
@@ -301,7 +309,8 @@ def bytes_to_tensor(
                     pass
                 
                 raise TensorDeserializationError(f"CUDA error during tensor deserialization: {e}")
-            raise
+            # For non-CUDA errors, also wrap in TensorDeserializationError for consistent handling
+            raise TensorDeserializationError(f"Error during tensor deserialization: {e}")
     else:
         buffer = io.BytesIO(tensor)
         tensors_dict = mx.load(buffer, format="safetensors")
