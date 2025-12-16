@@ -33,6 +33,7 @@ class Scheduler:
         model_info: ModelInfo,
         nodes: List[Node],
         min_nodes_bootstrapping: int = 1,
+        enable_weight_refit: bool = False,
         strategy: Literal["greedy", "dp"] = "dp",
         routing_strategy: Literal["rr", "dp"] = "rr",
         *,
@@ -59,6 +60,8 @@ class Scheduler:
         """
         self.model_info = model_info
         self.num_layers = model_info.num_layers
+        self.enable_weight_refit = enable_weight_refit
+        self.refit_request = {}
 
         allocator_class = (
             GreedyLayerAllocator if strategy == "greedy" else DynamicProgrammingLayerAllocator
@@ -87,7 +90,7 @@ class Scheduler:
         # Event queues for main loop orchestration (thread-safe)
         self._pending_joins: "queue.Queue[Node]" = queue.Queue()
         self._pending_leaves: "queue.Queue[str]" = queue.Queue()
-        self._pending_node_updates: "queue.Queue[Tuple[str, Optional[int], Optional[float], Optional[Dict[str, float]], Optional[bool]]]" = (queue.Queue())
+        self._pending_node_updates: "queue.Queue[Tuple[str, Optional[int], Optional[float], Optional[Dict[str, float]], Optional[bool], Optional[bool]]]" = (queue.Queue())
 
         # Concurrency controls
         self._stop_event: threading.Event = threading.Event()
@@ -104,6 +107,11 @@ class Scheduler:
             f"strategy {strategy}, rebalance threshold {rebalance_threshold}"
         )
         self._node_assigned_request_count: Dict[str, int] = {}
+
+        # Weight refit
+        self.refit_request = {}
+        self.refit_set = set()
+        self.last_refit_time = 0.0
 
         # Eager bootstrap for initial allocation if enough nodes are present
         try:
@@ -175,6 +183,16 @@ class Scheduler:
         logger.debug(f"{action.capitalize()} completed successfully; full pipeline established")
         return True
 
+    def update_last_refit_time(self):
+        min_refit_time = None
+        for node in self.node_id_to_node.values():
+            if min_refit_time is None:
+                min_refit_time = node.last_refit_time
+            else:
+                min_refit_time = min(min_refit_time, node.last_refit_time)
+        self.last_refit_time = min_refit_time
+        return self.last_refit_time
+
     def list_node_allocations(self) -> List[Tuple[str, int, int]]:
         """List the allocations of all nodes."""
         return self.layer_allocator.list_node_allocations()
@@ -235,6 +253,7 @@ class Scheduler:
         layer_latency_ms: Optional[float] = None,
         new_rtt_to_nodes: Optional[Dict[str, float]] = None,
         is_active: Optional[bool] = None,
+        last_refit_time: Optional[float] = 0.0,
     ) -> None:
         """Update the info of a node."""
         if current_requests is not None:
@@ -245,6 +264,8 @@ class Scheduler:
             node.rtt_to_nodes = new_rtt_to_nodes
         if is_active is not None:
             node.is_active = is_active
+        if last_refit_time > 0.0:
+            node.last_refit_time = last_refit_time
         node.last_heartbeat = time.time()
         # logger.debug(
         #     "Node updated: %s (requests=%s, latency_ms=%s, rtt_updates=%s)",
@@ -274,10 +295,18 @@ class Scheduler:
         layer_latency_ms: Optional[float] = None,
         new_rtt_to_nodes: Optional[Dict[str, float]] = None,
         is_active: Optional[bool] = None,
+        last_refit_time: Optional[float] = 0.0,
     ) -> None:
         """Enqueue a node update event."""
         self._pending_node_updates.put(
-            (node_id, current_requests, layer_latency_ms, new_rtt_to_nodes, is_active)
+            (
+                node_id,
+                current_requests,
+                layer_latency_ms,
+                new_rtt_to_nodes,
+                is_active,
+                last_refit_time,
+            )
         )
         self._wake_event.set()
 
@@ -503,7 +532,7 @@ class Scheduler:
             self._process_joins()
             self._process_leaves()
             now = time.time()
-            if now - last_hb_check >= max(0.5, poll_interval):
+            if now - last_hb_check >= max(0.5, poll_interval) and not self.enable_weight_refit:
                 self.checking_node_heartbeat()
                 last_hb_check = now
             self._wake_event.wait(timeout=poll_interval)
@@ -551,7 +580,9 @@ class Scheduler:
         """Apply pending node stats updates from the queue."""
         while True:
             try:
-                node_id, cur, lat, rtts, is_active = self._pending_node_updates.get_nowait()
+                node_id, cur, lat, rtts, is_active, last_refit_time = (
+                    self._pending_node_updates.get_nowait()
+                )
             except queue.Empty:
                 break
             if node_id not in self.node_id_to_node:
@@ -563,6 +594,7 @@ class Scheduler:
                 layer_latency_ms=lat,
                 new_rtt_to_nodes=rtts,
                 is_active=is_active,
+                last_refit_time=last_refit_time,
             )
 
     def _process_joins(self) -> None:

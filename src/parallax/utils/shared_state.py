@@ -116,6 +116,7 @@ class SharedState:
             "block_start_index": self._dict.get("block_start_index"),
             "block_end_index": self._dict.get("block_end_index"),
             "tp_size": self._dict.get("tp_size"),
+            "enable_weight_refit": self._dict.get("enable_weight_refit"),
             "_layer_allocation_changed": self._dict.get("_layer_allocation_changed", False),
         }
 
@@ -146,6 +147,7 @@ class SharedState:
         shared_dict["block_end_index"] = None
         shared_dict["model_name"] = None
         shared_dict["tp_size"] = None
+        shared_dict["enable_weight_refit"] = None
         shared_dict["_layer_allocation_changed"] = False
         shared_dict["status"] = None
 

@@ -82,6 +82,8 @@ class MLXExecutor(BaseExecutor):
         nccl_port: Optional[int] = 4000,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
+        # Weight Refit
+        enable_weight_refit: Optional[bool] = False,
     ):
         logger.debug(
             f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer})"
@@ -189,6 +191,7 @@ class MLXExecutor(BaseExecutor):
             tp_rank=tp_rank,
             tp_size=tp_size,
             shared_state=shared_state,
+            enable_weight_refit=enable_weight_refit,
         )
 
         try:
@@ -276,6 +279,8 @@ class MLXExecutor(BaseExecutor):
                             req_dict["length"] = True
                         if original_req.status == RequestStatus.FINISHED_ABORT:
                             req_dict["abort"] = True
+                        if self.enable_weight_refit:
+                            req_dict["weight_version"] = self.weight_version
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:
@@ -304,6 +309,11 @@ class MLXExecutor(BaseExecutor):
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
+
+    def check_and_refit_weight(self, refit_weight_path: str):
+        if refit_weight_path == "":
+            return
+        self.shard_loader.update_weight_from_disk(self.model_shard, refit_weight_path)
 
     def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """Process a batch of requests in MLX."""

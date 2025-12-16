@@ -41,6 +41,9 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Use local Hugging Face cache only (no network download)",
     )
+    parser.add_argument(
+        "--enable-weight-refit", type=bool, default=False, help="Enable online weight refit"
+    )
 
     args = parser.parse_args()
 
