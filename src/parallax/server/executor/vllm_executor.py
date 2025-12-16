@@ -15,7 +15,6 @@ from parallax.server.request import (
     Request,
     RequestStatus,
 )
-from parallax.p2p.message_util import reset_cuda_error_state
 from parallax.vllm.batch_info import (
     compute_expected_intermediate_tokens,
     form_vllm_batch_decode,
@@ -259,47 +258,32 @@ class VLLMExecutor(BaseExecutor):
         except Exception:
             pass
 
-    def _recover_from_cuda_error(self):
-        """Attempt to recover CUDA device from error state."""
-        try:
-            # First try to synchronize to clear any pending errors
-            torch.cuda.synchronize()
-        except Exception as e:
-            logger.warning(f"CUDA sync failed during error recovery: {e}")
+    def _abort_requests_due_to_kv_cache(self, batched_requests: List[Request], reason: str):
+        """
+        Abort requests due to KV cache shortage and notify relevant parties.
+        """
+        logger.warning(f"Aborting {len(batched_requests)} requests due to: {reason}")
         
-        try:
-            # Clear CUDA cache to free memory
-            torch.cuda.empty_cache()
-        except Exception as e:
-            logger.warning(f"Failed to clear CUDA cache: {e}")
-        
-        try:
-            # Reset memory stats
-            torch.cuda.reset_peak_memory_stats()
-            torch.cuda.reset_accumulated_memory_stats()
-        except Exception as e:
-            logger.warning(f"Failed to reset CUDA memory stats: {e}")
-        
-        # Final sync attempt
-        try:
-            torch.cuda.synchronize()
-        except Exception:
-            pass
-        
-        # Reset the global CUDA error state tracker
-        try:
-            reset_cuda_error_state()
-        except Exception:
-            pass
-        
-        # Test if CUDA is actually working
-        try:
-            test_tensor = torch.zeros(1, device="cuda")
-            del test_tensor
-            torch.cuda.empty_cache()
-            logger.info("CUDA error recovery completed - device is functional")
-        except Exception as e:
-            logger.warning(f"CUDA device still in error state after recovery attempt: {e}")
+        for req in batched_requests:
+            req.update_status(RequestStatus.FINISHED_ABORT)
+
+            # Notify HTTP Server to return partial results
+            if self.is_first_peer and self.tp_rank == 0:
+                req_dict = {
+                    "prompt_tokens": req.prompt_len,
+                    "next_token_id": (
+                        req.output_ids[-1] if hasattr(req, 'output_ids') and req.output_ids else -1
+                    ),
+                    "rid": req.request_id,
+                    "abort": True,
+                }
+                if hasattr(self, "send_to_ipc_socket"):
+                    self.send_to_ipc_socket.send_pyobj(req_dict)
+                    time.sleep(0.05)  # Give ZMQ time to flush
+
+            # Add to finished_batch to trigger abort notification to other peers
+            self.finished_batch.append(req)
+            self.scheduler.evict_request(req.request_id)
 
     def _gen_token_id_from_hidden(self, hidden_states) -> Tuple[int, Any]:
         """
@@ -362,6 +346,14 @@ class VLLMExecutor(BaseExecutor):
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
         schedule_outputs_prefill = form_vllm_batch_prefill(batched_requests, self.model_runner)
+
+        # Check if KV cache allocation failed
+        if schedule_outputs_prefill is None:
+            self._abort_requests_due_to_kv_cache(
+                batched_requests,
+                "KV cache insufficient for prefill"
+            )
+            return None
 
         if not self.is_first_peer and pp_proxy_tensors is not None:
             target_tokens = compute_expected_intermediate_tokens(
@@ -427,38 +419,16 @@ class VLLMExecutor(BaseExecutor):
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
-        try:
-            scheduler_outputs_decode = form_vllm_batch_decode(batched_requests, self.model_runner)
-        except Exception as e:
-            logger.error(f"Error during vllm decode batch formation (possible OOM): {e}")
-            
-            # Comprehensive CUDA error recovery
-            self._recover_from_cuda_error()
-            
-            for req in batched_requests:
-                req.update_status(RequestStatus.FINISHED_ABORT)
+        scheduler_outputs_decode = form_vllm_batch_decode(batched_requests, self.model_runner)
 
-                # Notify HTTP Server first to ensure partial results are returned
-                if self.is_first_peer and self.tp_rank == 0:
-                    req_dict = {
-                        "prompt_tokens": req.prompt_len,
-                        "next_token_id": (
-                            req.output_ids[-1] if req.output_ids else -1
-                        ),  # Best effort to return last token
-                        "rid": req.request_id,
-                        "abort": True,
-                    }
-                    if hasattr(self, "send_to_ipc_socket"):
-                        self.send_to_ipc_socket.send_pyobj(req_dict)
-                        # Give ZMQ a chance to flush before potential process crash
-                        time.sleep(0.05)
-
-                # Add to finished_batch to trigger abort notification to other nodes
-                self.finished_batch.append(req)
-                
-                self.scheduler.evict_request(req.request_id)
-                
+        # Check if KV cache allocation failed
+        if scheduler_outputs_decode is None:
+            self._abort_requests_due_to_kv_cache(
+                batched_requests,
+                "KV cache insufficient for decode"
+            )
             return None
+
         ret = {
             "scheduler_output": scheduler_outputs_decode,
             "pp_proxy_tensors": pp_proxy_tensors,

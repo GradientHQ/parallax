@@ -19,7 +19,6 @@ from parallax.server.request import (
     Request,
     RequestStatus,
 )
-from parallax.p2p.message_util import reset_cuda_error_state
 from parallax.sglang.batch_info import (
     form_sgl_batch_decode,
     form_sgl_batch_prefill,
@@ -322,12 +321,6 @@ class SGLExecutor(BaseExecutor):
                     req, IntermediateRequest
                 ), "Non-first peers must receive IntermediateRequests."
                 if req.is_finished or req.hidden_states is None:
-                    logger.warning(
-                        f"Request {req.request_id} being evicted: "
-                        f"is_finished={req.is_finished}, status={req.status}, "
-                        f"hidden_states_is_none={req.hidden_states is None}, "
-                        f"abort={req.abort}"
-                    )
                     self.release_and_evict_request(req.request_id)
                     if not self.is_last_peer:
                         self.finished_batch.append(req)
@@ -383,97 +376,54 @@ class SGLExecutor(BaseExecutor):
         except Exception:
             pass
 
-    def _recover_from_cuda_error(self):
-        """Attempt to recover CUDA device from error state."""
-        try:
-            # First try to synchronize to clear any pending errors
-            torch.cuda.synchronize()
-        except Exception as e:
-            logger.warning(f"CUDA sync failed during error recovery: {e}")
-        
-        try:
-            # Clear CUDA cache to free memory
-            torch.cuda.empty_cache()
-        except Exception as e:
-            logger.warning(f"Failed to clear CUDA cache: {e}")
-        
-        try:
-            # Reset memory stats
-            torch.cuda.reset_peak_memory_stats()
-            torch.cuda.reset_accumulated_memory_stats()
-        except Exception as e:
-            logger.warning(f"Failed to reset CUDA memory stats: {e}")
-        
-        # Final sync attempt
-        try:
-            torch.cuda.synchronize()
-        except Exception:
-            pass
-        
-        # Reset the global CUDA error state tracker
-        try:
-            reset_cuda_error_state()
-        except Exception:
-            pass
-        
-        # Test if CUDA is actually working
-        try:
-            test_tensor = torch.zeros(1, device="cuda")
-            del test_tensor
-            torch.cuda.empty_cache()
-            logger.info("CUDA error recovery completed - device is functional")
-        except Exception as e:
-            logger.warning(f"CUDA device still in error state after recovery attempt: {e}")
-
-    def _reset_running_batch(self):
-        """Reset running_batch to clean state after error."""
-        try:
-            # Create a fresh empty ScheduleBatch
-            self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
-            logger.info("Running batch reset to clean state")
-        except Exception as e:
-            logger.warning(f"Failed to reset running batch: {e}")
-
-    def _validate_running_batch_for_decode(self, batched_requests: List[Request]) -> bool:
+    def _check_kv_cache_available(self, num_tokens: int) -> bool:
         """
-        Validate that running_batch is in a valid state for decode operations.
-        Returns False if state is corrupted or requests are not found.
+        Check if there is enough KV cache space for the requested tokens.
+        
+        Returns True if there is enough space, False otherwise.
         """
         try:
-            # Check if running_batch exists and is not empty
-            if self.running_batch is None:
-                logger.warning("running_batch is None")
+            allocator = self.model_runner.token_to_kv_pool_allocator
+            available = allocator.available_size()
+            
+            if available < num_tokens:
+                logger.warning(
+                    f"KV cache space insufficient: need {num_tokens} tokens, "
+                    f"but only {available} available"
+                )
                 return False
-            
-            if self.running_batch.is_empty():
-                logger.warning("running_batch is empty but decode requests exist")
-                return False
-            
-            # Check if all requests are present in running_batch
-            running_rids = {req.rid for req in self.running_batch.reqs}
-            for req in batched_requests:
-                if req.request_id not in running_rids:
-                    logger.warning(f"Request {req.request_id} not found in running_batch")
-                    return False
-            
-            # Check if seq_lens tensor is valid (not corrupted)
-            if self.running_batch.seq_lens is None:
-                logger.warning("running_batch.seq_lens is None")
-                return False
-            
-            # Try to access seq_lens to verify it's not corrupted
-            # This is a lightweight check that would fail if CUDA state is corrupted
-            try:
-                _ = self.running_batch.seq_lens.shape
-            except Exception as e:
-                logger.warning(f"running_batch.seq_lens appears corrupted: {e}")
-                return False
-            
             return True
-            
         except Exception as e:
-            logger.warning(f"running_batch validation failed with exception: {e}")
-            return False
+            logger.warning(f"Failed to check KV cache availability: {e}")
+            # If we can't check, allow the operation to proceed
+            return True
+
+    def _abort_requests_due_to_kv_cache(self, batched_requests: List[Request], reason: str):
+        """
+        Abort requests due to KV cache shortage and notify relevant parties.
+        """
+        logger.warning(f"Aborting {len(batched_requests)} requests due to: {reason}")
+        
+        for req in batched_requests:
+            req.update_status(RequestStatus.FINISHED_ABORT)
+
+            # Notify HTTP Server to return partial results
+            if self.is_first_peer and self.tp_rank == 0:
+                req_dict = {
+                    "prompt_tokens": req.prompt_len,
+                    "next_token_id": (
+                        req.output_ids[-1] if hasattr(req, 'output_ids') and req.output_ids else -1
+                    ),
+                    "rid": req.request_id,
+                    "abort": True,
+                }
+                if hasattr(self, "send_to_ipc_socket"):
+                    self.send_to_ipc_socket.send_pyobj(req_dict)
+                    time.sleep(0.05)  # Give ZMQ time to flush
+
+            # Add to finished_batch to trigger abort notification to other peers
+            self.finished_batch.append(req)
+            self.scheduler.evict_request(req.request_id)
 
     def _gen_token_id_from_hidden(self, hidden_states) -> Tuple[int, Any]:
         """
@@ -507,6 +457,15 @@ class SGLExecutor(BaseExecutor):
         if batch_size == 0:
             return None
 
+        # Pre-check: Verify KV cache has enough space for prefill
+        total_tokens_needed = sum(req.total_length for req in batched_requests)
+        if not self._check_kv_cache_available(total_tokens_needed):
+            self._abort_requests_due_to_kv_cache(
+                batched_requests, 
+                f"KV cache insufficient for prefill ({total_tokens_needed} tokens needed)"
+            )
+            return None
+
         # Prepare PP proxy tensors
         pp_proxy_tensors = None
         if not self.is_first_peer:
@@ -552,41 +511,11 @@ class SGLExecutor(BaseExecutor):
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
-        try:
-            schedule_batch, forward_batch = form_sgl_batch_prefill(
-                batched_requests,
-                self.model_runner,
-            )
-            self.cur_batch = schedule_batch
-        except Exception as e:
-            logger.error(f"Error during sglang prefill batch formation (possible OOM): {e}")
-            
-            # Comprehensive CUDA error recovery
-            self._recover_from_cuda_error()
-            
-            for req in batched_requests:
-                req.update_status(RequestStatus.FINISHED_ABORT)
-
-                # Notify HTTP Server first to ensure partial results are returned
-                if self.is_first_peer and self.tp_rank == 0:
-                    req_dict = {
-                        "prompt_tokens": req.prompt_len,
-                        "next_token_id": -1,  # No tokens generated in prefill
-                        "rid": req.request_id,
-                        "abort": True,
-                    }
-                    if hasattr(self, "send_to_ipc_socket"):
-                        self.send_to_ipc_socket.send_pyobj(req_dict)
-                        time.sleep(0.05)
-
-                # Add to finished_batch to trigger abort notification to other nodes
-                self.finished_batch.append(req)
-                self.scheduler.evict_request(req.request_id)
-            
-            # Reset running_batch to clean state
-            self._reset_running_batch()
-            
-            return None
+        schedule_batch, forward_batch = form_sgl_batch_prefill(
+            batched_requests,
+            self.model_runner,
+        )
+        self.cur_batch = schedule_batch
 
         ret = {
             "forward_batch": forward_batch,
@@ -606,23 +535,13 @@ class SGLExecutor(BaseExecutor):
         if batch_size == 0:
             return None
 
-        # Pre-check: Validate running_batch state before attempting decode
-        # This prevents cascading CUDA errors if state was corrupted
-        if not self._validate_running_batch_for_decode(batched_requests):
-            logger.warning("Running batch validation failed, aborting decode requests")
-            for req in batched_requests:
-                req.update_status(RequestStatus.FINISHED_ABORT)
-                if self.is_first_peer and self.tp_rank == 0:
-                    req_dict = {
-                        "prompt_tokens": req.prompt_len,
-                        "next_token_id": (req.output_ids[-1] if req.output_ids else -1),
-                        "rid": req.request_id,
-                        "abort": True,
-                    }
-                    if hasattr(self, "send_to_ipc_socket"):
-                        self.send_to_ipc_socket.send_pyobj(req_dict)
-                self.finished_batch.append(req)
-                self.scheduler.evict_request(req.request_id)
+        # Pre-check: Verify KV cache has enough space for decode (1 token per request)
+        tokens_needed = batch_size
+        if not self._check_kv_cache_available(tokens_needed):
+            self._abort_requests_due_to_kv_cache(
+                batched_requests,
+                f"KV cache insufficient for decode ({tokens_needed} tokens needed)"
+            )
             return None
 
         # Prepare PP proxy tensors
@@ -670,46 +589,12 @@ class SGLExecutor(BaseExecutor):
             lengths.append(req.total_length)
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
-        try:
-            forward_batch = form_sgl_batch_decode(
-                batched_requests,
-                self.model_runner,
-                self.running_batch,
-                self.is_first_peer,
-            )
-        except Exception as e:
-            logger.error(f"Error during sglang decode batch formation (possible OOM): {e}")
-            
-            # Comprehensive CUDA error recovery
-            self._recover_from_cuda_error()
-            
-            for req in batched_requests:
-                req.update_status(RequestStatus.FINISHED_ABORT)
-
-                # Notify HTTP Server first to ensure partial results are returned
-                if self.is_first_peer and self.tp_rank == 0:
-                    req_dict = {
-                        "prompt_tokens": req.prompt_len,
-                        "next_token_id": (
-                            req.output_ids[-1] if req.output_ids else -1
-                        ),  # Best effort to return last token
-                        "rid": req.request_id,
-                        "abort": True,
-                    }
-                    if hasattr(self, "send_to_ipc_socket"):
-                        self.send_to_ipc_socket.send_pyobj(req_dict)
-                        # Give ZMQ a chance to flush before potential process crash
-                        time.sleep(0.05)
-
-                # Add to finished_batch to trigger abort notification to other nodes
-                self.finished_batch.append(req)
-                
-                self.scheduler.evict_request(req.request_id)
-            
-            # Reset running_batch to clean state after aborting all requests
-            self._reset_running_batch()
-                
-            return None
+        forward_batch = form_sgl_batch_decode(
+            batched_requests,
+            self.model_runner,
+            self.running_batch,
+            self.is_first_peer,
+        )
 
         ret = {
             "forward_batch": forward_batch,

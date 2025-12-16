@@ -27,12 +27,10 @@ from jinja2 import TemplateError
 from mlx_lm.server import convert_chat, process_message_content
 
 from parallax.p2p.message_util import (
-    TensorDeserializationError,
     abort_request_to_proto,
     proto_to_abort_request,
     proto_to_request,
     request_to_proto,
-    reset_cuda_error_state,
 )
 from parallax.p2p.proto import forward_pb2
 from parallax.p2p.server import ServerState
@@ -253,9 +251,6 @@ class BaseExecutor:
         """Receives requests from the RPC server."""
         if self.tp_rank == 0:
             recv_reqs = []
-            cuda_error_count = 0
-            max_cuda_errors = 3  # Limit consecutive CUDA errors before breaking
-            
             while True:
                 try:
                     recv_req = self.recv_from_peer_socket.recv_multipart(zmq.NOBLOCK)
@@ -264,68 +259,30 @@ class BaseExecutor:
                         # Create a new ForwardRequest instance and parse from bytes
                         forward_request = forward_pb2.ForwardRequest()
                         forward_request.ParseFromString(recv_req[1])
-                        
-                        try:
-                            recv_req = proto_to_request(forward_request, self.device)
-                        except TensorDeserializationError as e:
-                            # CUDA is in error state - create abort requests
-                            logger.error(f"CUDA error during request deserialization: {e}")
-                            cuda_error_count += 1
-                            self._try_cuda_error_recovery()
-                            
-                            # Create abort requests for all requests in this batch
-                            recv_req = []
-                            for proto_req in forward_request.reqs:
-                                abort_req = IntermediateRequest(
-                                    request_id=proto_req.rid,
-                                    current_position=len(proto_req.input_ids) + proto_req.output_length,
-                                    status=RequestStatus.FINISHED_ABORT,
-                                    input_ids=list(proto_req.input_ids),
-                                    hidden_states=None,
-                                    routing_table=list(proto_req.routing_table),
-                                )
-                                abort_req.abort = True
-                                recv_req.append(abort_req)
-                            
-                            if cuda_error_count >= max_cuda_errors:
-                                logger.error(f"Too many consecutive CUDA errors ({cuda_error_count}), stopping recv loop")
-                                recv_reqs.extend(recv_req)
-                                break
+                        recv_req = proto_to_request(forward_request, self.device)
 
                         # Convert hidden_states dtype if necessary
                         if recv_req is not None and len(recv_req) > 0:
                             for req in recv_req:
                                 if req.hidden_states is not None:
-                                    try:
-                                        if req.hidden_states.dtype != self.dtype:
-                                            logger.debug(
-                                                f"Converting hidden_states dtype from {req.hidden_states.dtype} to {self.dtype} for request {req.request_id}"
+                                    if req.hidden_states.dtype != self.dtype:
+                                        logger.debug(
+                                            f"Converting hidden_states dtype from {req.hidden_states.dtype} to {self.dtype} for request {req.request_id}"
+                                        )
+                                        if self.device == "cuda":
+                                            req.hidden_states = req.hidden_states.to(self.dtype)
+                                        elif self.device == "mlx":
+                                            req.hidden_states = req.hidden_states.astype(self.dtype)
+                                        else:
+                                            raise ValueError(
+                                                f"Unsupported device type: {self.device}"
                                             )
-                                            if self.device == "cuda":
-                                                req.hidden_states = req.hidden_states.to(self.dtype)
-                                            elif self.device == "mlx":
-                                                req.hidden_states = req.hidden_states.astype(self.dtype)
-                                            else:
-                                                raise ValueError(
-                                                    f"Unsupported device type: {self.device}"
-                                                )
-                                    except Exception as dtype_e:
-                                        logger.warning(f"Failed to convert dtype for request {req.request_id}: {dtype_e}")
-                                        # Mark as abort if dtype conversion fails
-                                        req.hidden_states = None
-                                        req.status = RequestStatus.FINISHED_ABORT
-                                        req.abort = True
 
                         # Move current position for first peer
                         if self.is_first_peer:
                             for req in recv_req:
-                                if hasattr(req, 'current_position'):
-                                    req.current_position += 1
+                                req.current_position += 1
                         recv_reqs.extend(recv_req)
-                        
-                        # Reset error count on successful receive
-                        cuda_error_count = 0
-                        
                     elif recv_req[0] == b"abort":
                         abort_request = forward_pb2.AbortRequest()
                         abort_request.ParseFromString(recv_req[1])
@@ -344,70 +301,12 @@ class BaseExecutor:
 
                 except zmq.ZMQError:
                     break
-                except TensorDeserializationError as e:
-                    logger.error(f"TensorDeserializationError in recv loop: {e}")
-                    self._try_cuda_error_recovery()
-                    cuda_error_count += 1
-                    if cuda_error_count >= max_cuda_errors:
-                        break
                 except Exception as e:
                     logger.exception(f"Error receiving or deserializing request: {e}")
-                    # Attempt CUDA error recovery if on CUDA device
-                    if self.device == "cuda":
-                        self._try_cuda_error_recovery()
-                    break  # Exit loop after error to avoid cascading failures
         else:
             recv_reqs = []
 
         return recv_reqs
-    
-    def _try_cuda_error_recovery(self):
-        """Attempt to recover from CUDA errors. Called from base executor."""
-        if self.device != "cuda":
-            return
-        try:
-            import torch
-            torch.cuda.synchronize()
-        except Exception:
-            pass
-        try:
-            import torch
-            torch.cuda.empty_cache()
-        except Exception:
-            pass
-        try:
-            import torch
-            torch.cuda.reset_peak_memory_stats()
-            torch.cuda.reset_accumulated_memory_stats()
-        except Exception:
-            pass
-        try:
-            import torch
-            torch.cuda.synchronize()
-        except Exception:
-            pass
-        
-        # Reset the global CUDA error state tracker
-        try:
-            reset_cuda_error_state()
-        except Exception:
-            pass
-        
-        # Test if CUDA is actually working
-        cuda_working = False
-        try:
-            import torch
-            test_tensor = torch.zeros(1, device="cuda")
-            del test_tensor
-            torch.cuda.empty_cache()
-            cuda_working = True
-        except Exception:
-            pass
-        
-        if cuda_working:
-            logger.info("CUDA error recovery attempted in base executor - device is functional")
-        else:
-            logger.warning("CUDA error recovery attempted in base executor - device may still be in error state")
 
     def prepare_batch_inputs(self, batched_requests: List[Request]) -> Optional[Dict[str, Any]]:
         """Prepares inputs for ShardedModel from a batch of requests.
