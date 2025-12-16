@@ -133,7 +133,6 @@ if __name__ == "__main__":
                 model_name=args.model_path,
                 max_batch_size=args.max_batch_size,
                 max_sequence_length=args.max_sequence_length,
-                enable_weight_refit=args.enable_weight_refit,
                 param_mem_ratio=args.param_mem_ratio,
                 kvcache_mem_ratio=args.kvcache_mem_ratio,
                 shared_state=shared_state.dict,  # Pass dict to subprocess
@@ -182,7 +181,6 @@ if __name__ == "__main__":
                 model_name=args.model_path,
                 max_batch_size=args.max_batch_size,
                 max_sequence_length=args.max_sequence_length,
-                enable_weight_refit=args.enable_weight_refit,
                 param_mem_ratio=args.param_mem_ratio,
                 kvcache_mem_ratio=args.kvcache_mem_ratio,
                 shared_state=shared_state.dict,  # Pass dict to subprocess

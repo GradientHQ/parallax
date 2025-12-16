@@ -228,7 +228,6 @@ class GradientServer:
         model_name: Optional[str] = None,
         max_batch_size: Optional[int] = None,
         max_sequence_length: Optional[int] = None,
-        enable_weight_refit: Optional[bool] = False,
         param_mem_ratio: float = 0.65,
         kvcache_mem_ratio: float = 0.25,
     ):
@@ -251,7 +250,7 @@ class GradientServer:
         self.max_sequence_length = max_sequence_length
         self.param_mem_ratio = param_mem_ratio
         self.kvcache_mem_ratio = kvcache_mem_ratio
-        self.enable_weight_refit = enable_weight_refit
+        self.enable_weight_refit = False
         self.last_refit_time = 0.0
         self.prefix_id = f"{dht_prefix}_announce"
         self.lattica = None
@@ -910,7 +909,6 @@ def _run_p2p_server_process(
     model_name: Optional[str],
     max_batch_size: Optional[int] = None,
     max_sequence_length: Optional[int] = None,
-    enable_weight_refit: Optional[bool] = False,
     param_mem_ratio: float = 0.65,
     kvcache_mem_ratio: float = 0.25,
     shared_state: Optional[dict] = None,
@@ -941,8 +939,7 @@ def _run_p2p_server_process(
             notify_url=notify_url,
             model_name=model_name,
             max_batch_size=max_batch_size,
-            max_sequence_length=max_sequence_length,
-            enable_weight_refit=enable_weight_refit,
+            max_sequence_length=max_sequence_length,=
             param_mem_ratio=param_mem_ratio,
             kvcache_mem_ratio=kvcache_mem_ratio,
         )
@@ -956,7 +953,7 @@ def _run_p2p_server_process(
                 block_end_index=server.block_end_index,
                 model_name=server.model_name,
                 tp_size=server.tp_size,
-                enable_weight_refit=server.enable_weight_refit,
+                enable_weight_refit=False,
                 status=server.status.value,
             )
 
@@ -989,7 +986,6 @@ def launch_p2p_server_process(
     model_name: Optional[str],
     max_batch_size: Optional[int] = None,
     max_sequence_length: Optional[int] = None,
-    enable_weight_refit: Optional[bool] = False,
     param_mem_ratio: float = 0.65,
     kvcache_mem_ratio: float = 0.25,
     shared_state: Optional[dict] = None,
@@ -1023,7 +1019,6 @@ def launch_p2p_server_process(
             model_name,
             max_batch_size,
             max_sequence_length,
-            enable_weight_refit,
             param_mem_ratio,
             kvcache_mem_ratio,
             shared_state,
