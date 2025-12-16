@@ -227,11 +227,20 @@ class Scheduler:
             if self.cache_manager is not None:
                 if not self.cache_manager.has_request(req.request_id):
                     # TODO: Handle chunked prefill, and support preemption.
-                    if not self.cache_manager.allocate_request(req.request_id, req.total_length):
+                    # Pass input_ids for prefix cache matching
+                    token_ids = getattr(req, "input_ids", None)
+                    success, matched_tokens = self.cache_manager.allocate_request(
+                        req.request_id, req.total_length, token_ids=token_ids
+                    )
+                    if not success:
                         logger.warning(
                             f"Request {rid} can't be admit to running batch due to KV cache size."
                         )
                         continue
+                    if matched_tokens > 0:
+                        logger.debug(
+                            f"Request {rid} matched {matched_tokens} tokens from prefix cache"
+                        )
 
             # Add request to running requests
             self._running_requests[rid] = req

@@ -1,13 +1,13 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import mlx.core as mx
 
+from parallax.server.block_radix_cache import BlockRadixCache
 from parallax.server.cache.allocator import BlockAllocator, SlotAllocator
 from parallax.server.cache.base import BaseCache
 from parallax.server.cache.dsa_cache import DeepSeekSparseCache
 from parallax.server.cache.kv_cache import KVCache
 from parallax.server.cache.linear_cache import LinearCache
-from parallax.server.block_radix_cache import BlockRadixCache
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -122,6 +122,8 @@ class CacheManager:
 
         # Mapping: request_id -> token_ids (for prefix matching)
         self.request_token_ids: Dict[str, List[int]] = {}
+        # Mapping: request_id -> matched_tokens (for prefix cache hit tracking)
+        self.matched_tokens_cache: Dict[str, int] = {}
 
     def _create_cache(self, layer_type: str) -> BaseCache:
         if layer_type == "attention":
@@ -262,14 +264,24 @@ class CacheManager:
 
     def allocate_request(
         self, request_id: str, prompt_len: int, token_ids: Optional[List[int]] = None
-    ) -> bool:
+    ) -> Tuple[bool, int]:
+        """Allocate KV cache blocks for a request.
+
+        Returns:
+            Tuple[bool, int]: (success, matched_tokens)
+                - success: Whether allocation succeeded
+                - matched_tokens: Number of tokens matched from prefix cache (0 if no match)
+        """
         if request_id in self.block_tables:
-            return True
+            # Already allocated, return cached matched_tokens if available
+            cached_matched = self.matched_tokens_cache.get(request_id, 0)
+            return True, cached_matched
 
         # 1. Try to match prefix from cache first
         matched_blocks = []
         matched_tokens = 0
         if self.prefix_cache and token_ids is not None and self.needs_blocks:
+            matched_blocks, matched_tokens = self.prefix_cache.match_prefix(token_ids)
             matched_blocks, matched_tokens = self.prefix_cache.match_prefix(token_ids)
             if matched_tokens > 0:
                 self.request_token_ids[request_id] = token_ids
@@ -313,13 +325,15 @@ class CacheManager:
                         self.slot_allocator.free(slot)
                     if self.prefix_cache and request_id in self.prefix_cache.request_to_nodes:
                         self.prefix_cache.release_request(request_id)
-                    return False
+                    return False, 0
                 blocks.extend(new_blocks)
 
         # 4. Commit
         if self.needs_blocks:
             self.block_tables[request_id] = blocks
             self.context_lengths[request_id] = prompt_len
+            # Cache matched_tokens for later retrieval
+            self.matched_tokens_cache[request_id] = matched_tokens
 
         if self.needs_slots:
             self.request_slots[request_id] = slot
@@ -332,7 +346,7 @@ class CacheManager:
                     if cache.linear_state_cache is not None:
                         cache.linear_state_cache[..., slot, :, :, :] = 0
 
-        return True
+        return True, matched_tokens
 
     def free_request(self, request_id: str):
         if self.prefix_cache:
@@ -344,6 +358,8 @@ class CacheManager:
             del self.block_tables[request_id]
             if request_id in self.context_lengths:
                 del self.context_lengths[request_id]
+            if request_id in self.matched_tokens_cache:
+                del self.matched_tokens_cache[request_id]
 
         if self.needs_slots and request_id in self.request_slots:
             slot = self.request_slots[request_id]
@@ -393,6 +409,10 @@ class CacheManager:
 
     def get_slot(self, request_id: str) -> int:
         return self.request_slots.get(request_id, -1)
+
+    def get_matched_tokens(self, request_id: str) -> int:
+        """Get the number of matched tokens from prefix cache for a request."""
+        return self.matched_tokens_cache.get(request_id, 0)
 
     def get_caches(self) -> List[BaseCache]:
         """Returns the list of layer caches."""

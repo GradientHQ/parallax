@@ -307,6 +307,7 @@ class MLXExecutor(BaseExecutor):
             context_lengths=prepared_inputs.get("context_lengths"),
             slot_mapping=prepared_inputs.get("slot_mapping"),
             state_slot_mapping=prepared_inputs.get("state_slot_mapping"),
+            prefix_lens=prepared_inputs.get("prefix_lens"),  # For RoPE offset in prefix cache
         )
 
         logger.debug(
@@ -335,7 +336,9 @@ class MLXExecutor(BaseExecutor):
                 if req.is_prefill:
                     # Insert all full blocks from this prefill into the prefix cache
                     self.cache_manager.insert_full_blocks_to_cache(req.request_id)
-                    logger.debug(f"Inserted full blocks for request {req.request_id} to prefix cache")
+                    logger.debug(
+                        f"Inserted full blocks for request {req.request_id} to prefix cache"
+                    )
 
         # Process last peer: need additional sampling + detokenization
         if return_decoded_tokens:
@@ -373,27 +376,41 @@ class MLXExecutor(BaseExecutor):
         h_or_tokens_list = []
         block_tables_list = []
         context_lengths_list = []
+        prefix_lens_list = []  # Track matched prefix lengths for each request
 
         for req in batched_requests:
             assert req.is_prefill, f"Request {req.request_id} is not a prefill request."
-            if self.is_first_peer:
-                h_or_tokens_list.append(req.input_ids)
-            else:
-                h_or_tokens_list.append(req.hidden_states)
 
             # Allocate Paged KV blocks with prefix cache support
             # For first peer, pass input_ids for prefix matching
             token_ids = None
             if self.is_first_peer and self.enable_prefix_cache:
                 token_ids = req.input_ids
-            
-            success = self.cache_manager.allocate_request(
-                req.request_id, 
-                req.total_length,
-                token_ids=token_ids
+
+            success, matched_tokens = self.cache_manager.allocate_request(
+                req.request_id, req.total_length, token_ids=token_ids
             )
             if not success:
                 raise RuntimeError(f"OOM during prefill allocation for {req.request_id}")
+
+            prefix_lens_list.append(matched_tokens)
+
+            if self.is_first_peer:
+                if matched_tokens > 0 and self.enable_prefix_cache:
+                    # Skip the prefix tokens that are already cached
+                    h_or_tokens_list.append(req.input_ids[matched_tokens:])
+                    logger.debug(
+                        f"Request {req.request_id}: Skipping {matched_tokens} cached tokens, "
+                        f"processing {len(req.input_ids) - matched_tokens} new tokens"
+                    )
+                else:
+                    h_or_tokens_list.append(req.input_ids)
+            else:
+                if matched_tokens > 0 and self.enable_prefix_cache:
+                    # Skip the prefix hidden states that correspond to cached tokens
+                    h_or_tokens_list.append(req.hidden_states[matched_tokens:])
+                else:
+                    h_or_tokens_list.append(req.hidden_states)
 
             block_table = self.cache_manager.get_block_table(req.request_id)
             block_tables_list.append(block_table)
@@ -407,19 +424,22 @@ class MLXExecutor(BaseExecutor):
         else:
             padded_inputs, padding_mask = pad_inputs(0, h_or_tokens_list, self.dtype)
 
-        # Generate slot_mapping (Batch * MaxLen) for prefill
+        # Generate slot_mapping for prefill (only for NEW tokens, starting from prefix_len)
         max_len = padded_inputs.shape[1]
         slot_mapping_flat = []
 
         for i, req in enumerate(batched_requests):
             block_table = block_tables_list[i]
-            length = req.total_length
+            prefix_len = prefix_lens_list[i]
+            total_len = req.total_length
+            new_tokens_len = total_len - prefix_len
 
             for seq_idx in range(max_len):
-                if seq_idx < length:
-                    # Valid token
-                    block_idx = seq_idx // self.cache_manager.block_size
-                    block_offset = seq_idx % self.cache_manager.block_size
+                if seq_idx < new_tokens_len:
+                    # Valid new token - map to position after prefix
+                    actual_pos = prefix_len + seq_idx
+                    block_idx = actual_pos // self.cache_manager.block_size
+                    block_offset = actual_pos % self.cache_manager.block_size
                     physical_block = block_table[block_idx]
                     slot = physical_block * self.cache_manager.block_size + block_offset
                     slot_mapping_flat.append(slot)
@@ -450,6 +470,9 @@ class MLXExecutor(BaseExecutor):
             slots = [self.cache_manager.get_slot(rid) for rid in req_ids]
             state_slot_mapping = mx.array(slots, dtype=mx.int32)
 
+        # Convert prefix_lens to tensor for models that need RoPE offset adjustment
+        prefix_lens_tensor = mx.array(prefix_lens_list, dtype=mx.int32)
+
         ret = {
             "h_or_tokens": padded_inputs,
             "cache": self.cache_manager.get_caches(),
@@ -459,6 +482,7 @@ class MLXExecutor(BaseExecutor):
             "context_lengths": context_lengths_tensor,
             "slot_mapping": slot_mapping_tensor,
             "state_slot_mapping": state_slot_mapping,
+            "prefix_lens": prefix_lens_tensor,  # For RoPE offset calculation
         }
         logger.debug(f"Prepared MLX prefill batch (size={batch_size})")
         return ret

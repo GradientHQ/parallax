@@ -4,7 +4,6 @@ Block-based Prefix Cache implementation using Radix Tree.
 
 import heapq
 import time
-from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
 from parallax_utils.logging_config import get_logger
@@ -78,7 +77,6 @@ class BlockRadixCache:
         matched_tokens = 0
 
         current_node = self.root
-        pos = 0
 
         num_full_blocks = len(token_ids) // self.block_size
 
