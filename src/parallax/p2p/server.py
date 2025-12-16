@@ -694,11 +694,17 @@ class GradientServer:
                                 self.get_node_info(is_update=True)
                             )
                             # Get the response result
-                            response, refit_message = (
+                            result_data = (
                                 response_future.result(timeout=30)
                                 if hasattr(response_future, "result")
                                 else response_future
                             )
+                            if isinstance(result_data, (list, tuple)) and len(result_data) > 0:
+                                response = result_data[0]
+                                refit_message = result_data[1] if len(result_data) > 1 else {}
+                            else:
+                                response = result_data
+                                refit_message = {}
 
                             # Print layer allocation information
                             if response and isinstance(response, dict):
