@@ -98,6 +98,7 @@ class RPCConnectionHandler(ConnectionHandler):
                 layer_latency_ms=node.layer_latency_ms,
                 new_rtt_to_nodes=node.rtt_to_nodes,
                 is_active=node.is_active,
+                last_refit_time=node.last_refit_time,
             )
             # Return current layer allocation to node
             layer_allocation = self.get_layer_allocation(node.node_id)

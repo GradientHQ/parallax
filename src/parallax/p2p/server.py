@@ -360,9 +360,10 @@ class GradientServer:
             raw_data = None
             time_begin_get_block = time.time()
             time_end_get_block = None
+            peer_id = None
             while True:
                 try:
-                    raw_data = self.lattica.get_block(cid, timeout_secs=30)
+                    peer_id, raw_data = self.lattica.get_block(cid, timeout_secs=30)
                     time_end_get_block = time.time()
                     break
                 except Exception:
@@ -381,7 +382,7 @@ class GradientServer:
             interval_get_block = time_end_get_block - time_begin_get_block
             interval_write_file = time_end_write_file - time_end_get_block
             logger.info(
-                f"Finish download cid={cid}, file_size={file_size_mb}MB, get_block={interval_get_block}s, write_file={interval_write_file}s"
+                f"Finish download cid={cid}, file_size={file_size_mb}MB, get_block={interval_get_block}s, write_file={interval_write_file}s, peer_id={peer_id}"
             )
 
         # add sleep 60s for direct connection first
@@ -428,6 +429,7 @@ class GradientServer:
         # step3. send ipc message to update weight
         self.connection_handler.ipc_weight_refit(weight_dir, weight_version)
         self.last_refit_time = float(time_stamp)
+        logger.info(f"Finish download weight_version={weight_version}, last_refit_time={self.last_refit_time}")
 
     def run(self):
         if self.build_lattica():
