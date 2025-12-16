@@ -69,6 +69,7 @@ class BaseExecutor:
         micro_batch_ratio: int = 2,
         scheduler_wait_ms: int = 500,
         request_timeout_s: Optional[int] = 600,
+        enable_full_allocation: bool = False,
         # Metrics Configs
         layer_latency_update_every: int = 4096,
         # Communication Configs
@@ -147,9 +148,10 @@ class BaseExecutor:
             is_first_peer=self.is_first_peer,
             tokenizer=self.tokenizer,
             eos_token_id=self.eos_token_id,
-            cache_manager=self.cache_manager if self.device == "mlx" else None,
+            cache_manager=self.cache_manager,
             request_timeout_s=request_timeout_s,
             shared_state=self.shared_state,
+            enable_full_allocation=enable_full_allocation,
         )
         logger.debug(
             f"Scheduler initialized (max_batch_size={max_batch_size}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"

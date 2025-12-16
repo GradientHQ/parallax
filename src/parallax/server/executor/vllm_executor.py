@@ -23,6 +23,7 @@ from parallax.vllm.batch_info import (
     resize_intermediate_tensors,
 )
 from parallax.vllm.model_runner import initialize_vllm_model_runner
+from parallax.vllm.cache_adapter import VLLMCacheAdapter
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -55,6 +56,7 @@ class VLLMExecutor(BaseExecutor):
         kv_block_size: int = 64,
         kv_cache_memory_fraction: float = 0.8,
         enable_prefix_cache: Optional[bool] = False,
+        enable_full_allocation: bool = False,
         # Communication Configs
         # P2P Communication Configs
         send_to_peer_addr: Optional[str] = None,
@@ -111,6 +113,13 @@ class VLLMExecutor(BaseExecutor):
         self.model_runner, self.config, self.tokenizer = initialize_vllm_model_runner(
             **model_runner_params
         )
+
+        # Initialize Cache Adapter for vLLM
+        if enable_full_allocation:
+            self.cache_manager = VLLMCacheAdapter(self.model_runner.kv_cache_manager, kv_block_size)
+        else:
+            self.cache_manager = None
+
         super().__init__(
             start_layer=start_layer,
             end_layer=end_layer,
@@ -123,6 +132,7 @@ class VLLMExecutor(BaseExecutor):
             micro_batch_ratio=micro_batch_ratio,
             scheduler_wait_ms=scheduler_wait_ms,
             request_timeout_s=request_timeout_s,
+            enable_full_allocation=enable_full_allocation,
             layer_latency_update_every=layer_latency_update_every,
             send_to_peer_addr=send_to_peer_addr,
             recv_from_peer_addr=recv_from_peer_addr,

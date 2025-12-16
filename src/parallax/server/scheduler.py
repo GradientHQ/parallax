@@ -21,7 +21,7 @@ Our scheduler also handles tokenization and pre-processing for the First Peer's 
 
 import time
 from collections import OrderedDict, deque
-from typing import Deque, Dict, List, Optional
+from typing import Deque, Dict, List, Optional, Union
 
 from parallax.server.cache_manager import CacheManager
 from parallax.server.request import InitialRequest, Request, RequestStatus
@@ -48,6 +48,7 @@ class Scheduler:
         cache_manager: Optional[CacheManager] = None,
         request_timeout_s: Optional[int] = 600,
         shared_state: Optional[SharedState] = None,
+        enable_full_allocation: bool = False,
         **kwargs,
     ):
         """
@@ -59,12 +60,14 @@ class Scheduler:
             tokenizer: The tokenizer to use for the model;
             cache_manager: The KV cache manager to use for the scheduler.
             request_timeout_s: timeout for each inflight request (default 10mins).
+            enable_full_allocation: Whether to allocate full memory for request generation to avoid OOM.
         """
         self.max_batch_size = max_batch_size
         self.max_num_tokens_per_batch = max_num_tokens_per_batch
         self.micro_batch_size = max(1, max_batch_size // micro_batch_ratio)
         self.scheduler_wait_ms = scheduler_wait_ms
         self.is_first_peer = is_first_peer
+        self.enable_full_allocation = enable_full_allocation
         if is_first_peer:
             # Load configs for building InitialRequest
             self.tokenizer = kwargs.get("tokenizer", None)
@@ -112,7 +115,7 @@ class Scheduler:
             input_ids, self.eos_token_id, self.max_new_tokens, self.max_total_length
         )
 
-    def enque_request(self, request: Request | str):
+    def enque_request(self, request: Union[Request, str]):
         """Enque a request to the scheduler's wait queue."""
         if isinstance(request, str):
             request = self._prompt_string_to_request(request)
@@ -238,7 +241,20 @@ class Scheduler:
             if self.cache_manager is not None:
                 if not self.cache_manager.has_request(req.request_id):
                     # TODO: Handle chunked prefill, and support preemption.
-                    if not self.cache_manager.allocate_request(req.request_id, req.total_length):
+                    pre_alloc_size = None
+                    if self.enable_full_allocation:
+                        max_new_tokens = 0
+                        if hasattr(req, "max_new_tokens"):
+                            max_new_tokens = req.max_new_tokens
+                        elif req.sampling_params is not None:
+                            max_new_tokens = req.sampling_params.max_new_tokens
+
+                        if max_new_tokens > 0:
+                            pre_alloc_size = req.prompt_len + max_new_tokens
+
+                    if not self.cache_manager.allocate_request(
+                        req.request_id, req.total_length, pre_alloc_size=pre_alloc_size
+                    ):
                         logger.warning(
                             f"Request {rid} can't be admit to running batch due to KV cache size."
                         )

@@ -24,6 +24,7 @@ def create_executor_config(args: argparse.Namespace, shared_state=None):
         "kv_block_size": args.kv_block_size,
         "kv_cache_memory_fraction": args.kv_cache_memory_fraction,
         "enable_prefix_cache": args.enable_prefix_cache,
+        "enable_full_allocation": args.enable_full_allocation,
         "max_num_tokens_per_batch": args.max_num_tokens_per_batch,
         "prefill_priority": args.prefill_priority,
         "micro_batch_ratio": args.micro_batch_ratio,

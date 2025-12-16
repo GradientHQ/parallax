@@ -109,6 +109,12 @@ def parse_args() -> argparse.Namespace:
         "--enable-prefix-cache", action="store_true", help="Enable prefix cache reuse"
     )
 
+    parser.add_argument(
+        "--enable-full-allocation",
+        action="store_true",
+        help="Enable full allocation for request generation to avoid OOM.",
+    )
+
     # Scheduler configuration
     parser.add_argument(
         "--max-batch-size",
