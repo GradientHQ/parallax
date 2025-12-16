@@ -54,6 +54,10 @@ def request_to_proto(
         if hasattr(request, "token_prob") and request.token_prob is not None:
             proto_req.token_prob = request.token_prob
 
+        # Add return_probs flag
+        if hasattr(request, "return_probs"):
+            proto_req.return_probs = request.return_probs
+
         forward_request.reqs.append(proto_req)
 
     return forward_request
@@ -95,6 +99,9 @@ def proto_to_request(
         if proto_req.HasField("token_prob"):
             token_prob = proto_req.token_prob
 
+        # Extract return_probs (defaults to False if not present)
+        return_probs = proto_req.return_probs if hasattr(proto_req, "return_probs") else False
+
         request = IntermediateRequest(
             request_id=proto_req.rid,
             current_position=current_position,
@@ -106,6 +113,7 @@ def proto_to_request(
             sampling_params=sampling_params,
             lora_path=proto_req.lora_path if proto_req.lora_path != "" else None,
             token_prob=token_prob,
+            return_probs=return_probs,
         )
 
         requests.append(request)

@@ -344,7 +344,9 @@ class MLXExecutor(BaseExecutor):
             )
 
             needs_probs = any(
-                isinstance(req, InitialRequest) and req.return_probs for req in requests
+                (isinstance(req, InitialRequest) and req.return_probs)
+                or (isinstance(req, IntermediateRequest) and req.return_probs)
+                for req in requests
             )
 
             token_probs = None

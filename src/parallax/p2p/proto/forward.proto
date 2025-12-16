@@ -37,6 +37,7 @@ message Req {
   bytes hidden_states = 7;
   string lora_path = 8;
   optional float token_prob = 9;  // Probability value for the sampled token
+  bool return_probs = 10;  // Whether to return probabilities
 }
 
 message SamplingParams {

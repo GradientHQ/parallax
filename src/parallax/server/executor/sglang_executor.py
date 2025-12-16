@@ -360,7 +360,9 @@ class SGLExecutor(BaseExecutor):
             # Only compute probs if any request in the batch needs it
             # Check if any InitialRequest has return_probs=True
             needs_probs = any(
-                isinstance(req, InitialRequest) and req.return_probs for req in requests
+                (isinstance(req, InitialRequest) and req.return_probs)
+                or (isinstance(req, IntermediateRequest) and req.return_probs)
+                for req in requests
             )
 
             token_probs = None

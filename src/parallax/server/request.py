@@ -265,6 +265,7 @@ class IntermediateRequest(Request):
         sampling_params: Optional[SamplingParams] = None,
         lora_path: Optional[str] = None,
         token_prob: Optional[float] = None,
+        return_probs: bool = False,
     ):
         super().__init__(
             request_id=request_id,
@@ -287,6 +288,7 @@ class IntermediateRequest(Request):
         self.hidden_states = hidden_states
         self.next_token_id = next_token_id
         self.token_prob = token_prob
+        self.return_probs = return_probs
 
     @property
     def input_length(self) -> int:
@@ -339,6 +341,7 @@ class IntermediateRequest(Request):
             routing_table=initial_request.routing_table,
             lora_path=lora_path,
             token_prob=token_prob,
+            return_probs=initial_request.return_probs,
         )
 
     @classmethod
@@ -364,6 +367,7 @@ class IntermediateRequest(Request):
             sampling_params=old_request.sampling_params,
             lora_path=lora_path,
             token_prob=token_prob,
+            return_probs=old_request.return_probs,
         )
 
     def __repr__(self):
