@@ -939,7 +939,7 @@ def _run_p2p_server_process(
             notify_url=notify_url,
             model_name=model_name,
             max_batch_size=max_batch_size,
-            max_sequence_length=max_sequence_length,=
+            max_sequence_length=max_sequence_length,
             param_mem_ratio=param_mem_ratio,
             kvcache_mem_ratio=kvcache_mem_ratio,
         )
