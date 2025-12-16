@@ -1,7 +1,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/variant.h>
 
-#include "paged_attention/paged_attention.h"
+#include "paged_attention_v1/paged_attention.h"
 
 namespace nb = nanobind;
 using namespace nb::literals;
