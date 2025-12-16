@@ -215,6 +215,8 @@ class HTTPHandler:
         }
         choice = response["choices"][0]
         choice["delta"] = {"role": role, "content": content}
+        if request_info.weight_version:
+            response["weight_version"] = request_info.weight_version
         response_json = json.dumps(response, separators=(",", ":"))
         return f"data: {response_json}\n\n".encode()
 
