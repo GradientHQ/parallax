@@ -278,7 +278,7 @@ class SGLExecutor(BaseExecutor):
                             f"[FirstPeer-CUDA] Committed token {req.next_token_id} for {req.request_id}, "
                             f"output_ids now has {len(original_req.output_ids)} tokens"
                         )
-                    
+
                     if len(req.routing_table) > 0:
                         original_req.routing_table = req.routing_table
 
@@ -286,7 +286,7 @@ class SGLExecutor(BaseExecutor):
                     # Force update if received abort signal
                     if req.abort:
                         original_req.abort = True
-                    
+
                     if self.scheduler.check_and_update_request_status(original_req):
                         logger.debug(f"Releasing resources for finished request {req.request_id}")
                         self.release_and_evict_request(req.request_id)
@@ -379,13 +379,13 @@ class SGLExecutor(BaseExecutor):
     def _check_kv_cache_available(self, num_tokens: int) -> bool:
         """
         Check if there is enough KV cache space for the requested tokens.
-        
+
         Returns True if there is enough space, False otherwise.
         """
         try:
             allocator = self.model_runner.token_to_kv_pool_allocator
             available = allocator.available_size()
-            
+
             if available < num_tokens:
                 logger.warning(
                     f"KV cache space insufficient: need {num_tokens} tokens, "
@@ -403,7 +403,7 @@ class SGLExecutor(BaseExecutor):
         Abort requests due to KV cache shortage and notify relevant parties.
         """
         logger.warning(f"Aborting {len(batched_requests)} requests due to: {reason}")
-        
+
         for req in batched_requests:
             req.update_status(RequestStatus.FINISHED_ABORT)
 
@@ -412,7 +412,7 @@ class SGLExecutor(BaseExecutor):
                 req_dict = {
                     "prompt_tokens": req.prompt_len,
                     "next_token_id": (
-                        req.output_ids[-1] if hasattr(req, 'output_ids') and req.output_ids else -1
+                        req.output_ids[-1] if hasattr(req, "output_ids") and req.output_ids else -1
                     ),
                     "rid": req.request_id,
                     "abort": True,
@@ -461,8 +461,8 @@ class SGLExecutor(BaseExecutor):
         total_tokens_needed = sum(req.total_length for req in batched_requests)
         if not self._check_kv_cache_available(total_tokens_needed):
             self._abort_requests_due_to_kv_cache(
-                batched_requests, 
-                f"KV cache insufficient for prefill ({total_tokens_needed} tokens needed)"
+                batched_requests,
+                f"KV cache insufficient for prefill ({total_tokens_needed} tokens needed)",
             )
             return None
 
@@ -540,7 +540,7 @@ class SGLExecutor(BaseExecutor):
         if not self._check_kv_cache_available(tokens_needed):
             self._abort_requests_due_to_kv_cache(
                 batched_requests,
-                f"KV cache insufficient for decode ({tokens_needed} tokens needed)"
+                f"KV cache insufficient for decode ({tokens_needed} tokens needed)",
             )
             return None
 

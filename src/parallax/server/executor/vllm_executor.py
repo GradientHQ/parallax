@@ -160,7 +160,7 @@ class VLLMExecutor(BaseExecutor):
                             f"[FirstPeer-CUDA] Committed token {req.next_token_id} for {req.request_id}, "
                             f"output_ids now has {len(original_req.output_ids)} tokens"
                         )
-                    
+
                     if len(req.routing_table) > 0:
                         original_req.routing_table = req.routing_table
 
@@ -168,7 +168,7 @@ class VLLMExecutor(BaseExecutor):
                     # Force update if received abort signal
                     if req.abort:
                         original_req.abort = True
-                    
+
                     if self.scheduler.check_and_update_request_status(original_req):
                         logger.debug(f"Releasing resources for finished request {req.request_id}")
                         self.release_and_evict_request(req.request_id)
@@ -263,7 +263,7 @@ class VLLMExecutor(BaseExecutor):
         Abort requests due to KV cache shortage and notify relevant parties.
         """
         logger.warning(f"Aborting {len(batched_requests)} requests due to: {reason}")
-        
+
         for req in batched_requests:
             req.update_status(RequestStatus.FINISHED_ABORT)
 
@@ -272,7 +272,7 @@ class VLLMExecutor(BaseExecutor):
                 req_dict = {
                     "prompt_tokens": req.prompt_len,
                     "next_token_id": (
-                        req.output_ids[-1] if hasattr(req, 'output_ids') and req.output_ids else -1
+                        req.output_ids[-1] if hasattr(req, "output_ids") and req.output_ids else -1
                     ),
                     "rid": req.request_id,
                     "abort": True,
@@ -350,8 +350,7 @@ class VLLMExecutor(BaseExecutor):
         # Check if KV cache allocation failed
         if schedule_outputs_prefill is None:
             self._abort_requests_due_to_kv_cache(
-                batched_requests,
-                "KV cache insufficient for prefill"
+                batched_requests, "KV cache insufficient for prefill"
             )
             return None
 
@@ -424,8 +423,7 @@ class VLLMExecutor(BaseExecutor):
         # Check if KV cache allocation failed
         if scheduler_outputs_decode is None:
             self._abort_requests_due_to_kv_cache(
-                batched_requests,
-                "KV cache insufficient for decode"
+                batched_requests, "KV cache insufficient for decode"
             )
             return None
 
