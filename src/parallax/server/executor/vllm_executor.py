@@ -22,8 +22,8 @@ from parallax.vllm.batch_info import (
     release_vllm_request,
     resize_intermediate_tensors,
 )
-from parallax.vllm.model_runner import initialize_vllm_model_runner
 from parallax.vllm.cache_adapter import VLLMCacheAdapter
+from parallax.vllm.model_runner import initialize_vllm_model_runner
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)

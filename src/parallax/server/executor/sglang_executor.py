@@ -24,8 +24,8 @@ from parallax.sglang.batch_info import (
     form_sgl_batch_prefill,
     release_sglang_request,
 )
-from parallax.sglang.model_runner import initialize_sgl_model_runner, refit_sgl_model
 from parallax.sglang.cache_adapter import SGLangCacheAdapter
+from parallax.sglang.model_runner import initialize_sgl_model_runner, refit_sgl_model
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
