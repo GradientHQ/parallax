@@ -70,6 +70,11 @@ class RPCConnectionHandler(ConnectionHandler):
 
     @rpc_method
     def node_update(self, message):
+        """
+        Returns a Tuple[Dict, Dict] where
+        first dict contains layer allocation result and
+        second dict records weight refit information.
+        """
         logger.debug(f"receive node_update request: {message}")
         try:
             node = self.build_node(message)
@@ -84,7 +89,7 @@ class RPCConnectionHandler(ConnectionHandler):
                 time.sleep(0.1)
                 # Return layer allocation after join
                 layer_allocation = self.wait_layer_allocation(node.node_id, wait_seconds=5)
-                return layer_allocation
+                return layer_allocation, {}
 
             # Node exists, update its info
             self.scheduler.enqueue_node_update(
@@ -93,13 +98,19 @@ class RPCConnectionHandler(ConnectionHandler):
                 layer_latency_ms=node.layer_latency_ms,
                 new_rtt_to_nodes=node.rtt_to_nodes,
                 is_active=node.is_active,
+                last_refit_time=node.last_refit_time,
             )
             # Return current layer allocation to node
             layer_allocation = self.get_layer_allocation(node.node_id)
-            return layer_allocation
+            refit_request = {}
+            if self.scheduler.refit_request:
+                if node.node_id not in self.scheduler.refit_set:
+                    refit_request = self.scheduler.refit_request
+                    self.scheduler.refit_set.add(node.node_id)
+            return layer_allocation, refit_request
         except Exception as e:
             logger.exception(f"node_update error: {e}")
-            return {}
+            return {}, {}
 
     @rpc_stream_iter
     def chat_completion(
@@ -168,6 +179,7 @@ class RPCConnectionHandler(ConnectionHandler):
                         "start_layer": start_layer,
                         "end_layer": end_layer,
                         "tp_size": node.hardware.num_gpus,
+                        "enable_weight_refit": self.scheduler.enable_weight_refit,
                     }
         return {}
 
@@ -182,6 +194,7 @@ class RPCConnectionHandler(ConnectionHandler):
             max_sequence_length=node_json.get("max_sequence_length"),
             is_active=node_json.get("is_active", True),
             manual_layer_assignment=node_json.get("manual_layer_assignment", False),
+            last_refit_time=node_json.get("last_refit_time", 0.0),
         )
         if node_json.get("start_layer", None) is not None:
             node.start_layer = node_json.get("start_layer")

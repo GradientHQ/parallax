@@ -87,6 +87,8 @@ class HTTPRequestInfo:
     error_message: Optional[str] = None
     error_type: Optional[str] = None
     error_status: HTTPStatus = HTTPStatus.INTERNAL_SERVER_ERROR
+    # Weight version for RL
+    weight_version: Optional[int] = None
 
 
 class HTTPHandler:
@@ -213,6 +215,8 @@ class HTTPHandler:
         }
         choice = response["choices"][0]
         choice["delta"] = {"role": role, "content": content}
+        if request_info.weight_version:
+            response["weight_version"] = request_info.weight_version
         response_json = json.dumps(response, separators=(",", ":"))
         return f"data: {response_json}\n\n".encode()
 
@@ -280,6 +284,8 @@ class HTTPHandler:
             "reasoning_content": None,
             "tool_calls": None,
         }
+        if request_info.weight_version:
+            response["weight_version"] = request_info.weight_version
         return response
 
     async def _handle_executor_error(self, rid: str, recv_dict: Dict):
@@ -330,6 +336,7 @@ class HTTPHandler:
             request_info.completion_tokens += 1
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
+            request_info.weight_version = recv_dict.get("weight_version", None)
 
             is_finished = (
                 recv_dict.get("eos", False)
