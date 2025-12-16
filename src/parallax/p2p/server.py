@@ -429,7 +429,9 @@ class GradientServer:
         # step3. send ipc message to update weight
         self.connection_handler.ipc_weight_refit(weight_dir, weight_version)
         self.last_refit_time = float(time_stamp)
-        logger.info(f"Finish download weight_version={weight_version}, last_refit_time={self.last_refit_time}")
+        logger.info(
+            f"Finish download weight_version={weight_version}, last_refit_time={self.last_refit_time}"
+        )
 
     def run(self):
         if self.build_lattica():
