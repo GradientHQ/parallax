@@ -10,7 +10,7 @@ class FakeCacheManager:
     def has_request(self, request_id: str) -> bool:
         return request_id in self._reqs
 
-    def allocate_request(self, request_id: str, num_tokens: int) -> bool:
+    def allocate_request(self, request_id: str, num_tokens: int, pre_alloc_size=None) -> bool:
         """PagedKV interface."""
         if not self.allow:
             return False
@@ -106,3 +106,28 @@ def test_kv_cache_admission_guard_blocks_prefill():
     batch = sched.form_batch()
     assert len(batch) == 0
     assert sched.num_running_requests == 0
+
+
+def test_kv_cache_full_allocation_prefill():
+    # A KV manager that allows everything (mocking sufficient memory)
+    # But we will use specific behavior to test full allocation logic if needed.
+    # Here we just verify that passing enable_full_allocation=True works with scheduler.
+    cache_mgr = FakeCacheManager(allow=True)
+    sched = Scheduler(
+        max_batch_size=2,
+        max_num_tokens_per_batch=100,
+        micro_batch_ratio=1,
+        cache_manager=cache_mgr,
+        enable_full_allocation=True,
+    )
+    # Request with max_new_tokens
+    p = make_prefill("p_full", 4)
+    p.max_new_tokens = 10
+
+    sched.enque_request(p)
+
+    # Since cache manager allows, it should succeed
+    batch = sched.form_batch()
+    assert len(batch) == 1
+    assert batch[0].request_id == "p_full"
+    assert sched.num_running_requests == 1
