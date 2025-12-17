@@ -1,4 +1,5 @@
 import asyncio
+from parallax_utils.logging_config import get_logger
 import os
 import random
 import time
@@ -12,6 +13,9 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+
+
+logger = get_logger("router.main")
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,11 @@ class RouterConfig:
 
     # Exploration ratio in [0, 1). With probability p, pick a random endpoint.
     explore_ratio: float = 0.0
+
+    # Endpoint readiness check (queried from downstream).
+    status_check_path: str = "/cluster/status/onetime"
+    status_check_ttl_sec: float = 2.0
+    status_check_timeout_sec: float = 2.0
 
 
 def _get_env_float(name: str, default: float) -> float:
@@ -82,6 +91,10 @@ def load_router_config() -> RouterConfig:
         recent_error_penalty_ms=_get_env_float("ROUTER_RECENT_ERROR_PENALTY_MS", 2000.0),
         top_k=top_k,
         explore_ratio=explore_ratio,
+        status_check_path=(os.getenv("ROUTER_STATUS_CHECK_PATH", "/cluster/status/onetime").strip()
+        or "/cluster/status/onetime"),
+        status_check_ttl_sec=max(0.0, _get_env_float("ROUTER_STATUS_CHECK_TTL_SEC", 2.0)),
+        status_check_timeout_sec=max(0.1, _get_env_float("ROUTER_STATUS_CHECK_TIMEOUT_SEC", 2.0)),
     )
 
 
@@ -103,6 +116,12 @@ class EndpointMetrics:
     last_tpot_ms: Optional[float] = None
     last_itl_ms: Optional[float] = None
     last_e2el_ms: Optional[float] = None
+
+    # Downstream readiness status (queried from /cluster/status/onetime)
+    last_status_ok: Optional[bool] = None
+    last_status: Optional[str] = None
+    last_status_ts: Optional[float] = None
+    last_status_error: Optional[str] = None
 
 
 @dataclass
@@ -175,6 +194,49 @@ class EndpointRegistry:
     async def _snapshot_endpoints(self) -> List[Endpoint]:
         async with self._lock:
             return list(self._endpoints.values())
+
+    async def _refresh_endpoint_status_if_needed(self, ep: Endpoint, *, now_ts: float) -> None:
+        cfg = self._config
+        last_ts = ep.metrics.last_status_ts
+        if last_ts is not None and (now_ts - last_ts) < cfg.status_check_ttl_sec:
+            return
+
+        client = await self._get_client()
+        url = _join_url(ep.base_url, cfg.status_check_path)
+        ok: Optional[bool] = None
+        status_val: Optional[str] = None
+        err: Optional[str] = None
+        try:
+            resp = await client.get(url, timeout=httpx.Timeout(cfg.status_check_timeout_sec))
+            if resp.status_code != 200:
+                ok = False
+                err = f"Non-200 status: {resp.status_code}"
+            else:
+                data = resp.json()
+                if isinstance(data, dict):
+                    status_val = data.get("data", {}).get("status")
+                ok = status_val == "available"
+                if not ok:
+                    err = f"Not available: {status_val}"
+        except Exception as e:
+            ok = False
+            err = str(e)
+
+        async with self._lock:
+            cur = self._endpoints.get(ep.endpoint_id)
+            if cur is None:
+                return
+            cur.metrics.last_status_ok = ok
+            cur.metrics.last_status = status_val
+            cur.metrics.last_status_ts = now_ts
+            cur.metrics.last_status_error = err
+
+    async def refresh_statuses_if_needed(self, endpoints: List[Endpoint]) -> None:
+        now_ts = time.time()
+        await asyncio.gather(
+            *[self._refresh_endpoint_status_if_needed(ep, now_ts=now_ts) for ep in endpoints],
+            return_exceptions=False,
+        )
 
     async def broadcast_json(
         self,
@@ -262,6 +324,16 @@ class EndpointRegistry:
         endpoints = await self._snapshot_endpoints()
         if not endpoints:
             raise HTTPException(status_code=503, detail="No downstream endpoints registered")
+
+        await self.refresh_statuses_if_needed(endpoints)
+        healthy = [ep for ep in endpoints if ep.metrics.last_status_ok is True]
+        unknown = [ep for ep in endpoints if ep.metrics.last_status_ok is None]
+        if healthy:
+            endpoints = healthy
+        elif unknown:
+            endpoints = unknown
+        else:
+            raise HTTPException(status_code=503, detail="No healthy downstream endpoints")
 
         def score(ep: Endpoint) -> float:
             m = ep.metrics
@@ -492,6 +564,12 @@ async def endpoints() -> JSONResponse:
 async def weight_refit(raw_request: Request) -> JSONResponse:
     headers = _filter_forward_headers(dict(raw_request.headers))
     body = await raw_request.body()
+    eps = await registry._snapshot_endpoints()
+    logger.info(
+        "Broadcasting /weight/refit to %d endpoints: %s",
+        len(eps),
+        [e.base_url for e in eps],
+    )
     results = await registry.broadcast_raw(path="/weight/refit", headers=headers, body=body)
     ok = all(r.get("ok") is True for r in results)
     return JSONResponse(
@@ -511,6 +589,12 @@ async def v1_chat_completions(raw_request: Request):
 
     ep = await registry.choose_best()
     await registry.mark_start(ep.endpoint_id)
+    logger.info(
+        "Forwarding /v1/chat/completions to endpoint_id=%s base_url=%s stream=%s",
+        ep.endpoint_id,
+        ep.base_url,
+        is_stream,
+    )
 
     url = _join_url(ep.base_url, "/v1/chat/completions")
     headers = _filter_forward_headers(dict(raw_request.headers))

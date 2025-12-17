@@ -139,6 +139,13 @@ async def cluster_status():
     )
 
 
+@app.get("/cluster/status/onetime")
+async def cluster_status_onetime():
+    if scheduler_manage is None:
+        return JSONResponse(content={"error": "Scheduler is not initialized"}, status_code=503)
+    return JSONResponse(content=scheduler_manage.get_cluster_status(), status_code=200)
+
+
 @app.post("/v1/chat/completions")
 async def openai_v1_chat_completions(raw_request: Request):
     request_data = await raw_request.json()
