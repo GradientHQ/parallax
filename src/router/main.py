@@ -1,4 +1,16 @@
+"""
+Parallax HTTP router.
+
+This module provides a HTTP router for the Parallax system.
+It is responsible for routing requests to the appropriate downstream endpoint.
+It is used to balance the load between the downstream endpoints.
+
+Start the router with:
+    python src/router/main.py --host 0.0.0.0 --port 8081
+"""
+
 import asyncio
+import argparse
 from parallax_utils.logging_config import get_logger
 import random
 import time
@@ -610,5 +622,12 @@ async def v1_chat_completions(raw_request: Request):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8081, log_level="info")
+    def parse_args() -> argparse.Namespace:
+        parser = argparse.ArgumentParser(description="Parallax HTTP router")
+        parser.add_argument("--host", type=str, default="0.0.0.0", help="Listen host")
+        parser.add_argument("--port", type=int, default=8081, help="Listen port")
+        return parser.parse_args()
+
+    args = parse_args()
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
