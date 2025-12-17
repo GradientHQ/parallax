@@ -577,18 +577,6 @@ async def endpoints() -> JSONResponse:
     return JSONResponse(content={"endpoints": await registry.list_endpoints()})
 
 
-@app.get("/")
-async def endpoints_ui() -> HTMLResponse:
-    """
-    Simple UI for viewing registered endpoints and their metrics.
-
-    Example:
-      open http://127.0.0.1:8081/ui/endpoints
-    """
-    ui_path = Path(__file__).resolve().parent / "ui" / "endpoints.html"
-    return HTMLResponse(content=ui_path.read_text(encoding="utf-8"), status_code=200)
-
-
 @app.post("/weight/refit")
 async def weight_refit(raw_request: Request) -> JSONResponse:
     """
@@ -704,6 +692,18 @@ async def v1_chat_completions(raw_request: Request):
             ep.base_url, ttft_ms=None, tpot_ms=None, itl_ms=None, e2el_ms=None
         )
         raise HTTPException(status_code=502, detail=f"Upstream error: {e}") from e
+
+
+@app.get("/")
+async def endpoints_ui() -> HTMLResponse:
+    """
+    Simple UI for viewing registered endpoints and their metrics.
+
+    Example:
+      open http://127.0.0.1:8081
+    """
+    ui_path = Path(__file__).resolve().parent / "ui" / "endpoints.html"
+    return HTMLResponse(content=ui_path.read_text(encoding="utf-8"), status_code=200)
 
 
 if __name__ == "__main__":
