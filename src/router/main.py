@@ -156,32 +156,37 @@ class EndpointRegistry:
         async with self._lock:
             return list(self._endpoints.values())
 
+    async def probe_endpoint_status(self, base_url: str) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Probe downstream readiness via GET {base_url}{status_check_path}.
+
+        Returns:
+          (ok, status_value, error_message)
+        """
+        cfg = self._config
+        client = await self._get_client()
+        url = _join_url(base_url, cfg.status_check_path)
+        try:
+            resp = await client.get(url, timeout=httpx.Timeout(cfg.status_check_timeout_sec))
+            if resp.status_code != 200:
+                return False, None, f"Non-200 status: {resp.status_code}"
+            data = resp.json()
+            status_val = data.get("data", {}).get("status") if isinstance(data, dict) else None
+            ok = status_val == "available"
+            if not ok:
+                return False, status_val, f"Not available: {status_val}"
+            return True, status_val, None
+        except Exception as e:
+            return False, None, str(e)
+
     async def _refresh_endpoint_status_if_needed(self, ep: Endpoint, *, now_ts: float) -> None:
         cfg = self._config
         last_ts = ep.metrics.last_status_ts
         if last_ts is not None and (now_ts - last_ts) < cfg.status_check_ttl_sec:
             return
 
-        client = await self._get_client()
-        url = _join_url(ep.base_url, cfg.status_check_path)
-        ok: Optional[bool] = None
-        status_val: Optional[str] = None
-        err: Optional[str] = None
-        try:
-            resp = await client.get(url, timeout=httpx.Timeout(cfg.status_check_timeout_sec))
-            if resp.status_code != 200:
-                ok = False
-                err = f"Non-200 status: {resp.status_code}"
-            else:
-                data = resp.json()
-                if isinstance(data, dict):
-                    status_val = data.get("data", {}).get("status")
-                ok = status_val == "available"
-                if not ok:
-                    err = f"Not available: {status_val}"
-        except Exception as e:
-            ok = False
-            err = str(e)
+        ok_raw, status_val, err = await self.probe_endpoint_status(ep.base_url)
+        ok: Optional[bool] = bool(ok_raw)
 
         async with self._lock:
             cur = self._endpoints.get(ep.base_url)
@@ -481,8 +486,16 @@ async def register(raw_request: Request) -> JSONResponse:
     base_url = payload.get("endpoint") or payload.get("base_url")
     if not base_url:
         raise HTTPException(status_code=400, detail="Missing endpoint/base_url")
+    base_url = str(base_url).strip().rstrip("/")
+
+    # Readiness check before registering (use the same path/logic as routing).
+    ok, status_val, err = await registry.probe_endpoint_status(base_url)
+    if not ok:
+        detail = err if err is not None else f"Not available: {status_val}"
+        raise HTTPException(status_code=400, detail=f"Endpoint not ready: {detail}")
+
     try:
-        ep = await registry.register(str(base_url))
+        ep = await registry.register(base_url)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return JSONResponse(content={"endpoint_id": ep.endpoint_id, "base_url": ep.base_url})
