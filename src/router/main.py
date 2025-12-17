@@ -1,6 +1,5 @@
 import asyncio
 from parallax_utils.logging_config import get_logger
-import os
 import random
 import time
 import uuid
@@ -45,57 +44,9 @@ class RouterConfig:
     status_check_timeout_sec: float = 2.0
 
 
-def _get_env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None or raw.strip() == "":
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
-
-
-def _get_env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None or raw.strip() == "":
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
-
 def load_router_config() -> RouterConfig:
-    alpha = _get_env_float("ROUTER_EMA_ALPHA", 0.2)
-    # Keep alpha in a sane range to avoid silent misconfiguration.
-    if not (0.0 < alpha <= 1.0):
-        alpha = 0.2
-
-    top_k = _get_env_int("ROUTER_TOP_K", 1)
-    if top_k < 1:
-        top_k = 1
-
-    explore_ratio = _get_env_float("ROUTER_EXPLORE_RATIO", 0.0)
-    if explore_ratio < 0.0:
-        explore_ratio = 0.0
-    if explore_ratio >= 1.0:
-        explore_ratio = 0.99
-
-    return RouterConfig(
-        ema_alpha=alpha,
-        default_ttft_ms=_get_env_float("ROUTER_DEFAULT_TTFT_MS", 3000.0),
-        default_e2el_ms=_get_env_float("ROUTER_DEFAULT_E2EL_MS", 6000.0),
-        inflight_penalty_ms=_get_env_float("ROUTER_INFLIGHT_PENALTY_MS", 1000.0),
-        err_rate_penalty_ms=_get_env_float("ROUTER_ERR_RATE_PENALTY_MS", 5000.0),
-        recent_error_window_sec=_get_env_float("ROUTER_RECENT_ERROR_WINDOW_SEC", 30.0),
-        recent_error_penalty_ms=_get_env_float("ROUTER_RECENT_ERROR_PENALTY_MS", 2000.0),
-        top_k=top_k,
-        explore_ratio=explore_ratio,
-        status_check_path=(os.getenv("ROUTER_STATUS_CHECK_PATH", "/cluster/status/onetime").strip()
-        or "/cluster/status/onetime"),
-        status_check_ttl_sec=max(0.0, _get_env_float("ROUTER_STATUS_CHECK_TTL_SEC", 2.0)),
-        status_check_timeout_sec=max(0.1, _get_env_float("ROUTER_STATUS_CHECK_TIMEOUT_SEC", 2.0)),
-    )
+    # Configuration is intentionally fixed to defaults (no env overrides).
+    return RouterConfig()
 
 
 @dataclass
@@ -237,47 +188,6 @@ class EndpointRegistry:
             *[self._refresh_endpoint_status_if_needed(ep, now_ts=now_ts) for ep in endpoints],
             return_exceptions=False,
         )
-
-    async def broadcast_json(
-        self,
-        *,
-        path: str,
-        headers: Dict[str, str],
-        payload: Dict[str, Any],
-    ) -> List[Dict[str, Any]]:
-        endpoints = await self._snapshot_endpoints()
-        if not endpoints:
-            raise HTTPException(status_code=503, detail="No downstream endpoints registered")
-
-        client = await self._get_client()
-
-        async def _one(ep: Endpoint) -> Dict[str, Any]:
-            url = _join_url(ep.base_url, path)
-            try:
-                resp = await client.post(url, headers=headers, json=payload)
-                content_type = resp.headers.get("content-type", "")
-                if "application/json" in content_type.lower():
-                    body: Any = resp.json()
-                else:
-                    body = resp.text
-                return {
-                    "endpoint_id": ep.endpoint_id,
-                    "base_url": ep.base_url,
-                    "ok": 200 <= resp.status_code < 300,
-                    "status_code": resp.status_code,
-                    "response": body,
-                }
-            except Exception as e:
-                return {
-                    "endpoint_id": ep.endpoint_id,
-                    "base_url": ep.base_url,
-                    "ok": False,
-                    "status_code": None,
-                    "error": str(e),
-                }
-
-        results = await asyncio.gather(*[_one(ep) for ep in endpoints], return_exceptions=False)
-        return results
 
     async def broadcast_raw(
         self,
