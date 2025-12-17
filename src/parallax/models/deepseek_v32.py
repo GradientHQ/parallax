@@ -1,5 +1,5 @@
 # Copyright © 2025 Apple Inc.
-from typing import Any, Optional, Tuple
+from typing import Any, List, Optional
 
 import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention
@@ -10,6 +10,7 @@ from mlx_lm.models.deepseek_v32 import ModelArgs
 
 from parallax.metal.indexer.kernel import q_dot_k, store_indexer_cache
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
+from parallax.server.cache.base import BaseCache
 
 
 class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
@@ -22,8 +23,8 @@ class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         block_size: int = 1024,
-        layer_idx: int = 0,
         slot_mapping: Optional[mx.array] = None,
+        **kwargs,
     ):
         # Computes top_k indices for attention
         batch, target_len, _ = x.shape
@@ -56,7 +57,6 @@ class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
             block_tables,
             context_lengths,
             block_size=block_size,
-            layer_idx=layer_idx,
             slot_mapping=slot_mapping,
         )
 
@@ -73,7 +73,6 @@ class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
                         block_size=block_size,
                         block_table=block_tables[i],
                         context_length=context_lengths[i],
-                        layer_idx=layer_idx,
                     )  # shape: (n_heads, context_len)
                     score = score[:, None, :]  # shape: (n_heads, 1, context_len)
                     score = mx.maximum(score, 0)
@@ -115,12 +114,11 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
+        cache: Optional[BaseCache] = None,
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
-        layer_idx: int = 0,
-        indexer_cache: Optional[mx.array] = None,
+        **kwargs,
     ) -> mx.array:
         batch, target_len, _ = x.shape
 
@@ -141,7 +139,8 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
 
         k_nope, values = mx.split(kv, [self.qk_nope_head_dim], axis=-1)
         k_nope = k_nope.transpose(0, 2, 1, 3)
-        key_cache_global, value_cache_global = cache
+        key_cache_global, value_cache_global = cache.get_cache()
+        indexer_cache = cache.get_indexer_cache()
         q_pe_list = []
         k_pe_list = []
         for i in range(batch):
@@ -168,7 +167,6 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
             block_tables,
             context_lengths,
             block_size,
-            layer_idx=layer_idx,
             slot_mapping=slot_mapping,
         )
 
@@ -180,7 +178,6 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
             block_tables=block_tables,
             context_lengths=context_lengths,
             block_size=block_size,
-            layer_idx=layer_idx,
             slot_mapping=slot_mapping,
         )
 
@@ -194,7 +191,6 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
                 block_size,
                 self.scale,
                 self.num_heads,
-                layer_idx,
                 v_head_dim=values.shape[-1],
                 top_k_indices=topk_indices,
             )
@@ -223,31 +219,31 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
 
 
 class ParallaxDeepSeekV32Block(MLXDeepseekV32Block):
-    def __init__(self, args: ModelArgs, layer_idx: int):
+    def __init__(self, args: ModelArgs, layer_idx: int, local_layer_idx: int):
         super().__init__(args, layer_idx=layer_idx)
         self.self_attn = ParallaxDeepSeekV32Attention(args)
         self.layer_idx = layer_idx
+        self.local_layer_idx = local_layer_idx
 
     def __call__(
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
-        cache: Optional[Any] = None,
+        cache: Optional[List[Any]] = None,
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
         **kwargs,
     ):
-        indexer_cache = kwargs.get("indexer_cache")
+
         r = self.self_attn(
             self.input_layernorm(x),
             mask,
-            cache,
+            cache[self.local_layer_idx],
             block_tables=block_tables,
             context_lengths=context_lengths,
             slot_mapping=slot_mapping,
-            layer_idx=self.layer_idx,
-            indexer_cache=indexer_cache,
+            **kwargs,
         )
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))

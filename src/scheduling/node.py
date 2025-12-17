@@ -185,6 +185,9 @@ class Node:
     end_layer: Optional[int] = None  # exclusive
     current_requests: int = 0
 
+    # Runtime weight refit for RL
+    last_refit_time: float = 0.0
+
     # todo upload is_active
     is_active: bool = True
     last_heartbeat: float = 0.0

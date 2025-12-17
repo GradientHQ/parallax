@@ -63,7 +63,6 @@ def reshape_and_cache(
     block_tables: mx.array,  # (batch, max_blocks)
     context_lengths: mx.array,  # (batch,)
     block_size: int,
-    layer_idx: int,
     slot_mapping: Optional[mx.array] = None,  # (batch,) or (batch * target_len,)
 ):
     """
@@ -130,25 +129,14 @@ def reshape_and_cache(
         if slot_mapping.shape[0] != num_tokens:
             raise ValueError(f"Slot mapping length {slot_mapping.shape[0]} != tokens {num_tokens}")
 
-    num_layers = key_cache.shape[0]
-    num_blocks = key_cache.shape[1]
-
     # 2. Prepare Constants
-    key_stride = num_kv_heads * k_head_dim
-    value_stride = num_kv_heads * v_head_dim
-
     def mk_int(val):
         return mx.array(val, dtype=mx.int32)
 
-    c_key_stride = mk_int(key_stride)
-    c_val_stride = mk_int(value_stride)
     c_num_kv = mk_int(num_kv_heads)
     c_k_head_dim = mk_int(k_head_dim)
     c_v_head_dim = mk_int(v_head_dim)
     c_block_size = mk_int(block_size)
-    c_layer_idx = mk_int(layer_idx)
-    c_num_layers = mk_int(num_layers)
-    c_num_blocks = mk_int(num_blocks)
 
     # Inputs list
     inputs = [
@@ -157,15 +145,10 @@ def reshape_and_cache(
         key_cache,
         value_cache,
         slot_mapping,
-        c_key_stride,
-        c_val_stride,
         c_num_kv,
         c_k_head_dim,
         c_v_head_dim,
         c_block_size,
-        c_layer_idx,
-        c_num_layers,
-        c_num_blocks,
     ]
 
     # Input names (just for declaration)
@@ -175,15 +158,10 @@ def reshape_and_cache(
         "key_cache",
         "value_cache",
         "slot_mapping",
-        "key_stride",
-        "value_stride",
         "num_kv_heads",
         "k_head_dim",
         "v_head_dim",
         "block_size",
-        "layer_idx",
-        "num_layers",
-        "num_blocks",
     ]
 
     # 3. Get and Launch Kernel
@@ -225,7 +203,6 @@ def paged_attention(
     block_size: int,
     scale: float,
     num_kv_heads: int,
-    layer_idx: int,
     v_head_dim: Optional[int] = None,
     top_k_indices: Optional[mx.array] = None,
     window_size: Optional[int] = None,
@@ -261,7 +238,6 @@ def paged_attention(
     c_v_head_dim = mk_int(v_head_dim)
     c_block_size = mk_int(block_size)
     c_max_blocks = mk_int(max_blocks)
-    c_layer_idx = mk_int(layer_idx)
     c_num_layers = mk_int(num_layers)
     c_num_total_blocks = mk_int(num_total_blocks)
     c_scale = mx.array(scale, dtype=queries.dtype)
@@ -283,7 +259,6 @@ def paged_attention(
             c_v_head_dim,
             c_block_size,
             c_max_blocks,
-            c_layer_idx,
             c_num_layers,
             c_num_total_blocks,
             c_scale,
@@ -303,7 +278,6 @@ def paged_attention(
             "v_head_dim",
             "block_size",
             "max_blocks",
-            "layer_idx",
             "num_layers",
             "num_total_blocks",
             "scale",
@@ -327,7 +301,6 @@ def paged_attention(
             c_v_head_dim,
             c_block_size,
             c_max_blocks,
-            c_layer_idx,
             c_num_layers,
             c_num_total_blocks,
             c_scale,
@@ -347,7 +320,6 @@ def paged_attention(
             "v_head_dim",
             "block_size",
             "max_blocks",
-            "layer_idx",
             "num_layers",
             "num_total_blocks",
             "scale",
@@ -368,7 +340,6 @@ def paged_attention(
             c_v_head_dim,
             c_block_size,
             c_max_blocks,
-            c_layer_idx,
             c_num_layers,
             c_num_total_blocks,
             c_scale,
@@ -386,7 +357,6 @@ def paged_attention(
             "v_head_dim",
             "block_size",
             "max_blocks",
-            "layer_idx",
             "num_layers",
             "num_total_blocks",
             "scale",

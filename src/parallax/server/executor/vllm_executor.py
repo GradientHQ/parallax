@@ -79,6 +79,8 @@ class VLLMExecutor(BaseExecutor):
         nccl_port: Optional[int] = 4000,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
+        # Weight Refit
+        enable_weight_refit: Optional[bool] = False,
     ):
         model_runner_params = {
             "model_repo": model_repo,
@@ -130,6 +132,7 @@ class VLLMExecutor(BaseExecutor):
             tp_rank=tp_rank,
             tp_size=tp_size,
             shared_state=shared_state,
+            enable_weight_refit=enable_weight_refit,
         )
 
     def handle_input_requests(self, requests: List[Request]):
@@ -181,6 +184,8 @@ class VLLMExecutor(BaseExecutor):
                             req_dict["eos"] = True
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
+                        if self.enable_weight_refit:
+                            req_dict["weight_version"] = self.weight_version
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:

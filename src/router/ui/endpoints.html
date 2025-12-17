@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Parallax Router - Endpoints</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 20px; }
+      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .pill { padding: 4px 10px; border-radius: 999px; background: rgba(127,127,127,0.15); font-size: 12px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { border-bottom: 1px solid rgba(127,127,127,0.25); padding: 8px 10px; text-align: left; vertical-align: top; }
+      th { position: sticky; top: 0; background: rgba(30,30,30,0.06); }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12px; }
+      .ok { color: #1a7f37; }
+      .bad { color: #d1242f; }
+      .muted { color: rgba(127,127,127,0.9); }
+      button { padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(127,127,127,0.35); background: transparent; cursor: pointer; }
+      button:hover { background: rgba(127,127,127,0.12); }
+      .iconBtn { padding: 4px; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; }
+      .iconBtn svg { width: 14px; height: 14px; opacity: 0.9; }
+      .baseCell { display: flex; align-items: center; gap: 10px; }
+      .baseCell code { overflow-wrap: anywhere; }
+      .baseCell .spacer { flex: 1; }
+      .primaryBtn { background: #1f883d; border-color: #1f883d; color: #fff; font-weight: 600; }
+      .primaryBtn:hover { background: #1a7f37; border-color: #1a7f37; }
+      .primaryBtn:active { background: #166534; border-color: #166534; }
+      .chartWrap { padding: 10px 10px 14px 10px; }
+      .chartRow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .chartBox { border: 1px solid rgba(127,127,127,0.25); border-radius: 10px; padding: 8px; }
+      .chartTitle { font-size: 12px; color: rgba(127,127,127,0.9); margin-bottom: 6px; display:flex; justify-content: space-between; }
+      .chartSvg { width: 100%; height: 120px; display: block; }
+      tr.dataRow { cursor: pointer; }
+      tr.dataRow:hover td { background: rgba(127,127,127,0.06); }
+      .right { margin-left: auto; }
+      .small { font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <h2 style="margin:0">Endpoints</h2>
+      <span id="status" class="pill muted">Loading...</span>
+      <div class="right row">
+        <button id="registerBtn" class="primaryBtn">Register</button>
+        <span class="pill">Auto refresh: <span id="intervalLabel">1.0</span>s</span>
+        <button id="refreshBtn">Refresh</button>
+      </div>
+    </div>
+
+    <div class="small muted" style="margin-top:8px">
+      Data source: <code>GET /endpoints</code>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>base_url</th>
+          <th>inflight</th>
+          <th>requests</th>
+          <th>errors</th>
+          <th>ema_ttft_ms</th>
+          <th>ema_tpot_ms</th>
+          <th>ema_itl_ms</th>
+          <th>ema_e2el_ms</th>
+          <th>status</th>
+          <th>status_error</th>
+          <th>updated</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+
+    <script>
+      const intervalMs = 1000;
+      document.getElementById("intervalLabel").textContent = (intervalMs / 1000).toFixed(1);
+
+      function normalizeBaseUrl(s) {
+        if (!s) return "";
+        return String(s).trim().replace(/\/+$/, "");
+      }
+
+      const expanded = new Set();
+
+      function fmtNum(x) {
+        if (x === null || x === undefined) return "-";
+        if (typeof x === "number") return Number.isFinite(x) ? x.toFixed(1) : String(x);
+        return String(x);
+      }
+
+      function fmtTs(sec) {
+        if (!sec) return "-";
+        const d = new Date(sec * 1000);
+        return d.toLocaleString();
+      }
+
+      async function loadOnce() {
+        const statusEl = document.getElementById("status");
+        const tbody = document.getElementById("tbody");
+        const t0 = performance.now();
+        try {
+          const resp = await fetch("/endpoints", { cache: "no-store" });
+          const text = await resp.text();
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${text}`);
+          const data = JSON.parse(text);
+          const endpoints = Array.isArray(data.endpoints) ? data.endpoints : [];
+
+          tbody.innerHTML = "";
+          for (const ep of endpoints) {
+            const m = ep.metrics || {};
+            const ok = m.last_status_ok;
+            let statusText = "unknown";
+            let cls = "muted";
+            if (ok === true) { statusText = "available"; cls = "ok"; }
+            else if (ok === false) { statusText = "unavailable"; cls = "bad"; }
+
+            const baseUrl = String(ep.base_url || "");
+            const tr = document.createElement("tr");
+            tr.className = "dataRow";
+            tr.setAttribute("data-base-url", baseUrl);
+            tr.innerHTML = `
+              <td>
+                <div class="baseCell">
+                  <code>${baseUrl}</code>
+                  <span class="spacer"></span>
+                  <button class="iconBtn unregBtn" data-base-url="${baseUrl.replace(/"/g, "&quot;")}" title="Unregister" aria-label="Unregister">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M3 6h18"></path>
+                      <path d="M8 6V4h8v2"></path>
+                      <path d="M6 6l1 16h10l1-16"></path>
+                      <path d="M10 11v7"></path>
+                      <path d="M14 11v7"></path>
+                    </svg>
+                  </button>
+                </div>
+              </td>
+              <td>${m.inflight ?? "-"}</td>
+              <td>${m.total_requests ?? "-"}</td>
+              <td>${m.total_errors ?? "-"}</td>
+              <td>${fmtNum(m.ema_ttft_ms)}</td>
+              <td>${fmtNum(m.ema_tpot_ms)}</td>
+              <td>${fmtNum(m.ema_itl_ms)}</td>
+              <td>${fmtNum(m.ema_e2el_ms)}</td>
+              <td class="${cls}">${statusText}${m.last_status ? ` (${m.last_status})` : ""}</td>
+              <td class="muted">${m.last_status_error ? String(m.last_status_error) : "-"}</td>
+              <td class="muted">${fmtTs(m.last_status_ts)}</td>
+            `;
+            tbody.appendChild(tr);
+
+            // Expanded row (charts)
+            if (expanded.has(baseUrl)) {
+              const tr2 = document.createElement("tr");
+              tr2.className = "expandRow";
+              const colCount = tr.children.length;
+              const samples = Array.isArray(m.request_samples) ? m.request_samples : [];
+              tr2.innerHTML = `
+                <td colspan="${colCount}">
+                  <div class="chartWrap">
+                    <div class="chartRow">
+                      <div class="chartBox">
+                        <div class="chartTitle"><span>TTFT (ms)</span><span>${samples.length} pts</span></div>
+                        <svg class="chartSvg" data-kind="ttft_ms"></svg>
+                      </div>
+                      <div class="chartBox">
+                        <div class="chartTitle"><span>TPOT (ms)</span><span>${samples.length} pts</span></div>
+                        <svg class="chartSvg" data-kind="tpot_ms"></svg>
+                      </div>
+                      <div class="chartBox">
+                        <div class="chartTitle"><span>ITL (ms)</span><span>${samples.length} pts</span></div>
+                        <svg class="chartSvg" data-kind="itl_ms"></svg>
+                      </div>
+                      <div class="chartBox">
+                        <div class="chartTitle"><span>E2E (ms)</span><span>${samples.length} pts</span></div>
+                        <svg class="chartSvg" data-kind="e2el_ms"></svg>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+              `;
+              tbody.appendChild(tr2);
+
+              // Draw charts
+              for (const svg of tr2.querySelectorAll(".chartSvg")) {
+                const kind = svg.getAttribute("data-kind");
+                drawChart(svg, samples, kind);
+              }
+            }
+          }
+
+          // Click any row to toggle charts (except the delete icon).
+          for (const row of tbody.querySelectorAll("tr.dataRow")) {
+            row.addEventListener("click", async (e) => {
+              if (e.target && e.target.closest && e.target.closest(".unregBtn")) return;
+              const baseUrl = normalizeBaseUrl(row.getAttribute("data-base-url"));
+              if (!baseUrl) return;
+              if (expanded.has(baseUrl)) expanded.delete(baseUrl);
+              else expanded.add(baseUrl);
+              await loadOnce();
+            });
+          }
+
+          // Wire unregister buttons after render.
+          for (const btn of tbody.querySelectorAll(".unregBtn")) {
+            btn.addEventListener("click", async (e) => {
+              e.stopPropagation();
+              const baseUrl = normalizeBaseUrl(e.currentTarget.getAttribute("data-base-url"));
+              if (!baseUrl) return;
+              setActionResult("muted", `Unregistering ${baseUrl}...`);
+              const r = await postJson("/unregister", { base_url: baseUrl });
+              showResultDialog("Unregister", r);
+              if (r.ok) {
+                // Remove row immediately from the table.
+                const tr = e.currentTarget.closest("tr");
+                if (tr) tr.remove();
+                setActionResult("ok", `Unregistered (${r.status})`);
+              } else {
+                setActionResult("bad", `Unregister failed (${r.status})`);
+              }
+            });
+          }
+
+          const dt = performance.now() - t0;
+          statusEl.className = "pill";
+          statusEl.textContent = `OK • ${endpoints.length} endpoints • ${dt.toFixed(0)}ms`;
+        } catch (e) {
+          statusEl.className = "pill bad";
+          statusEl.textContent = `Error: ${e && e.message ? e.message : e}`;
+        }
+      }
+
+      document.getElementById("refreshBtn").addEventListener("click", loadOnce);
+
+      async function postJson(path, payload) {
+        const resp = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const text = await resp.text();
+        let body;
+        try { body = JSON.parse(text); } catch { body = text; }
+        return { ok: resp.ok, status: resp.status, body };
+      }
+
+      function extractMessage(body) {
+        if (body === null || body === undefined) return "";
+        if (typeof body === "string") return body;
+        if (typeof body === "object") {
+          if (body.detail) return String(body.detail);
+          if (body.error) return String(body.error);
+          try { return JSON.stringify(body); } catch { return String(body); }
+        }
+        return String(body);
+      }
+
+      function showResultDialog(action, result) {
+        const msg = extractMessage(result.body);
+        if (result.ok) {
+          window.alert(`${action} succeeded (HTTP ${result.status}).\n\n${msg}`);
+        } else {
+          window.alert(`${action} failed (HTTP ${result.status}).\n\n${msg}`);
+        }
+      }
+
+      function drawChart(svg, samples, kind) {
+        const width = 360;
+        const height = 120;
+        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+        const vals = [];
+        for (const s of samples) {
+          const v = s && typeof s === "object" ? s[kind] : null;
+          if (typeof v === "number" && Number.isFinite(v)) vals.push(v);
+        }
+        if (vals.length === 0) {
+          const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          t.setAttribute("x", "8");
+          t.setAttribute("y", "18");
+          t.setAttribute("fill", "rgba(127,127,127,0.9)");
+          t.setAttribute("font-size", "12");
+          t.textContent = "No data";
+          svg.appendChild(t);
+          return;
+        }
+
+        const padLeft = 38;
+        const padRight = 10;
+        const padTop = 10;
+        const padBottom = 18;
+        const minY = Math.min(...vals);
+        const maxY = Math.max(...vals);
+        const spanY = Math.max(maxY - minY, 1e-6);
+
+        // Grid + y-axis labels (max/mid/min)
+        const ticks = [
+          { v: maxY, label: maxY.toFixed(1) },
+          { v: (maxY + minY) / 2, label: ((maxY + minY) / 2).toFixed(1) },
+          { v: minY, label: minY.toFixed(1) },
+        ];
+        for (const t of ticks) {
+          const y = padTop + (1 - (t.v - minY) / spanY) * (height - padTop - padBottom);
+          const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          line.setAttribute("x1", String(padLeft));
+          line.setAttribute("x2", String(width - padRight));
+          line.setAttribute("y1", y.toFixed(2));
+          line.setAttribute("y2", y.toFixed(2));
+          line.setAttribute("stroke", "rgba(127,127,127,0.20)");
+          line.setAttribute("stroke-width", "1");
+          svg.appendChild(line);
+
+          const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          text.setAttribute("x", "2");
+          text.setAttribute("y", (y + 4).toFixed(2));
+          text.setAttribute("fill", "rgba(127,127,127,0.9)");
+          text.setAttribute("font-size", "11");
+          text.textContent = t.label;
+          svg.appendChild(text);
+        }
+
+        const points = [];
+        const n = samples.length;
+        for (let i = 0; i < n; i++) {
+          const v = samples[i] && typeof samples[i] === "object" ? samples[i][kind] : null;
+          if (typeof v !== "number" || !Number.isFinite(v)) continue;
+          const x = padLeft + (i / Math.max(n - 1, 1)) * (width - padLeft - padRight);
+          const y = padTop + (1 - (v - minY) / spanY) * (height - padTop - padBottom);
+          points.push([x, y]);
+        }
+        if (points.length === 0) return;
+
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        let d = `M ${points[0][0].toFixed(2)} ${points[0][1].toFixed(2)}`;
+        for (let i = 1; i < points.length; i++) {
+          d += ` L ${points[i][0].toFixed(2)} ${points[i][1].toFixed(2)}`;
+        }
+        path.setAttribute("d", d);
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "rgba(31,136,61,0.9)");
+        path.setAttribute("stroke-width", "2");
+        svg.appendChild(path);
+
+        for (const [x, y] of points) {
+          const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          c.setAttribute("cx", x.toFixed(2));
+          c.setAttribute("cy", y.toFixed(2));
+          c.setAttribute("r", "2.6");
+          c.setAttribute("fill", "rgba(31,136,61,0.95)");
+          svg.appendChild(c);
+        }
+      }
+
+      function setActionResult(kind, msg) {
+        // No-op: action status pill removed from UI.
+      }
+
+      document.getElementById("registerBtn").addEventListener("click", async () => {
+        const input = window.prompt("Enter base_url (e.g. http://127.0.0.1:3001):", "");
+        const baseUrl = normalizeBaseUrl(input);
+        if (!baseUrl) {
+          setActionResult("muted", "Cancelled");
+          return;
+        }
+        setActionResult("muted", "Registering...");
+        const r = await postJson("/register", { base_url: baseUrl });
+        showResultDialog("Register", r);
+        if (r.ok) {
+          setActionResult("ok", `Registered (${r.status})`);
+          await loadOnce();
+        } else {
+          setActionResult("bad", `Register failed (${r.status})`);
+        }
+      });
+
+      loadOnce();
+      setInterval(loadOnce, intervalMs);
+    </script>
+  </body>
+</html>

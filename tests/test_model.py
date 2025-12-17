@@ -9,7 +9,7 @@ import pytest
 from mlx_lm.models.base import create_attention_mask
 from mlx_lm.utils import _download, load_model
 
-from parallax.server.paged_kv_cache import PagedKVCacheManager
+from parallax.server.cache_manager import CacheManager
 from parallax.server.shard_loader import MLXModelLoader
 from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.utils.utils import pad_inputs
@@ -87,12 +87,12 @@ def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
         "num_attention_heads"
     )
 
-    kv_cache_managers = []
+    cache_managers = []
     cache_memory_fraction = 0
     for shard in model_shards:
         num_shard_layers = shard.end_layer - shard.start_layer
         cache_memory_fraction += 0.1
-        kv_mgr = PagedKVCacheManager(
+        cache_mgr = CacheManager(
             num_layers=num_shard_layers,
             num_kv_heads=num_kv_heads,
             head_dim=head_dim,
@@ -100,7 +100,7 @@ def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
             block_size=64,
             num_gpu_blocks=200,
         )
-        kv_cache_managers.append(kv_mgr)
+        cache_managers.append(cache_mgr)
 
     # Prepare common inputs
     padding_mask = (ref_ids != ref_pad_token_id).astype(dtype)
@@ -109,7 +109,7 @@ def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
     # Run sharded models
     x = None
     for shard_idx, shard in enumerate(model_shards):
-        kv_cache_manager = kv_cache_managers[shard_idx]
+        cache_manager = cache_managers[shard_idx]
 
         # Allocate blocks and prepare metadata
         block_tables_list = []
@@ -121,19 +121,19 @@ def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
             seq_len = actual_seq_lengths[i]
             context_lengths_list.append(seq_len)
 
-            success = kv_cache_manager.allocate_request(req_id, seq_len)
+            success = cache_manager.allocate_request(req_id, seq_len)
             assert success, f"Failed to allocate blocks for request {i} in shard {shard_idx}"
 
-            block_table = kv_cache_manager.get_block_table(req_id)
+            block_table = cache_manager.get_block_table(req_id)
             block_tables_list.append(block_table)
 
             # Generate slot mapping
             for seq_idx in range(max_seq_len):
                 if seq_idx < seq_len:
-                    block_idx = seq_idx // kv_cache_manager.block_size
-                    block_offset = seq_idx % kv_cache_manager.block_size
+                    block_idx = seq_idx // cache_manager.block_size
+                    block_offset = seq_idx % cache_manager.block_size
                     physical_block = block_table[block_idx]
-                    slot = physical_block * kv_cache_manager.block_size + block_offset
+                    slot = physical_block * cache_manager.block_size + block_offset
                     slot_mapping_flat.append(slot)
                 else:
                     slot_mapping_flat.append(-1)
@@ -145,7 +145,7 @@ def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
         block_tables = mx.array(padded_block_tables, dtype=mx.int32)
         context_lengths = mx.array(context_lengths_list, dtype=mx.int32)
         slot_mapping = mx.array(slot_mapping_flat, dtype=mx.int64)
-        cache = kv_cache_manager.get_cache()
+        cache = cache_manager.get_caches()
 
         # Forward pass
         input_data = ref_ids if shard.start_layer == 0 else x

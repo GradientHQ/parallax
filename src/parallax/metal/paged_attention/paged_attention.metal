@@ -2,7 +2,7 @@
 // Inputs:
 // queries, key_cache, value_cache, block_tables, context_lengths
 // output (output array)
-// num_heads, num_kv_heads, k_head_dim, v_head_dim, block_size, max_blocks, layer_idx,
+// num_heads, num_kv_heads, k_head_dim, v_head_dim, block_size, max_blocks,
 // num_layers, num_total_blocks, scale (All pointers)
 
 uint3 gid = thread_position_in_grid;
@@ -24,7 +24,6 @@ int _k_head_dim = k_head_dim;
 int _v_head_dim = v_head_dim;
 int _block_size = block_size;
 int _max_blocks = max_blocks;
-int _layer_idx = layer_idx;
 int _num_total_blocks = num_total_blocks;
 float _scale = scale;
 
@@ -57,29 +56,21 @@ int context_len = context_lengths[batch_idx];
 int num_context_blocks = (context_len + _block_size - 1) / _block_size;
 
 // Strides for Key
-long k_layer_stride =
-    (long)_num_total_blocks * _num_kv_heads * _block_size * _k_head_dim;
 long k_block_stride = _num_kv_heads * _block_size * _k_head_dim;
 long k_head_stride = _block_size * _k_head_dim;
 
-long k_layer_offset = _layer_idx * k_layer_stride;
-
 // Strides for Value
-long v_layer_stride =
-    (long)_num_total_blocks * _num_kv_heads * _block_size * _v_head_dim;
 long v_block_stride = _num_kv_heads * _block_size * _v_head_dim;
 long v_head_stride = _block_size * _v_head_dim;
-
-long v_layer_offset = _layer_idx * v_layer_stride;
 
 // Iterate over blocks
 for (int b = 0; b < num_context_blocks; b++) {
   int block_num = block_tables[batch_idx * _max_blocks + b];
 
   long k_block_base =
-      k_layer_offset + block_num * k_block_stride + kv_head_idx * k_head_stride;
+      block_num * k_block_stride + kv_head_idx * k_head_stride;
   long v_block_base =
-      v_layer_offset + block_num * v_block_stride + kv_head_idx * v_head_stride;
+      block_num * v_block_stride + kv_head_idx * v_head_stride;
 
   int tokens_in_block = _block_size;
   if (b == num_context_blocks - 1) {

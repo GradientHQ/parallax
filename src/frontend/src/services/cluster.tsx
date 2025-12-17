@@ -44,7 +44,7 @@ export interface ModelInfo {
   readonly vram: number;
 }
 
-export type ClusterStatus = 'idle' | 'waiting' | 'available' | 'rebalancing' | 'failed';
+export type ClusterStatus = 'offline' | 'idle' | 'waiting' | 'available' | 'rebalancing' | 'failed';
 
 export interface ClusterInfo {
   readonly id: string;
@@ -58,7 +58,7 @@ export interface ClusterInfo {
 
 const INITIAL_CLUSTER_INFO: ClusterInfo = {
   id: '',
-  status: 'idle',
+  status: 'offline',
   modelName: '',
   modelInfo: undefined,
   nodeJoinCommand: {},
@@ -116,12 +116,15 @@ const { Provider } = context;
 export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
   const [{ type: hostType }] = useHost();
 
+  // ================================
   // Configs
   const [networkType, setNetworkType] = useState<NetworkType>('local');
   const [initNodesNumber, setInitNodesNumber] = useState(1);
   const [modelName, setModelName] = useState<string>('');
 
+  // ================================
   // Model List
+
   const [modelInfoList, setModelInfoList] = useState<readonly ModelInfo[]>([]);
 
   const updateModelList = useRefCallback(async () => {
@@ -132,23 +135,17 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
     while (!succeed) {
       try {
         const rawList = await getModelList();
-        setModelInfoList((prev) => {
-          const next = rawList.map<ModelInfo>(({ name, vram_gb }) => {
-            name = name || '';
-            vram_gb = vram_gb || 0;
-            return {
-              name,
-              displayName: name,
-              logoUrl: getLogoUrl(name),
-              vram: vram_gb,
-            };
-          });
-          if (JSON.stringify(next) !== JSON.stringify(prev)) {
-            debugLog('setModelInfoList', next);
-            return next;
-          }
-          return prev;
+        const next: readonly ModelInfo[] = rawList.map(({ name, vram_gb }) => {
+          name = name || '';
+          vram_gb = vram_gb || 0;
+          return {
+            name,
+            displayName: name,
+            logoUrl: getLogoUrl(name),
+            vram: vram_gb,
+          };
         });
+        setModelInfoList(next);
         succeed = true;
       } catch (error) {
         console.error('getModelList error', error);
@@ -161,13 +158,9 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
     updateModelList();
   }, []);
 
-  useEffect(() => {
-    if (modelInfoList.length) {
-      setModelName(modelInfoList[0].name);
-    }
-  }, [modelInfoList]);
-
+  // ================================
   // Cluster and Nodes
+
   const [clusterInfo, setClusterInfo] = useState<ClusterInfo>(INITIAL_CLUSTER_INFO);
   const [nodeInfoList, setNodeInfoList] = useState<readonly NodeInfo[]>([]);
 
@@ -191,7 +184,7 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
           },
         } = message;
         setClusterInfo((prev) => {
-          const next = {
+          const next: ClusterInfo = {
             ...prev,
             status: (model_name && status) || 'idle',
             initNodesNumber: init_nodes_num || 0,
@@ -253,7 +246,28 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
     streamClusterStatus.send();
   }, []);
 
+  // ================================
   // Init
+
+  useEffect(() => {
+    const firstModelName = modelInfoList.length ? modelInfoList[0].name : '';
+    // must wait for cluster to be connected
+    // set config model name initial value
+    // detect by the cluster is running or not.
+    if (clusterInfo.status === 'waiting') {
+      setModelName((prev) => clusterInfo.modelName || prev || firstModelName);
+    } else if (clusterInfo.status !== 'offline') {
+      setModelName(
+        (prev) =>
+          // if prev is assigned, means the model has been set by user, do not change it
+          // if prev is not assigned and clusterInfo.modelName is assigned,
+          // means the cluster is running, set it to clusterInfo.modelName
+          // if prev and clusterInfo.modelName are both not assigned,
+          // means the model has not been set by user, set it to the first model in the list
+          prev || clusterInfo.modelName || firstModelName,
+      );
+    }
+  }, [modelInfoList, clusterInfo]);
 
   const init = useRefCallback(async () => {
     if (initNodesNumber < 1) {
@@ -271,12 +285,18 @@ export const ClusterProvider: FC<PropsWithChildren> = ({ children }) => {
 
     debugLog('initScheduler', params);
     await initScheduler(params);
-    // setClusterInfo((prev) => ({
-    //   ...prev,
-    //   status: 'waiting',
-    // }));
+    setClusterInfo((prev) => ({
+      ...prev,
+      status: 'waiting',
+      initNodesNumber,
+      modelName,
+      modelInfo: modelInfoList.find((model) => model.name === modelName),
+      needMoreNodes: false,
+    }));
+    setNodeInfoList([]);
   });
 
+  // ================================
   // Forwards
 
   const actions: ClusterActions = useMemo(() => {

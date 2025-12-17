@@ -57,7 +57,6 @@ def store_indexer_cache(
     block_tables: mx.array,
     context_lengths: mx.array,
     block_size: int,
-    layer_idx: int,
     slot_mapping: Optional[mx.array] = None,
 ):
     dtype = key.dtype
@@ -114,7 +113,6 @@ def store_indexer_cache(
         mk_int(num_heads),
         mk_int(head_dim),
         mk_int(block_size),
-        mk_int(layer_idx),
         mk_int(num_layers),
         mk_int(num_blocks),
     ]
@@ -127,7 +125,6 @@ def store_indexer_cache(
         "num_heads",
         "head_dim",
         "block_size",
-        "layer_idx",
         "num_layers",
         "num_blocks",
     ]
@@ -160,7 +157,6 @@ def q_dot_k(
     block_table: mx.array,  # (max_blocks)
     context_length: mx.array,  # scalar
     block_size: int,
-    layer_idx: int,
 ) -> mx.array:
 
     if q.ndim > 2:
@@ -186,7 +182,6 @@ def q_dot_k(
         mk_int(block_size),
         mk_int(num_heads),
         mk_int(head_dim),
-        mk_int(layer_idx),
         mk_int(num_layers),
         mk_int(num_total_blocks),
         mk_int(max_blocks),
@@ -200,7 +195,6 @@ def q_dot_k(
         "block_size",
         "num_heads",
         "head_dim",
-        "layer_idx",
         "num_layers",
         "num_total_blocks",
         "max_blocks",

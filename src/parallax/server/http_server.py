@@ -91,6 +91,8 @@ class HTTPRequestInfo:
     return_probs: bool = False  # Whether to return probabilities
     probs_list: List = field(default_factory=list)  # Store probs for each token
     token_ids_list: List = field(default_factory=list)  # Store token IDs for each token
+    # Weight version for RL
+    weight_version: Optional[int] = None
 
 
 class HTTPHandler:
@@ -230,6 +232,8 @@ class HTTPHandler:
                 {self.tokenizer.decode([token_id]): prob}
                 for token_id, prob in zip(request_info.token_ids_list, request_info.probs_list)
             ]
+        if request_info.weight_version:
+            response["weight_version"] = request_info.weight_version
         response_json = json.dumps(response, separators=(",", ":"))
         return f"data: {response_json}\n\n".encode()
 
@@ -303,6 +307,8 @@ class HTTPHandler:
                 {self.tokenizer.decode([token_id]): prob}
                 for token_id, prob in zip(request_info.token_ids_list, request_info.probs_list)
             ]
+        if request_info.weight_version:
+            response["weight_version"] = request_info.weight_version
         return response
 
     async def _handle_executor_error(self, rid: str, recv_dict: Dict):
@@ -353,6 +359,7 @@ class HTTPHandler:
             request_info.completion_tokens += 1
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
+            request_info.weight_version = recv_dict.get("weight_version", None)
 
             # Store probs and token IDs if requested
             if request_info.return_probs and "probs" in recv_dict:
