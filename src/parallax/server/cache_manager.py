@@ -526,7 +526,7 @@ class CacheManager:
             block_id = block_table[block_idx]
 
             new_node = self.prefix_cache.insert_block(
-                token_ids=block_tokens, block_id=block_id, parent_path=parent_path, lock=True
+                token_ids=block_tokens, block_id=block_id, parent_path=parent_path
             )
 
             parent_path.append(new_node)
@@ -538,7 +538,12 @@ class CacheManager:
             )
 
         if registered_nodes:
+            if request_id in self.prefix_cache.request_to_nodes:
+                old_nodes = self.prefix_cache.request_to_nodes[request_id]
+                self.prefix_cache.decrease_lock_ref(old_nodes)
+
             self.prefix_cache.request_to_nodes[request_id] = registered_nodes
+            self.prefix_cache.increase_lock_ref(registered_nodes)
 
     def update_request_tokens(self, request_id: str, new_token_ids: List[int]):
         """
