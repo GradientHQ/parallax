@@ -14,6 +14,7 @@ import asyncio
 import random
 import time
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -28,6 +29,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger("router.main")
+
+MAX_REQUEST_SAMPLES = 1000
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,10 @@ class EndpointMetrics:
     last_status: Optional[str] = None
     last_status_ts: Optional[float] = None
     last_status_error: Optional[str] = None
+
+    # Recent per-request samples for simple UI charting.
+    # Each entry: {"ts": float, "ttft_ms": float|None, "tpot_ms": float|None, "itl_ms": float|None, "e2el_ms": float|None}
+    request_samples: deque = field(default_factory=lambda: deque(maxlen=MAX_REQUEST_SAMPLES))
 
 
 @dataclass
@@ -155,12 +162,20 @@ class EndpointRegistry:
 
     async def list_endpoints(self) -> List[Dict[str, Any]]:
         async with self._lock:
+            # Convert deque to list for JSON serialization.
             return [
                 {
                     "endpoint_id": ep.endpoint_id,
                     "base_url": ep.base_url,
                     "created_ts": ep.created_ts,
-                    "metrics": asdict(ep.metrics),
+                    "metrics": {
+                        **{
+                            k: v
+                            for k, v in asdict(ep.metrics).items()
+                            if k != "request_samples"
+                        },
+                        "request_samples": list(ep.metrics.request_samples),
+                    },
                 }
                 for ep in self._endpoints.values()
             ]
@@ -348,6 +363,17 @@ class EndpointRegistry:
             if e2el_ms is not None:
                 ep.metrics.last_e2el_ms = e2el_ms
                 ep.metrics.ema_e2el_ms = self._ema(ep.metrics.ema_e2el_ms, e2el_ms)
+
+            # Store a per-request sample for UI charting.
+            ep.metrics.request_samples.append(
+                {
+                    "ts": time.time(),
+                    "ttft_ms": ttft_ms,
+                    "tpot_ms": tpot_ms,
+                    "itl_ms": itl_ms,
+                    "e2el_ms": e2el_ms,
+                }
+            )
 
 
 router_config = load_router_config()
