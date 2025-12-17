@@ -141,7 +141,9 @@ class EndpointRegistry:
                 if status_ok is not None:
                     existing.metrics.last_status_ok = status_ok
                     existing.metrics.last_status = status_val
-                    existing.metrics.last_status_ts = time.time() if status_ts is None else status_ts
+                    existing.metrics.last_status_ts = (
+                        time.time() if status_ts is None else status_ts
+                    )
                     existing.metrics.last_status_error = status_error
                 return existing
 
@@ -169,11 +171,7 @@ class EndpointRegistry:
                     "base_url": ep.base_url,
                     "created_ts": ep.created_ts,
                     "metrics": {
-                        **{
-                            k: v
-                            for k, v in asdict(ep.metrics).items()
-                            if k != "request_samples"
-                        },
+                        **{k: v for k, v in asdict(ep.metrics).items() if k != "request_samples"},
                         "request_samples": list(ep.metrics.request_samples),
                     },
                 }
@@ -190,7 +188,9 @@ class EndpointRegistry:
         async with self._lock:
             return list(self._endpoints.values())
 
-    async def probe_endpoint_status(self, base_url: str) -> Tuple[bool, Optional[str], Optional[str]]:
+    async def probe_endpoint_status(
+        self, base_url: str
+    ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Probe downstream readiness via GET {base_url}{status_check_path}.
 
