@@ -86,6 +86,7 @@ class Endpoint:
 class EndpointRegistry:
     def __init__(self, *, config: RouterConfig) -> None:
         self._lock = asyncio.Lock()
+        # Use base_url as the single source of truth to avoid state divergence.
         self._endpoints: Dict[str, Endpoint] = {}
         self._client: Optional[httpx.AsyncClient] = None
         self._config = config
@@ -106,22 +107,20 @@ class EndpointRegistry:
         base_url = base_url.strip().rstrip("/")
         if not base_url.startswith("http://") and not base_url.startswith("https://"):
             raise ValueError("base_url must start with http:// or https://")
-        endpoint_id = str(uuid.uuid4())
-        ep = Endpoint(endpoint_id=endpoint_id, base_url=base_url)
         async with self._lock:
-            self._endpoints[endpoint_id] = ep
-        return ep
+            existing = self._endpoints.get(base_url)
+            if existing is not None:
+                return existing
 
-    async def unregister(self, *, endpoint_id: Optional[str] = None, base_url: Optional[str] = None) -> int:
+            endpoint_id = str(uuid.uuid4())
+            ep = Endpoint(endpoint_id=endpoint_id, base_url=base_url)
+            self._endpoints[base_url] = ep
+            return ep
+
+    async def unregister(self, *, base_url: str) -> int:
         async with self._lock:
-            if endpoint_id is not None:
-                return 1 if self._endpoints.pop(endpoint_id, None) is not None else 0
-            if base_url is not None:
-                base_url = base_url.strip().rstrip("/")
-                removed = [k for k, v in self._endpoints.items() if v.base_url == base_url]
-                for k in removed:
-                    self._endpoints.pop(k, None)
-                return len(removed)
+            base_url = base_url.strip().rstrip("/")
+            return 1 if self._endpoints.pop(base_url, None) is not None else 0
         return 0
 
     async def list_endpoints(self) -> List[Dict[str, Any]]:
@@ -174,7 +173,7 @@ class EndpointRegistry:
             err = str(e)
 
         async with self._lock:
-            cur = self._endpoints.get(ep.endpoint_id)
+            cur = self._endpoints.get(ep.base_url)
             if cur is None:
                 return
             cur.metrics.last_status_ok = ok
@@ -271,17 +270,17 @@ class EndpointRegistry:
             return ranked[0]
         return random.choice(ranked[:k])
 
-    async def mark_start(self, endpoint_id: str) -> None:
+    async def mark_start(self, base_url: str) -> None:
         async with self._lock:
-            ep = self._endpoints.get(endpoint_id)
+            ep = self._endpoints.get(base_url)
             if ep is None:
                 return
             ep.metrics.inflight += 1
             ep.metrics.total_requests += 1
 
-    async def mark_error(self, endpoint_id: str) -> None:
+    async def mark_error(self, base_url: str) -> None:
         async with self._lock:
-            ep = self._endpoints.get(endpoint_id)
+            ep = self._endpoints.get(base_url)
             if ep is None:
                 return
             ep.metrics.total_errors += 1
@@ -289,7 +288,7 @@ class EndpointRegistry:
 
     async def mark_finish(
         self,
-        endpoint_id: str,
+        base_url: str,
         *,
         ttft_ms: Optional[float],
         tpot_ms: Optional[float],
@@ -297,7 +296,7 @@ class EndpointRegistry:
         e2el_ms: Optional[float],
     ) -> None:
         async with self._lock:
-            ep = self._endpoints.get(endpoint_id)
+            ep = self._endpoints.get(base_url)
             if ep is None:
                 return
             ep.metrics.inflight = max(ep.metrics.inflight - 1, 0)
@@ -440,11 +439,27 @@ async def _proxy_chat_completions_stream(
 
 @app.get("/health")
 async def health() -> JSONResponse:
-    return JSONResponse(content={"status": "ok"})
+    # Example:
+    # curl -sS http://127.0.0.1:8081/health
+    return JSONResponse(content={
+        "status": "ok",
+        "apis": [
+            "/health",
+            "/register",
+            "/unregister",
+            "/endpoints",
+            "/v1/chat/completions",
+            "/weight/refit",
+        ],
+    })
 
 
 @app.post("/register")
 async def register(raw_request: Request) -> JSONResponse:
+    # Example:
+    # curl -sS -X POST http://127.0.0.1:8081/register \
+    #   -H 'Content-Type: application/json' \
+    #   -d '{"base_url":"http://127.0.0.1:3001"}'
     payload = await raw_request.json()
     base_url = payload.get("endpoint") or payload.get("base_url")
     if not base_url:
@@ -458,20 +473,37 @@ async def register(raw_request: Request) -> JSONResponse:
 
 @app.post("/unregister")
 async def unregister(raw_request: Request) -> JSONResponse:
+    # Example:
+    # curl -sS -X POST http://127.0.0.1:8081/unregister \
+    #   -H 'Content-Type: application/json' \
+    #   -d '{"base_url":"http://127.0.0.1:3001"}'
     payload = await raw_request.json()
-    endpoint_id = payload.get("endpoint_id")
     base_url = payload.get("endpoint") or payload.get("base_url")
-    removed = await registry.unregister(endpoint_id=endpoint_id, base_url=base_url)
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Missing endpoint/base_url")
+    removed = await registry.unregister(base_url=str(base_url))
     return JSONResponse(content={"removed": removed})
 
 
 @app.get("/endpoints")
 async def endpoints() -> JSONResponse:
+    # Example:
+    # curl -sS http://127.0.0.1:8081/endpoints
     return JSONResponse(content={"endpoints": await registry.list_endpoints()})
 
 
 @app.post("/weight/refit")
 async def weight_refit(raw_request: Request) -> JSONResponse:
+    # Example:
+    # curl -sS -X POST http://127.0.0.1:3001/weight/refit \
+    #   -H 'Content-Type: application/json' \
+    #   -d '{
+    #     "time_stamp": "2025-12-17T00:00:00Z",
+    #     "cid": ["cid1","cid2"],
+    #     "index_map": {"weight_a":"cid1"},
+    #     "echo_peer_id": "peer_id",
+    #     "version": "v1"
+    #   }'
     headers = _filter_forward_headers(dict(raw_request.headers))
     body = await raw_request.body()
     eps = await registry._snapshot_endpoints()
@@ -494,11 +526,19 @@ async def weight_refit(raw_request: Request) -> JSONResponse:
 
 @app.post("/v1/chat/completions")
 async def v1_chat_completions(raw_request: Request):
+    # Example:
+    # curl -sS -X POST http://127.0.0.1:8081/v1/chat/completions \
+    #   -H 'Content-Type: application/json' \
+    #   -d '{
+    #     "model": "your-model",
+    #     "messages": [{"role":"user","content":"Hello"}],
+    #     "stream": true
+    #   }'
     request_json = await raw_request.json()
     is_stream = bool(request_json.get("stream", False))
 
     ep = await registry.choose_best()
-    await registry.mark_start(ep.endpoint_id)
+    await registry.mark_start(ep.base_url)
     logger.info(
         "Forwarding /v1/chat/completions to endpoint_id=%s base_url=%s stream=%s",
         ep.endpoint_id,
@@ -523,12 +563,12 @@ async def v1_chat_completions(raw_request: Request):
                     async for chunk in stream_iter:
                         yield chunk
                 except Exception:
-                    await registry.mark_error(ep.endpoint_id)
+                    await registry.mark_error(ep.base_url)
                     raise
                 finally:
                     m = metrics_final()
                     await registry.mark_finish(
-                        ep.endpoint_id,
+                        ep.base_url,
                         ttft_ms=m.get("ttft_ms"),
                         tpot_ms=m.get("tpot_ms"),
                         itl_ms=m.get("itl_ms"),
@@ -541,12 +581,12 @@ async def v1_chat_completions(raw_request: Request):
                 headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"},
             )
         except HTTPException:
-            await registry.mark_error(ep.endpoint_id)
-            await registry.mark_finish(ep.endpoint_id, ttft_ms=None, tpot_ms=None, itl_ms=None, e2el_ms=None)
+            await registry.mark_error(ep.base_url)
+            await registry.mark_finish(ep.base_url, ttft_ms=None, tpot_ms=None, itl_ms=None, e2el_ms=None)
             raise
         except Exception as e:
-            await registry.mark_error(ep.endpoint_id)
-            await registry.mark_finish(ep.endpoint_id, ttft_ms=None, tpot_ms=None, itl_ms=None, e2el_ms=None)
+            await registry.mark_error(ep.base_url)
+            await registry.mark_finish(ep.base_url, ttft_ms=None, tpot_ms=None, itl_ms=None, e2el_ms=None)
             raise HTTPException(status_code=502, detail=f"Upstream error: {e}") from e
 
     start_ts = time.time()
@@ -555,11 +595,11 @@ async def v1_chat_completions(raw_request: Request):
         resp = await client.post(url, headers=headers, json=request_json)
         e2el_ms = (time.time() - start_ts) * 1000.0
         # For non-stream, treat TTFT as full latency.
-        await registry.mark_finish(ep.endpoint_id, ttft_ms=e2el_ms, tpot_ms=None, itl_ms=None, e2el_ms=e2el_ms)
+        await registry.mark_finish(ep.base_url, ttft_ms=e2el_ms, tpot_ms=None, itl_ms=None, e2el_ms=e2el_ms)
         return JSONResponse(status_code=resp.status_code, content=resp.json())
     except Exception as e:
-        await registry.mark_error(ep.endpoint_id)
-        await registry.mark_finish(ep.endpoint_id, ttft_ms=None, tpot_ms=None, itl_ms=None, e2el_ms=None)
+        await registry.mark_error(ep.base_url)
+        await registry.mark_finish(ep.base_url, ttft_ms=None, tpot_ms=None, itl_ms=None, e2el_ms=None)
         raise HTTPException(status_code=502, detail=f"Upstream error: {e}") from e
 
 
