@@ -301,9 +301,8 @@ class SGLExecutor(BaseExecutor):
                             req_dict["length"] = True
 
                         # Add prob value for the sampled token (if requested and available)
-                        if hasattr(original_req, "return_probs") and original_req.return_probs:
-                            if hasattr(req, "token_prob") and req.token_prob is not None:
-                                req_dict["probs"] = req.token_prob
+                        if original_req.return_probs and req.token_prob is not None:
+                            req_dict["probs"] = req.token_prob
 
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
@@ -382,7 +381,7 @@ class SGLExecutor(BaseExecutor):
             final_hidden_states = (
                 logits_output.tensors["hidden_states"] + logits_output.tensors["residual"]
             )
-            return final_hidden_states
+            return {"hidden_states": final_hidden_states, "probs": None}
 
     def _release_request(self, rid: str):
         """Release per-request resources in SGLang."""
