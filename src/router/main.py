@@ -203,6 +203,7 @@ class EndpointRegistry:
         async def _one(ep: Endpoint) -> Dict[str, Any]:
             url = _join_url(ep.base_url, path)
             try:
+                logger.info(f"Broadcasting raw to {url}")
                 resp = await client.post(url, headers=headers, content=body)
                 content_type = resp.headers.get("content-type", "")
                 if "application/json" in content_type.lower():
@@ -515,12 +516,6 @@ async def weight_refit(raw_request: Request) -> JSONResponse:
     """
     headers = _filter_forward_headers(dict(raw_request.headers))
     body = await raw_request.body()
-    eps = await registry._snapshot_endpoints()
-    logger.info(
-        "Broadcasting /weight/refit to %d endpoints: %s",
-        len(eps),
-        [e.base_url for e in eps],
-    )
     results = await registry.broadcast_raw(path="/weight/refit", headers=headers, body=body)
     ok = all(r.get("ok") is True for r in results)
     return JSONResponse(
