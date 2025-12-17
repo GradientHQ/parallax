@@ -16,13 +16,14 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
 
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from parallax_utils.logging_config import get_logger
 
@@ -51,7 +52,7 @@ class RouterConfig:
     explore_ratio: float = 0.0
 
     # Endpoint readiness check (queried from downstream).
-    status_check_path: str = "/cluster/status/onetime"
+    status_check_path: str = "/cluster/status_json"
     status_check_ttl_sec: float = 2.0
     status_check_timeout_sec: float = 2.0
 
@@ -115,17 +116,35 @@ class EndpointRegistry:
                 self._client = httpx.AsyncClient(timeout=httpx.Timeout(20 * 60))
             return self._client
 
-    async def register(self, base_url: str) -> Endpoint:
+    async def register(
+        self,
+        base_url: str,
+        *,
+        status_ok: Optional[bool] = None,
+        status_val: Optional[str] = None,
+        status_error: Optional[str] = None,
+        status_ts: Optional[float] = None,
+    ) -> Endpoint:
         base_url = base_url.strip().rstrip("/")
         if not base_url.startswith("http://") and not base_url.startswith("https://"):
             raise ValueError("base_url must start with http:// or https://")
         async with self._lock:
             existing = self._endpoints.get(base_url)
             if existing is not None:
+                if status_ok is not None:
+                    existing.metrics.last_status_ok = status_ok
+                    existing.metrics.last_status = status_val
+                    existing.metrics.last_status_ts = time.time() if status_ts is None else status_ts
+                    existing.metrics.last_status_error = status_error
                 return existing
 
             endpoint_id = str(uuid.uuid4())
             ep = Endpoint(endpoint_id=endpoint_id, base_url=base_url)
+            if status_ok is not None:
+                ep.metrics.last_status_ok = status_ok
+                ep.metrics.last_status = status_val
+                ep.metrics.last_status_ts = time.time() if status_ts is None else status_ts
+                ep.metrics.last_status_error = status_error
             self._endpoints[base_url] = ep
             return ep
 
@@ -495,9 +514,15 @@ async def register(raw_request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail=f"Endpoint not ready: {detail}")
 
     try:
-        ep = await registry.register(base_url)
+        ep = await registry.register(
+            base_url,
+            status_ok=True,
+            status_val="available",
+            status_error=None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
     return JSONResponse(content={"endpoint_id": ep.endpoint_id, "base_url": ep.base_url})
 
 
@@ -524,6 +549,18 @@ async def endpoints() -> JSONResponse:
       curl -sS http://127.0.0.1:8081/endpoints
     """
     return JSONResponse(content={"endpoints": await registry.list_endpoints()})
+
+
+@app.get("/")
+async def endpoints_ui() -> HTMLResponse:
+    """
+    Simple UI for viewing registered endpoints and their metrics.
+
+    Example:
+      open http://127.0.0.1:8081/ui/endpoints
+    """
+    ui_path = Path(__file__).resolve().parent / "ui" / "endpoints.html"
+    return HTMLResponse(content=ui_path.read_text(encoding="utf-8"), status_code=200)
 
 
 @app.post("/weight/refit")

@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Parallax Router - Endpoints</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 20px; }
+      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .pill { padding: 4px 10px; border-radius: 999px; background: rgba(127,127,127,0.15); font-size: 12px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { border-bottom: 1px solid rgba(127,127,127,0.25); padding: 8px 10px; text-align: left; vertical-align: top; }
+      th { position: sticky; top: 0; background: rgba(30,30,30,0.06); }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12px; }
+      .ok { color: #1a7f37; }
+      .bad { color: #d1242f; }
+      .muted { color: rgba(127,127,127,0.9); }
+      button { padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(127,127,127,0.35); background: transparent; cursor: pointer; }
+      button:hover { background: rgba(127,127,127,0.12); }
+      .iconBtn { padding: 4px; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; }
+      .iconBtn svg { width: 14px; height: 14px; opacity: 0.9; }
+      .baseCell { display: flex; align-items: center; gap: 10px; }
+      .baseCell code { overflow-wrap: anywhere; }
+      .baseCell .spacer { flex: 1; }
+      .primaryBtn { background: #1f883d; border-color: #1f883d; color: #fff; font-weight: 600; }
+      .primaryBtn:hover { background: #1a7f37; border-color: #1a7f37; }
+      .primaryBtn:active { background: #166534; border-color: #166534; }
+      .right { margin-left: auto; }
+      .small { font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <h2 style="margin:0">Endpoints</h2>
+      <span id="status" class="pill muted">Loading...</span>
+      <div class="right row">
+        <button id="registerBtn" class="primaryBtn">Register</button>
+        <span class="pill">Auto refresh: <span id="intervalLabel">1.0</span>s</span>
+        <button id="refreshBtn">Refresh</button>
+      </div>
+    </div>
+
+    <div class="small muted" style="margin-top:8px">
+      Data source: <code>GET /endpoints</code>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>base_url</th>
+          <th>inflight</th>
+          <th>requests</th>
+          <th>errors</th>
+          <th>ema_ttft_ms</th>
+          <th>ema_e2el_ms</th>
+          <th>status</th>
+          <th>status_error</th>
+          <th>updated</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+
+    <script>
+      const intervalMs = 1000;
+      document.getElementById("intervalLabel").textContent = (intervalMs / 1000).toFixed(1);
+
+      function normalizeBaseUrl(s) {
+        if (!s) return "";
+        return String(s).trim().replace(/\/+$/, "");
+      }
+
+      function fmtNum(x) {
+        if (x === null || x === undefined) return "-";
+        if (typeof x === "number") return Number.isFinite(x) ? x.toFixed(1) : String(x);
+        return String(x);
+      }
+
+      function fmtTs(sec) {
+        if (!sec) return "-";
+        const d = new Date(sec * 1000);
+        return d.toLocaleString();
+      }
+
+      async function loadOnce() {
+        const statusEl = document.getElementById("status");
+        const tbody = document.getElementById("tbody");
+        const t0 = performance.now();
+        try {
+          const resp = await fetch("/endpoints", { cache: "no-store" });
+          const text = await resp.text();
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${text}`);
+          const data = JSON.parse(text);
+          const endpoints = Array.isArray(data.endpoints) ? data.endpoints : [];
+
+          tbody.innerHTML = "";
+          for (const ep of endpoints) {
+            const m = ep.metrics || {};
+            const ok = m.last_status_ok;
+            let statusText = "unknown";
+            let cls = "muted";
+            if (ok === true) { statusText = "available"; cls = "ok"; }
+            else if (ok === false) { statusText = "unavailable"; cls = "bad"; }
+
+            const baseUrl = String(ep.base_url || "");
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td>
+                <div class="baseCell">
+                  <code>${baseUrl}</code>
+                  <span class="spacer"></span>
+                  <button class="iconBtn unregBtn" data-base-url="${baseUrl.replace(/"/g, "&quot;")}" title="Unregister" aria-label="Unregister">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M3 6h18"></path>
+                      <path d="M8 6V4h8v2"></path>
+                      <path d="M6 6l1 16h10l1-16"></path>
+                      <path d="M10 11v7"></path>
+                      <path d="M14 11v7"></path>
+                    </svg>
+                  </button>
+                </div>
+              </td>
+              <td>${m.inflight ?? "-"}</td>
+              <td>${m.total_requests ?? "-"}</td>
+              <td>${m.total_errors ?? "-"}</td>
+              <td>${fmtNum(m.ema_ttft_ms)}</td>
+              <td>${fmtNum(m.ema_e2el_ms)}</td>
+              <td class="${cls}">${statusText}${m.last_status ? ` (${m.last_status})` : ""}</td>
+              <td class="muted">${m.last_status_error ? String(m.last_status_error) : "-"}</td>
+              <td class="muted">${fmtTs(m.last_status_ts)}</td>
+            `;
+            tbody.appendChild(tr);
+          }
+
+          // Wire unregister buttons after render.
+          for (const btn of tbody.querySelectorAll(".unregBtn")) {
+            btn.addEventListener("click", async (e) => {
+              const baseUrl = normalizeBaseUrl(e.currentTarget.getAttribute("data-base-url"));
+              if (!baseUrl) return;
+              setActionResult("muted", `Unregistering ${baseUrl}...`);
+              const r = await postJson("/unregister", { base_url: baseUrl });
+              if (r.ok) {
+                // Remove row immediately from the table.
+                const tr = e.currentTarget.closest("tr");
+                if (tr) tr.remove();
+                setActionResult("ok", `Unregistered (${r.status})`);
+              } else {
+                setActionResult("bad", `Unregister failed (${r.status})`);
+              }
+            });
+          }
+
+          const dt = performance.now() - t0;
+          statusEl.className = "pill";
+          statusEl.textContent = `OK • ${endpoints.length} endpoints • ${dt.toFixed(0)}ms`;
+        } catch (e) {
+          statusEl.className = "pill bad";
+          statusEl.textContent = `Error: ${e && e.message ? e.message : e}`;
+        }
+      }
+
+      document.getElementById("refreshBtn").addEventListener("click", loadOnce);
+
+      async function postJson(path, payload) {
+        const resp = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const text = await resp.text();
+        let body;
+        try { body = JSON.parse(text); } catch { body = text; }
+        return { ok: resp.ok, status: resp.status, body };
+      }
+
+      function setActionResult(kind, msg) {
+        // No-op: action status pill removed from UI.
+      }
+
+      document.getElementById("registerBtn").addEventListener("click", async () => {
+        const input = window.prompt("Enter base_url (e.g. http://127.0.0.1:3001):", "");
+        const baseUrl = normalizeBaseUrl(input);
+        if (!baseUrl) {
+          setActionResult("muted", "Cancelled");
+          return;
+        }
+        setActionResult("muted", "Registering...");
+        const r = await postJson("/register", { base_url: baseUrl });
+        if (r.ok) {
+          setActionResult("ok", `Registered (${r.status})`);
+          await loadOnce();
+        } else {
+          setActionResult("bad", `Register failed (${r.status})`);
+        }
+      });
+
+      loadOnce();
+      setInterval(loadOnce, intervalMs);
+    </script>
+  </body>
+</html>
+
+
