@@ -117,6 +117,7 @@ class CacheManager:
             self.prefix_cache = BlockRadixCache(
                 block_size=block_size,
                 max_cached_blocks=max_cached_blocks,
+                on_block_evict=self._on_prefix_block_evict,
             )
             logger.info(f"Prefix cache enabled with max_cached_blocks={max_cached_blocks}")
 
@@ -124,6 +125,12 @@ class CacheManager:
         self.request_token_ids: Dict[str, List[int]] = {}
         # Mapping: request_id -> matched_tokens (for prefix cache hit tracking)
         self.matched_tokens_cache: Dict[str, int] = {}
+
+    def _on_prefix_block_evict(self, block_id: int):
+        """Callback when a block is evicted from prefix cache."""
+        if self.needs_blocks:
+            self.allocator.free([block_id])
+            logger.debug(f"Freed evicted prefix cache block: {block_id}")
 
     def _create_cache(self, layer_type: str) -> BaseCache:
         if layer_type == "attention":
@@ -281,11 +288,18 @@ class CacheManager:
         matched_blocks = []
         matched_tokens = 0
         if self.prefix_cache and token_ids is not None and self.needs_blocks:
-            matched_blocks, matched_tokens = self.prefix_cache.match_prefix(token_ids)
+            # Always save token_ids for later insertion to prefix cache
+            self.request_token_ids[request_id] = token_ids
+
+            # Debug: Log token_ids to understand prefix cache behavior
+            logger.debug(
+                f"Request {request_id}: input_ids length={len(token_ids)}, "
+                f"first 20 tokens={token_ids[:20]}, "
+                f"last 20 tokens={token_ids[-20:]}"
+            )
+
             matched_blocks, matched_tokens = self.prefix_cache.match_prefix(token_ids)
             if matched_tokens > 0:
-                self.request_token_ids[request_id] = token_ids
-
                 matched_nodes = []
                 temp_node = self.prefix_cache.root
                 for i, block_id in enumerate(matched_blocks):
@@ -349,12 +363,21 @@ class CacheManager:
         return True, matched_tokens
 
     def free_request(self, request_id: str):
+        # Get blocks that are managed by prefix cache (should not be freed)
+        cached_blocks = set()
+        if self.prefix_cache and request_id in self.prefix_cache.request_to_nodes:
+            nodes = self.prefix_cache.request_to_nodes[request_id]
+            cached_blocks = {node.block_id for node in nodes}
+
         if self.prefix_cache:
             self.prefix_cache.release_request(request_id)
 
         if self.needs_blocks and request_id in self.block_tables:
             blocks = self.block_tables[request_id]
-            self.allocator.free(blocks)
+            # Only free blocks that are NOT in prefix cache
+            blocks_to_free = [b for b in blocks if b not in cached_blocks]
+            if blocks_to_free:
+                self.allocator.free(blocks_to_free)
             del self.block_tables[request_id]
             if request_id in self.context_lengths:
                 del self.context_lengths[request_id]
@@ -389,8 +412,8 @@ class CacheManager:
 
         current_len = self.context_lengths[request_id]
 
-        if current_len > 0 and current_len % self.block_size == 0:
-            self.insert_full_blocks_to_cache(request_id)
+        # if current_len > 0 and current_len % self.block_size == 0:
+        #     self.insert_full_blocks_to_cache(request_id)
 
         if current_len % self.block_size == 0:
             new_blocks = self.allocator.allocate(1)
@@ -503,7 +526,7 @@ class CacheManager:
             block_id = block_table[block_idx]
 
             new_node = self.prefix_cache.insert_block(
-                token_ids=block_tokens, block_id=block_id, parent_path=parent_path
+                token_ids=block_tokens, block_id=block_id, parent_path=parent_path, lock=True
             )
 
             parent_path.append(new_node)
@@ -515,12 +538,7 @@ class CacheManager:
             )
 
         if registered_nodes:
-            if request_id in self.prefix_cache.request_to_nodes:
-                old_nodes = self.prefix_cache.request_to_nodes[request_id]
-                self.prefix_cache.decrease_lock_ref(old_nodes)
-
             self.prefix_cache.request_to_nodes[request_id] = registered_nodes
-            self.prefix_cache.increase_lock_ref(registered_nodes)
 
     def update_request_tokens(self, request_id: str, new_token_ids: List[int]):
         """

@@ -166,6 +166,7 @@ class MLXExecutor(BaseExecutor):
             linear_v_dim=linear_value_head_dim,
             linear_num_k_heads=linear_num_key_heads,
             linear_num_v_heads=linear_num_value_heads,
+            enable_prefix_cache=enable_prefix_cache,
         )
         super().__init__(
             start_layer=start_layer,
@@ -299,6 +300,8 @@ class MLXExecutor(BaseExecutor):
         # Note: Paged Attention writes KV cache in-place within the model (via reshape_and_cache).
         # The returned 'hidden_states' is what we need.
         # The returned cache tuple (_, _) is ignored/unused here.
+        logger.debug(f"prefix_cache is {'on' if self.enable_prefix_cache else 'off'}")
+        logger.debug(f"prefix_lens: {prepared_inputs.get('prefix_lens')}")
         hidden_states = self.model_shard(
             h_or_tokens=prepared_inputs["h_or_tokens"],
             cache=prepared_inputs["cache"],
@@ -398,17 +401,32 @@ class MLXExecutor(BaseExecutor):
             if self.is_first_peer:
                 if matched_tokens > 0 and self.enable_prefix_cache:
                     # Skip the prefix tokens that are already cached
-                    h_or_tokens_list.append(req.input_ids[matched_tokens:])
-                    logger.debug(
-                        f"Request {req.request_id}: Skipping {matched_tokens} cached tokens, "
-                        f"processing {len(req.input_ids) - matched_tokens} new tokens"
-                    )
+                    # But we must keep at least the last token to generate next token logits
+                    new_tokens = req.input_ids[matched_tokens:]
+                    if len(new_tokens) == 0:
+                        # All tokens cached - keep the last token and adjust prefix_len
+                        new_tokens = req.input_ids[-1:]
+                        prefix_lens_list[-1] = matched_tokens - 1
+                        logger.debug(
+                            f"Request {req.request_id}: Full cache hit, keeping last token for logits"
+                        )
+                    else:
+                        logger.debug(
+                            f"Request {req.request_id}: Skipping {matched_tokens} cached tokens, "
+                            f"processing {len(new_tokens)} new tokens"
+                        )
+                    h_or_tokens_list.append(new_tokens)
                 else:
                     h_or_tokens_list.append(req.input_ids)
             else:
                 if matched_tokens > 0 and self.enable_prefix_cache:
                     # Skip the prefix hidden states that correspond to cached tokens
-                    h_or_tokens_list.append(req.hidden_states[matched_tokens:])
+                    new_hidden = req.hidden_states[matched_tokens:]
+                    if new_hidden.shape[0] == 0:
+                        # All tokens cached - keep the last hidden state
+                        new_hidden = req.hidden_states[-1:]
+                        prefix_lens_list[-1] = matched_tokens - 1
+                    h_or_tokens_list.append(new_hidden)
                 else:
                     h_or_tokens_list.append(req.hidden_states)
 

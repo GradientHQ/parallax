@@ -4,7 +4,7 @@ Block-based Prefix Cache implementation using Radix Tree.
 
 import heapq
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from parallax_utils.logging_config import get_logger
 
@@ -43,14 +43,17 @@ class BlockRadixCache:
         self,
         block_size: int,
         max_cached_blocks: int = 1000,
+        on_block_evict: Optional[Callable[[int], None]] = None,
     ):
         """
         Args:
             block_size: Number of tokens per block
             max_cached_blocks: Maximum number of blocks to cache
+            on_block_evict: Callback function when a block is evicted, receives block_id
         """
         self.block_size = block_size
         self.max_cached_blocks = max_cached_blocks
+        self.on_block_evict = on_block_evict
 
         self.root = BlockTreeNode(block_id=None, token_ids=[])
         self.root.lock_ref = 1
@@ -87,11 +90,18 @@ class BlockRadixCache:
 
             first_token = block_tokens[0]
             if first_token not in current_node.children:
+                logger.debug(
+                    f"Prefix match stopped at block {block_idx}: first_token {first_token} not in children"
+                )
                 break
 
             child_node = current_node.children[first_token]
 
             if child_node.token_ids != block_tokens:
+                logger.debug(
+                    f"Prefix match stopped at block {block_idx}: token mismatch. "
+                    f"Expected {block_tokens[:5]}..., got {child_node.token_ids[:5]}..."
+                )
                 break
 
             matched_blocks.append(child_node.block_id)
@@ -107,7 +117,11 @@ class BlockRadixCache:
         return matched_blocks, matched_tokens
 
     def insert_block(
-        self, token_ids: List[int], block_id: int, parent_path: Optional[List[BlockTreeNode]] = None
+        self,
+        token_ids: List[int],
+        block_id: int,
+        parent_path: Optional[List[BlockTreeNode]] = None,
+        lock: bool = False,
     ) -> BlockTreeNode:
         """
         Insert a full block into the radix tree.
@@ -116,6 +130,7 @@ class BlockRadixCache:
             token_ids: Token sequence for this block (must be block_size length)
             block_id: Physical block ID
             parent_path: Parent node path (optional, for faster lookup)
+            lock: Whether to lock the node (increment ref count) immediately
 
         Returns:
             The inserted node
@@ -135,10 +150,16 @@ class BlockRadixCache:
             existing_node = parent_node.children[first_token]
             if existing_node.token_ids == token_ids:
                 logger.debug(f"Block already exists in cache: {token_ids[:5]}...")
+                if lock:
+                    existing_node.lock_ref += 1
+                    existing_node.last_access_time = time.monotonic()
                 return existing_node
 
         new_node = BlockTreeNode(block_id=block_id, token_ids=token_ids)
         new_node.parent = parent_node
+        if lock:
+            new_node.lock_ref += 1
+        
         parent_node.children[first_token] = new_node
 
         self.num_cached_blocks += 1
@@ -228,12 +249,16 @@ class BlockRadixCache:
         return leaves
 
     def _delete_leaf(self, node: BlockTreeNode):
-        """Delete a leaf node."""
+        """Delete a leaf node and free the physical block."""
         if node.parent:
             for key, child in list(node.parent.children.items()):
                 if child == node:
                     del node.parent.children[key]
                     break
+
+        # Free the physical block via callback
+        if self.on_block_evict and node.block_id is not None:
+            self.on_block_evict(node.block_id)
 
         self.num_cached_blocks -= 1
         logger.debug(f"Deleted node {node.node_id} (block_id={node.block_id})")

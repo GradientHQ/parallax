@@ -4,6 +4,10 @@ hidden_dimefines the Qwen3 model.
 
 from typing import Any, List, Optional
 
+from parallax_utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention
 from mlx_lm.models.qwen3 import Attention as MLXQwen3Attention
@@ -117,6 +121,9 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
             # Check if any request has prefix cache
             has_prefix_cache = prefix_lens is not None and bool(mx.any(prefix_lens > 0))
 
+            logger.debug("Prefill phase: prefix_lens=%s", prefix_lens)
+            logger.debug("Prefill phase: has_prefix_cache=%s", has_prefix_cache)
+
             if has_prefix_cache:
                 # Read cached prefix KV from paged cache and concatenate with new KV
                 # key_cache_global: (num_layers, num_blocks, n_kv_heads, head_dim, block_size)
@@ -141,13 +148,14 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
                             block_idx = pos // block_size
                             offset_in_block = pos % block_size
                             physical_block = int(block_table_i[block_idx])
-                            # key_cache_global[0]: (num_blocks, n_kv_heads, head_dim, block_size)
+                            # key_cache_global[0]: (num_blocks, n_kv_heads, block_size, head_dim)
+                            # value_cache_global[0]: (num_blocks, n_kv_heads, block_size, head_dim_v)
                             k_token = key_cache_global[
-                                0, physical_block, :, :, offset_in_block
+                                0, physical_block, :, offset_in_block, :
                             ]  # (n_kv_heads, head_dim)
                             v_token = value_cache_global[
                                 0, physical_block, :, offset_in_block, :
-                            ]  # (n_kv_heads, head_dim)
+                            ]  # (n_kv_heads, head_dim_v)
                             prefix_k_list.append(k_token)
                             prefix_v_list.append(v_token)
 
@@ -181,17 +189,13 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
                     # Compute attention for this request
                     # Need to create proper causal mask for the full sequence
                     full_len = k_full.shape[2]
-                    # Causal mask: new tokens can attend to prefix + previous new tokens
-                    # mask shape: (1, 1, target_len, full_len)
-                    causal_mask = mx.triu(
-                        mx.full((target_len, full_len), float("-inf")),
-                        k=prefix_len + 1 - target_len + 1,
-                    )
                     # Correct causal mask: position j can attend to positions 0..j
                     row_indices = mx.arange(target_len)[:, None] + prefix_len  # actual positions
                     col_indices = mx.arange(full_len)[None, :]
                     causal_mask = mx.where(col_indices <= row_indices, 0.0, float("-inf"))
-                    causal_mask = causal_mask[None, None, :, :]  # (1, 1, target_len, full_len)
+                    causal_mask = causal_mask[None, None, :, :].astype(
+                        q_i.dtype
+                    )  # (1, 1, target_len, full_len)
 
                     out_i = scaled_dot_product_attention(
                         q_i,
