@@ -9,9 +9,8 @@ Start the router with:
     python src/router/main.py --host 0.0.0.0 --port 8081
 """
 
-import asyncio
 import argparse
-from parallax_utils.logging_config import get_logger
+import asyncio
 import random
 import time
 import uuid
@@ -25,6 +24,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from parallax_utils.logging_config import get_logger
 
 logger = get_logger("router.main")
 
@@ -264,9 +264,8 @@ class EndpointRegistry:
             e2el = m.ema_e2el_ms if m.ema_e2el_ms is not None else float(cfg.default_e2el_ms)
             err_rate = (m.total_errors / max(m.total_requests, 1)) * float(cfg.err_rate_penalty_ms)
             recent_err_penalty = 0.0
-            if (
-                m.last_error_ts is not None
-                and (time.time() - m.last_error_ts) < float(cfg.recent_error_window_sec)
+            if m.last_error_ts is not None and (time.time() - m.last_error_ts) < float(
+                cfg.recent_error_window_sec
             ):
                 recent_err_penalty = float(cfg.recent_error_penalty_ms)
             return inflight_penalty + ttft + 0.5 * e2el + err_rate + recent_err_penalty
@@ -455,17 +454,19 @@ async def health() -> JSONResponse:
     Example:
       curl -sS http://127.0.0.1:8081/health
     """
-    return JSONResponse(content={
-        "status": "ok",
-        "apis": [
-            "/health",
-            "/register",
-            "/unregister",
-            "/endpoints",
-            "/v1/chat/completions",
-            "/weight/refit",
-        ],
-    })
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "apis": [
+                "/health",
+                "/register",
+                "/unregister",
+                "/endpoints",
+                "/v1/chat/completions",
+                "/weight/refit",
+            ],
+        }
+    )
 
 
 @app.post("/register")
@@ -600,11 +601,15 @@ async def v1_chat_completions(raw_request: Request):
             )
         except HTTPException:
             await registry.mark_error(ep.base_url)
-            await registry.mark_finish(ep.base_url, ttft_ms=None, tpot_ms=None, itl_ms=None, e2el_ms=None)
+            await registry.mark_finish(
+                ep.base_url, ttft_ms=None, tpot_ms=None, itl_ms=None, e2el_ms=None
+            )
             raise
         except Exception as e:
             await registry.mark_error(ep.base_url)
-            await registry.mark_finish(ep.base_url, ttft_ms=None, tpot_ms=None, itl_ms=None, e2el_ms=None)
+            await registry.mark_finish(
+                ep.base_url, ttft_ms=None, tpot_ms=None, itl_ms=None, e2el_ms=None
+            )
             raise HTTPException(status_code=502, detail=f"Upstream error: {e}") from e
 
     start_ts = time.time()
@@ -613,15 +618,20 @@ async def v1_chat_completions(raw_request: Request):
         resp = await client.post(url, headers=headers, json=request_json)
         e2el_ms = (time.time() - start_ts) * 1000.0
         # For non-stream, treat TTFT as full latency.
-        await registry.mark_finish(ep.base_url, ttft_ms=e2el_ms, tpot_ms=None, itl_ms=None, e2el_ms=e2el_ms)
+        await registry.mark_finish(
+            ep.base_url, ttft_ms=e2el_ms, tpot_ms=None, itl_ms=None, e2el_ms=e2el_ms
+        )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
     except Exception as e:
         await registry.mark_error(ep.base_url)
-        await registry.mark_finish(ep.base_url, ttft_ms=None, tpot_ms=None, itl_ms=None, e2el_ms=None)
+        await registry.mark_finish(
+            ep.base_url, ttft_ms=None, tpot_ms=None, itl_ms=None, e2el_ms=None
+        )
         raise HTTPException(status_code=502, detail=f"Upstream error: {e}") from e
 
 
 if __name__ == "__main__":
+
     def parse_args() -> argparse.Namespace:
         parser = argparse.ArgumentParser(description="Parallax HTTP router")
         parser.add_argument("--host", type=str, default="0.0.0.0", help="Listen host")
@@ -630,4 +640,3 @@ if __name__ == "__main__":
 
     args = parse_args()
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
-
