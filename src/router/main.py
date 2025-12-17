@@ -121,7 +121,6 @@ class EndpointRegistry:
         async with self._lock:
             base_url = base_url.strip().rstrip("/")
             return 1 if self._endpoints.pop(base_url, None) is not None else 0
-        return 0
 
     async def list_endpoints(self) -> List[Dict[str, Any]]:
         async with self._lock:
@@ -439,8 +438,10 @@ async def _proxy_chat_completions_stream(
 
 @app.get("/health")
 async def health() -> JSONResponse:
-    # Example:
-    # curl -sS http://127.0.0.1:8081/health
+    """
+    Example:
+      curl -sS http://127.0.0.1:8081/health
+    """
     return JSONResponse(content={
         "status": "ok",
         "apis": [
@@ -456,10 +457,12 @@ async def health() -> JSONResponse:
 
 @app.post("/register")
 async def register(raw_request: Request) -> JSONResponse:
-    # Example:
-    # curl -sS -X POST http://127.0.0.1:8081/register \
-    #   -H 'Content-Type: application/json' \
-    #   -d '{"base_url":"http://127.0.0.1:3001"}'
+    """
+    Example:
+      curl -sS -X POST http://127.0.0.1:8081/register \
+        -H 'Content-Type: application/json' \
+        -d '{"base_url":"http://127.0.0.1:3001"}'
+    """
     payload = await raw_request.json()
     base_url = payload.get("endpoint") or payload.get("base_url")
     if not base_url:
@@ -473,10 +476,12 @@ async def register(raw_request: Request) -> JSONResponse:
 
 @app.post("/unregister")
 async def unregister(raw_request: Request) -> JSONResponse:
-    # Example:
-    # curl -sS -X POST http://127.0.0.1:8081/unregister \
-    #   -H 'Content-Type: application/json' \
-    #   -d '{"base_url":"http://127.0.0.1:3001"}'
+    """
+    Example:
+      curl -sS -X POST http://127.0.0.1:8081/unregister \
+        -H 'Content-Type: application/json' \
+        -d '{"base_url":"http://127.0.0.1:3001"}'
+    """
     payload = await raw_request.json()
     base_url = payload.get("endpoint") or payload.get("base_url")
     if not base_url:
@@ -487,23 +492,27 @@ async def unregister(raw_request: Request) -> JSONResponse:
 
 @app.get("/endpoints")
 async def endpoints() -> JSONResponse:
-    # Example:
-    # curl -sS http://127.0.0.1:8081/endpoints
+    """
+    Example:
+      curl -sS http://127.0.0.1:8081/endpoints
+    """
     return JSONResponse(content={"endpoints": await registry.list_endpoints()})
 
 
 @app.post("/weight/refit")
 async def weight_refit(raw_request: Request) -> JSONResponse:
-    # Example:
-    # curl -sS -X POST http://127.0.0.1:3001/weight/refit \
-    #   -H 'Content-Type: application/json' \
-    #   -d '{
-    #     "time_stamp": "2025-12-17T00:00:00Z",
-    #     "cid": ["cid1","cid2"],
-    #     "index_map": {"weight_a":"cid1"},
-    #     "echo_peer_id": "peer_id",
-    #     "version": "v1"
-    #   }'
+    """
+    Example:
+      curl -sS -X POST http://127.0.0.1:3001/weight/refit \
+        -H 'Content-Type: application/json' \
+        -d '{
+          "time_stamp": "2025-12-17T00:00:00Z",
+          "cid": ["cid1","cid2"],
+          "index_map": {"weight_a":"cid1"},
+          "echo_peer_id": "peer_id",
+          "version": "v1"
+        }'
+    """
     headers = _filter_forward_headers(dict(raw_request.headers))
     body = await raw_request.body()
     eps = await registry._snapshot_endpoints()
@@ -526,14 +535,16 @@ async def weight_refit(raw_request: Request) -> JSONResponse:
 
 @app.post("/v1/chat/completions")
 async def v1_chat_completions(raw_request: Request):
-    # Example:
-    # curl -sS -X POST http://127.0.0.1:8081/v1/chat/completions \
-    #   -H 'Content-Type: application/json' \
-    #   -d '{
-    #     "model": "your-model",
-    #     "messages": [{"role":"user","content":"Hello"}],
-    #     "stream": true
-    #   }'
+    """
+    Example:
+      curl -sS -X POST http://127.0.0.1:8081/v1/chat/completions \
+        -H 'Content-Type: application/json' \
+        -d '{
+          "model": "your-model",
+          "messages": [{"role":"user","content":"Hello"}],
+          "stream": true
+        }'
+    """
     request_json = await raw_request.json()
     is_stream = bool(request_json.get("stream", False))
 
