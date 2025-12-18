@@ -1,13 +1,14 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/variant.h>
 
-#include "paged_attention_v1/paged_attention.h"
+#include "kernels/paged_attention.h"
+#include "kernels/reshape_and_cache.h"
 
 namespace nb = nanobind;
 using namespace nb::literals;
 
 NB_MODULE(_ext, m) {
-  m.doc() = "vLLM PagedAttentionV1";
+  m.doc() = "Parallax extensions";
 
   m.def(
       "paged_attention_v1",
@@ -39,5 +40,29 @@ NB_MODULE(_ext, m) {
 
         Returns:
             array: ``Paged attention result``
+      )");
+
+  m.def(
+      "reshape_and_cache",
+      &parallax_ext::reshape_and_cache,
+      "key"_a,
+      "value"_a,
+      "key_cache"_a,
+      "value_cache"_a,
+      "slot_mapping"_a,
+      nb::kw_only(),
+      "stream"_a = nb::none(),
+      R"(
+        vLLM ReshapeAndCache operation
+
+        Args:
+            key (array): Input array [num_tokens, num_heads, head_size].
+            value (array): Input array [num_tokens, num_heads, head_size].
+            key_cache (array): Input array [num_blocks, num_heads, head_size/x, block_size, x].
+            value_cache (array): Input array [num_blocks, num_heads, head_size, block_size].
+            slot_mapping (array): Input array [num_tokens].
+
+        Returns:
+            array: ``Dummy output``
       )");
 }
