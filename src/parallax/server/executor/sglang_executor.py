@@ -23,7 +23,7 @@ from parallax.sglang.batch_info import (
     form_sgl_batch_prefill,
     release_sglang_request,
 )
-from parallax.sglang.model_runner import initialize_sgl_model_runner
+from parallax.sglang.model_runner import initialize_sgl_model_runner, refit_sgl_model
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -81,6 +81,8 @@ class SGLExecutor(BaseExecutor):
         nccl_port: Optional[int] = 4000,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
+        # Weight Refit
+        enable_weight_refit: Optional[bool] = False,
     ):
 
         self.enable_lora = True if lora_paths is not None else enable_lora
@@ -153,11 +155,17 @@ class SGLExecutor(BaseExecutor):
             tp_rank=tp_rank,
             tp_size=tp_size,
             shared_state=shared_state,
+            enable_weight_refit=enable_weight_refit,
         )
         self.cur_batch = None
         self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
         self.tp_group = self.model_runner.tp_group
         self.tp_cpu_group = self.tp_group.cpu_group
+
+    def check_and_refit_weight(self, refit_weight_path: str):
+        if refit_weight_path == "":
+            return
+        refit_sgl_model(self.model_runner, refit_weight_path)
 
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
@@ -299,6 +307,8 @@ class SGLExecutor(BaseExecutor):
                             req_dict["eos"] = True
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
+                        if self.enable_weight_refit:
+                            req_dict["weight_version"] = self.weight_version
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:

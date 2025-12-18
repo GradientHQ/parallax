@@ -2,7 +2,7 @@
 hidden_dimefines the Qwen3 model.
 """
 
-from typing import Optional, Tuple
+from typing import Any, List, Optional
 
 import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention
@@ -11,6 +11,7 @@ from mlx_lm.models.qwen3 import ModelArgs
 from mlx_lm.models.qwen3 import TransformerBlock as MLXQwen3Block
 
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
+from parallax.server.cache.base import BaseCache
 
 
 class ParallaxQwen3Attention(MLXQwen3Attention):
@@ -24,11 +25,11 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
+        cache: Optional[BaseCache] = None,
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
-        layer_idx: int = 0,
+        **kwargs,
     ) -> mx.array:
         """
         Attention forward pass with explicit KV cache handling.
@@ -36,10 +37,10 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
         Args:
             x: (batch, target_len, hidden_dim) - Input hidden states for the current query segment.
             mask: (batch, n_q_heads, target_len, source_len)
-            cache: contains (key_cache, value_cache) global.
+            cache: BaseCache object containing the layer cache.
             block_tables: (batch, max_blocks) - PagedKV block tables.
             context_lengths: (batch,) - PagedKV sequence lengths.
-            layer_idx: Layer index for PagedKV access.
+            slot_mapping: (batch * target_len,) - Flattened slot mapping.
 
         Returns:
             output: (batch, target_len, hidden_dim) - Output hidden states.
@@ -58,7 +59,7 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
         )
         values_new = values_new.reshape(batch, target_len, self.n_kv_heads, -1)
 
-        key_cache_global, value_cache_global = cache
+        key_cache_global, value_cache_global = cache.get_cache()
 
         queries_rotated_list = []
         keys_rotated_list = []
@@ -87,7 +88,6 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
             block_tables,
             context_lengths,
             block_size,
-            layer_idx,
             slot_mapping=slot_mapping,
         )
 
@@ -103,7 +103,6 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
                 block_size,
                 self.scale,
                 self.n_kv_heads,
-                layer_idx,
             )
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
         else:
@@ -126,28 +125,30 @@ class ParallaxQwen3Block(MLXQwen3Block):
     This version handles the KV cache explicitly and returns new K and V states.
     """
 
-    def __init__(self, args: ModelArgs, layer_idx: int):
+    def __init__(self, args: ModelArgs, layer_idx: int, local_layer_idx: int):
         super().__init__(args)
         self.self_attn = ParallaxQwen3Attention(args)
         self.layer_idx = layer_idx
+        self.local_layer_idx = local_layer_idx
 
     def __call__(
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
+        cache: Optional[List[Any]] = None,
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
+        **kwargs,
     ):
         r = self.self_attn(
             self.input_layernorm(x),
             mask,
-            cache,
+            cache[self.local_layer_idx],
             block_tables=block_tables,
             context_lengths=context_lengths,
             slot_mapping=slot_mapping,
-            layer_idx=self.layer_idx,
+            **kwargs,
         )
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))

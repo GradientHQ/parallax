@@ -68,19 +68,13 @@ class TestPagedAttention:
         NUM_KV_HEADS = 4
         HEAD_DIM = 32
         BLOCK_SIZE = 16
-        NUM_LAYERS = 1
         NUM_BLOCKS = 1024
-        LAYER_IDX = 0
         SCALE = 1.0 / math.sqrt(HEAD_DIM)
         atol = 1e-2 if dtype != mx.float32 else 1e-4
 
-        # Setup Memory
-        key_cache = mx.zeros(
-            (NUM_LAYERS, NUM_BLOCKS, NUM_KV_HEADS, BLOCK_SIZE, HEAD_DIM), dtype=dtype
-        )
-        value_cache = mx.zeros(
-            (NUM_LAYERS, NUM_BLOCKS, NUM_KV_HEADS, BLOCK_SIZE, HEAD_DIM), dtype=dtype
-        )
+        # Setup Memory (single layer cache, shape: (1, num_blocks, num_kv_heads, block_size, head_dim))
+        key_cache = mx.zeros((1, NUM_BLOCKS, NUM_KV_HEADS, BLOCK_SIZE, HEAD_DIM), dtype=dtype)
+        value_cache = mx.zeros((1, NUM_BLOCKS, NUM_KV_HEADS, BLOCK_SIZE, HEAD_DIM), dtype=dtype)
 
         # Mock Block Tables
         max_blocks_per_req = 2
@@ -104,7 +98,6 @@ class TestPagedAttention:
             block_tables,
             context_lengths,
             BLOCK_SIZE,
-            LAYER_IDX,
         )
         mx.eval(new_k_cache, new_v_cache)
 
@@ -139,7 +132,6 @@ class TestPagedAttention:
             BLOCK_SIZE,
             SCALE,
             NUM_KV_HEADS,
-            LAYER_IDX,
         )
         mx.eval(output)
 
@@ -207,7 +199,7 @@ class TestPagedAttention:
         num_blocks_per_req = (seq_len + block_size - 1) // block_size
         total_blocks = num_blocks_per_req * batch_size
 
-        # Setup Cache
+        # Setup Cache (single layer, shape: (1, total_blocks, num_kv_heads, block_size, head_dim))
         key_cache = mx.zeros((1, total_blocks, num_kv_heads, block_size, head_dim), dtype=dtype)
         value_cache = mx.zeros((1, total_blocks, num_kv_heads, block_size, head_dim), dtype=dtype)
 
@@ -254,7 +246,7 @@ class TestPagedAttention:
         value_cache = v_ready[None, ...]
         mx.eval(key_cache, value_cache)
 
-        # Run Kernel
+        # Run Kernel (no layer_idx needed)
         out = paged_attention(
             q,
             key_cache,
@@ -264,7 +256,6 @@ class TestPagedAttention:
             block_size,
             scale,
             num_kv_heads,
-            0,
         )
         mx.eval(out)
 
@@ -356,7 +347,6 @@ class TestPagedAttention:
                 block_size,
                 scale,
                 num_kv_heads,
-                0,
             )
             mx.eval(_)
 
@@ -371,7 +361,6 @@ class TestPagedAttention:
                 block_size,
                 scale,
                 num_kv_heads,
-                0,
             )
             mx.eval(out)
         end = time.perf_counter()

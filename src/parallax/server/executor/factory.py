@@ -48,6 +48,7 @@ def create_executor_config(args: argparse.Namespace, shared_state=None):
         "lora_eviction_policy": args.lora_eviction_policy,
         "lora_backend": args.lora_backend,
         "max_lora_chunk_size": args.max_lora_chunk_size,
+        "enable_weight_refit": args.enable_weight_refit,
     }
     return config
 

@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import mlx.core as mx
 
+from parallax.server.cache_manager import CacheManager
 from parallax.server.executor.base_executor import BaseExecutor
-from parallax.server.paged_kv_cache import PagedKVCacheManager
 from parallax.server.request import (
     InitialRequest,
     IntermediateRequest,
@@ -21,6 +21,7 @@ from parallax.utils.utils import (
     combine_padding_and_causal_masks,
     create_causal_mask,
     get_device_dtype,
+    get_layer_types,
     pad_inputs,
 )
 from parallax_utils.logging_config import get_logger
@@ -80,6 +81,8 @@ class MLXExecutor(BaseExecutor):
         nccl_port: Optional[int] = 4000,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
+        # Weight Refit
+        enable_weight_refit: Optional[bool] = False,
     ):
         logger.debug(
             f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer})"
@@ -135,14 +138,19 @@ class MLXExecutor(BaseExecutor):
             value_dim = linear_value_head_dim * linear_num_value_heads
         if key_dim is not None and value_dim is not None:
             conv_dim = key_dim * 2 + value_dim
-        self.using_state_cache = linear_conv_kernel_dim is not None and conv_dim is not None
 
+        indexer_key_head_dim = self.config.get("indexer_key_head_dim", None)
+        indexer_num_kv_heads = self.config.get("indexer_num_kv_heads", None)
+
+        layer_types = get_layer_types(self.config, start_layer, end_layer)
+        logger.debug(f"layer_types: {layer_types}")
+        time.sleep(5)
         logger.debug(
-            "Initializing PagedKVCacheManager (mlx) with block_size=%d, layers=%d",
+            "Initializing CacheManager (mlx) with block_size=%d, layers=%d",
             kv_block_size,
             self.num_shard_layers,
         )
-        self.kv_cache_manager = PagedKVCacheManager(
+        self.cache_manager = CacheManager(
             num_layers=self.num_shard_layers,
             num_kv_heads=num_key_value_heads,
             head_dim=head_dim,
@@ -150,6 +158,16 @@ class MLXExecutor(BaseExecutor):
             block_size=kv_block_size,
             cache_memory_fraction=kv_cache_memory_fraction,
             head_dim_v=v_head_dim,
+            indexer_key_head_dim=indexer_key_head_dim,
+            indexer_num_kv_heads=indexer_num_kv_heads,
+            layer_types=layer_types,
+            max_num_seqs=max_batch_size // micro_batch_ratio,
+            conv_dim=conv_dim,
+            conv_kernel_size=linear_conv_kernel_dim,
+            linear_k_dim=linear_key_head_dim,
+            linear_v_dim=linear_value_head_dim,
+            linear_num_k_heads=linear_num_key_heads,
+            linear_num_v_heads=linear_num_value_heads,
         )
         super().__init__(
             start_layer=start_layer,
@@ -171,6 +189,7 @@ class MLXExecutor(BaseExecutor):
             tp_rank=tp_rank,
             tp_size=tp_size,
             shared_state=shared_state,
+            enable_weight_refit=enable_weight_refit,
         )
 
         try:
@@ -190,7 +209,7 @@ class MLXExecutor(BaseExecutor):
         # )
 
         logger.debug(
-            f"KVCacheManager ready; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}"
+            f"CacheManager ready; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}"
         )
 
     def handle_input_requests(self, requests: List[Request]):
@@ -212,7 +231,7 @@ class MLXExecutor(BaseExecutor):
                             "It might have been cancelled or finished."
                         )
                         continue
-                    if not self.kv_cache_manager.has_request(req.request_id):
+                    if not self.cache_manager.has_request(req.request_id):
                         logger.warning(
                             f"Received IntermediateRequest {req.request_id}. "
                             "But no corresponding request found in cache manager. "
@@ -227,7 +246,7 @@ class MLXExecutor(BaseExecutor):
 
                     # Check for termination.
                     if self.scheduler.check_and_update_request_status(original_req):
-                        self.kv_cache_manager.release_request(original_req.request_id)
+                        self.cache_manager.release_request(original_req.request_id)
                         logger.debug(
                             f"Released resources for finished request {req.request_id}, "
                             f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
@@ -248,6 +267,8 @@ class MLXExecutor(BaseExecutor):
                             req_dict["eos"] = True
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
+                        if self.enable_weight_refit:
+                            req_dict["weight_version"] = self.weight_version
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:
@@ -261,14 +282,13 @@ class MLXExecutor(BaseExecutor):
                 ), "Non-first peers must receive IntermediateRequests."
                 if req.is_finished or req.hidden_states is None:
                     if self.enable_prefix_cache:
-                        keys, values = self.kv_cache_manager.gather_kv_cache(req.request_id)
+                        keys, values = self.cache_manager.gather_kv_cache(req.request_id)
                         self.prefix_cache.cache_finished_request(req, keys, values)
                         self.prefix_cache.evict_request(req.request_id)
 
-                    self.kv_cache_manager.release_request(req.request_id)
+                    self.cache_manager.release_request(req.request_id)
                     logger.debug(
                         f"Released resources for finished request {req.request_id}, "
-                        f"kv cache manager has {self.kv_cache_manager.tokens_in_cache} tokens, "
                         f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
                     )
                     self.scheduler.evict_request(req.request_id)
@@ -277,6 +297,11 @@ class MLXExecutor(BaseExecutor):
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
+
+    def check_and_refit_weight(self, refit_weight_path: str):
+        if refit_weight_path == "":
+            return
+        self.shard_loader.update_weight_from_disk(self.model_shard, refit_weight_path)
 
     def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """Process a batch of requests in MLX."""
@@ -291,6 +316,7 @@ class MLXExecutor(BaseExecutor):
             block_tables=prepared_inputs.get("block_tables"),
             context_lengths=prepared_inputs.get("context_lengths"),
             slot_mapping=prepared_inputs.get("slot_mapping"),
+            state_slot_mapping=prepared_inputs.get("state_slot_mapping"),
         )
 
         logger.debug(
@@ -311,14 +337,14 @@ class MLXExecutor(BaseExecutor):
 
         # Note: With PagedAttention, we don't need to explicitly update requests with new K/V
         # because they are written in-place to the global cache.
-        # self.kv_cache_manager.update_requests(...) is REMOVED.
+        # self.cache_manager.update_requests(...) is REMOVED.
 
         # Update prefix cache (TODO: Adapt to PagedKV)
         if self.enable_prefix_cache:
             pass
             # for _, req in enumerate(requests):
             #    if req.is_prefill:
-            #        keys, values = self.kv_cache_manager.gather_kv_cache(req.request_id)
+            #        keys, values = self.cache_manager.gather_kv_cache(req.request_id)
             #        self.prefix_cache.cache_unfinished_request(req, keys, values)
 
         # Process last peer: need additional sampling + detokenization
@@ -333,8 +359,8 @@ class MLXExecutor(BaseExecutor):
     def _release_request(self, rid: str):
         """Release per-request resources in MLX."""
         try:
-            if hasattr(self, "kv_cache_manager") and self.kv_cache_manager is not None:
-                self.kv_cache_manager.release_request(rid)
+            if hasattr(self, "cache_manager") and self.cache_manager is not None:
+                self.cache_manager.release_request(rid)
         except Exception:
             pass
 
@@ -369,11 +395,11 @@ class MLXExecutor(BaseExecutor):
 
             # Allocate Paged KV blocks
             # For first peer and intermediate peers, we allocate based on prompt length
-            success = self.kv_cache_manager.allocate_request(req.request_id, req.total_length)
+            success = self.cache_manager.allocate_request(req.request_id, req.total_length)
             if not success:
                 raise RuntimeError(f"OOM during prefill allocation for {req.request_id}")
 
-            block_table = self.kv_cache_manager.get_block_table(req.request_id)
+            block_table = self.cache_manager.get_block_table(req.request_id)
             block_tables_list.append(block_table)
             # For prefill, context length after this step will be total_length
             context_lengths_list.append(req.total_length)
@@ -396,10 +422,10 @@ class MLXExecutor(BaseExecutor):
             for seq_idx in range(max_len):
                 if seq_idx < length:
                     # Valid token
-                    block_idx = seq_idx // self.kv_cache_manager.block_size
-                    block_offset = seq_idx % self.kv_cache_manager.block_size
+                    block_idx = seq_idx // self.cache_manager.block_size
+                    block_offset = seq_idx % self.cache_manager.block_size
                     physical_block = block_table[block_idx]
-                    slot = physical_block * self.kv_cache_manager.block_size + block_offset
+                    slot = physical_block * self.cache_manager.block_size + block_offset
                     slot_mapping_flat.append(slot)
                 else:
                     # Padding token
@@ -421,15 +447,22 @@ class MLXExecutor(BaseExecutor):
         causal_mask = create_causal_mask(padded_inputs.shape[1], padded_inputs.shape[1], self.dtype)
         mask = combine_padding_and_causal_masks(padding_mask, causal_mask, self.dtype)
 
+        # Prepare state slot mapping if needed
+        state_slot_mapping = None
+        if self.cache_manager.needs_slots:
+            req_ids = [r.request_id for r in batched_requests]
+            slots = [self.cache_manager.get_slot(rid) for rid in req_ids]
+            state_slot_mapping = mx.array(slots, dtype=mx.int32)
+
         ret = {
             "h_or_tokens": padded_inputs,
-            "cache": self.kv_cache_manager.get_cache(),
+            "cache": self.cache_manager.get_caches(),
             "mask": mask,
             "requests": batched_requests,
             "block_tables": block_tables_tensor,
             "context_lengths": context_lengths_tensor,
             "slot_mapping": slot_mapping_tensor,
-            "state_cache": None,
+            "state_slot_mapping": state_slot_mapping,
         }
         logger.debug(f"Prepared MLX prefill batch (size={batch_size})")
         return ret
@@ -456,13 +489,13 @@ class MLXExecutor(BaseExecutor):
             # TODO: Prefix cache update
 
             # Allocate slot for new token
-            success = self.kv_cache_manager.append_slot(req.request_id)
+            success = self.cache_manager.append_slot(req.request_id)
             if not success:
                 raise RuntimeError(f"OOM during decode for {req.request_id}")
 
-            block_table = self.kv_cache_manager.get_block_table(req.request_id)
+            block_table = self.cache_manager.get_block_table(req.request_id)
             block_tables_list.append(block_table)
-            context_lengths_list.append(self.kv_cache_manager.get_context_length(req.request_id))
+            context_lengths_list.append(self.cache_manager.get_context_length(req.request_id))
 
         if isinstance(h_or_tokens_list[0], list):
             # First peer case: h_or_tokens_list is list of list of ints [[token_id], ...]
@@ -481,15 +514,22 @@ class MLXExecutor(BaseExecutor):
         block_tables_tensor = mx.array(padded_block_tables, dtype=mx.int32)
         context_lengths_tensor = mx.array(context_lengths_list, dtype=mx.int32)
 
+        # Prepare state slot mapping if needed
+        state_slot_mapping = None
+        if self.cache_manager.needs_slots:
+            req_ids = [r.request_id for r in batched_requests]
+            slots = [self.cache_manager.get_slot(rid) for rid in req_ids]
+            state_slot_mapping = mx.array(slots, dtype=mx.int32)
+
         ret = {
             "h_or_tokens": padded_inputs,
-            "cache": self.kv_cache_manager.get_cache(),
+            "cache": self.cache_manager.get_caches(),
             "mask": None,
             "requests": batched_requests,
             "block_tables": block_tables_tensor,
             "context_lengths": context_lengths_tensor,
             "slot_mapping": None,
-            "state_cache": None,
+            "state_slot_mapping": state_slot_mapping,
         }
         logger.debug(f"Prepared MLX decode batch (size={batch_size})")
         return ret

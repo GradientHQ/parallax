@@ -2,7 +2,7 @@
 hidden_dimefines the Qwen3 model.
 """
 
-from typing import Optional, Tuple
+from typing import Any, List, Optional
 
 import mlx.core as mx
 from mlx_lm.models.base import create_causal_mask, scaled_dot_product_attention
@@ -11,6 +11,7 @@ from mlx_lm.models.gpt_oss import ModelArgs
 from mlx_lm.models.gpt_oss import TransformerBlock as MLXGPTOSSBlock
 
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
+from parallax.server.cache.base import BaseCache
 
 
 class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
@@ -24,12 +25,12 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
+        cache: Optional[BaseCache] = None,
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
-        layer_idx: int = 0,
         window_size: Optional[int] = None,
+        **kwargs,
     ) -> mx.array:
         """
         Attention forward pass with PagedAttention integration.
@@ -48,7 +49,7 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
         )
         values_new = values_new.reshape(batch, target_len, self.num_key_value_heads, -1)
 
-        key_cache_global, value_cache_global = cache
+        key_cache_global, value_cache_global = cache.get_cache()
 
         queries_rotated_list = []
         keys_rotated_list = []
@@ -75,7 +76,6 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
             block_tables,
             context_lengths,
             block_size,
-            layer_idx,
             slot_mapping=slot_mapping,
         )
 
@@ -90,7 +90,6 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                 block_size,
                 self.sm_scale,
                 self.num_key_value_heads,
-                layer_idx,
                 window_size=window_size,
                 sinks=self.sinks,
             )
@@ -121,11 +120,12 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
     This version handles the KV cache explicitly and returns new K and V states.
     """
 
-    def __init__(self, args: ModelArgs, layer_idx: int):
+    def __init__(self, args: ModelArgs, layer_idx: int, local_layer_idx: int):
         super().__init__(args)
         self.self_attn = ParallaxGPTOSSAttention(args)
         self.sliding_window = args.sliding_window
         self.layer_idx = layer_idx
+        self.local_layer_idx = local_layer_idx
         if args.layer_types:
             self.layer_type = args.layer_types[layer_idx]
         else:
@@ -138,10 +138,11 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
+        cache: Optional[List[Any]] = None,
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
+        **kwargs,
     ):
         # Determine window size for this layer
         if self.layer_type == "sliding_attention":
@@ -152,12 +153,12 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
         r = self.self_attn(
             self.input_layernorm(x),
             mask=mask,
-            cache=cache,
+            cache=cache[self.local_layer_idx],
             block_tables=block_tables,
             context_lengths=context_lengths,
             slot_mapping=slot_mapping,
-            layer_idx=self.layer_idx,
             window_size=window_size,
+            **kwargs,
         )
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))

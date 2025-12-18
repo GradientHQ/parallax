@@ -8,14 +8,6 @@ COPY README.md ./README.md
 COPY src ./src
 COPY pyproject.toml ./pyproject.toml
 
-RUN apt-get update
-
-RUN git clone --branch v0.29.1 https://github.com/ml-explore/mlx.git && \
-    apt-get install libblas-dev liblapack-dev liblapacke-dev -y && \
-    cd mlx && \
-    PYPI_RELEASE=1 pip install . --break-system-packages && \
-    cd ..
-
 # remove sglang[all] from pyproject.toml
 RUN sed -i '/sglang\[all\]/d' pyproject.toml
 

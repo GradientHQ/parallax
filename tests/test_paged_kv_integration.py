@@ -4,7 +4,7 @@ import mlx.core as mx
 import numpy as np
 
 from parallax.metal.paged_attention.kernel import reshape_and_cache
-from parallax.server.paged_kv_cache import PagedKVCacheManager
+from parallax.server.cache_manager import CacheManager
 
 
 class TestPagedKVIntegration(unittest.TestCase):
@@ -19,7 +19,7 @@ class TestPagedKVIntegration(unittest.TestCase):
         # Mocking device info to avoid OOM or device dependency in test env
         # Assuming cache_memory_fraction results in enough blocks
         # We will manually override num_gpu_blocks if needed or rely on default fallback
-        self.cache_manager = PagedKVCacheManager(
+        self.cache_manager = CacheManager(
             num_layers=self.num_layers,
             num_kv_heads=self.num_kv_heads,
             head_dim=self.head_dim,
@@ -103,8 +103,9 @@ class TestPagedKVIntegration(unittest.TestCase):
 
         slot_mapping_tensor = mx.array(slot_mapping_flat, dtype=mx.int64)
 
-        # 4. Run Kernel
-        key_cache, value_cache = self.cache_manager.get_cache()
+        # 4. Run Kernel (get cache for layer 0)
+        layer_cache = self.cache_manager.get_caches()[0]
+        key_cache, value_cache = layer_cache.get_cache()
 
         reshape_and_cache(
             keys_flat,
@@ -114,7 +115,6 @@ class TestPagedKVIntegration(unittest.TestCase):
             block_tables_tensor,
             context_lengths_tensor,
             self.block_size,
-            layer_idx=0,
             slot_mapping=slot_mapping_tensor,
         )
 
@@ -125,7 +125,10 @@ class TestPagedKVIntegration(unittest.TestCase):
         # req1 fits in 1 block (block_size=16)
         block_idx_req1 = block_tables[0][0]
         # Check first token
-        cached_k_0 = key_cache[0, block_idx_req1, :, 0, :]  # layer 0, block, heads, offset 0, dim
+        # key_cache shape: (1, num_blocks, num_kv_heads, block_size, head_dim)
+        cached_k_0 = key_cache[
+            0, block_idx_req1, :, 0, :
+        ]  # dim0=placeholder, block, heads, offset 0, dim
         expected_k_0 = mx.array(keys_np[0, 0, :, :])
         self.assertTrue(mx.allclose(cached_k_0, expected_k_0).item(), "Req1 Token 0 Key Mismatch")
 

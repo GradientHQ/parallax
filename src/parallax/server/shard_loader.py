@@ -17,7 +17,7 @@ from mlx.utils import tree_unflatten
 from mlx_lm.models.switch_layers import QuantizedSwitchLinear, SwitchLinear
 from mlx_lm.tuner.dora import DoRAEmbedding, DoRALinear
 from mlx_lm.tuner.lora import LoRAEmbedding, LoRALinear, LoRASwitchLinear
-from mlx_lm.utils import get_model_path, load_config
+from mlx_lm.utils import _download, load_config
 
 from parallax.server.model import ShardedModel
 from parallax.utils.tokenizer_utils import load_tokenizer
@@ -27,7 +27,6 @@ logger = get_logger(__name__)
 
 MODEL_CLASS_MAP = {
     "kimi_k2": "mlx_lm.models.deepseek_v3",
-    "minimax": "parallax.models.minimax",
 }
 
 
@@ -240,7 +239,7 @@ class MLXModelLoader:
                 local_files_only=self.use_hfcache,
             )
         else:
-            model_path = get_model_path(self.model_path_str)[0]
+            model_path = _download(self.model_path_str)
 
         config = load_config(model_path)
         tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
@@ -433,3 +432,109 @@ class MLXModelLoader:
             mx.get_active_memory() / 1024**3,
         )
         return model_shard, config, tokenizer
+
+    def update_weight_from_disk(self, model_shard: nn.Module, refit_weight_path: str):
+        """Runtime weight refit from disk"""
+        weight_files = glob.glob(refit_weight_path + "/*.safetensors")
+        if not weight_files:
+            raise FileNotFoundError(f"No safetensors found in {refit_weight_path}")
+
+        logger.info(f"Begin refit weight from path: {refit_weight_path}")
+        shard_weights = {}
+        layer_key_prefix = "model.layers"  # Common prefix
+
+        for wf in weight_files:
+            # For bf16 models, we need torch tensors as a bridge
+            with safetensors.safe_open(wf, framework="pt") as f:
+                for key in f.keys():
+                    is_needed = False
+                    remapped_key = None
+
+                    # Check if the key belongs to the shard and remap it
+                    if (
+                        model_shard.is_first_shard
+                        and "embed_tokens" in key
+                        and key.startswith("model.")
+                    ):
+                        is_needed = True
+                        remapped_key = key.replace("model.", "", 1)
+                        if model_shard.is_last_shard and self.config.get(
+                            "tie_word_embeddings", False
+                        ):
+                            shard_weights["lm_head.weight"] = mx.array(f.get_tensor(key))
+                    elif model_shard.is_last_shard:
+                        if "model.norm" in key:
+                            is_needed = True
+                            remapped_key = key.replace("model.", "", 1)
+                        if "lm_head" in key:
+                            is_needed = True
+                            remapped_key = key
+                        elif (
+                            self.config.get("tie_word_embeddings", False)
+                            and "embed" in key
+                            and key.startswith("model.embed_tokens")
+                        ):
+                            # TODO: we don't need load lm_head in this case
+                            # as we will pass hidden_states to FirstPeer
+                            # see request.py for details
+                            is_needed = True
+                            remapped_key = "lm_head.weight"
+                    if layer_key_prefix in key:
+                        try:
+                            parts = key.split(".")
+                            layer_idx = int(parts[2])
+                            if self.start_layer <= layer_idx < self.end_layer:
+                                is_needed = True
+                                local_layer_idx = layer_idx - self.start_layer
+                                remapped_key = f"layers.{local_layer_idx}.{'.'.join(parts[3:])}"
+                        except (ValueError, IndexError):
+                            continue
+
+                    # If the key is needed, load only that tensor from the file
+                    if is_needed:
+                        shard_weights[remapped_key] = mx.array(f.get_tensor(key))
+
+        if (quantization := self.config.get("quantization", None)) is not None:
+            logger.info("Model is quantized. Applying quantization parameters...")
+
+            def class_predicate(p, m):
+                # Handle custom per-layer quantizations from the config
+                qcfg = self.config.get("quantization", {})
+                # Direct key (Parallax remapped keys usually drop the 'model.' prefix)
+                if p in qcfg:
+                    override = qcfg[p]
+                    if isinstance(override, dict):
+                        logger.debug(
+                            f"[quantize] Using override for '{p}': bits={override.get('bits')} group_size={override.get('group_size')}"
+                        )
+                    return override
+                # Allow config keys that still include the original 'model.' prefix (as in mlx-lm)
+                prefixed = f"model.{p}"
+                if prefixed in qcfg:
+                    override = qcfg[prefixed]
+                    if isinstance(override, dict):
+                        logger.debug(
+                            f"[quantize] Using override for '{prefixed}' (mapped to '{p}'): bits={override.get('bits')} group_size={override.get('group_size')}"
+                        )
+                    return override
+                if not hasattr(m, "to_quantized"):
+                    return False
+                # Handle legacy models by checking if quantized weights exist
+                return f"{p}.scales" in shard_weights
+
+            nn.quantize(
+                model_shard,
+                group_size=quantization["group_size"],
+                bits=quantization["bits"],
+                mode=quantization.get("mode", "affine"),
+                class_predicate=class_predicate,
+            )
+
+        model_shard.load_weights(list(shard_weights.items()), strict=False)
+        mx.eval(model_shard.parameters())
+        model_shard.eval()
+        logger.info(
+            "Successfully updated model shard from %s, memory usage: %.3f GB",
+            refit_weight_path,
+            mx.get_active_memory() / 1024**3,
+        )

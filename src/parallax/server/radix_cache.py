@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple
 
 import mlx.core as mx
 
-from parallax.server.kv_cache import KVCache
+from parallax.server.cache.kv_cache import KVCache
 from parallax.server.request import Request
 
 

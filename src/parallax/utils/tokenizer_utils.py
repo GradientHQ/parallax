@@ -14,7 +14,7 @@ from mlx_lm.tokenizer_utils import (
     _is_spm_decoder,
     _is_spm_decoder_no_space,
 )
-from mlx_lm.tokenizer_utils import load_tokenizer as _mlx_load_tokenizer
+from mlx_lm.tokenizer_utils import load as _mlx_load_tokenizer
 
 
 class ParallaxNaiveStreamingDetokenizer(NaiveStreamingDetokenizer):

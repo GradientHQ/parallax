@@ -10,7 +10,7 @@ For MAC, test 1 pipeline
 
 import pytest
 from mlx_lm.generate import generate
-from mlx_lm.utils import get_model_path, load_model
+from mlx_lm.utils import _download, load_model
 
 from parallax.p2p.message_util import proto_to_request, request_to_proto
 from parallax.server.request import InitialRequest
@@ -20,7 +20,7 @@ from parallax.utils.utils import get_current_device
 MLX_MODEL_REPO = "mlx-community/Qwen3-0.6B-bf16"
 CUDA_MODEL_REPO = "Qwen/Qwen3-0.6B"
 
-model_path = get_model_path(MLX_MODEL_REPO)[0]
+model_path = _download(MLX_MODEL_REPO)
 ref_model, ref_config = load_model(model_path)
 ref_tokenizer = load_tokenizer(model_path, eos_token_ids=ref_config.get("eos_token_id", None))
 

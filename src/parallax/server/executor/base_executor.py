@@ -83,6 +83,8 @@ class BaseExecutor:
         tp_size: Optional[int] = 1,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
+        # Weight Refit
+        enable_weight_refit: Optional[bool] = False,
     ):
         # Backend
         if device is not None:
@@ -101,6 +103,10 @@ class BaseExecutor:
             self.shared_state = SharedState(shared_state)  # Auto-converts dict to SharedState
         else:
             self.shared_state = None
+
+        # Runtime weight refit for RL
+        self.enable_weight_refit = enable_weight_refit
+        self.weight_version = 0
 
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
@@ -147,7 +153,7 @@ class BaseExecutor:
             is_first_peer=self.is_first_peer,
             tokenizer=self.tokenizer,
             eos_token_id=self.eos_token_id,
-            kv_cache_manager=self.kv_cache_manager if self.device == "mlx" else None,
+            cache_manager=self.cache_manager if self.device == "mlx" else None,
             request_timeout_s=request_timeout_s,
             shared_state=self.shared_state,
         )
@@ -176,6 +182,10 @@ class BaseExecutor:
                 )
         if self.shared_state is not None:
             self.shared_state.set_status(ServerState.READY.value)
+
+        # store max_sequence_length
+        self.max_sequence_length = max_sequence_length
+        self.model_path = None
 
     @abstractmethod
     def handle_input_requests(self, requests: List[Request]):
@@ -211,6 +221,10 @@ class BaseExecutor:
         """
 
     @abstractmethod
+    def check_and_refit_weight(self, refit_weight_path: str):
+        """Run weight if triggered"""
+
+    @abstractmethod
     def _release_request(self, rid: str):
         """Release request in backend frameworks"""
 
@@ -243,14 +257,14 @@ class BaseExecutor:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
         return recv_reqs
 
-    def recv_requests_from_peer(self) -> List[Request]:
+    def recv_requests_from_peer(self) -> Tuple[List[Request], str]:
         """Receives requests from the RPC server."""
+        refit_weight_path = ""
         if self.tp_rank == 0:
             recv_reqs = []
             while True:
                 try:
                     recv_req = self.recv_from_peer_socket.recv_multipart(zmq.NOBLOCK)
-                    assert len(recv_req) == 2, f"Received invalid request: {recv_req}"
                     if recv_req[0] == b"forward":
                         # Create a new ForwardRequest instance and parse from bytes
                         forward_request = forward_pb2.ForwardRequest()
@@ -284,6 +298,9 @@ class BaseExecutor:
                         abort_request.ParseFromString(recv_req[1])
                         recv_req = proto_to_abort_request(abort_request)
                         recv_reqs.extend(recv_req)
+                    elif recv_req[0] == b"refit":
+                        refit_weight_path = recv_req[1].decode("ascii")
+                        self.weight_version = int(recv_req[2].decode("ascii"))
                     else:
                         raise ValueError(f"Unknown request type: {recv_req[0]}")
                     # First peer is responsible for tokenization
@@ -301,7 +318,7 @@ class BaseExecutor:
         else:
             recv_reqs = []
 
-        return recv_reqs
+        return recv_reqs, refit_weight_path
 
     def prepare_batch_inputs(self, batched_requests: List[Request]) -> Optional[Dict[str, Any]]:
         """Prepares inputs for ShardedModel from a batch of requests.
@@ -401,7 +418,10 @@ class BaseExecutor:
                 received_requests = self.recv_requests_from_http()
 
             # Receive requests from peer
-            received_requests.extend(self.recv_requests_from_peer())
+            incoming_requests, refit_weight_path = self.recv_requests_from_peer()
+            received_requests.extend(incoming_requests)
+            if self.enable_weight_refit:
+                self.check_and_refit_weight(refit_weight_path)
 
             self.handle_input_requests(received_requests)
 
@@ -570,10 +590,26 @@ class BaseExecutor:
             prompt = convert_chat(raw_request["messages"], raw_request.get("role_mapping"))
             prompt = self.tokenizer.encode(prompt)
 
+        max_req_len = self.max_sequence_length if self.max_sequence_length is not None else 2048
+        input_token_num = len(prompt)
+        if input_token_num >= max_req_len:
+            logger.warning(
+                f"Input token length {input_token_num} exceeds max_sequence_length {max_req_len}. Truncating input."
+            )
+            now_prompt_len = max(5, max_req_len - 10)
+            del prompt[now_prompt_len:]
+            input_token_num = len(prompt)
+
         max_new_tokens = raw_request.get("max_tokens")
-        if max_new_tokens is None:
-            max_new_tokens = 2048
+        logger.debug(f"max_new_tokens from request: {max_new_tokens}")
+        if max_new_tokens is None or (input_token_num + max_new_tokens) >= max_req_len:
+            logger.warning(
+                f"max_new_tokens {max_new_tokens} is None or input length + max_new_tokens exceeds max_sequence_length {max_req_len}. Adjusting max_new_tokens."
+            )
+            max_new_tokens = max(0, max_req_len - input_token_num)
         max_total_length = len(prompt) + max_new_tokens
+        logger.debug(f"Final max_new_tokens for request ID {rid}: {max_new_tokens}")
+        logger.debug(f"Final input token length for request ID {rid}: {input_token_num}")
 
         lora_path = raw_request.get("lora_path")
 

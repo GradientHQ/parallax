@@ -2,7 +2,7 @@ from parallax.server.request import InitialRequest, Request, RequestStatus
 from parallax.server.scheduler import Scheduler
 
 
-class FakeKVCacheManager:
+class FakeCacheManager:
     def __init__(self, allow: bool = True):
         self.allow = allow
         self._reqs = set()
@@ -92,12 +92,12 @@ def test_token_budget_prefill_skipped_decode_taken():
 
 def test_kv_cache_admission_guard_blocks_prefill():
     # A KV manager that rejects additions
-    kv_mgr = FakeKVCacheManager(allow=False)
+    cache_mgr = FakeCacheManager(allow=False)
     sched = Scheduler(
         max_batch_size=2,
         max_num_tokens_per_batch=100,
         micro_batch_ratio=1,
-        kv_cache_manager=kv_mgr,
+        cache_manager=cache_mgr,
     )
     p = make_prefill("p", 4)
     sched.enque_request(p)
