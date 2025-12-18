@@ -79,9 +79,20 @@ void PagedAttentionV1::eval_gpu(
     const int num_threads = 256;
     const int num_simd_lanes = 32;
     const int partition_size = 0; // v1 doesn't use partitioning
+    bool use_partitioning = false;
+    bool use_alibi = false;
+    bool use_fp8_scales = false;
+
+    // Function constants
+    mx::metal::MTLFCList func_consts = {
+      {&use_partitioning, MTL::DataType::DataTypeBool, 10},
+      {&use_alibi, MTL::DataType::DataTypeBool, 20},
+      {&use_fp8_scales, MTL::DataType::DataTypeBool, 30},
+    };
 
     // Resolve name of kernel
     std::string kname;
+    std::string hash_name = "";
     kname = "paged_attention_" + type_to_name(out);
     kname += "_cache_" + type_to_name(k);
     kname += "_hs" + std::to_string(num_kv_heads_);
@@ -94,7 +105,7 @@ void PagedAttentionV1::eval_gpu(
     auto lib = d.get_library("parallax_ext", current_binary_dir());
 
     // Make a kernel from this metal library
-    auto kernel = d.get_kernel(kname, lib);
+    auto kernel = d.get_kernel(kname, lib, hash_name, func_consts);
 
     // Prepare to encode kernel
     auto& compute_encoder = d.get_command_encoder(s.index);
