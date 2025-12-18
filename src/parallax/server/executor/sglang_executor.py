@@ -327,6 +327,10 @@ class SGLExecutor(BaseExecutor):
                             req_dict["length"] = True
                         if original_req.status == RequestStatus.FINISHED_ABORT:
                             req_dict["abort"] = True
+
+                        # Add prob value for the sampled token (if requested and available)
+                        if original_req.return_probs and req.token_prob is not None:
+                            req_dict["probs"] = req.token_prob
                         if self.enable_weight_refit:
                             req_dict["weight_version"] = self.weight_version
                         if hasattr(self, "send_to_ipc_socket"):
@@ -356,6 +360,7 @@ class SGLExecutor(BaseExecutor):
 
         forward_batch = prepared_inputs["forward_batch"]
         pp_proxy_tensors = prepared_inputs["pp_proxy_tensors"]
+        requests = prepared_inputs.get("requests", [])
 
         # Execute model with SGLang
         logits_output, _ = self.model_runner.forward(
@@ -379,14 +384,33 @@ class SGLExecutor(BaseExecutor):
         if return_decoded_tokens:
             # Last peer: sample and return token IDs
             next_token_ids = self.model_runner.sample(logits_output, forward_batch)
-            return next_token_ids
+
+            # Only compute probs if any request in the batch needs it
+            # Check if any InitialRequest has return_probs=True
+            needs_probs = any(
+                (isinstance(req, InitialRequest) and req.return_probs)
+                or (isinstance(req, IntermediateRequest) and req.return_probs)
+                for req in requests
+            )
+
+            token_probs = None
+            # Extract probs for the sampled tokens only if needed
+            if needs_probs and hasattr(logits_output, "next_token_logits"):
+                # Get probs for sampled tokens (next_token_logits contains probabilities)
+                real_probs = logits_output.next_token_logits[
+                    torch.arange(len(next_token_ids)), next_token_ids
+                ]
+                token_probs = real_probs.cpu().float().tolist()
+
+            # Return dict with token_ids and optional probs
+            return {"hidden_states": next_token_ids, "probs": token_probs}
         else:
             # Intermediate peer: return hidden states for next peer
             # Note: SGLang stores hidden_states + residual separately
             final_hidden_states = (
                 logits_output.tensors["hidden_states"] + logits_output.tensors["residual"]
             )
-            return final_hidden_states
+            return {"hidden_states": final_hidden_states, "probs": None}
 
     def _release_request(self, rid: str):
         """Release per-request resources in SGLang."""

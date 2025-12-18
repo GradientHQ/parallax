@@ -69,13 +69,13 @@ def run_executor_pipeline_stage(executor, requests, batch_type, is_last_peer):
     prepared_batch = executor.prepare_batch_inputs(input_batch)
     assert prepared_batch is not None, "Failed to prepare batch inputs"
     batch_data = prepared_batch[batch_type]
-    hidden_states = executor.process_batch(batch_data, return_decoded_tokens=is_last_peer)
+    batch_output = executor.process_batch(batch_data, return_decoded_tokens=is_last_peer)
     output_reqs = executor.prepare_next_batch_requests(
         requests=batch_data["requests"],
-        hidden_states=hidden_states,
+        batch_output=batch_output,
         context_lengths=batch_data.get("context_lengths"),
     )
-    return output_reqs, hidden_states
+    return output_reqs, batch_output
 
 
 @pytest.mark.parametrize(
@@ -190,7 +190,8 @@ def test_decode_pipeline_multiple_steps(pipeline_devices, pp_end_layers, num_dec
         print(f"prompt: {prompt}")
         print(f"mlx-lm reference generation: {ref_output_text}")
         output_tokens_for_prompt = [
-            gen_step_tokens[i].item() for gen_step_tokens in generated_tokens_pipeline
+            gen_step_tokens["hidden_states"][i].item()
+            for gen_step_tokens in generated_tokens_pipeline
         ]
 
         # Decode the token IDs into a string

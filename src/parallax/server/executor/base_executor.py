@@ -359,10 +359,25 @@ class BaseExecutor:
         }
 
     def prepare_next_batch_requests(
-        self, requests: List[Request], hidden_states: Any, context_lengths: Any
+        self, requests: List[Request], batch_output: Any, context_lengths: Any
     ) -> List[Request]:
-        """Prepares a batch of requests for the next stage of the pipeline."""
+        """Prepares a batch of requests for the next stage of the pipeline.
+
+        Args:
+            requests: List of requests in the batch
+            batch_output: Output from process_batch. Always a dict with:
+                - 'hidden_states': token IDs (last peer) or hidden states tensor (intermediate peer)
+                - 'probs': list of probabilities (last peer) or None (intermediate peer)
+            context_lengths: Context lengths for each request
+        """
         if self.tp_rank == 0:
+            # Extract hidden_states and probs from output (always a dict now)
+            assert isinstance(
+                batch_output, dict
+            ), f"Expected dict from process_batch, got {type(batch_output)}"
+            hidden_states = batch_output["hidden_states"]
+            token_probs = batch_output["probs"]
+
             batched_requests = []
             pre_length = 0
             for i, src_request in enumerate(requests):
@@ -387,7 +402,16 @@ class BaseExecutor:
                             hidden_state_for_req = hidden_states[pre_length : pre_length + 1, :]
                         pre_length += 1
 
-                next_req = self._prepare_next_single_request(src_request, hidden_state_for_req)
+                # Get prob for this request if available
+                token_prob = (
+                    token_probs[i]
+                    if (self.is_last_peer and token_probs and i < len(token_probs))
+                    else None
+                )
+
+                next_req = self._prepare_next_single_request(
+                    src_request, hidden_state_for_req, token_prob
+                )
                 batched_requests.append(next_req)
         else:
             batched_requests = None
@@ -504,7 +528,7 @@ class BaseExecutor:
                         # 7. Prepare requests for the next stage in the pipeline
                         next_batch = self.prepare_next_batch_requests(
                             requests=prepared_inputs["requests"],
-                            hidden_states=output,
+                            batch_output=output,
                             context_lengths=prepared_inputs.get("context_lengths"),
                         )
 
@@ -614,6 +638,7 @@ class BaseExecutor:
         logger.debug(f"Final input token length for request ID {rid}: {input_token_num}")
 
         lora_path = raw_request.get("lora_path")
+        return_probs = raw_request.get("return_probs", False)  # Get return_probs parameter
 
         raw_sampling_params = raw_request.get("sampling_params")
         if raw_sampling_params is None:
@@ -638,6 +663,7 @@ class BaseExecutor:
             max_new_tokens=max_new_tokens,
             max_total_length=max_total_length,
             lora_path=lora_path,
+            return_probs=return_probs,
         )
         if "routing_table" in raw_request:
             req.routing_table = raw_request["routing_table"]
@@ -671,7 +697,9 @@ class BaseExecutor:
         except Exception:  # pragma: no cover - best effort notification
             logger.debug("Failed to send error notification to HTTP handler", exc_info=True)
 
-    def _prepare_next_single_request(self, request: Request, hidden_states: Any) -> Request:
+    def _prepare_next_single_request(
+        self, request: Request, hidden_states: Any, token_prob: Optional[float] = None
+    ) -> Request:
         """Handle request state changes both inter and intra peers.
 
         This function prepares the request object to be sent to the *next* peer in the
@@ -680,6 +708,7 @@ class BaseExecutor:
         Args:
             request: The request that was just processed by this peer.
             hidden_states: The output hidden_states/output_ids from the model for this request.
+            token_prob: The probability value for the sampled token (optional).
 
         Returns:
             A new Request object ready to be sent to the next destination.
@@ -700,6 +729,7 @@ class BaseExecutor:
                 next_token_id=next_token_id,
                 routing_table=request.routing_table,
                 lora_path=request.lora_path,
+                token_prob=token_prob,
             )
         if self.is_last_peer:
             # Last peer decodes a token and sends it back to the first peer.
@@ -718,6 +748,7 @@ class BaseExecutor:
                 next_token_id=next_token_id,
                 routing_table=request.routing_table,
                 lora_path=request.lora_path,
+                token_prob=token_prob,
             )
         # This peer is the first or an intermediate peer.
         if self.is_first_peer:

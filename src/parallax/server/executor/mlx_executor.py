@@ -279,6 +279,10 @@ class MLXExecutor(BaseExecutor):
                             req_dict["length"] = True
                         if original_req.status == RequestStatus.FINISHED_ABORT:
                             req_dict["abort"] = True
+
+                        # Add prob value for the sampled token (if requested and available)
+                        if original_req.return_probs and req.token_prob is not None:
+                            req_dict["probs"] = req.token_prob
                         if self.enable_weight_refit:
                             req_dict["weight_version"] = self.weight_version
                         if hasattr(self, "send_to_ipc_socket"):
@@ -362,11 +366,48 @@ class MLXExecutor(BaseExecutor):
         # Process last peer: need additional sampling + detokenization
         if return_decoded_tokens:
             sampling_info = SamplingBatchInfo.from_reqs(requests)
-            return mx.array(
+
+            # For MLX, hidden_states at last shard is already logits (after lm_head)
+            # hidden_states shape: [batch_size, seq_len, vocab_size]
+            token_ids = mx.array(
                 self.model_shard.logits_to_tokens(hidden_states, lengths, sampling_info)
             )
 
-        return hidden_states
+            needs_probs = any(
+                (isinstance(req, InitialRequest) and req.return_probs)
+                or (isinstance(req, IntermediateRequest) and req.return_probs)
+                for req in requests
+            )
+
+            token_probs = None
+            if needs_probs:
+                # Extract probability values for sampled tokens
+                try:
+                    # Get last position logits for each request
+                    batch_probs = []
+                    for i, req in enumerate(requests):
+                        if lengths[i] > 0:
+                            # Get logit at last position
+                            last_idx = int(lengths[i]) - 1
+                            last_logits = hidden_states[i, last_idx, :]  # [vocab_size]
+                            probs = last_logits / sampling_info.temperatures.reshape(-1, 1)
+                            probs[:] = mx.softmax(probs, axis=-1)
+                            # logit_value = float(last_logits[token_id])
+                            # batch_logits.append(logit_value)
+                            # Extract probability for the sampled token
+                            token_id = int(token_ids[i])
+                            batch_probs.append(float(probs[i, token_id]))
+
+                    token_probs = batch_probs if batch_probs else None
+                except Exception as e:
+                    logger.debug(f"Failed to extract token probs: {e}")
+                    token_probs = None
+
+            # Return dict with token_ids and optional probs
+            return {"hidden_states": token_ids, "probs": token_probs}
+
+        # Intermediate peer: return hidden states without probs
+        return {"hidden_states": hidden_states, "probs": None}
 
     def _release_request(self, rid: str):
         """Release per-request resources in MLX."""
