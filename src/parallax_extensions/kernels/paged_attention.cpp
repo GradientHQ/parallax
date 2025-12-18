@@ -4,22 +4,13 @@
 #include <sstream>
 #include <string>
 
+#include "utils.h"
 #include "paged_attention.h"
 #include "mlx/backend/metal/device.h"
 #include "mlx/backend/metal/utils.h"
 
 namespace parallax_ext {
 
-std::string current_binary_dir() {
-  static std::string binary_dir = []() {
-    Dl_info info;
-    if (!dladdr(reinterpret_cast<void*>(&current_binary_dir), &info)) {
-      throw std::runtime_error("Unable to get current binary dir.");
-    }
-    return std::filesystem::path(info.dli_fname).parent_path().string();
-  }();
-  return binary_dir;
-}
 
 mx::array paged_attention_v1(
     const mx::array& query,         // [num_seqs, num_heads, head_size]
