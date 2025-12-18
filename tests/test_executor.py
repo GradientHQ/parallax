@@ -106,19 +106,19 @@ def test_decode_pipeline_multiple_steps(pipeline_devices, pp_end_layers, num_dec
         start_layer=0,
         end_layer=pp_end_layers[0],
         device=pipeline_devices[0],
-        kv_cache_memory_fraction=0.3,
+        kv_cache_memory_fraction=0.1,
     )
     executor_peer2 = create_executor(
         start_layer=pp_end_layers[0],
         end_layer=pp_end_layers[1],
         device=pipeline_devices[1],
-        kv_cache_memory_fraction=0.3,
+        kv_cache_memory_fraction=0.1,
     )
     executor_peer3 = create_executor(
         start_layer=pp_end_layers[1],
         end_layer=pp_end_layers[2],
         device=pipeline_devices[2],
-        kv_cache_memory_fraction=0.3,
+        kv_cache_memory_fraction=0.1,
     )
 
     # 2. Setup initial requests for multiple prompts
