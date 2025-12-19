@@ -24,6 +24,9 @@ except ImportError:
     class _MockDPPaddingMode:
         class _Mode:
             def is_max_len(self):
+                return False
+
+            def is_packed(self):
                 return True
 
         MAX_LEN = _Mode()
@@ -113,7 +116,16 @@ def form_sgl_batch_prefill(
     forward_batch = ForwardBatch.init_new(model_worker_batch, model_runner)
 
     if getattr(forward_batch, "dp_padding_mode", None) is None:
-        forward_batch.dp_padding_mode = DPPaddingMode.MAX_LEN
+        if getattr(DPPaddingMode, "__name__", "") == "_MockDPPaddingMode":
+            forward_batch.dp_padding_mode = DPPaddingMode.MAX_LEN
+        elif hasattr(DPPaddingMode, "PACKED"):
+            forward_batch.dp_padding_mode = DPPaddingMode.PACKED
+        else:
+            # Try to find any mode that is not MAX_LEN
+            for name in dir(DPPaddingMode):
+                if name.isupper() and name != "MAX_LEN":
+                    forward_batch.dp_padding_mode = getattr(DPPaddingMode, name)
+                    break
 
     return schedule_batch, forward_batch
 
@@ -229,7 +241,16 @@ def form_sgl_batch_decode(
     forward_batch = ForwardBatch.init_new(model_worker_batch, model_runner)
 
     if getattr(forward_batch, "dp_padding_mode", None) is None:
-        forward_batch.dp_padding_mode = DPPaddingMode.MAX_LEN
+        if getattr(DPPaddingMode, "__name__", "") == "_MockDPPaddingMode":
+            forward_batch.dp_padding_mode = DPPaddingMode.MAX_LEN
+        elif hasattr(DPPaddingMode, "PACKED"):
+            forward_batch.dp_padding_mode = DPPaddingMode.PACKED
+        else:
+            # Try to find any mode that is not MAX_LEN
+            for name in dir(DPPaddingMode):
+                if name.isupper() and name != "MAX_LEN":
+                    forward_batch.dp_padding_mode = getattr(DPPaddingMode, name)
+                    break
 
     return forward_batch
 
