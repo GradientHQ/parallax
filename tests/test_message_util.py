@@ -246,6 +246,6 @@ class TestMessageUtil:
         assert len(intermediate_reqs) == 2
         assert intermediate_reqs[0].request_id == "abort1"
         assert intermediate_reqs[0].status == RequestStatus.FINISHED_ABORT
-        assert intermediate_reqs[0].abort is True  # Abort requests should have abort flag set
+        assert intermediate_reqs[0].abort is True
         assert intermediate_reqs[0].routing_table == ["nodeA", "nodeB"]
         assert intermediate_reqs[1].request_id == "abort2"

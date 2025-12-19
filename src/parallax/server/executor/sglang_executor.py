@@ -291,7 +291,6 @@ class SGLExecutor(BaseExecutor):
                         original_req.routing_table = req.routing_table
 
                     # Check for termination.
-                    # Force update if received abort signal
                     if req.abort:
                         original_req.abort = True
 
