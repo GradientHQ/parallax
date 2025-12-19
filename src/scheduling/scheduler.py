@@ -82,6 +82,11 @@ class Scheduler:
         )
         self.request_warm_up_for_reshard = request_warm_up_for_reshard
 
+        self.routing_with_fixed_pipelines: bool = False
+        self.registered_pipelines: Dict[int, List[str]] = {}
+        self.pipelines_status: Dict[int, bool] = {}
+        # TODO: handle runtime unused cases even in dynamic routing mode, potentially tracking routed time
+
         self._request_queue: "queue.Queue[RequestSignal]" = queue.Queue()
         self.request_arrival_horizon_sec = request_arrival_horizon_sec
         self.heartbeat_timeout = heartbeat_timeout

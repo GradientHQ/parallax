@@ -312,78 +312,6 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
             index.setdefault(n.start_layer, []).append(n)
         return index
 
-    def _attempt_repair_pipeline(
-        self, candidate_ids: List[str], nodes: List[Node], num_layers: int
-    ) -> Optional[List[str]]:
-        """Best-effort repair of an overloaded pipeline by backtracking from the tail.
-
-        Starting from the end of the proposed pipeline, keep the longest viable
-        prefix (no missing/overloaded nodes) and search for an alternative suffix
-        that completes coverage to `num_layers`. The search explores all nodes that
-        start at the split layer and are not overloaded, performing DFS until a
-        complete chain is found or possibilities are exhausted.
-
-        Returns:
-            A repaired pipeline (list of node_ids) or None if not found.
-        """
-        id_to_node: Dict[str, Node] = {n.node_id: n for n in nodes}
-        start_to_nodes = self._build_start_index(nodes)
-
-        # Identify which positions in the original pipeline are viable
-        def is_viable_node_id(nid: str) -> bool:
-            node = id_to_node.get(nid)
-            return node is not None and not node.is_overloaded
-
-        # Try backtracking from the tail to earlier split points
-        for split_idx in range(len(candidate_ids) - 1, -1, -1):
-            # Check that prefix [0, split_idx) remains viable
-            prefix_ok = True
-            for i in range(split_idx):
-                if not is_viable_node_id(candidate_ids[i]):
-                    prefix_ok = False
-                    break
-            if not prefix_ok:
-                continue
-
-            # Determine split layer where we start reconstructing the suffix
-            if split_idx == 0:
-                split_layer = 0
-            else:
-                prev_node = id_to_node.get(candidate_ids[split_idx - 1])
-                if prev_node is None or prev_node.end_layer is None:
-                    continue
-                split_layer = int(prev_node.end_layer)
-
-            # Depth-first search to build a non-overloaded suffix covering [split_layer, L)
-            repaired_suffix: Optional[List[str]] = None
-
-            def dfs(layer: int, acc: List[str]) -> bool:
-                nonlocal repaired_suffix
-                if layer == num_layers:
-                    repaired_suffix = list(acc)
-                    return True
-                candidates = [
-                    n
-                    for n in start_to_nodes.get(layer, [])
-                    if n.end_layer is not None and n.end_layer > layer and not n.is_overloaded
-                ]
-                # Prefer shorter segments first for responsiveness
-                candidates.sort(key=lambda n: n.end_layer)  # type: ignore[arg-type]
-                for nxt in candidates:
-                    acc.append(nxt.node_id)
-                    if dfs(int(nxt.end_layer), acc):  # type: ignore[arg-type]
-                        return True
-                    acc.pop()
-                return False
-
-            if dfs(split_layer, []):
-                new_pipeline = candidate_ids[:split_idx] + (repaired_suffix or [])
-                # Sanity check: ensure coverage starts from 0 and ends at L
-                # (prefix guarantees contiguous coverage up to split_layer)
-                return new_pipeline if new_pipeline else None
-
-        return None
-
     def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
         """Round-robin among cached pipelines, skipping overloaded ones.
 
@@ -432,25 +360,5 @@ class RoundRobinPipelineRouting(RequestRoutingStrategy):
             attempts += 1
             if viable and total_latency != float("inf"):
                 return candidate_ids, total_latency
-            # Attempt a one-shot repair if the selected pipeline is not viable
-            repaired = self._attempt_repair_pipeline(candidate_ids, nodes, num_layers)
-            if repaired:
-                # Compute latency for the repaired path
-                total_latency = 0.0
-                prev = None
-                for nid in repaired:
-                    node = id_to_node.get(nid)
-                    # If any node is missing/overloaded, skip this repair
-                    if node is None or node.is_overloaded:
-                        total_latency = float("inf")
-                        break
-                    total_latency += float(node.layer_latency_ms)
-                    if prev is not None:
-                        total_latency += (
-                            0.0 if prev.node_id == node.node_id else float(prev.get_rtt_to(node))
-                        )
-                    prev = node
-                if total_latency != float("inf"):
-                    return repaired, total_latency
 
         return [], float("inf")

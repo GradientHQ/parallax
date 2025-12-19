@@ -12,7 +12,7 @@ Scheduling primitives for distributed LLM inference.
 import time
 from dataclasses import dataclass, field
 from math import floor
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from parallax_utils.logging_config import get_logger
 from parallax_utils.utils import bytes_per_element, compute_max_batch_size
@@ -167,6 +167,7 @@ class Node:
     - Capacity helpers for layer allocation;
     - Latency tracking and estimation if not available from node broadcasting;
     - Networking: optional RTT cache and getter for on-demand RTT measurement.
+    - Scheduling metadata: fixed pipeline membership and left-over status (scheduler-managed).
 
     """
 
@@ -184,6 +185,16 @@ class Node:
     start_layer: Optional[int] = None  # inclusive
     end_layer: Optional[int] = None  # exclusive
     current_requests: int = 0
+
+    # Scheduling metadata:
+    # Fixed pipeline membership
+    # - None: dynamic routing / not assigned to any fixed pipeline
+    pipeline_id: Optional[int] = None
+    # Left-over status
+    # - bootstrap_unassigned: joined but ended bootstrap with no layer allocation
+    # - runtime_unused: has layers allocated but no requests are routed through or broken pipeline
+    left_over: bool = False
+    left_over_reason: Optional[Literal["bootstrap_unassigned", "runtime_unused"]] = None
 
     # Runtime weight refit for RL
     last_refit_time: float = 0.0
