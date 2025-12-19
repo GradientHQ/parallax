@@ -239,7 +239,7 @@ class MLXExecutor(BaseExecutor):
                         )
                         continue
 
-                    # If it's an abort signal (e.g. from OOM), next_token_id might be None or dummy
+                
                     if not req.abort and req.next_token_id is not None:
                         original_req.commit_new_token(req.next_token_id)
 
@@ -247,7 +247,6 @@ class MLXExecutor(BaseExecutor):
                         original_req.routing_table = req.routing_table
 
                     # Check for termination.
-                    # Force update if received abort signal
                     if req.abort:
                         original_req.abort = True
 
