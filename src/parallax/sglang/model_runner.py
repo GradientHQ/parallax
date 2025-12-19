@@ -390,6 +390,7 @@ def concat_weight_partition(weight_files, refit_weight_path):
             tensors[key] = val
         elif prev_key is None:
             concate_list.append(val)
+            prev_key = key
         else:
             prev_name_list = prev_key.split(".")[:-1]
             cur_name_list = key.split(".")[:-1]
@@ -401,7 +402,7 @@ def concat_weight_partition(weight_files, refit_weight_path):
                 final_key = ".".join(cur_name_list)
                 tensors[final_key] = concate_result
                 concate_list = [val]
-        prev_key = key
+            prev_key = key
     if concate_list:
         concate_result = torch.cat(concate_list, 0)
         cur_name_list = prev_key.split(".")[:-1]
