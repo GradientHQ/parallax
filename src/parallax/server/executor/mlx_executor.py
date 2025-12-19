@@ -542,8 +542,7 @@ class MLXExecutor(BaseExecutor):
                 self.cache_manager.free_request(req.request_id)
                 self.scheduler.evict_request(req.request_id)
                 # Add to finished_batch to trigger abort notification
-                # - For First/Middle Peer: send to downstream
-                # - For Last Peer: send back to First Peer
+                # - Send abort signal to P2P server to broadcast to all nodes
                 self.finished_batch.append(req)
 
                 # If this is First Peer, we must also notify HTTP Server immediately
