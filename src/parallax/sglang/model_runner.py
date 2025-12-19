@@ -388,7 +388,7 @@ def concat_weight_partition(weight_files, refit_weight_path):
         val = original_tensors[key]
         if "part" not in key:
             tensors[key] = val
-        elif prev_key is None:
+        elif prev_key is None or '.' not in prev_key:
             concate_list.append(val)
         else:
             prev_name_list = prev_key.split(".")[:-1]
