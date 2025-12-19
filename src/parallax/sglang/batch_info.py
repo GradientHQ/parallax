@@ -16,7 +16,20 @@ from sglang.srt.model_executor.model_runner import ModelRunner
 try:
     from sglang.srt.layers.dp_attention import DPPaddingMode
 except ImportError:
-    DPPaddingMode = None
+    # logger is not defined yet here. Use print as fallback or move logger definition up.
+    # Moving logger definition up is better but requires reordering imports.
+    # For now, just silently mock it or use print if debug needed.
+    # logger.warning("Failed to import DPPaddingMode from sglang.srt.layers.dp_attention. Using mock class.")
+
+    class _MockDPPaddingMode:
+        class _Mode:
+            def is_max_len(self):
+                return True
+
+        MAX_LEN = _Mode()
+
+    DPPaddingMode = _MockDPPaddingMode
+
 from sglang.srt.sampling.sampling_batch_info import (
     SamplingBatchInfo as SGLSamplingBatchInfo,
 )
@@ -99,7 +112,7 @@ def form_sgl_batch_prefill(
     model_worker_batch = schedule_batch.get_model_worker_batch()
     forward_batch = ForwardBatch.init_new(model_worker_batch, model_runner)
 
-    if getattr(forward_batch, "dp_padding_mode", None) is None and DPPaddingMode is not None:
+    if getattr(forward_batch, "dp_padding_mode", None) is None:
         forward_batch.dp_padding_mode = DPPaddingMode.MAX_LEN
 
     return schedule_batch, forward_batch
@@ -215,7 +228,7 @@ def form_sgl_batch_decode(
         model_worker_batch.lora_ids = [req.lora_id or "" for req in requests]
     forward_batch = ForwardBatch.init_new(model_worker_batch, model_runner)
 
-    if getattr(forward_batch, "dp_padding_mode", None) is None and DPPaddingMode is not None:
+    if getattr(forward_batch, "dp_padding_mode", None) is None:
         forward_batch.dp_padding_mode = DPPaddingMode.MAX_LEN
 
     return forward_batch
