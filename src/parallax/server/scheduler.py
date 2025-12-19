@@ -174,21 +174,31 @@ class Scheduler:
 
     def check_and_update_request_status(self, request: InitialRequest) -> bool:
         """Checks if a request has met any finishing conditions and updates its status."""
-        assert self.is_first_peer, "Only first peer can check and update request status."
-        assert (
-            self.eos_token_id is not None
-        ), "EOS token ID must be set for request status checking."
         if request.is_finished:
             return True
 
         finished = False
-        last_token_id = request.output_ids[-1] if request.output_ids else None
         if request.abort:
             request.update_status(RequestStatus.FINISHED_ABORT)
             finished = True
         elif request.status == RequestStatus.FINISHED_ABORT:
             # Already marked as ABORT by executor (e.g. OOM)
             finished = True
+
+        if finished:
+            logger.debug(f"Request {request.request_id} finished with status {request.status}.")
+            # Remove from running requests. The executor will handle KV cache release.
+            self.evict_request(request.request_id)
+            return True
+
+        if not self.is_first_peer:
+            return False
+
+        assert (
+            self.eos_token_id is not None
+        ), "EOS token ID must be set for request status checking."
+
+        last_token_id = request.output_ids[-1] if request.output_ids else None
         if (
             not finished
             and not request.sampling_params.ignore_eos

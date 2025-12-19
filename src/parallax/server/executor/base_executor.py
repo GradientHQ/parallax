@@ -298,13 +298,7 @@ class BaseExecutor:
                         abort_request.ParseFromString(recv_req[1])
                         recv_req = proto_to_abort_request(abort_request)
                         recv_reqs.extend(recv_req)
-
-                        # Propagate abort to downstream peers if not last peer
-                        if not self.is_last_peer:
-                            logger.info(
-                                f"Propagating abort for {len(recv_req)} requests to downstream."
-                            )
-                            self.finished_batch.extend(recv_req)
+                        # We don't propagate abort here because the P2P server handles broadcasting
 
                     elif recv_req[0] == b"refit":
                         refit_weight_path = recv_req[1].decode("ascii")

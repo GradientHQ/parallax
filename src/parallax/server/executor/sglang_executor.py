@@ -298,7 +298,7 @@ class SGLExecutor(BaseExecutor):
                     if self.scheduler.check_and_update_request_status(original_req):
                         logger.debug(f"Releasing resources for finished request {req.request_id}")
                         self.release_and_evict_request(req.request_id)
-                        if not self.is_last_peer:
+                        if not self.is_last_peer and not req.abort:
                             self.finished_batch.append(req)
                     else:
                         self.scheduler.enque_request(original_req)
@@ -336,7 +336,7 @@ class SGLExecutor(BaseExecutor):
                 ), "Non-first peers must receive IntermediateRequests."
                 if req.is_finished or req.hidden_states is None:
                     self.release_and_evict_request(req.request_id)
-                    if not self.is_last_peer:
+                    if not self.is_last_peer and not req.abort:
                         self.finished_batch.append(req)
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
