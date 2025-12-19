@@ -65,6 +65,7 @@ class SGLExecutor(BaseExecutor):
         executor_output_ipc_addr: Optional[str] = None,
         # GPU Specialized Configs
         attention_backend: Optional[str] = "flashinfer",
+        enable_dp_attention: bool = False,
         moe_runner_backend: Optional[str] = "auto",
         enable_lora: Optional[bool] = False,
         max_lora_rank: Optional[int] = None,
@@ -108,6 +109,7 @@ class SGLExecutor(BaseExecutor):
             "end_layer": end_layer,
             "kv_cache_memory_fraction": kv_cache_memory_fraction,
             "attention_backend": attention_backend,
+            "enable_dp_attention": enable_dp_attention,
             "kv_block_size": kv_block_size,
             "max_num_tokens_per_batch": max_num_tokens_per_batch,
             "dtype": dtype,

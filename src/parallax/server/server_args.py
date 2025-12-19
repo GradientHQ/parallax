@@ -162,6 +162,12 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--enable-dp-attention",
+        action="store_true",
+        help="Enable data parallel attention (e.g. for DeepSeek)",
+    )
+
+    parser.add_argument(
         "--moe-runner-backend",
         type=str,
         default="auto",

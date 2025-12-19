@@ -210,6 +210,7 @@ def form_sgl_server_args(
     kv_cache_memory_fraction: float = 0.85,
     tp_size: int = 1,
     attention_backend: str = "flashinfer",
+    enable_dp_attention: bool = False,
     kv_block_size: int = 64,
     moe_runner_backend="auto",
     enable_lora: Optional[bool] = False,
@@ -227,6 +228,7 @@ def form_sgl_server_args(
         model_path=model_path,
         dtype=dtype,
         attention_backend=attention_backend,
+        enable_dp_attention=enable_dp_attention,
         page_size=kv_block_size,
         mem_fraction_static=kv_cache_memory_fraction,
         moe_runner_backend=moe_runner_backend,
@@ -263,6 +265,7 @@ def initialize_sgl_model_runner(
     lora_eviction_policy: Optional[str] = "lru",
     lora_backend: Optional[str] = "triton",
     max_lora_chunk_size: Optional[int] = 128,
+    enable_dp_attention: bool = False,
     **kwargs,
 ):
     """
@@ -316,6 +319,7 @@ def initialize_sgl_model_runner(
         kv_cache_memory_fraction,
         tp_size,
         attention_backend,
+        enable_dp_attention,
         kv_block_size,
         moe_runner_backend,
         enable_lora,
