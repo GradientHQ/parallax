@@ -70,6 +70,7 @@ class ParallaxModelRunner(SGLModelRunner):
         server_args: ServerArgs,
         pp_start_layer: int,
         pp_end_layer: int,
+        dp_rank: Optional[int] = None,
     ):
         """Add pp_start_layer and pp_end_layer for decentralized model"""
         self.pp_start_layer = pp_start_layer
@@ -89,6 +90,7 @@ class ParallaxModelRunner(SGLModelRunner):
             moe_ep_size=moe_ep_size,
             nccl_port=nccl_port,
             server_args=server_args,
+            dp_rank=dp_rank,
         )
 
     def init_torch_distributed(self):
@@ -364,6 +366,7 @@ def initialize_sgl_model_runner(
         server_args=server_args,
         pp_start_layer=start_layer,
         pp_end_layer=end_layer,
+        dp_rank=kwargs.get("dp_rank", 0),
     )
     return model_runner, config, tokenizer
 
