@@ -53,7 +53,7 @@ class Scheduler:
             strategy: Layer allocation strategy ("dp" or "greedy").
             routing_strategy: Request routing strategy:
                 - "dp": dynamic-programming routing over current allocations (minimum latency).
-                - "rr": randomized selection over all complete pipelines implied by current allocations.
+                - "rr": round-robin selection over fixed, small set of pipelines.
             request_arrival_horizon_sec: Sliding window horizon for arrival-rate tracking.
             rebalance_threshold: Threshold for triggering rebalancing in allocation.
             water_filling_max_iterations: Max iterations for water-filling allocation.
@@ -85,11 +85,6 @@ class Scheduler:
             else RoundRobinOverFixedPipelinesRouting()
         )
         self.request_warm_up_for_reshard = request_warm_up_for_reshard
-
-        self.routing_with_fixed_pipelines: bool = False
-        self.registered_pipelines: Dict[int, List[str]] = {}
-        self.pipelines_status: Dict[int, bool] = {}
-        # TODO: handle runtime unused cases even in dynamic routing mode, potentially tracking routed time
 
         self._request_queue: "queue.Queue[RequestSignal]" = queue.Queue()
         self.request_arrival_horizon_sec = request_arrival_horizon_sec
