@@ -12,6 +12,11 @@ import torch
 from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_executor.model_runner import ModelRunner
+
+try:
+    from sglang.srt.layers.dp_attention import DPPaddingMode
+except ImportError:
+    DPPaddingMode = None
 from sglang.srt.sampling.sampling_batch_info import (
     SamplingBatchInfo as SGLSamplingBatchInfo,
 )
@@ -93,6 +98,10 @@ def form_sgl_batch_prefill(
     schedule_batch.prepare_for_extend()
     model_worker_batch = schedule_batch.get_model_worker_batch()
     forward_batch = ForwardBatch.init_new(model_worker_batch, model_runner)
+
+    if getattr(forward_batch, "dp_padding_mode", None) is None and DPPaddingMode is not None:
+        forward_batch.dp_padding_mode = DPPaddingMode.MAX_LEN
+
     return schedule_batch, forward_batch
 
 
@@ -205,6 +214,9 @@ def form_sgl_batch_decode(
     if requests[0].lora_id is not None:
         model_worker_batch.lora_ids = [req.lora_id or "" for req in requests]
     forward_batch = ForwardBatch.init_new(model_worker_batch, model_runner)
+
+    if getattr(forward_batch, "dp_padding_mode", None) is None and DPPaddingMode is not None:
+        forward_batch.dp_padding_mode = DPPaddingMode.MAX_LEN
 
     return forward_batch
 
