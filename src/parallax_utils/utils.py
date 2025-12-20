@@ -1,7 +1,7 @@
-from typing import Optional
-
 import base64
 import hashlib
+from typing import Optional
+
 import torch
 
 from parallax.server.server_info import HardwareInfo
@@ -134,16 +134,18 @@ def compute_max_batch_size(
         max_tokens_in_cache=max_tokens,
     )
 
+
 # CID constants
 CIDV1 = 0x01
 RAW_CODEC = 0x55
 SHA2_256_CODE = 0x12
 SHA2_256_SIZE = 0x20  # 32 bytes
 
+
 def calculate_cid_manual(data: bytes) -> str:
     sha256_digest = hashlib.sha256(data).digest()
     multihash = bytes([SHA2_256_CODE, SHA2_256_SIZE]) + sha256_digest
     cid_bytes = bytes([CIDV1, RAW_CODEC]) + multihash
-    base32_str = base64.b32encode(cid_bytes).decode('ascii').lower().rstrip('=')
-    cid_string = 'b' + base32_str
+    base32_str = base64.b32encode(cid_bytes).decode("ascii").lower().rstrip("=")
+    cid_string = "b" + base32_str
     return cid_string

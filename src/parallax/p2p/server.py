@@ -27,10 +27,7 @@ from parallax.p2p.proto import forward_pb2
 from parallax.p2p.utils import AsyncWorker
 from parallax.server.server_info import detect_node_hardware
 from parallax.utils.shared_state import SharedState
-from parallax.utils.utils import (
-    calculate_cid_manual,
-    get_zmq_socket,
-)
+from parallax.utils.utils import calculate_cid_manual, get_zmq_socket
 from parallax_utils.logging_config import get_logger, set_log_level
 
 logger = get_logger(__name__)
