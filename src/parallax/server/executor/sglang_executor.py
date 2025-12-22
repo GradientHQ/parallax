@@ -141,6 +141,12 @@ class SGLExecutor(BaseExecutor):
         logger.debug(
             f"SGLang model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
         )
+
+        # Set device to specific CUDA device based on tp_rank
+        # This ensures tensors are moved to the correct GPU
+        if device is None or device == "cuda":
+            device = f"cuda:{tp_rank}"
+
         super().__init__(
             start_layer=start_layer,
             end_layer=end_layer,
@@ -267,6 +273,10 @@ class SGLExecutor(BaseExecutor):
             return
         if self.tp_size > 1:
             requests = self._tensor_parallel_broadcast_byobj(requests)
+            for req in requests:
+                if hasattr(req, "hidden_states") and req.hidden_states is not None:
+                    if hasattr(req.hidden_states, "to"):  # PyTorch tensor
+                        req.hidden_states = req.hidden_states.to(self.device)
         if len(requests) > 0:
             logger.debug(f"Handling {len(requests)} requests.")
 

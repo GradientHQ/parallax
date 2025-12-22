@@ -283,7 +283,9 @@ class BaseExecutor:
                                         logger.debug(
                                             f"Converting hidden_states dtype from {req.hidden_states.dtype} to {self.dtype} for request {req.request_id}"
                                         )
-                                        if self.device == "cuda":
+                                        if self.device is not None and self.device.startswith(
+                                            "cuda"
+                                        ):
                                             req.hidden_states = req.hidden_states.to(self.dtype)
                                         elif self.device == "mlx":
                                             req.hidden_states = req.hidden_states.astype(self.dtype)

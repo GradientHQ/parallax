@@ -18,6 +18,7 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 from sglang.srt.configs.model_config import ModelConfig
 from sglang.srt.distributed import (
+    get_pp_group,
     get_tp_group,
     get_world_group,
     init_distributed_environment,
@@ -92,7 +93,6 @@ class ParallaxModelRunner(SGLModelRunner):
             nccl_port=nccl_port,
             server_args=server_args,
             dp_rank=dp_rank,
-            dp_size=dp_size,
         )
 
     def init_torch_distributed(self):
@@ -181,6 +181,7 @@ class ParallaxModelRunner(SGLModelRunner):
             cpu_group=get_world_group().cpu_group,
         )
         self.tp_group = get_tp_group()
+        self.pp_group = get_pp_group()
         self.attention_tp_group = get_attention_tp_group()
 
         # Check memory for tensor parallelism

@@ -68,7 +68,7 @@ def create_from_args(
     config = create_executor_config(args, shared_state)
     if device is None:
         device = get_current_device()
-    if device == "cuda":
+    if device is not None and device.startswith("cuda"):
         if args.gpu_backend == "sglang":
             from parallax.server.executor.sglang_executor import SGLExecutor
 
