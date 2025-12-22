@@ -390,18 +390,26 @@ def concat_weight_partition(weight_files, refit_weight_path):
             tensors[key] = val
         elif prev_key is None:
             concate_list.append(val)
+            prev_key = key
         else:
             prev_name_list = prev_key.split(".")[:-1]
             cur_name_list = key.split(".")[:-1]
             if prev_name_list == cur_name_list:
                 concate_list.append(val)
             else:
-                concate_list.append(val)
                 concate_result = torch.cat(concate_list, 0)
-                final_key = ".".join(cur_name_list.append("weight"))
+                cur_name_list.append("weight")
+                final_key = ".".join(cur_name_list)
                 tensors[final_key] = concate_result
-                concate_list = []
-        prev_key = key
+                concate_list = [val]
+            prev_key = key
+    if concate_list:
+        concate_result = torch.cat(concate_list, 0)
+        cur_name_list.append("weight")
+        cur_name_list = prev_key.split(".")[:-1]
+        final_key = ".".join(cur_name_list)
+        tensors[final_key] = concate_result
+
     save_file_path = refit_weight_path + "/model.safetensors"
     save_file(tensors, save_file_path)
 

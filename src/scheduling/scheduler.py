@@ -19,7 +19,8 @@ from scheduling.model_info import ModelInfo
 from scheduling.node import Node, RequestSignal
 from scheduling.request_routing import (
     DynamicProgrammingRouting,
-    RoundRobinPipelineRouting,
+    RoundRobinOverFixedPipelinesRouting,
+    find_turning_points,
 )
 
 logger = get_logger(__name__)
@@ -50,8 +51,9 @@ class Scheduler:
             nodes: Initial list of candidate nodes.
             min_nodes_bootstrapping: Minimum nodes required to attempt initial allocation.
             strategy: Layer allocation strategy ("dp" or "greedy").
-            routing_strategy: Request routing strategy ("dp" for dynamic programming, or
-                "greedy" for round-robin over complete pipelines skipping overloaded ones).
+            routing_strategy: Request routing strategy:
+                - "dp": dynamic-programming routing over current allocations (minimum latency).
+                - "rr": round-robin selection over fixed, small set of pipelines.
             request_arrival_horizon_sec: Sliding window horizon for arrival-rate tracking.
             rebalance_threshold: Threshold for triggering rebalancing in allocation.
             water_filling_max_iterations: Max iterations for water-filling allocation.
@@ -78,7 +80,9 @@ class Scheduler:
         self.min_nodes_bootstrapping = min_nodes_bootstrapping
 
         self.request_router = (
-            DynamicProgrammingRouting() if routing_strategy == "dp" else RoundRobinPipelineRouting()
+            DynamicProgrammingRouting()
+            if routing_strategy == "dp"
+            else RoundRobinOverFixedPipelinesRouting()
         )
         self.request_warm_up_for_reshard = request_warm_up_for_reshard
 
@@ -226,7 +230,7 @@ class Scheduler:
 
         agg_turns: Dict[Tuple[str, int, str], int] = {}
         for _ in range(warmup_count):
-            turns = DynamicProgrammingRouting.find_turning_points(nodes_list, num_layers)
+            turns = find_turning_points(nodes_list, num_layers)
             for t in turns:
                 agg_turns[t] = agg_turns.get(t, 0) + 1
 

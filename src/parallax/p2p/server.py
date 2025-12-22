@@ -27,7 +27,7 @@ from parallax.p2p.proto import forward_pb2
 from parallax.p2p.utils import AsyncWorker
 from parallax.server.server_info import detect_node_hardware
 from parallax.utils.shared_state import SharedState
-from parallax.utils.utils import get_zmq_socket
+from parallax.utils.utils import calculate_cid_manual, get_zmq_socket
 from parallax_utils.logging_config import get_logger, set_log_level
 
 logger = get_logger(__name__)
@@ -364,8 +364,13 @@ class GradientServer:
             while True:
                 try:
                     peer_id, raw_data = self.lattica.get_block(cid, timeout_secs=30)
-                    time_end_get_block = time.time()
-                    break
+                    cid_manual = calculate_cid_manual(raw_data)
+                    if cid_manual != cid:
+                        logger.warning(f"Checksum failed. Retry get_block for cid={cid}")
+                        continue
+                    else:
+                        time_end_get_block = time.time()
+                        break
                 except Exception:
                     logger.warning(f"Failed to get block: {cid}. Retry in 1 second.")
                     time.sleep(1)

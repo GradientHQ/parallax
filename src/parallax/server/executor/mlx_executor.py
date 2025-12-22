@@ -259,7 +259,7 @@ class MLXExecutor(BaseExecutor):
                             f"Released resources for finished request {req.request_id}, "
                             f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
                         )
-                        if not self.is_last_peer:
+                        if not self.is_last_peer and not req.abort:
                             self.finished_batch.append(req)
                     else:
                         self.scheduler.enque_request(original_req)
@@ -308,7 +308,7 @@ class MLXExecutor(BaseExecutor):
                         f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
                     )
                     self.scheduler.evict_request(req.request_id)
-                    if not self.is_last_peer:
+                    if not self.is_last_peer and not req.abort:
                         self.finished_batch.append(req)
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
