@@ -42,7 +42,13 @@ def test_scheduler_join_and_leave():
     n1 = build_node("a100-0", model, tflops=312.0, mem_gb=80.0, x=0, y=0)
     n2 = build_node("a100-1", model, tflops=312.0, mem_gb=80.0, x=1, y=0)
     set_rtt_from_coords([n1, n2])
-    sched = Scheduler(model, [n1, n2], strategy="greedy", min_nodes_bootstrapping=1)
+    sched = Scheduler(
+        model,
+        [n1, n2],
+        strategy="greedy",
+        routing_strategy="dp",
+        min_nodes_bootstrapping=1,
+    )
 
     # Join a new node
     n3 = build_node("rtx4090-x", model, tflops=82.6, mem_gb=24.0, x=0, y=1)
@@ -59,7 +65,7 @@ def test_scheduler_bootstrap_wait_and_dynamic_events():
     model = build_model_info(12)
     # Start with no nodes assigned yet; bootstrap needs 2
     n1 = build_node("a100-0", model, tflops=312.0, mem_gb=80.0, x=0, y=0)
-    sched = Scheduler(model, [], strategy="dp", min_nodes_bootstrapping=2)
+    sched = Scheduler(model, [], strategy="dp", routing_strategy="dp", min_nodes_bootstrapping=2)
 
     # Enqueue one join; should not bootstrap yet (insufficient nodes)
     sched.enqueue_join(n1)
@@ -114,7 +120,7 @@ def test_scheduler_single_node_leave_then_rejoin_reassigns_layers():
     # Start with a single capable node and bootstrap successfully
     n1 = build_node("solo-0", model, tflops=312.0, mem_gb=80.0, x=0, y=0)
     set_rtt_from_coords([n1])
-    sched = Scheduler(model, [n1], strategy="dp", min_nodes_bootstrapping=1)
+    sched = Scheduler(model, [n1], strategy="dp", routing_strategy="dp", min_nodes_bootstrapping=1)
     ok = sched.bootstrap()
     assert ok
     assert n1.start_layer is not None and n1.end_layer is not None
@@ -162,7 +168,7 @@ def test_scheduler_three_nodes_sequential_join_leave_rejoin():
     assert n3.get_decoder_layer_capacity() >= 22, "n3 should be able to host 22 layers"
 
     # Initialize scheduler with min_nodes_bootstrapping=2, no nodes initially
-    sched = Scheduler(model, [], strategy="dp", min_nodes_bootstrapping=2)
+    sched = Scheduler(model, [], strategy="dp", routing_strategy="dp", min_nodes_bootstrapping=2)
 
     # Step 1: n1 joins (not enough nodes yet)
     sched.enqueue_join(n1)

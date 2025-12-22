@@ -33,7 +33,7 @@ from scheduling.layer_allocation import (
 )
 from scheduling.model_info import ModelInfo
 from scheduling.node import Node, RequestSignal
-from scheduling.node_registry import NodeRegistry
+from scheduling.node_registry import NodeRegistry, NodeState
 from scheduling.request_routing import (
     DynamicProgrammingRouting,
     RoundRobinOverFixedPipelinesRouting,
@@ -87,6 +87,7 @@ class Scheduler:
         # NodeRegistry is the long-term source of truth for membership and node runtime state.
         # Phase 1: keep it in sync, but do not change existing control flow yet.
         self.node_registry = NodeRegistry(initial_nodes=nodes)
+        self.routing_strategy = routing_strategy
 
         allocator_class = (
             GreedyLayerAllocator if strategy == "greedy" else DynamicProgrammingLayerAllocator
@@ -148,6 +149,11 @@ class Scheduler:
                 )
                 self.layer_allocator.global_allocation()
                 self._log_invariant_violations(context="post_eager_global_allocation")
+                # If eager allocation produces a full pipeline, mark scheduler as bootstrapped
+                # so subsequent joins can be dynamically assigned immediately.
+                if self.layer_allocator.has_full_pipeline():
+                    self._bootstrapped = True
+                    self._bootstrapped_event.set()
         except Exception:  # best-effort eager allocation
             pass
 
@@ -182,6 +188,8 @@ class Scheduler:
             for n in self.nodes:
                 if n.start_layer is not None and n.end_layer is not None:
                     self.layer_allocator.deallocate(n)
+                    # Deallocated nodes are not actively serving.
+                    self._registry_mark_standby_if_needed(n.node_id)
         else:
             logger.debug("Bootstrapping layer allocator")
 
@@ -190,6 +198,7 @@ class Scheduler:
         if not success:
             logger.warning("Global allocation failed to produce a full pipeline")
             return False
+        self._sync_registry_lifecycle_from_allocations()
 
         assignments = self.list_node_allocations()
         logger.debug(f"Layer allocator assignments: {assignments}")
@@ -200,6 +209,7 @@ class Scheduler:
             self._run_warmup_and_truncate()
             assignments = self.list_node_allocations()
             logger.debug(f"Layer allocator assignments after turn-point warm-up: {assignments}")
+            self._sync_registry_lifecycle_from_allocations()
 
         if not self.layer_allocator.has_full_pipeline():
             logger.warning("Bootstrapping failed to produce a full pipeline")
@@ -349,8 +359,8 @@ class Scheduler:
                 self.leave(node.node_id)
 
     # Dynamic node management
-    def join(self, node: Node, bootstrap: bool = False) -> None:
-        """Add a node to allocation and refresh plan and materialized nodes."""
+    def dynamic_join(self, node: Node, bootstrap: bool = False) -> None:
+        """Dynamically join a node (DP-style): may allocate layers and activate the node."""
         logger.debug(
             "Joining node %s (kv_ratio=%.2f, param_ratio=%.2f, manual_assignment=%s)",
             node.node_id,
@@ -358,8 +368,8 @@ class Scheduler:
             node.param_mem_ratio,
             node.manual_layer_assignment,
         )
-        # Keep registry in sync (membership + runtime node reference).
-        self.node_registry.upsert(node)
+        # Joined nodes start as STANDBY; activation happens only when allocated.
+        self.node_registry.upsert(node, state=NodeState.STANDBY)
         self.layer_allocator.declare(node)
 
         # Manual layer assignment bypasses bootstrap waiting
@@ -376,6 +386,7 @@ class Scheduler:
             )
             # Directly allocate the specified layers without automatic assignment
             self.layer_allocator.allocate(node, node.start_layer, node.end_layer)
+            self._registry_mark_active_if_needed(node.node_id)
 
             # Check if manual allocations now cover the full pipeline
             if self.layer_allocator.has_full_pipeline():
@@ -389,12 +400,34 @@ class Scheduler:
         elif not bootstrap:
             # Automatic layer assignment (only after bootstrap)
             self.layer_allocator.join(node)
+            # Allocated nodes are actively serving.
+            self._registry_mark_active_if_needed(node.node_id)
         # If bootstrap=True and not manual, node is only declared (allocation deferred to bootstrap())
 
         # Notify waiters that node count changed
         with self._node_count_cv:
             self._node_count_cv.notify_all()
         self._log_invariant_violations(context="post_join")
+
+    def join(self, node: Node) -> None:
+        """Join a node into the cluster.
+
+        - DP routing (`routing_strategy="dp"`): perform dynamic join logic (may allocate/activate).
+        - RR routing (`routing_strategy="rr"`): only register the node as STANDBY; no dynamic
+          allocation is performed on join. The scheduler will separately try to form full
+          pipelines from the standby pool.
+        """
+        if self.routing_strategy == "dp":
+            self.dynamic_join(node, bootstrap=not self._bootstrapped_event.is_set())
+            return
+
+        # RR: keep node in standby; do not allocate on join.
+        logger.debug("Joining node %s (rr): adding to standby pool", node.node_id)
+        self.node_registry.upsert(node, state=NodeState.STANDBY)
+        self.layer_allocator.declare(node)
+        with self._node_count_cv:
+            self._node_count_cv.notify_all()
+        self._log_invariant_violations(context="post_join_rr")
 
     def leave(self, node_id: str) -> None:
         """Remove a node from allocation and refresh plan and materialized nodes."""
@@ -700,6 +733,7 @@ class Scheduler:
             # Keep registry in sync (best-effort) with the node reference we are mutating.
             # Runtime stats updates mutate the Node object in-place, so a registry reference
             # to the same Node will observe the updates automatically.
+            # Keep registry pointing at the same Node object; preserve lifecycle state.
             try:
                 self.node_registry.upsert(self.node_id_to_node[node_id])
             except Exception:
@@ -713,6 +747,44 @@ class Scheduler:
                 last_refit_time=last_refit_time,
             )
 
+    def _sync_registry_lifecycle_from_allocations(self) -> None:
+        """Best-effort sync of NodeRegistry ACTIVE/STANDBY based on allocation state.
+
+        ACTIVE: node has a valid allocated layer range.
+        STANDBY: joined but currently not allocated.
+        """
+        try:
+            for n in list(self.nodes):
+                if n.start_layer is not None and n.end_layer is not None and n.is_active:
+                    self._registry_mark_active_if_needed(n.node_id)
+                else:
+                    self._registry_mark_standby_if_needed(n.node_id)
+        except Exception:
+            # Best-effort; never impact scheduling.
+            return
+
+    def _registry_mark_active_if_needed(self, node_id: str) -> None:
+        """Mark node ACTIVE if present and currently STANDBY."""
+        try:
+            st = self.node_registry.state_of(node_id)
+            if st is None:
+                return
+            if st == NodeState.STANDBY:
+                self.node_registry.activate([node_id])
+        except Exception:
+            return
+
+    def _registry_mark_standby_if_needed(self, node_id: str) -> None:
+        """Mark node STANDBY if present and currently ACTIVE."""
+        try:
+            st = self.node_registry.state_of(node_id)
+            if st is None:
+                return
+            if st == NodeState.ACTIVE:
+                self.node_registry.move_to_standby([node_id])
+        except Exception:
+            return
+
     def _process_joins(self) -> None:
         """Handle pending join events, honoring bootstrap state for assignment."""
         joined_any = False
@@ -722,10 +794,7 @@ class Scheduler:
                 node = self._pending_joins.get_nowait()
             except queue.Empty:
                 break
-            # During bootstrap (no full pipeline yet), only declare nodes; no dynamic assignment.
-            # After bootstrap, allow dynamic light-weight joins.
-            # Exception: manual layer assignments are processed immediately regardless of bootstrap state.
-            self.join(node, bootstrap=not self._bootstrapped_event.is_set())
+            self.join(node)
             joined_any = True
             if node.manual_layer_assignment:
                 had_manual_assignment = True

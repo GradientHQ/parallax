@@ -36,11 +36,14 @@ class NodeRegistry:
             for n in initial_nodes:
                 self.upsert(n, state=NodeState.STANDBY)
 
-    def upsert(self, node: Node, *, state: NodeState = NodeState.STANDBY) -> None:
+    def upsert(self, node: Node, *, state: Optional[NodeState] = None) -> None:
         """Add or replace a node by node_id."""
         with self._lock:
             self._nodes[node.node_id] = node
-            self._state[node.node_id] = state
+            if state is None:
+                self._state.setdefault(node.node_id, NodeState.STANDBY)
+            else:
+                self._state[node.node_id] = state
 
     def remove(self, node_id: str) -> Optional[Node]:
         """Remove a node; returns removed node if present."""
@@ -55,6 +58,26 @@ class NodeRegistry:
     def state_of(self, node_id: str) -> Optional[NodeState]:
         with self._lock:
             return self._state.get(node_id)
+
+    def activate(self, node_ids: List[str]) -> None:
+        """Mark nodes as ACTIVE (actively serving as part of a pipeline)."""
+        with self._lock:
+            for nid in node_ids:
+                if nid not in self._nodes:
+                    raise ValueError(f"Node {nid} not found in registry")
+                if self._state.get(nid) != NodeState.STANDBY:
+                    raise ValueError(f"Node {nid} is not STANDBY")
+                self._state[nid] = NodeState.ACTIVE
+
+    def move_to_standby(self, node_ids: List[str]) -> None:
+        """Mark nodes as STANDBY (joined but not actively serving)."""
+        with self._lock:
+            for nid in node_ids:
+                if nid not in self._nodes:
+                    raise ValueError(f"Node {nid} not found in registry")
+                if self._state.get(nid) != NodeState.ACTIVE:
+                    raise ValueError(f"Node {nid} is not ACTIVE")
+                self._state[nid] = NodeState.STANDBY
 
     def snapshot(self, *, state: Optional[NodeState] = None) -> List[Node]:
         """Return a copy of nodes, optionally filtered by state."""
