@@ -406,37 +406,32 @@ class GradientServer:
 
         random.seed(time.time())
         random.shuffle(cid_list)
-        max_concurrency = 1
-        count = len(cid_list)
+        # max_concurrency = 1
+        # count = len(cid_list)
 
         # step2. save weight to disk
-        concurrency_loop = (count - 1) // max_concurrency + 1
+        # concurrency_loop = (count - 1) // max_concurrency + 1
         weight_dir = os.path.join("/tmp", str(time_stamp))
         folder = os.path.exists(weight_dir)
         if not folder:
             os.makedirs(weight_dir)
-            for i in range(concurrency_loop):
-                thread_pool = []
-                for j in range(max_concurrency):
-                    if len(cid_list) == 0:
-                        continue
-                    else:
-                        cid = cid_list.pop()
+            while True:
+                if len(cid_list) == 0:
+                    break
+                else:
+                    cid = cid_list.pop()
                     logger.info(f"Start downloading refit weight {cid}")
-                    download_thread = threading.Thread(
-                        target=_download_weight_thread, args=(weight_dir, cid), daemon=True
-                    )
-                    download_thread.start()
-                    thread_pool.append(download_thread)
-                for t in thread_pool:
-                    t.join()
-
-        # step3. send ipc message to update weight
-        self.connection_handler.ipc_weight_refit(weight_dir, weight_version)
-        self.last_refit_time = float(time_stamp)
-        logger.info(
-            f"Finish download weight_version={weight_version}, last_refit_time={self.last_refit_time}"
-        )
+                    _download_weight_thread(weight_dir, cid)
+            # step3. send ipc message to update weight
+            self.connection_handler.ipc_weight_refit(weight_dir, weight_version)
+            self.last_refit_time = float(time_stamp)
+            logger.info(
+                f"Finish download weight_version={weight_version}, last_refit_time={self.last_refit_time}"
+            )
+        else:
+            logger.warning(
+                f"Already satisfies weight_version={weight_version}"
+            )
 
     def run(self):
         if self.build_lattica():
