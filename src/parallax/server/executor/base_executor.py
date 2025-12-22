@@ -81,6 +81,8 @@ class BaseExecutor:
         # Tensor Parallel Configs
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
+        dp_rank: Optional[int] = 0,
+        dp_size: Optional[int] = 1,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
         # Weight Refit
@@ -112,6 +114,8 @@ class BaseExecutor:
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
         self.tp_size = tp_size
         self.tp_rank = tp_rank
+        self.dp_size = dp_size
+        self.dp_rank = dp_rank
 
         # Metrics throttling for per-layer latency updates
         self.layer_latency_update_every = int(max(1, layer_latency_update_every))

@@ -79,6 +79,8 @@ class SGLExecutor(BaseExecutor):
         # Tensor Parallel Configs
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
+        dp_rank: Optional[int] = 0,
+        dp_size: Optional[int] = 1,
         nccl_port: Optional[int] = 4000,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
@@ -116,6 +118,8 @@ class SGLExecutor(BaseExecutor):
             "moe_runner_backend": moe_runner_backend,
             "tp_rank": tp_rank,
             "tp_size": tp_size,
+            "dp_rank": dp_rank,
+            "dp_size": dp_size,
             "nccl_port": nccl_port,
             "using_hfcache": use_hfcache,
             "enable_lora": self.enable_lora,
@@ -156,6 +160,8 @@ class SGLExecutor(BaseExecutor):
             executor_output_ipc_addr=executor_output_ipc_addr,
             tp_rank=tp_rank,
             tp_size=tp_size,
+            dp_rank=dp_rank,
+            dp_size=dp_size,
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
         )

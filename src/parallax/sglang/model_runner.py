@@ -70,7 +70,8 @@ class ParallaxModelRunner(SGLModelRunner):
         server_args: ServerArgs,
         pp_start_layer: int,
         pp_end_layer: int,
-        dp_rank: Optional[int] = None,
+        dp_size: int = 1,
+        dp_rank: int = 0,
     ):
         """Add pp_start_layer and pp_end_layer for decentralized model"""
         self.pp_start_layer = pp_start_layer
@@ -91,6 +92,7 @@ class ParallaxModelRunner(SGLModelRunner):
             nccl_port=nccl_port,
             server_args=server_args,
             dp_rank=dp_rank,
+            dp_size=dp_size,
         )
 
     def init_torch_distributed(self):
@@ -211,6 +213,7 @@ def form_sgl_server_args(
     dtype: str = "bfloat16",
     kv_cache_memory_fraction: float = 0.85,
     tp_size: int = 1,
+    dp_size: int = 1,
     attention_backend: str = "flashinfer",
     enable_dp_attention: bool = False,
     kv_block_size: int = 64,
@@ -245,6 +248,7 @@ def form_sgl_server_args(
         lora_eviction_policy=lora_eviction_policy,
         lora_backend=lora_backend,
         max_lora_chunk_size=max_lora_chunk_size,
+        dp_size=dp_size,
     )
     return sgl_server_args
 
@@ -282,6 +286,8 @@ def initialize_sgl_model_runner(
     # Extract TP-related parameters from kwargs or use defaults
     tp_rank = kwargs.get("tp_rank", 0)
     tp_size = kwargs.get("tp_size", 1)
+    dp_size = kwargs.get("dp_size", 1)
+    dp_rank = kwargs.get("dp_rank", 0)
     use_hfcache = kwargs.get("use_hfcache", False)
     nccl_port = kwargs.get("nccl_port", None)
     # Use selective download for GPU models to save bandwidth and disk space
@@ -320,6 +326,7 @@ def initialize_sgl_model_runner(
         dtype,
         kv_cache_memory_fraction,
         tp_size,
+        dp_size,
         attention_backend,
         enable_dp_attention,
         kv_block_size,
@@ -366,7 +373,8 @@ def initialize_sgl_model_runner(
         server_args=server_args,
         pp_start_layer=start_layer,
         pp_end_layer=end_layer,
-        dp_rank=kwargs.get("dp_rank", 0),
+        dp_rank=dp_rank,
+        dp_size=dp_size,
     )
     return model_runner, config, tokenizer
 
