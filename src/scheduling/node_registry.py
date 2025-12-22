@@ -34,9 +34,9 @@ class NodeRegistry:
 
         if initial_nodes:
             for n in initial_nodes:
-                self.upsert(n, state=NodeState.ACTIVE)
+                self.upsert(n, state=NodeState.STANDBY)
 
-    def upsert(self, node: Node, *, state: NodeState = NodeState.ACTIVE) -> None:
+    def upsert(self, node: Node, *, state: NodeState = NodeState.STANDBY) -> None:
         """Add or replace a node by node_id."""
         with self._lock:
             self._nodes[node.node_id] = node
@@ -62,5 +62,3 @@ class NodeRegistry:
             if state is None:
                 return list(self._nodes.values())
             return [n for nid, n in self._nodes.items() if self._state.get(nid) == state]
-
-

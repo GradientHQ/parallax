@@ -33,6 +33,7 @@ from scheduling.layer_allocation import (
 )
 from scheduling.model_info import ModelInfo
 from scheduling.node import Node, RequestSignal
+from scheduling.node_registry import NodeRegistry
 from scheduling.request_routing import (
     DynamicProgrammingRouting,
     RoundRobinOverFixedPipelinesRouting,
@@ -82,6 +83,10 @@ class Scheduler:
         self.refit_request = {}
         # Opt-in invariant logging for refactors/debugging; keep disabled in production by default.
         self._enable_invariants: bool = os.getenv("PARALLAX_SCHEDULER_INVARIANTS", "0") == "1"
+
+        # NodeRegistry is the long-term source of truth for membership and node runtime state.
+        # Phase 1: keep it in sync, but do not change existing control flow yet.
+        self.node_registry = NodeRegistry(initial_nodes=nodes)
 
         allocator_class = (
             GreedyLayerAllocator if strategy == "greedy" else DynamicProgrammingLayerAllocator
@@ -353,6 +358,8 @@ class Scheduler:
             node.param_mem_ratio,
             node.manual_layer_assignment,
         )
+        # Keep registry in sync (membership + runtime node reference).
+        self.node_registry.upsert(node)
         self.layer_allocator.declare(node)
 
         # Manual layer assignment bypasses bootstrap waiting
@@ -398,6 +405,8 @@ class Scheduler:
             "Leaving node %s (start=%s, end=%s)", node_id, node.start_layer, node.end_layer
         )
         self.layer_allocator.leave(node_id)
+        # Keep registry in sync (membership).
+        self.node_registry.remove(node_id)
         if self.layer_allocator.should_global_rebalance():
             logger.debug("Global rebalance triggered due to node leave")
 
@@ -688,6 +697,13 @@ class Scheduler:
             if node_id not in self.node_id_to_node:
                 logger.warning(f"Node {node_id} not found in node list, ignore the update")
                 continue
+            # Keep registry in sync (best-effort) with the node reference we are mutating.
+            # Runtime stats updates mutate the Node object in-place, so a registry reference
+            # to the same Node will observe the updates automatically.
+            try:
+                self.node_registry.upsert(self.node_id_to_node[node_id])
+            except Exception:
+                pass
             self.update_node_info(
                 self.node_id_to_node[node_id],
                 current_requests=cur,
