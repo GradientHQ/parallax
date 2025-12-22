@@ -220,6 +220,7 @@ class GradientServer:
         block_end_index: int = 1,
         hidden_layers: int = 128,
         tp_size: int = 1,
+        dp_size: int = 1,
         dht_prefix: str = "gradient",
         host_maddrs: List[str] = [],
         http_port: Optional[int] = None,
@@ -240,6 +241,7 @@ class GradientServer:
         self.block_end_index = block_end_index
         self.hidden_layers = hidden_layers
         self.tp_size = tp_size
+        self.dp_size = dp_size
         self.dht_prefix = dht_prefix
         self.host_maddrs = host_maddrs
         self.announce_maddrs = announce_maddrs
