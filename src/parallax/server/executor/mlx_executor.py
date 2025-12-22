@@ -143,8 +143,9 @@ class MLXExecutor(BaseExecutor):
         if key_dim is not None and value_dim is not None:
             conv_dim = key_dim * 2 + value_dim
 
-        indexer_key_head_dim = self.config.get("indexer_key_head_dim", None)
-        indexer_num_kv_heads = self.config.get("indexer_num_kv_heads", None)
+        # Support both naming conventions for indexer config
+        index_head_dim = self.config.get("index_head_dim", None)
+        index_n_heads = self.config.get("index_n_heads", None)
 
         layer_types = get_layer_types(self.config, start_layer, end_layer)
         logger.debug(f"layer_types: {layer_types}")
@@ -162,8 +163,8 @@ class MLXExecutor(BaseExecutor):
             block_size=kv_block_size,
             cache_memory_fraction=kv_cache_memory_fraction,
             head_dim_v=v_head_dim,
-            indexer_key_head_dim=indexer_key_head_dim,
-            indexer_num_kv_heads=indexer_num_kv_heads,
+            index_head_dim=index_head_dim,
+            index_n_heads=index_n_heads,
             layer_types=layer_types,
             max_num_seqs=max_batch_size // micro_batch_ratio,
             conv_dim=conv_dim,
