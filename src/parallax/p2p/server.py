@@ -252,6 +252,7 @@ class GradientServer:
         self.kvcache_mem_ratio = kvcache_mem_ratio
         self.enable_weight_refit = False
         self.last_refit_time = 0.0
+        self.refit_finish = True
         self.prefix_id = f"{dht_prefix}_announce"
         self.lattica = None
         self.routing_table = None
@@ -432,6 +433,7 @@ class GradientServer:
             logger.warning(
                 f"Already satisfies weight_version={weight_version}"
             )
+        self.refit_finish = True
 
     def run(self):
         if self.build_lattica():
@@ -760,7 +762,10 @@ class GradientServer:
                             if refit_message and isinstance(refit_message, dict):
                                 if self.enable_weight_refit:
                                     logger.info(f"Server begin weight refit process.")
-                                    self.check_and_run_weight_refit(refit_message)
+                                    if self.refit_finish:
+                                        self.refit_finish = False
+                                        t = threading.Thread(target=self.check_and_run_weight_refit, args=(refit_message), daemon=True)
+                                        t.start()
                                 else:
                                     logger.warning(
                                         f"Received weight refit request but enable_weight_refit is set to {self.enable_weight_refit}."
