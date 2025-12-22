@@ -6,8 +6,7 @@ from __future__ import annotations
 
 import threading
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Iterator, DefaultDict
-from collections import defaultdict
+from typing import Dict, List, Optional, Tuple
 
 from scheduling.node import Node
 
@@ -19,7 +18,7 @@ class NodeState(str, Enum):
     STANDBY = "standby"
 
 
-class NodeManagement:
+class NodeManager:
     """Thread-safe node membership + lifecycle management.
 
     Responsibilities:
@@ -71,7 +70,6 @@ class NodeManagement:
                 if self._state.get(nid) != NodeState.STANDBY:
                     raise ValueError(f"Node {nid} is not STANDBY")
                 self._state[nid] = NodeState.ACTIVE
-    
 
     def standby(self, node_ids: List[str]) -> None:
         """Mark nodes as STANDBY (joined but not actively serving)."""
@@ -113,7 +111,6 @@ class NodeManagement:
                     raise ValueError(f"Invalid layer range: {s}, {e} for node {nid}")
                 segments.append((nid, int(s), int(e)))
         return segments
-
 
     def num_full_pipelines(self, total_layers: int) -> int:
         """Count how many complete pipelines exist among ACTIVE nodes.

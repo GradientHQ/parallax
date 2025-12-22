@@ -73,7 +73,9 @@ def test_water_filling_rebalance(num_layers: int, gpu_types: list[str], expected
     nodes = [_build_node(g, model, id_suffix=f"-{i}") for i, g in enumerate(gpu_types)]
 
     node_management = build_node_management(nodes)
-    allocator = GreedyLayerAllocator(model, node_management)
+    allocator = GreedyLayerAllocator(
+        model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+    )
     allocator.adjust_pipeline_layers(nodes, assume_sorted=False)
 
     actual_layers = []
@@ -123,7 +125,6 @@ def _test_gap_patch_rebalance(allocator: BaseLayerAllocator):
     assert new_node.node_id in allocator.layer_to_load[before_layer_id].hosting_nodes
 
     allocator.deallocate(new_node)
-    allocator.node_management.standby([new_node.node_id])
     restored_mem = allocator.layer_to_load[before_layer_id].current_kv_size
     assert new_node.node_id not in allocator.layer_to_load[before_layer_id].hosting_nodes
     assert restored_mem == before_mem
@@ -206,9 +207,13 @@ def test_allocator(
 
     node_management = build_node_management(nodes)
     allocator = (
-        GreedyLayerAllocator(model, node_management)
+        GreedyLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
         if strategy == "greedy"
-        else DynamicProgrammingLayerAllocator(model, node_management, assign_left_over_nodes=False)
+        else DynamicProgrammingLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
     )
     allocator.global_allocation()
     _test_gap_patch_rebalance(allocator)
@@ -238,9 +243,13 @@ def test_single_node_can_host_all_layers_greedy(strategy: Literal["greedy", "dp"
     node = _build_node("a100-80g", model)
     node_management = build_node_management([node])
     alloc = (
-        GreedyLayerAllocator(model, node_management)
+        GreedyLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
         if strategy == "greedy"
-        else DynamicProgrammingLayerAllocator(model, node_management)
+        else DynamicProgrammingLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
     )
     initialized = alloc.global_allocation()
     assert initialized is True
@@ -257,9 +266,13 @@ def test_mixed_pool_single_host_available(strategy: Literal["greedy", "dp"]):
     r2 = _build_node("rtx4090", model, id_suffix="-2")
     node_management = build_node_management([a100, r1, r2])
     alloc = (
-        GreedyLayerAllocator(model, node_management)
+        GreedyLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
         if strategy == "greedy"
-        else DynamicProgrammingLayerAllocator(model, node_management)
+        else DynamicProgrammingLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
     )
     initialized = alloc.global_allocation()
     assert initialized is True
@@ -276,9 +289,13 @@ def test_pipeline_required_with_midrange_only(strategy: Literal["greedy", "dp"])
     nodes = [_build_node("rtx4090", model, id_suffix=f"-{i}") for i in range(3)]
     node_management = build_node_management(nodes)
     alloc = (
-        GreedyLayerAllocator(model, node_management)
+        GreedyLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
         if strategy == "greedy"
-        else DynamicProgrammingLayerAllocator(model, node_management)
+        else DynamicProgrammingLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
     )
     ok = alloc.global_allocation()
     assert ok is True
@@ -316,9 +333,13 @@ def test_allocator_does_not_duplicate_leftover_nodes(strategy: Literal["greedy",
 
     node_management = build_node_management(nodes)
     alloc = (
-        GreedyLayerAllocator(model, node_management)
+        GreedyLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
         if strategy == "greedy"
-        else DynamicProgrammingLayerAllocator(model, node_management)
+        else DynamicProgrammingLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
     )
     ok = alloc.global_allocation()
     assert ok is True

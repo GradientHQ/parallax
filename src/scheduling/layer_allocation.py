@@ -26,7 +26,7 @@ from typing import Dict, List, Literal, Optional, Set, Tuple
 from parallax_utils.logging_config import get_logger
 from scheduling.model_info import ModelInfo
 from scheduling.node import Node
-from scheduling.node_management import NodeManagement, NodeState
+from scheduling.node_management import NodeManager, NodeState
 
 logger = get_logger(__name__)
 
@@ -98,17 +98,22 @@ class BaseLayerAllocator:
     def __init__(
         self,
         model_info: ModelInfo,
-        node_management: NodeManagement,
+        node_management: NodeManager,
         *,
         dynamic_pipelines_router: bool = False,
         rebalance_threshold: float = 0.25,
         water_filling_max_iterations: int = 40,
+        trim_layers_on_turning_points: bool = True,
     ) -> None:
         self.model_info = model_info
         self.num_total_layers = model_info.num_layers
         self.node_management = node_management
-
         self.layer_to_load: Dict[int, LayerLoad] = {}
+
+        # True if we should trim layers on turning points
+        # e.g. 4 layers, 2 nodes, [0, 3), [2,4) -> [0, 3), [3, 4);
+        # where we trim the second node.
+        self.trim_layers_on_turning_points = trim_layers_on_turning_points
 
         # Threshold for layer hosting power imbalance to trigger global rebalance
         self.rebalance_threshold = rebalance_threshold
@@ -168,7 +173,7 @@ class BaseLayerAllocator:
         for layer_id in range(start_layer, end_layer):
             if layer_id in self.layer_to_load:
                 self.layer_to_load[layer_id].remove_node(node)
-        node.clear_layer_allocation()
+        self.node_management.standby([node.node_id])
         self._update_layer_loads_heap()
 
     def reallocate(self, node: Node, start_layer: int, end_layer: int) -> None:
@@ -440,6 +445,102 @@ class BaseLayerAllocator:
                 f"Greedy assignment did not cover all layers: remaining {remaining_layers}"
             )
 
+    def adjust_for_turning_points(self, num_layers: int) -> List[Tuple[str, int, str]]:
+        """Find truncation points (warm-up helper).
+
+        Turning points mark where shards can be trimmed based on optimal routing.
+        This is implemented using layer-level DP, with state (layer l, node i that hosts l).
+        Node cost uses the node's per-layer latency proxy; edge cost uses RTT between nodes.
+
+        Returns:
+            A list of (node_id, layer_index, kind), where kind in {"head", "tail"}:
+                - (node, l, "tail"): the route switches away at layer l although node still
+                hosts l, so drop [l, end) on that node.
+                - (node, l, "head"): the route first uses this node at layer l (> start),
+                so drop [start, l) on that node.
+        """
+        nodes = self.node_management.snapshot(state=NodeState.ACTIVE)
+        if num_layers <= 0 or not nodes:
+            return []
+
+        # Build host lists per layer using start/end layer ranges
+        layer_hosts: List[List[int]] = []
+        for l in range(num_layers):
+            hosts = [i for i, n in enumerate(nodes) if n.hosts_layer(l)]
+            layer_hosts.append(hosts)
+
+        # If any layer lacks a host, return empty
+        if any(len(h) == 0 for h in layer_hosts):
+            return []
+
+        # layer_id: node_id -> cost
+        dp: List[Dict[int, float]] = [{i: float("inf") for i in layer_hosts[0]}]
+        back: List[Dict[int, Optional[int]]] = [{i: None for i in layer_hosts[0]}]
+
+        # Init layer 0
+        for i in layer_hosts[0]:
+            dp[0][i] = nodes[i].layer_latency_ms
+
+        # Recurrrence: dp[l+1][g] = min_g' (dp[l][g] + rtt(g,g') + latency(g'))
+        for l in range(1, num_layers):
+            curr: Dict[int, float] = {i: float("inf") for i in layer_hosts[l]}
+            prev_back: Dict[int, Optional[int]] = {i: None for i in layer_hosts[l]}
+            for i in layer_hosts[l]:
+                node_i = nodes[i]
+                best_cost = float("inf")
+                best_j: Optional[int] = None
+                for j, prev_cost in dp[l - 1].items():
+                    if prev_cost == float("inf"):
+                        continue
+                    node_j = nodes[j]
+                    trans = 0.0 if i == j else node_j.get_rtt_to(node_i)
+                    total = prev_cost + trans + node_i.layer_latency_ms
+                    if total < best_cost:
+                        best_cost = total
+                        best_j = j
+                curr[i] = best_cost
+                prev_back[i] = best_j
+            dp.append(curr)
+            back.append(prev_back)
+
+        # Backtrack optimal node index per layer
+        last = dp[-1]
+        end_i = min(last, key=lambda k: last[k])
+        path_idx: List[int] = [end_i]
+        for l in range(num_layers - 1, 0, -1):
+            prev_i = back[l][path_idx[-1]]
+            if prev_i is None:
+                break
+            path_idx.append(prev_i)
+        path_idx.reverse()
+
+        # Identify turning points: tail truncations when switching away
+        turning: List[Tuple[str, int, str]] = []
+        for l in range(1, len(path_idx)):
+            prev_i = path_idx[l - 1]
+            cur_i = path_idx[l]
+            if prev_i == cur_i:
+                continue
+            prev_node = nodes[prev_i]
+            if prev_node.hosts_layer(l):
+                turning.append((nodes[prev_i].node_id, l, "tail"))
+                self.reallocate(nodes[prev_i], prev_node.start_layer, l)
+        # Identify front truncations: for each node on the path, if the first
+        # layer used is greater than its hosted start, we can drop the prefix
+        # [start, first_used_layer)
+        first_used: Dict[int, int] = {}
+        for l, idx in enumerate(path_idx):
+            if idx not in first_used:
+                first_used[idx] = l
+        for idx, l0 in first_used.items():
+            n = nodes[idx]
+            if n.start_layer is None:
+                continue
+            if l0 > n.start_layer:
+                turning.append((n.node_id, l0, "head"))
+                self.reallocate(n, l0, n.end_layer)
+        return turning
+
     def get_lightest_layer(self) -> Optional[LayerLoad]:
         """Return the current lightest-hosted layer from the heap, if any."""
         if not self.layer_loads_heap:
@@ -505,14 +606,10 @@ class GreedyLayerAllocator(BaseLayerAllocator):
 
     def __init__(
         self,
-        model_info: ModelInfo,
-        node_management: NodeManagement,
         *,
-        rebalance_threshold: float = 0.25,
-        dynamic_pipelines_router: bool = False,
-        water_filling_max_iterations: int = 40,
         look_ahead_enable: bool = True,
         pipeline_rebalance_strategy: Literal["greedy", "water_filling"] = "water_filling",
+        **kwargs,
     ) -> None:
         """Initialize Greedy allocator runtime knobs.
 
@@ -528,13 +625,7 @@ class GreedyLayerAllocator(BaseLayerAllocator):
             None. Sets internal flags `_look_ahead_enable` and
             `_pipeline_rebalance_strategy`.
         """
-        super().__init__(
-            model_info,
-            node_management,
-            rebalance_threshold=rebalance_threshold,
-            water_filling_max_iterations=water_filling_max_iterations,
-            dynamic_pipelines_router=dynamic_pipelines_router,
-        )
+        super().__init__(**kwargs)
         self._look_ahead_enable = look_ahead_enable
         self._pipeline_rebalance_strategy = pipeline_rebalance_strategy
 
@@ -642,6 +733,9 @@ class GreedyLayerAllocator(BaseLayerAllocator):
         ):
             logger.warning("[Greedy] global_allocation produced no full pipeline")
             return False
+        if self.trim_layers_on_turning_points:
+            turning_points = self.adjust_for_turning_points(self.num_total_layers)
+            logger.debug(f"Turning points: {turning_points}")
         if self.dynamic_pipelines_router:
             logger.info("[Greedy] Allocating standby nodes using Dynamic Join (lightest layers)")
             self.allocate_standby_nodes()
@@ -686,22 +780,11 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
 
     def __init__(
         self,
-        model_info: ModelInfo,
-        node_management: NodeManagement,
         *,
-        rebalance_threshold: float = 0.25,
-        water_filling_max_iterations: int = 40,
-        dynamic_pipelines_router: bool = False,
         alpha: float = 2.0,
-        assign_left_over_nodes: bool = True,
+        **kwargs,
     ) -> None:
-        super().__init__(
-            model_info,
-            node_management,
-            rebalance_threshold=rebalance_threshold,
-            water_filling_max_iterations=water_filling_max_iterations,
-            dynamic_pipelines_router=dynamic_pipelines_router,
-        )
+        super().__init__(**kwargs)
         # Sort GPUs by layer capacity descending for stronger pruning
         self.alpha = alpha
         self._path: Dict[Tuple[int, Tuple[int, ...], int], Tuple] = {}
@@ -856,6 +939,9 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
         if not self.node_management.num_full_pipelines(self.num_total_layers) > 0:
             logger.warning("[DP] Allocation did not produce a full pipeline")
             return False
+        if self.trim_layers_on_turning_points:
+            turning_points = self.adjust_for_turning_points(self.num_total_layers)
+            logger.debug(f"Turning points: {turning_points}")
         if self.dynamic_pipelines_router:
             logger.info("[DP] Allocating standby nodes using Dynamic Join (lightest layers)")
             self.allocate_standby_nodes()

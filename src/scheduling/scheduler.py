@@ -17,10 +17,10 @@ from scheduling.layer_allocation import (
 )
 from scheduling.model_info import ModelInfo
 from scheduling.node import Node, RequestSignal
+from scheduling.node_management import NodeManager
 from scheduling.request_routing import (
     DynamicProgrammingRouting,
     RoundRobinOverFixedPipelinesRouting,
-    find_turning_points,
 )
 
 logger = get_logger(__name__)
@@ -41,7 +41,7 @@ class Scheduler:
         request_arrival_horizon_sec: float = 600.0,
         rebalance_threshold: float = float("inf"),
         water_filling_max_iterations: int = 40,
-        request_warm_up_for_reshard: int = 0,
+        request_warmup_for_reshard: int = 0,
         heartbeat_timeout: float = 60.0,
     ) -> None:
         """Initialize the scheduler.
@@ -57,13 +57,14 @@ class Scheduler:
             request_arrival_horizon_sec: Sliding window horizon for arrival-rate tracking.
             rebalance_threshold: Threshold for triggering rebalancing in allocation.
             water_filling_max_iterations: Max iterations for water-filling allocation.
-            request_warm_up_for_reshard: Number of warm-up requests to detect truncation.
+            request_warmup_for_reshard: Number of warm-up requests to detect truncation.
             heartbeat_timeout: Time in seconds to consider node heartbeat stale.
         """
         self.model_info = model_info
         self.num_layers = model_info.num_layers
         self.enable_weight_refit = enable_weight_refit
         self.refit_request = {}
+        self.node_manager = NodeManager(initial_nodes=nodes)
 
         allocator_class = (
             GreedyLayerAllocator if strategy == "greedy" else DynamicProgrammingLayerAllocator
@@ -71,12 +72,11 @@ class Scheduler:
         self.layer_allocator = allocator_class(
             model_info,
             nodes,
+            dynamic_pipelines_router=routing_strategy == "dp",
             rebalance_threshold=rebalance_threshold,
             water_filling_max_iterations=water_filling_max_iterations,
         )
         # Ensure Scheduler and allocator share the same node list to avoid divergence.
-        self.nodes = self.layer_allocator.nodes
-        self.node_id_to_node: Dict[str, Node] = self.layer_allocator.node_id_to_node
         self.min_nodes_bootstrapping = min_nodes_bootstrapping
 
         self.request_router = (
@@ -119,13 +119,34 @@ class Scheduler:
 
         # Eager bootstrap for initial allocation if enough nodes are present
         try:
-            if len(self.nodes) >= self.min_nodes_bootstrapping:
-                logger.debug(
+            if self.node_manager.num_nodes >= self.min_nodes_bootstrapping:
+                logger.info(
                     f"Eager allocation attempt with {len(self.nodes)} nodes (min required: {self.min_nodes_bootstrapping})"
                 )
                 self.layer_allocator.global_allocation()
         except Exception:  # best-effort eager allocation
             pass
+
+    def bootstrap(self) -> bool:
+        """Initial Node Allocation Assignment."""
+        # Check if we have enough nodes for bootstraping
+        if self.node_manager.num_nodes < self.min_nodes_bootstrapping:
+            logger.debug(
+                f"Bootstrap deferred: have {self.node_manager.num_nodes} nodes; need >= {self.min_nodes_bootstrapping}"
+            )
+            return False
+
+        # Perform global allocation
+        success = self.layer_allocator.global_allocation()
+        if not success:
+            logger.warning("Global allocation failed to produce a full pipeline")
+            return False
+
+        assignments = self.node_manager.list_node_allocations(self.num_layers)
+        logger.debug(f"Layer allocator assignments: {assignments}")
+
+        if self.request_warmup_for_reshard > 0:
+            self._run_warmup_and_truncate(override_warmup_count=self.request_warmup_for_reshard)
 
     # Orchestration helpers
     def bootstrap(self, *, clear_existing: bool = False, skip_warmup: bool = False) -> bool:
@@ -143,24 +164,6 @@ class Scheduler:
         Returns:
             True if a full pipeline was established; False otherwise.
         """
-        # Check node count only for initial bootstrapping (not rebalancing)
-        if not clear_existing and len(self.nodes) < self.min_nodes_bootstrapping:
-            logger.debug(
-                f"Bootstrapping deferred: have {len(self.nodes)} nodes; need >= {self.min_nodes_bootstrapping}"
-            )
-            return False
-
-        # Clear existing allocations if this is a rebalance
-        if clear_existing:
-            logger.debug("Performing global rebalance (clearing existing allocations)")
-            self._bootstrapped = False
-            self._bootstrapped_event.clear()
-            for n in self.nodes:
-                if n.start_layer is not None and n.end_layer is not None:
-                    self.layer_allocator.deallocate(n)
-        else:
-            logger.debug("Bootstrapping layer allocator")
-
         # Perform global allocation
         success = self.layer_allocator.global_allocation()
         if not success:
@@ -196,58 +199,6 @@ class Scheduler:
                 min_refit_time = min(min_refit_time, node.last_refit_time)
         self.last_refit_time = min_refit_time
         return self.last_refit_time
-
-    def list_node_allocations(self) -> List[Tuple[str, int, int]]:
-        """List the allocations of all nodes."""
-        return self.layer_allocator.list_node_allocations()
-
-    # Warm-up and re-shard
-    def _run_warmup_and_truncate(self, override_warmup_count: int = 0) -> None:
-        """Run a brief warm-up to detect truncation points and shrink shards.
-
-        Uses layer-level DP turning points (node_id, layer_idx, kind):
-        - kind == "tail": drop [layer_idx, end) on that node
-        - kind == "head": drop [start, layer_idx) on that node
-
-        Note: Always uses DynamicProgrammingRouting for finding turning points,
-        regardless of the current request_router type, since turning points
-        detection requires layer-level DP analysis.
-
-        Args:
-            override_warmup_count: If > 0, use this value instead of request_warm_up_for_reshard.
-                Default is 0, which means use request_warm_up_for_reshard.
-        """
-        nodes_list = list(self.nodes)
-        if not nodes_list:
-            return
-        num_layers = self.model_info.num_layers
-
-        # The number of warm-up requests can be used to repeat detection, but a
-        # single pass is sufficient with our DP model; we repeat to smooth noise.
-        warmup_count = (
-            override_warmup_count if override_warmup_count > 0 else self.request_warm_up_for_reshard
-        )
-
-        agg_turns: Dict[Tuple[str, int, str], int] = {}
-        for _ in range(warmup_count):
-            turns = find_turning_points(nodes_list, num_layers)
-            for t in turns:
-                agg_turns[t] = agg_turns.get(t, 0) + 1
-
-        # Apply truncation for consistently observed turning points
-        # Note: Must use layer_allocator.allocate/deallocate to properly update
-        # internal state (node_allocation dict and layer_to_load)
-        for node_id, layer_idx, kind in agg_turns:
-            node = next((n for n in self.nodes if n.node_id == node_id), None)
-            if node is None or node.start_layer is None or node.end_layer is None:
-                continue
-            start, end = node.start_layer, node.end_layer
-            if kind == "tail":
-                if layer_idx < end:
-                    self.layer_allocator.reallocate(node, start, layer_idx)
-            elif kind == "head":
-                if layer_idx > start:
-                    self.layer_allocator.reallocate(node, layer_idx, end)
 
     def update_node_info(
         self,
