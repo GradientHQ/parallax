@@ -1,9 +1,25 @@
 """
 Scheduler for Layer Allocation and Request Routing.
+
+State ownership:
+
+- NodeRegistry owns node membership and runtime node state:
+  - membership: which node_ids exist
+  - lifecycle: active (layer assigned and actively hosting) vs standby (may or may not be assigned, not hosting)
+  - runtime stats: load/current_requests, RTT tables, latency estimates, heartbeats
+- LayerAllocator owns allocation decisions and allocation bookkeeping:
+  - decides per-node contiguous layer ranges and writes `Node.start_layer/end_layer`
+  - maintains per-layer load structures and allocation maps
+- RequestRouter owns routing-specific state:
+  - dynamic routing: no persistent routing state (pure function over a snapshot)
+
+Scheduler (this module) orchestrates these components: it consumes events (join/leave/stats),
+invokes NodeRegistry/LayerAllocator/RequestRouter in the correct order, and emits routing decisions.
 """
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import time
@@ -64,6 +80,8 @@ class Scheduler:
         self.num_layers = model_info.num_layers
         self.enable_weight_refit = enable_weight_refit
         self.refit_request = {}
+        # Opt-in invariant logging for refactors/debugging; keep disabled in production by default.
+        self._enable_invariants: bool = os.getenv("PARALLAX_SCHEDULER_INVARIANTS", "0") == "1"
 
         allocator_class = (
             GreedyLayerAllocator if strategy == "greedy" else DynamicProgrammingLayerAllocator
@@ -124,6 +142,7 @@ class Scheduler:
                     f"Eager allocation attempt with {len(self.nodes)} nodes (min required: {self.min_nodes_bootstrapping})"
                 )
                 self.layer_allocator.global_allocation()
+                self._log_invariant_violations(context="post_eager_global_allocation")
         except Exception:  # best-effort eager allocation
             pass
 
@@ -185,6 +204,7 @@ class Scheduler:
         self._bootstrapped_event.set()
         action = "rebalance" if clear_existing else "bootstrapping"
         logger.debug(f"{action.capitalize()} completed successfully; full pipeline established")
+        self._log_invariant_violations(context=f"post_{action}")
         return True
 
     def update_last_refit_time(self):
@@ -367,6 +387,7 @@ class Scheduler:
         # Notify waiters that node count changed
         with self._node_count_cv:
             self._node_count_cv.notify_all()
+        self._log_invariant_violations(context="post_join")
 
     def leave(self, node_id: str) -> None:
         """Remove a node from allocation and refresh plan and materialized nodes."""
@@ -410,6 +431,81 @@ class Scheduler:
 
         with self._node_count_cv:
             self._node_count_cv.notify_all()
+        self._log_invariant_violations(context="post_leave")
+
+    # === Log-only guardrails for state consistency ===
+    def _log_invariant_violations(self, *, context: str) -> None:
+        """Log-only invariant checks.
+
+        This must never raise; it exists to surface state divergence early.
+        """
+        if not getattr(self, "_enable_invariants", False):
+            return
+        try:
+            nodes = list(self.nodes)
+            id_map = self.node_id_to_node
+
+            # Invariant: nodes list has unique node_ids
+            ids = [n.node_id for n in nodes]
+            if len(ids) != len(set(ids)):
+                logger.warning(
+                    "[invariant] duplicate node_ids in Scheduler.nodes (%s): %s",
+                    context,
+                    ids,
+                )
+
+            # Invariant: mapping is consistent with nodes list (best-effort)
+            missing_in_map = [nid for nid in ids if nid not in id_map]
+            if missing_in_map:
+                logger.warning(
+                    "[invariant] node_ids present in nodes list but missing from node_id_to_node (%s): %s",
+                    context,
+                    missing_in_map,
+                )
+
+            # Invariant: allocation sanity for allocated nodes
+            L = int(self.num_layers)
+            for n in nodes:
+                if n.start_layer is None or n.end_layer is None:
+                    continue
+                if not (0 <= n.start_layer < n.end_layer <= L):
+                    logger.warning(
+                        "[invariant] invalid allocation range (%s): node=%s start=%s end=%s total_layers=%s",
+                        context,
+                        n.node_id,
+                        n.start_layer,
+                        n.end_layer,
+                        L,
+                    )
+
+            # Invariant (RR only): registered pipelines are node-disjoint and reference existing nodes
+            rr = self.request_router
+            pipelines = getattr(rr, "_pipelines", None)
+            if isinstance(pipelines, dict) and pipelines:
+                used = set()
+                overlap = set()
+                missing_nodes = set()
+                for p in pipelines.values():
+                    for nid in p:
+                        if nid in used:
+                            overlap.add(nid)
+                        used.add(nid)
+                        if nid not in id_map:
+                            missing_nodes.add(nid)
+                if overlap:
+                    logger.warning(
+                        "[invariant] RR registered pipelines have overlapping nodes (%s): %s",
+                        context,
+                        sorted(overlap),
+                    )
+                if missing_nodes:
+                    logger.warning(
+                        "[invariant] RR registered pipelines reference missing nodes (%s): %s",
+                        context,
+                        sorted(missing_nodes),
+                    )
+        except Exception as exc:
+            logger.debug("[invariant] invariant check failed (%s): %s", context, exc)
 
     def receive_request(self, request: RequestSignal) -> None:
         """Add a request to the wait pool."""
