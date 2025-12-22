@@ -557,6 +557,11 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
             self._rr_cursor += 1
             attempts += 1
             latency = estimate_pipeline_latency(candidate, id_to_node=id_to_node)
+            for nid in candidate:
+                if nid not in id_to_node:
+                    raise ValueError(
+                        f"To be dispatched node {nid} in pipeline {candidate} not found in node manager!"
+                    )
             if latency != float("inf"):
                 return list(candidate), float(latency)
 

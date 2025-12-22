@@ -98,6 +98,8 @@ class NodeManager:
         for node in nodes_to_clear:
             node.clear_layer_allocation()
 
+        # In case it got rejoined in the system without clearing status
+        removed.clear_layer_allocation()
         return removed
 
     def get(self, node_id: str) -> Optional[Node]:
@@ -128,22 +130,41 @@ class NodeManager:
         for node in nodes_to_clear:
             node.clear_layer_allocation()
 
-    def snapshot(self, *, state: Optional[NodeState] = None) -> List[Node]:
-        """Return a copy of nodes, optionally filtered by state."""
-        with self._lock:
-            if state is None:
-                return list(self._nodes.values())
-            return [n for nid, n in self._nodes.items() if self._state.get(nid) == state]
-
     def ids_to_nodes(self, node_ids: List[str]) -> List[Node]:
         """Return a copy of nodes, optionally filtered by node_ids."""
         with self._lock:
             return [self._nodes[nid] for nid in node_ids]
 
     @property
-    def num_nodes(self) -> int:
+    def nodes(self) -> List[Node]:
         with self._lock:
-            return len(self._nodes)
+            return list(self._nodes.values())
+
+    @property
+    def num_nodes(self) -> int:
+        return len(self.nodes)
+
+    @property
+    def num_active_nodes(self) -> int:
+        return len(self.active_nodes)
+
+    @property
+    def num_standby_nodes(self) -> int:
+        return len(self.standby_nodes)
+
+    @property
+    def active_nodes(self) -> List[Node]:
+        with self._lock:
+            return [
+                n for n in self._nodes.values() if self._state.get(n.node_id) == NodeState.ACTIVE
+            ]
+
+    @property
+    def standby_nodes(self) -> List[Node]:
+        with self._lock:
+            return [
+                n for n in self._nodes.values() if self._state.get(n.node_id) == NodeState.STANDBY
+            ]
 
     def list_node_allocations(self, total_layers: int) -> List[Tuple[str, int, int]]:
         """Snapshot ACTIVE segments as (node_id, start, end) under the registry lock."""

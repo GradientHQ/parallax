@@ -26,7 +26,7 @@ from typing import Dict, List, Literal, Optional, Set, Tuple
 from parallax_utils.logging_config import get_logger
 from scheduling.model_info import ModelInfo
 from scheduling.node import Node
-from scheduling.node_management import NodeManager, NodeState
+from scheduling.node_management import NodeManager
 
 logger = get_logger(__name__)
 
@@ -205,7 +205,7 @@ class BaseLayerAllocator:
     def allocate_standby_nodes(self) -> bool:
         """In case of enabling dynamic pipelines, allocate left-over nodes to the lightest layers using dynamic join."""
         if self.dynamic_pipelines_router:
-            left_over_nodes = self.node_management.snapshot(state=NodeState.STANDBY)
+            left_over_nodes = self.node_management.standby_nodes
             for node in left_over_nodes:
                 self.dynamic_join(node)
             return True
@@ -226,7 +226,9 @@ class BaseLayerAllocator:
         if not self.node_management.has_full_pipeline(self.num_total_layers):
             return True
 
-        available_nodes = self.node_management.snapshot()
+        # TODO: add more imbalance checks
+
+        available_nodes = self.node_management.nodes
 
         layer_heap = self.layer_loads_heap
         if len(layer_heap) < 2:
@@ -459,7 +461,7 @@ class BaseLayerAllocator:
                 - (node, l, "head"): the route first uses this node at layer l (> start),
                 so drop [start, l) on that node.
         """
-        nodes = self.node_management.snapshot(state=NodeState.ACTIVE)
+        nodes = self.node_management.active_nodes
         if num_layers <= 0 or not nodes:
             return []
 
@@ -638,7 +640,7 @@ class GreedyLayerAllocator(BaseLayerAllocator):
         """
         num_total_layers = self.model_info.num_layers
 
-        available_nodes = self.node_management.snapshot(state=NodeState.STANDBY)
+        available_nodes = self.node_management.standby_nodes
         logger.info(
             "[Greedy] Starting allocate_from_standby with %d nodes for %d layers",
             len(available_nodes),
@@ -792,7 +794,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
         """
         num_layers = self.model_info.num_layers
 
-        available_nodes = self.node_management.snapshot(state=NodeState.STANDBY)
+        available_nodes = self.node_management.standby_nodes
         logger.info(
             "[DP] Starting allocate_from_standby with %d nodes for %d layers",
             len(available_nodes),

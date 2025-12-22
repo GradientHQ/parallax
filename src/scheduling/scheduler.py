@@ -17,7 +17,7 @@ from scheduling.layer_allocation import (
 )
 from scheduling.model_info import ModelInfo
 from scheduling.node import Node, RequestSignal
-from scheduling.node_management import NodeManager, NodeState
+from scheduling.node_management import NodeManager
 from scheduling.request_routing import (
     DynamicProgrammingRouting,
     RandomizedOverDynamicPipelinesRouting,
@@ -71,11 +71,12 @@ class Scheduler:
         allocator_class = (
             GreedyLayerAllocator if strategy == "greedy" else DynamicProgrammingLayerAllocator
         )
+        self.dynamic_pipelines_router = routing_strategy == "dp"
         # TODO: expose DP's alpha
         self.layer_allocator = allocator_class(
             model_info=model_info,
             node_management=self.node_manager,
-            dynamic_pipelines_router=routing_strategy == "dp",
+            dynamic_pipelines_router=self.dynamic_pipelines_router,
             rebalance_threshold=rebalance_threshold,
             water_filling_max_iterations=water_filling_max_iterations,
             trim_layers_on_turning_points=trim_layers_on_turning_points,
@@ -117,7 +118,6 @@ class Scheduler:
             f"Scheduler initialized, min_nodes_bootstrapping {self.min_nodes_bootstrapping}, "
             f"strategy {strategy}, rebalance threshold {rebalance_threshold}"
         )
-        self._node_assigned_request_count: Dict[str, int] = {}
 
         # Weight refit
         self.refit_request = {}
@@ -126,15 +126,12 @@ class Scheduler:
 
         # Eager bootstrap for initial allocation if enough nodes are present
         try:
-            if self.node_manager.num_nodes >= self.min_nodes_bootstrapping:
-                logger.info(
-                    f"Eager allocation attempt with {len(self.nodes)} nodes (min required: {self.min_nodes_bootstrapping})"
-                )
-                self.layer_allocator.allocate_from_standby()
+            self.bootstrap()
+
         except Exception:  # best-effort eager allocation
             pass
 
-    def _maybe_expand_rr_pipelines(self) -> None:
+    def _maybe_expand_rr_pipelines(self, force: bool = False) -> None:
         """RR-only: try to allocate/register additional pipelines from STANDBY nodes.
 
         This is a best-effort opportunistic expansion. It never touches ACTIVE nodes because
@@ -145,7 +142,7 @@ class Scheduler:
         if not self._bootstrapped_event.is_set():
             return
 
-        standby_nodes = self.node_manager.snapshot(state=NodeState.STANDBY)
+        standby_nodes = self.node_manager.standby_nodes
         if not standby_nodes:
             return
 
@@ -154,59 +151,75 @@ class Scheduler:
         if (
             now - self._rr_last_expand_ts < self._rr_expand_interval_sec
             and len(standby_nodes) == self._rr_last_seen_standby
+            and not force
         ):
+            logger.warning("[RR] Skipping pipeline expansion due to throttle")
             return
         self._rr_last_expand_ts = now
         self._rr_last_seen_standby = len(standby_nodes)
 
-        before_active_ids = {n.node_id for n in self.node_manager.snapshot(state=NodeState.ACTIVE)}
+        before_active_ids = {n.node_id for n in self.node_manager.active_nodes}
         ok = self.layer_allocator.allocate_from_standby()
-        self._refresh_node_views()
         if not ok:
             return
-        after_active_ids = {n.node_id for n in self.node_manager.snapshot(state=NodeState.ACTIVE)}
+        after_active_ids = {n.node_id for n in self.node_manager.active_nodes}
         newly_active_ids = after_active_ids - before_active_ids
         if not newly_active_ids:
             return
-        newly_active_nodes = self.node_manager.ids_to_nodes(newly_active_ids)
+        newly_active_nodes = self.node_manager.ids_to_nodes(list(newly_active_ids))
         new_pipelines = RandomizedOverDynamicPipelinesRouting.pipeline_discovery(
             newly_active_nodes, self.num_layers
         )
         if not new_pipelines:
-            raise ValueError("No new pipelines found for extended RR")
+            logger.warning("[RR] No new pipelines found for extended RR")
+            return
 
-        self.node_manager.extend_registered_pipelines(new_pipelines)
-        logger.info(
-            "[RR] Added %d new pipeline(s) from %d newly-active node(s)",
-            len(new_pipelines),
-            len(newly_active_nodes),
-        )
+        # Only extend with pipelines that do not overlap existing registered nodes.
+        filtered: List[List[str]] = []
+        for p in new_pipelines:
+            if all(self.node_manager.pipeline_id_of_node(nid) is None for nid in p):
+                filtered.append(p)
+        if not filtered:
+            return
 
-    def bootstrap(self) -> bool:
+        try:
+            self.node_manager.extend_registered_pipelines(filtered)
+            logger.info(
+                "[RR] Added %d new pipeline(s) from %d newly-active node(s)",
+                len(filtered),
+                len(newly_active_nodes),
+            )
+        except Exception as exc:
+            logger.warning(f"[RR] Failed to extend registered pipelines (best-effort): {exc}")
+
+    def bootstrap(self, reboot: bool = False) -> bool:
         """Initial Node Allocation Assignment."""
+        if self._bootstrapped_event.is_set() and not reboot:
+            return True
         # Check if we have enough nodes for bootstraping
         if self.node_manager.num_nodes < self.min_nodes_bootstrapping:
-            logger.debug(
+            logger.info(
                 f"Bootstrap deferred: have {self.node_manager.num_nodes} nodes; need >= {self.min_nodes_bootstrapping}"
             )
             return False
 
         # Perform global allocation
         success = self.layer_allocator.allocate_from_standby()
-        self._refresh_node_views()
         if not success:
             logger.warning("Global allocation failed to produce a full pipeline")
             return False
 
         assignments = self.node_manager.list_node_allocations(self.num_layers)
-        logger.debug(f"Layer allocator assignments: {assignments}")
+        logger.info(f"Layer allocator assignments: {assignments}")
 
         # For fixed (RR) routing: register a pipeline set immediately after bootstrap.
         if self.routing_strategy == "rr" and isinstance(
             self.request_router, RoundRobinOverFixedPipelinesRouting
         ):
             try:
-                self.request_router.register_pipelines(self.nodes, self.num_layers)
+                self.request_router.register_pipelines(
+                    self.node_manager.active_nodes, self.num_layers
+                )
             except Exception as exc:
                 logger.debug(f"[RR] register_pipelines after bootstrap failed (best-effort): {exc}")
 
@@ -216,7 +229,7 @@ class Scheduler:
 
     def update_last_refit_time(self):
         min_refit_time = None
-        for node in self.node_id_to_node.values():
+        for node in self.node_manager.nodes:
             if min_refit_time is None:
                 min_refit_time = node.last_refit_time
             else:
@@ -284,9 +297,7 @@ class Scheduler:
 
     def checking_node_heartbeat(self) -> None:
         """Check the heartbeat of all nodes."""
-        for node in self.nodes:
-            if not node.is_active:
-                continue
+        for node in self.node_manager.active_nodes:
             if time.time() - node.last_heartbeat > self.heartbeat_timeout:
                 logger.debug(f"Node {node.node_id} heartbeat timeout")
                 self.leave(node.node_id)
@@ -303,6 +314,9 @@ class Scheduler:
         )
         if self.node_manager.get(node.node_id) is None:
             self.node_manager.upsert(node)
+            # Greedily assign lightest layer in case of dynamic pipelines router
+            if self._bootstrapped_event.is_set() and self.dynamic_pipelines_router:
+                self.layer_allocator.dynamic_join(node)
 
         # Manual layer assignment bypasses bootstrap waiting
         if node.manual_layer_assignment:
@@ -351,7 +365,7 @@ class Scheduler:
         self.node_manager.remove(node_id)
 
         if self.layer_allocator.should_global_rebalance():
-            nodes = self.node_manager.snapshot()
+            nodes = self.node_manager.nodes
             logger.warning("Global rebalance triggered due to node leave")
 
             # Count manual vs automatic nodes
@@ -367,10 +381,15 @@ class Scheduler:
                     f"Mixed assignment detected ({manual_count} manual, {total_count - manual_count} automatic); skipping rebalance"
                 )
             else:
-                self.node_manager.standby(
-                    [n.node_id for n in self.node_manager.snapshot(state=NodeState.ACTIVE)]
-                )
-                self.bootstrap()
+                self.node_manager.standby([n.node_id for n in self.node_manager.active_nodes])
+                assert (
+                    self.node_manager.num_standby_nodes == self.node_manager.num_nodes
+                ), "All active nodes should be moved to standby"
+                assert (
+                    self.node_manager.num_active_nodes == 0
+                ), "No active nodes before re-bootstrap"
+                logger.warning("Re-bootstrapping for global rebalance")
+                self.bootstrap(reboot=True)
 
         with self._node_count_cv:
             self._node_count_cv.notify_all()
@@ -397,7 +416,9 @@ class Scheduler:
             req = None
         if req is None:
             return None
-        path, latency = self.request_router.find_optimal_path(self.nodes, self.num_layers)
+        path, latency = self.request_router.find_optimal_path(
+            self.node_manager.active_nodes, self.num_layers
+        )
         req.routing_table = path
         # Update simple load counters
         for node_id in path:
@@ -515,16 +536,13 @@ class Scheduler:
                 req = self._request_queue.get(timeout=poll_interval)
                 if req is None:
                     continue
-                path, path_rtt = self.request_router.find_optimal_path(self.nodes, self.num_layers)
+                path, path_rtt = self.request_router.find_optimal_path(
+                    self.node_manager.active_nodes, self.num_layers
+                )
                 logger.debug(f"Path RTT: {path_rtt}")
                 req.routing_table = path
                 for node_id in path:
-                    n = self.node_id_to_node[node_id]
-                    if n is not None:
-                        self._node_assigned_request_count[node_id] = (
-                            self._node_assigned_request_count.get(node_id, 0) + 1
-                        )
-                        n.add_request()
+                    self.node_manager.add_request(node_id)
                 logger.debug(
                     "Dispatched request %s via path %s", getattr(req, "request_id", "?"), path
                 )
@@ -536,7 +554,7 @@ class Scheduler:
         logger.debug("Waiting for bootstrap")
         while not self._stop_event.is_set() and not self._bootstrapped_event.is_set():
             with self._node_count_cv:
-                if len(self.nodes) < self.min_nodes_bootstrapping:
+                if self.node_manager.num_nodes < self.min_nodes_bootstrapping:
                     self._node_count_cv.wait(timeout=max(0.5, poll_interval))
                     continue
             boot_ok = self.bootstrap()
@@ -555,11 +573,12 @@ class Scheduler:
                 )
             except queue.Empty:
                 break
-            if node_id not in self.node_id_to_node:
-                logger.warning(f"Node {node_id} not found in node list, ignore the update")
+            node = self.node_manager.get(node_id)
+            if node is None:
+                logger.warning(f"Node {node_id} not found in node manager, ignore the update")
                 continue
             self.update_node_info(
-                self.node_id_to_node[node_id],
+                node,
                 current_requests=cur,
                 layer_latency_ms=lat,
                 new_rtt_to_nodes=rtts,
@@ -590,7 +609,7 @@ class Scheduler:
         # subsequent joins.
         # Skip bootstrap if manual assignments were used (they handle bootstrapping internally).
         if joined_any and not self._bootstrapped_event.is_set() and not had_manual_assignment:
-            if len(self.nodes) >= self.min_nodes_bootstrapping:
+            if self.node_manager.num_standby_nodes >= self.min_nodes_bootstrapping:
                 try:
                     ok = self.bootstrap()
                     if not ok:
@@ -604,12 +623,11 @@ class Scheduler:
             else:
                 logger.debug(
                     "Deferring bootstrap: have %d nodes; need >= %d",
-                    len(self.nodes),
+                    self.node_manager.num_standby_nodes,
                     self.min_nodes_bootstrapping,
                 )
         # After bootstrapped, opportunistically try to form/register additional RR pipelines from standby.
-        if joined_any:
-            self._maybe_expand_rr_pipelines()
+        self._maybe_expand_rr_pipelines(force=joined_any)
 
     def _process_leaves(self) -> None:
         """Handle pending leave events safely."""
@@ -631,4 +649,7 @@ class Scheduler:
             self._node_count_cv.notify_all()
 
     def need_more_nodes(self):
-        return not self._bootstrapped and len(self.nodes) >= self.min_nodes_bootstrapping
+        return (
+            not self._bootstrapped
+            and self.node_manager.num_standby_nodes >= self.min_nodes_bootstrapping
+        )
