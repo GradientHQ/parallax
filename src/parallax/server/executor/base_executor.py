@@ -450,8 +450,7 @@ class BaseExecutor:
 
             self.handle_input_requests(received_requests)
 
-            # Send finished batch to next peer (or back to first peer for Last Peer)
-            # All nodes can propagate abort signals along the pipeline
+            # Send abort signals to P2P server to broadcast to all nodes
             if len(self.finished_batch) > 0 and self.tp_rank == 0:
                 self.send_to_peer_socket.send_multipart(
                     [b"abort", abort_request_to_proto(self.finished_batch).SerializeToString()]
