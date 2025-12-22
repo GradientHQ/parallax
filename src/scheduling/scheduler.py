@@ -89,10 +89,6 @@ class Scheduler:
             if routing_strategy == "dp"
             else RoundRobinOverFixedPipelinesRouting(self.node_manager)
         )
-        # RR pipeline expansion: periodically try to form additional pipelines from STANDBY nodes.
-        self._rr_expand_interval_sec: float = 1.0
-        self._rr_last_expand_ts: float = 0.0
-        self._rr_last_seen_standby: int = 0
 
         self._request_queue: "queue.Queue[RequestSignal]" = queue.Queue()
         self.request_arrival_horizon_sec = request_arrival_horizon_sec
@@ -131,7 +127,7 @@ class Scheduler:
         except Exception:  # best-effort eager allocation
             pass
 
-    def _maybe_expand_rr_pipelines(self, force: bool = False) -> None:
+    def _maybe_expand_rr_pipelines(self) -> None:
         """RR-only: try to allocate/register additional pipelines from STANDBY nodes.
 
         This is a best-effort opportunistic expansion. It never touches ACTIVE nodes because
@@ -145,18 +141,6 @@ class Scheduler:
         standby_nodes = self.node_manager.standby_nodes
         if not standby_nodes:
             return
-
-        now = time.time()
-        # Throttle unless standby count changed (e.g. new joins)
-        if (
-            now - self._rr_last_expand_ts < self._rr_expand_interval_sec
-            and len(standby_nodes) == self._rr_last_seen_standby
-            and not force
-        ):
-            logger.warning("[RR] Skipping pipeline expansion due to throttle")
-            return
-        self._rr_last_expand_ts = now
-        self._rr_last_seen_standby = len(standby_nodes)
 
         before_active_ids = {n.node_id for n in self.node_manager.active_nodes}
         ok = self.layer_allocator.allocate_from_standby()
@@ -627,7 +611,7 @@ class Scheduler:
                     self.min_nodes_bootstrapping,
                 )
         # After bootstrapped, opportunistically try to form/register additional RR pipelines from standby.
-        self._maybe_expand_rr_pipelines(force=joined_any)
+        self._maybe_expand_rr_pipelines()
 
     def _process_leaves(self) -> None:
         """Handle pending leave events safely."""

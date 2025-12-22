@@ -323,9 +323,6 @@ def test_complicated_rr():
 
     sched.enqueue_join(n4)
     sched._process_joins()  # type: ignore[attr-defined]
-    import time
-
-    sched._rr_last_expand_ts = time.time()
     sched._maybe_expand_rr_pipelines()  # type: ignore[attr-defined]
 
     registered2 = sched.node_manager.get_registered_pipelines()
