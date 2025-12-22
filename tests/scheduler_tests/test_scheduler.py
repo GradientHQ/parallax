@@ -18,7 +18,7 @@ def test_scheduler_initialize_and_dispatch():
     set_rtt_from_coords([n1, n2])
 
     sched = Scheduler(model, [n1, n2], strategy="greedy", min_nodes_bootstrapping=1)
-    sched.layer_allocator.global_allocation()
+    sched.layer_allocator.allocate_from_standby()
     allocs = sched.list_node_allocations()
     assert allocs, "Allocator should assign at least one pipeline"
     # Check coverage equals total layers

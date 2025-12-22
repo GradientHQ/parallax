@@ -135,6 +135,11 @@ class NodeManager:
                 return list(self._nodes.values())
             return [n for nid, n in self._nodes.items() if self._state.get(nid) == state]
 
+    def ids_to_nodes(self, node_ids: List[str]) -> List[Node]:
+        """Return a copy of nodes, optionally filtered by node_ids."""
+        with self._lock:
+            return [self._nodes[nid] for nid in node_ids]
+
     @property
     def num_nodes(self) -> int:
         with self._lock:
@@ -227,6 +232,30 @@ class NodeManager:
                 for nid in p:
                     self._node_to_pipeline[nid] = pid
 
+            return {pid: list(p) for pid, p in self._registered_pipelines.items()}
+
+    def extend_registered_pipelines(self, pipelines: List[List[str]]) -> Dict[int, List[str]]:
+        """Append additional pipelines to the registry (thread-safe).
+
+        This is used when we allocate *new* full pipelines from STANDBY nodes and want
+        to add them without re-registering everything.
+        """
+        with self._lock:
+            next_pid = (
+                (max(self._registered_pipelines.keys()) + 1) if self._registered_pipelines else 0
+            )
+            for p in pipelines:
+                if not p:
+                    continue
+                pid = next_pid
+                next_pid += 1
+                self._registered_pipelines[pid] = list(p)
+                for nid in p:
+                    if nid in self._node_to_pipeline:
+                        raise ValueError(
+                            f"Node {nid} is already registered to pipeline {self._node_to_pipeline[nid]}"
+                        )
+                    self._node_to_pipeline[nid] = pid
             return {pid: list(p) for pid, p in self._registered_pipelines.items()}
 
     def clear_registered_pipelines(self) -> None:

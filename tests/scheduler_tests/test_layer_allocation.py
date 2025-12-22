@@ -215,7 +215,7 @@ def test_allocator(
             model_info=model, node_management=node_management, trim_layers_on_turning_points=False
         )
     )
-    allocator.global_allocation()
+    allocator.allocate_from_standby()
     _test_gap_patch_rebalance(allocator)
 
     # Collect (start,end) per node in creation order
@@ -251,7 +251,7 @@ def test_single_node_can_host_all_layers_greedy(strategy: Literal["greedy", "dp"
             model_info=model, node_management=node_management, trim_layers_on_turning_points=False
         )
     )
-    initialized = alloc.global_allocation()
+    initialized = alloc.allocate_from_standby()
     assert initialized is True
     assert node_management.has_full_pipeline(model.num_layers)
     assert node.start_layer == 0 and node.end_layer == model.num_layers
@@ -274,7 +274,7 @@ def test_mixed_pool_single_host_available(strategy: Literal["greedy", "dp"]):
             model_info=model, node_management=node_management, trim_layers_on_turning_points=False
         )
     )
-    initialized = alloc.global_allocation()
+    initialized = alloc.allocate_from_standby()
     assert initialized is True
     # A100 should cover entire model
     assert a100.start_layer == 0 and a100.end_layer == model.num_layers
@@ -297,7 +297,7 @@ def test_pipeline_required_with_midrange_only(strategy: Literal["greedy", "dp"])
             model_info=model, node_management=node_management, trim_layers_on_turning_points=False
         )
     )
-    ok = alloc.global_allocation()
+    ok = alloc.allocate_from_standby()
     assert ok is True
     # At least two nodes should be assigned to cover 7 layers
     assigned = [(n.node_id, n.start_layer, n.end_layer) for n in nodes if n.start_layer is not None]
@@ -341,7 +341,7 @@ def test_allocator_does_not_duplicate_leftover_nodes(strategy: Literal["greedy",
             model_info=model, node_management=node_management, trim_layers_on_turning_points=False
         )
     )
-    ok = alloc.global_allocation()
+    ok = alloc.allocate_from_standby()
     assert ok is True
     assert (
         node_management.num_nodes == expected_node_count

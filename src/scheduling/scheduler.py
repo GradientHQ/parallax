@@ -20,6 +20,7 @@ from scheduling.node import Node, RequestSignal
 from scheduling.node_management import NodeManager, NodeState
 from scheduling.request_routing import (
     DynamicProgrammingRouting,
+    RandomizedOverDynamicPipelinesRouting,
     RoundRobinOverFixedPipelinesRouting,
 )
 
@@ -62,6 +63,7 @@ class Scheduler:
         """
         self.model_info = model_info
         self.num_layers = model_info.num_layers
+        self.routing_strategy: Literal["rr", "dp"] = routing_strategy
         self.enable_weight_refit = enable_weight_refit
         self.refit_request = {}
         self.node_manager = NodeManager(initial_nodes=nodes)
@@ -86,6 +88,10 @@ class Scheduler:
             if routing_strategy == "dp"
             else RoundRobinOverFixedPipelinesRouting(self.node_manager)
         )
+        # RR pipeline expansion: periodically try to form additional pipelines from STANDBY nodes.
+        self._rr_expand_interval_sec: float = 1.0
+        self._rr_last_expand_ts: float = 0.0
+        self._rr_last_seen_standby: int = 0
 
         self._request_queue: "queue.Queue[RequestSignal]" = queue.Queue()
         self.request_arrival_horizon_sec = request_arrival_horizon_sec
@@ -124,9 +130,57 @@ class Scheduler:
                 logger.info(
                     f"Eager allocation attempt with {len(self.nodes)} nodes (min required: {self.min_nodes_bootstrapping})"
                 )
-                self.layer_allocator.global_allocation()
+                self.layer_allocator.allocate_from_standby()
         except Exception:  # best-effort eager allocation
             pass
+
+    def _maybe_expand_rr_pipelines(self) -> None:
+        """RR-only: try to allocate/register additional pipelines from STANDBY nodes.
+
+        This is a best-effort opportunistic expansion. It never touches ACTIVE nodes because
+        allocator `allocate_from_standby()` only draws from the STANDBY pool.
+        """
+        if self.routing_strategy != "rr":
+            return
+        if not self._bootstrapped_event.is_set():
+            return
+
+        standby_nodes = self.node_manager.snapshot(state=NodeState.STANDBY)
+        if not standby_nodes:
+            return
+
+        now = time.time()
+        # Throttle unless standby count changed (e.g. new joins)
+        if (
+            now - self._rr_last_expand_ts < self._rr_expand_interval_sec
+            and len(standby_nodes) == self._rr_last_seen_standby
+        ):
+            return
+        self._rr_last_expand_ts = now
+        self._rr_last_seen_standby = len(standby_nodes)
+
+        before_active_ids = {n.node_id for n in self.node_manager.snapshot(state=NodeState.ACTIVE)}
+        ok = self.layer_allocator.allocate_from_standby()
+        self._refresh_node_views()
+        if not ok:
+            return
+        after_active_ids = {n.node_id for n in self.node_manager.snapshot(state=NodeState.ACTIVE)}
+        newly_active_ids = after_active_ids - before_active_ids
+        if not newly_active_ids:
+            return
+        newly_active_nodes = self.node_manager.ids_to_nodes(newly_active_ids)
+        new_pipelines = RandomizedOverDynamicPipelinesRouting.pipeline_discovery(
+            newly_active_nodes, self.num_layers
+        )
+        if not new_pipelines:
+            raise ValueError("No new pipelines found for extended RR")
+
+        self.node_manager.extend_registered_pipelines(new_pipelines)
+        logger.info(
+            "[RR] Added %d new pipeline(s) from %d newly-active node(s)",
+            len(new_pipelines),
+            len(newly_active_nodes),
+        )
 
     def bootstrap(self) -> bool:
         """Initial Node Allocation Assignment."""
@@ -138,13 +192,23 @@ class Scheduler:
             return False
 
         # Perform global allocation
-        success = self.layer_allocator.global_allocation()
+        success = self.layer_allocator.allocate_from_standby()
+        self._refresh_node_views()
         if not success:
             logger.warning("Global allocation failed to produce a full pipeline")
             return False
 
         assignments = self.node_manager.list_node_allocations(self.num_layers)
         logger.debug(f"Layer allocator assignments: {assignments}")
+
+        # For fixed (RR) routing: register a pipeline set immediately after bootstrap.
+        if self.routing_strategy == "rr" and isinstance(
+            self.request_router, RoundRobinOverFixedPipelinesRouting
+        ):
+            try:
+                self.request_router.register_pipelines(self.nodes, self.num_layers)
+            except Exception as exc:
+                logger.debug(f"[RR] register_pipelines after bootstrap failed (best-effort): {exc}")
 
         self._bootstrapped = True
         self._bootstrapped_event.set()
@@ -436,6 +500,7 @@ class Scheduler:
             self._process_node_updates()
             self._process_joins()
             self._process_leaves()
+            self._maybe_expand_rr_pipelines()
             now = time.time()
             if now - last_hb_check >= max(0.5, poll_interval) and not self.enable_weight_refit:
                 self.checking_node_heartbeat()
@@ -542,6 +607,9 @@ class Scheduler:
                     len(self.nodes),
                     self.min_nodes_bootstrapping,
                 )
+        # After bootstrapped, opportunistically try to form/register additional RR pipelines from standby.
+        if joined_any:
+            self._maybe_expand_rr_pipelines()
 
     def _process_leaves(self) -> None:
         """Handle pending leave events safely."""

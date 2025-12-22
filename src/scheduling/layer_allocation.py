@@ -3,7 +3,7 @@ Layer allocation and dynamic rebalancing primitives (Phase 1 of scheduling).
 
 Key components:
 - LayerLoad: per-layer hosting power (combined KV memory + FLOPs) tracked in a min-heap;
-- BaseLayerAllocator: shared utilities for static global_allocation(), dynamic join/leave, and
+- BaseLayerAllocator: shared utilities for static allocate_from_standby(), dynamic join/leave, and
   in-place pipeline rebalancing using a water-filling algorithm;
 - GreedyLayerAllocator: builds pipelines greedily to minimize stages and maximize the
   number of pipelines, then rebalances each pipeline in-place;
@@ -82,7 +82,7 @@ class BaseLayerAllocator:
          - each worker node gives up running requests
          - each worker node re-load a different shard.
 
-    Global rebalancing, i.e. re-`global_allocation` is needed when:
+    Global rebalancing, i.e. re-`allocate_from_standby` is needed when:
      - When we find some layers are not hosted by any node,
      - Loads are too imbalanced.
 
@@ -138,7 +138,7 @@ class BaseLayerAllocator:
             return False
         return True
 
-    def global_allocation(self) -> bool:
+    def allocate_from_standby(self) -> bool:
         """Static assignment on STANDBY nodes.
 
         Returns:
@@ -210,7 +210,7 @@ class BaseLayerAllocator:
                 self.dynamic_join(node)
             return True
         else:
-            return self.global_allocation()
+            return self.allocate_from_standby()
 
     def should_global_rebalance(self) -> bool:
         """Trigger global rebalance, i.e. re-run `initialize`  if load imbalance is too high.
@@ -629,7 +629,7 @@ class GreedyLayerAllocator(BaseLayerAllocator):
         self._look_ahead_enable = look_ahead_enable
         self._pipeline_rebalance_strategy = pipeline_rebalance_strategy
 
-    def global_allocation(self) -> bool:
+    def allocate_from_standby(self) -> bool:
         """
         Allocate layers to nodes greedily to maximize the number of pipelines.
 
@@ -640,7 +640,7 @@ class GreedyLayerAllocator(BaseLayerAllocator):
 
         available_nodes = self.node_management.snapshot(state=NodeState.STANDBY)
         logger.info(
-            "[Greedy] Starting global_allocation with %d nodes for %d layers",
+            "[Greedy] Starting allocate_from_standby with %d nodes for %d layers",
             len(available_nodes),
             num_total_layers,
         )
@@ -728,7 +728,7 @@ class GreedyLayerAllocator(BaseLayerAllocator):
                 break
 
         if not any_assigned or not self.node_management.has_full_pipeline(self.num_total_layers):
-            logger.warning("[Greedy] global_allocation produced no full pipeline")
+            logger.warning("[Greedy] allocate_from_standby produced no full pipeline")
             return False
         if self.trim_layers_on_turning_points:
             turning_points = self.adjust_for_turning_points(self.num_total_layers)
@@ -736,7 +736,7 @@ class GreedyLayerAllocator(BaseLayerAllocator):
         if self.dynamic_pipelines_router:
             logger.info("[Greedy] Allocating standby nodes using Dynamic Join (lightest layers)")
             self.allocate_standby_nodes()
-        logger.info("[Greedy] global_allocation completed successfully")
+        logger.info("[Greedy] allocate_from_standby completed successfully")
         return True
 
 
@@ -786,7 +786,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
         self.alpha = alpha
         self._path: Dict[Tuple[int, Tuple[int, ...], int], Tuple] = {}
 
-    def global_allocation(self) -> bool:
+    def allocate_from_standby(self) -> bool:
         """
         Allocate nodes in STANDBY pool using dynamic programming.
         """
@@ -794,7 +794,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
 
         available_nodes = self.node_management.snapshot(state=NodeState.STANDBY)
         logger.info(
-            "[DP] Starting global_allocation with %d nodes for %d layers",
+            "[DP] Starting allocate_from_standby with %d nodes for %d layers",
             len(available_nodes),
             num_layers,
         )
@@ -942,7 +942,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
         if self.dynamic_pipelines_router:
             logger.info("[DP] Allocating standby nodes using Dynamic Join (lightest layers)")
             self.allocate_standby_nodes()
-        logger.info("[DP] global_allocation completed successfully")
+        logger.info("[DP] allocate_from_standby completed successfully")
         return True
 
     def _backtrack(self, best_num_pipes: int, available_nodes: List[Node]) -> List[List[Node]]:
