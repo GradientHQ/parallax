@@ -294,3 +294,58 @@ class NodeManager:
         """Return the pipeline id a node is registered to (if any)."""
         with self._lock:
             return self._node_to_pipeline.get(node_id)
+
+    def pipeline_min_load_and_total_capacity(
+        self, init: bool = True
+    ) -> Tuple[Optional[Dict[int, int]], int]:
+        """Return per-pipeline bottleneck load + total request capacity across pipelines.
+
+        Definitions:
+        - Per-node remaining request capacity = max(0, node.max_requests - node.current_requests)
+        - Per-pipeline capacity = min(remaining capacity of each worker in that pipeline)
+        - Total capacity = sum(per-pipeline capacity) across all registered pipelines
+
+        Safety/edge-cases:
+        - If no pipelines are registered, returns (None, 0)
+        - If a pipeline is empty or references any missing node, that pipeline capacity is 0
+
+        Args:
+            init: If True, checking capacity only, not accoutning for current requests
+        """
+        with self._lock:
+            if not self._registered_pipelines:
+                return None, 0
+
+            per_pipeline_min: Dict[int, int] = {}
+            total_capacity = 0
+
+            # Iterate deterministically for stable display/tests.
+            for pid in sorted(self._registered_pipelines.keys()):
+                node_ids = self._registered_pipelines.get(pid, [])
+                if not node_ids:
+                    per_pipeline_min[pid] = 0
+                    continue
+
+                min_remaining: Optional[int] = None
+                missing = False
+                for nid in node_ids:
+                    node = self._nodes.get(nid)
+                    if node is None:
+                        missing = True
+                        break
+                    if init:
+                        remaining = node.max_requests
+                    else:
+                        remaining = max(0, node.max_requests - node.current_requests)
+                    min_remaining = (
+                        remaining if min_remaining is None else min(min_remaining, remaining)
+                    )
+
+                if missing or min_remaining is None:
+                    per_pipeline_min[pid] = 0
+                    continue
+
+                per_pipeline_min[pid] = int(min_remaining)
+                total_capacity += int(min_remaining)
+
+            return per_pipeline_min, int(total_capacity)

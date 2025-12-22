@@ -84,3 +84,49 @@ def test_num_full_pipelines_raises_on_invalid_ranges_but_ignores_unallocated_ran
 
     with pytest.raises(ValueError):
         _ = reg.num_full_pipelines(4)
+
+
+def test_pipeline_min_load_and_total_capacity_none_when_no_registered_pipelines():
+    model = build_model_info(4)
+    n1 = build_node("n1", model, mem_gb=80.0)
+    reg = NodeManager(initial_nodes=[n1])
+
+    per, total = reg.pipeline_min_load_and_total_capacity()
+    assert per is None
+    assert total == 0
+
+
+def test_pipeline_min_load_and_total_capacity_computes_bottleneck_remaining_capacity():
+    model = build_model_info(4)
+    a = build_node("a", model, mem_gb=80.0)
+    b = build_node("b", model, mem_gb=80.0)
+    c = build_node("c", model, mem_gb=80.0)
+    d = build_node("d", model, mem_gb=80.0)
+    reg = NodeManager(initial_nodes=[a, b, c, d])
+
+    # Pipelines: [a,b] and [c,d]
+    reg.register_pipelines([[a.node_id, b.node_id], [c.node_id, d.node_id]])
+
+    # All nodes have max_requests=16 in tests (_force_max_concurrent_requests=True)
+    a.current_requests = 3  # remaining 13
+    b.current_requests = 10  # remaining 6 -> pipeline0 bottleneck = 6
+    c.current_requests = 0  # remaining 16
+    d.current_requests = 15  # remaining 1 -> pipeline1 bottleneck = 1
+
+    per, total = reg.pipeline_min_load_and_total_capacity(init=False)
+    assert per == {0: 6, 1: 1}
+    assert total == 7
+    per, total = reg.pipeline_min_load_and_total_capacity(init=True)
+    assert per == {0: 16, 1: 16}
+    assert total == 32
+
+
+def test_pipeline_min_load_and_total_capacity_zero_when_pipeline_has_missing_node():
+    model = build_model_info(4)
+    a = build_node("a", model, mem_gb=80.0)
+    reg = NodeManager(initial_nodes=[a])
+
+    reg.register_pipelines([[a.node_id, "ghost"]])
+    per, total = reg.pipeline_min_load_and_total_capacity()
+    assert per == {0: 0}
+    assert total == 0
