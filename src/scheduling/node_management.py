@@ -208,3 +208,39 @@ class NodeManager:
                 self.node_assigned_request_count.get(node_id, 0) + 1
             )
             self._nodes[node_id].add_request()
+
+    def register_pipelines(self, pipelines: List[List[str]]) -> Dict[int, List[str]]:
+        """Fixed-pipeline registry (for round-robin routing)
+
+        Args:
+            pipelines: A list of lists of node ids, each representing a pipeline.
+
+        Returns:
+            A dictionary of pipeline ids to lists of node ids.
+        """
+        with self._lock:
+            self._registered_pipelines = {}
+            self._node_to_pipeline = {}
+
+            for pid, p in enumerate(pipelines):
+                self._registered_pipelines[pid] = list(p)
+                for nid in p:
+                    self._node_to_pipeline[nid] = pid
+
+            return {pid: list(p) for pid, p in self._registered_pipelines.items()}
+
+    def clear_registered_pipelines(self) -> None:
+        """Clear any fixed pipeline registrations."""
+        with self._lock:
+            self._registered_pipelines = {}
+            self._node_to_pipeline = {}
+
+    def get_registered_pipelines(self) -> Dict[int, List[str]]:
+        """Return a copy of the currently registered fixed pipelines."""
+        with self._lock:
+            return {pid: list(p) for pid, p in self._registered_pipelines.items()}
+
+    def pipeline_id_of_node(self, node_id: str) -> Optional[int]:
+        """Return the pipeline id a node is registered to (if any)."""
+        with self._lock:
+            return self._node_to_pipeline.get(node_id)

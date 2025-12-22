@@ -20,7 +20,7 @@ from scheduling.request_routing import (
 )
 
 from .test_utils import build_model_info as build_model
-from .test_utils import build_node, set_rtt_from_coords
+from .test_utils import build_node, build_node_management, set_rtt_from_coords
 
 
 def test_optimal_path_simple_chain():
@@ -172,7 +172,8 @@ def test_round_robin_pipelines_cycle_between_two_complete_paths():
     nodes = [a, b, c, d]
     set_rtt_from_coords(nodes)
 
-    rr = RoundRobinOverFixedPipelinesRouting()
+    node_manager = build_node_management(nodes)
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
     registered = rr.register_pipelines(nodes, num_layers)
     assert len(registered) == 2
     paths = []
@@ -213,7 +214,8 @@ def test_round_robin_skips_overloaded_pipeline():
     # Overload p1b to invalidate pipeline 1
     p1b.current_requests = p1b.max_requests
 
-    rr = RoundRobinOverFixedPipelinesRouting()
+    node_manager = build_node_management(nodes)
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
     # Multiple calls should always pick the viable pipeline [p2a, p2b]
     for _ in range(3):
         node_ids, latency = rr.find_optimal_path(nodes, num_layers)
@@ -328,7 +330,8 @@ def test_round_robin_pipeline_diversity():
     for n in nodes:
         n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
 
-    rr = RoundRobinOverFixedPipelinesRouting()
+    node_manager = build_node_management(nodes)
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
     pipelines = rr.register_pipelines(nodes, num_layers)
 
     assert len(pipelines) == 1
@@ -338,6 +341,7 @@ def test_round_robin_pipeline_diversity():
     t2.set_layer_allocation(2, 3)
     t2.set_layer_latency_ms(1.0)
     nodes.append(t2)
+    node_manager.upsert(t2)
     for n in nodes:
         n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
     # TODO: apparently t2 shouldn't be paired with m2, but with current RR
@@ -345,7 +349,7 @@ def test_round_robin_pipeline_diversity():
     t2.rtt_to_nodes[m2.node_id] = 4.0
     m2.rtt_to_nodes[t2.node_id] = 4.0
 
-    rr = RoundRobinOverFixedPipelinesRouting()
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
     pp = rr.register_pipelines(nodes, num_layers)
     assert len(pp) == 2
     assert pp[1] == ["h1", "m2", "t2"]
@@ -403,7 +407,8 @@ def test_rr_24_node_topology_utilization():
 
     assert len(pipelines) == 756
 
-    rr = RoundRobinOverFixedPipelinesRouting()
+    node_manager = build_node_management(nodes)
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
     pipelines = rr.register_pipelines(nodes, num_layers)
     assert len(pipelines) == 6
 

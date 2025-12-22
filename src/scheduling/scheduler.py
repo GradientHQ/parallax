@@ -84,7 +84,7 @@ class Scheduler:
         self.request_router = (
             DynamicProgrammingRouting()
             if routing_strategy == "dp"
-            else RoundRobinOverFixedPipelinesRouting()
+            else RoundRobinOverFixedPipelinesRouting(self.node_manager)
         )
 
         self._request_queue: "queue.Queue[RequestSignal]" = queue.Queue()
@@ -303,7 +303,9 @@ class Scheduler:
                     f"Mixed assignment detected ({manual_count} manual, {total_count - manual_count} automatic); skipping rebalance"
                 )
             else:
-                self.node_manager.standby(self.node_manager.snapshot(state=NodeState.ACTIVE))
+                self.node_manager.standby(
+                    [n.node_id for n in self.node_manager.snapshot(state=NodeState.ACTIVE)]
+                )
                 self.bootstrap()
 
         with self._node_count_cv:

@@ -51,6 +51,7 @@ from typing import Dict, List, Optional, Tuple
 
 from parallax_utils.logging_config import get_logger
 from scheduling.node import Node
+from scheduling.node_management import NodeManager
 
 logger = get_logger(__name__)
 
@@ -430,8 +431,8 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
     5 x path A, and 1 x path B.
     """
 
-    def __init__(self) -> None:
-        self._pipelines: Dict[int, List[str]] = {}
+    def __init__(self, node_manager: NodeManager) -> None:
+        self._node_manager = node_manager
         self._rr_cursor: int = 0
 
     def _select_best_pipelines(
@@ -518,9 +519,10 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
         Returns:
             A mapping `{pipeline_id: [node_id, ...]}` in the registration order.
         """
-        if self._pipelines:
-            logger.warning("Pipelines already registered, re-registering")
-            self._pipelines = {}
+        existing = self._node_manager.get_registered_pipelines()
+        if existing:
+            logger.warning("Pipelines already registered in node manager, re-registering")
+            self._node_manager.clear_registered_pipelines()
             self._rr_cursor = 0
 
         if not nodes or num_layers <= 0:
@@ -532,11 +534,7 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
             return {}
         # Score: based on estimated latency
         selected_pipelines = self._select_best_pipelines(all_pipelines, nodes)
-
-        for i, p in enumerate(selected_pipelines):
-            self._pipelines[i] = p
-
-        return dict(self._pipelines)
+        return self._node_manager.register_pipelines(selected_pipelines)
 
     def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
         """Return the next viable *registered* pipeline in round-robin order.
@@ -544,13 +542,14 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
         Returns ([], inf) if nothing is registered or if all registered pipelines
         are currently invalid due to overload/missing RTT/missing nodes.
         """
-        if not self._pipelines:
-            self.register_pipelines(nodes, num_layers)
+        pipelines = self._node_manager.get_registered_pipelines()
+        if not pipelines:
+            pipelines = self.register_pipelines(nodes, num_layers)
 
         id_to_node: Dict[str, Node] = {n.node_id: n for n in nodes}
 
         attempts = 0
-        pipelines_list = list(self._pipelines.values())
+        pipelines_list = [pipelines[k] for k in sorted(pipelines.keys())]
         total_pipelines = len(pipelines_list)
         while attempts < total_pipelines:
             pid = self._rr_cursor % total_pipelines
