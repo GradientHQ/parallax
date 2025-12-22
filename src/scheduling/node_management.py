@@ -31,7 +31,9 @@ class NodeManager:
         self._lock = threading.RLock()
         self._nodes: Dict[str, Node] = {}
         self._state: Dict[str, NodeState] = {}
-        self._registered_pipelines: List[List[str]] = []
+        self._registered_pipelines: Dict[int, List[str]] = {}
+        self._node_to_pipeline: Dict[str, int] = {}
+        self.node_assigned_request_count: Dict[str, int] = {}
 
         if initial_nodes:
             for n in initial_nodes:
@@ -46,12 +48,57 @@ class NodeManager:
             else:
                 self._state[node.node_id] = state
 
+    def _standby_locked(
+        self,
+        node_ids: List[str],
+        *,
+        allow_missing: bool = False,
+    ) -> List[Node]:
+        """Transition nodes to STANDBY under the registry lock.
+
+        Returns the corresponding Node objects so callers can do any potentially
+        slower per-node work (e.g. clearing allocations) outside the lock.
+        """
+        nodes_to_clear: List[Node] = []
+        for nid in node_ids:
+            node = self._nodes.get(nid)
+            if node is None:
+                if allow_missing:
+                    continue
+                raise ValueError(f"Node {nid} not found in registry")
+
+            prev_state = self._state.get(nid)
+            if prev_state is not None and prev_state != NodeState.ACTIVE:
+                raise ValueError(f"Node {nid} is not ACTIVE, current state: {prev_state}")
+
+            self._state[nid] = NodeState.STANDBY
+            nodes_to_clear.append(node)
+            self.node_assigned_request_count.pop(nid, None)
+        return nodes_to_clear
+
     def remove(self, node_id: str) -> Optional[Node]:
         """Remove a node; returns removed node if present."""
+        nodes_to_clear: List[Node] = []
         with self._lock:
             self._state.pop(node_id, None)
             removed = self._nodes.pop(node_id, None)
-            return removed
+            pipeline_id = self._node_to_pipeline.pop(node_id, None)
+            if pipeline_id is not None:
+                pipeline_nodes = self._registered_pipelines.pop(pipeline_id, [])
+
+                # This pipeline is no longer valid if any member leaves; detach all members.
+                for nid in pipeline_nodes:
+                    self._node_to_pipeline.pop(nid, None)
+
+                # Transition remaining members to STANDBY while holding the lock,
+                # but clear per-node allocations outside the lock.
+                remaining = [nid for nid in pipeline_nodes if nid != node_id]
+                nodes_to_clear = self._standby_locked(remaining, allow_missing=True)
+
+        for node in nodes_to_clear:
+            node.clear_layer_allocation()
+
+        return removed
 
     def get(self, node_id: str) -> Optional[Node]:
         with self._lock:
@@ -73,15 +120,13 @@ class NodeManager:
 
     def standby(self, node_ids: List[str]) -> None:
         """Mark nodes as STANDBY (joined but not actively serving)."""
+        nodes_to_clear: List[Node] = []
         with self._lock:
-            for nid in node_ids:
-                if nid not in self._nodes:
-                    raise ValueError(f"Node {nid} not found in registry")
-                prev_state = self._state.get(nid)
-                if prev_state is not None and prev_state != NodeState.ACTIVE:
-                    raise ValueError(f"Node {nid} is not ACTIVE, current state: {prev_state}")
-                self._nodes[nid].clear_layer_allocation()
-                self._state[nid] = NodeState.STANDBY
+            nodes_to_clear = self._standby_locked(node_ids)
+
+        # Do per-node work outside the registry lock to reduce contention.
+        for node in nodes_to_clear:
+            node.clear_layer_allocation()
 
     def snapshot(self, *, state: Optional[NodeState] = None) -> List[Node]:
         """Return a copy of nodes, optionally filtered by state."""
@@ -147,3 +192,19 @@ class NodeManager:
                 ways[e] = ways.get(e, 0) + w
 
         return int(ways.get(total_layers, 0))
+
+    def has_full_pipeline(self, num_total_layers: int) -> bool:
+        """Check if there is a full pipeline among ACTIVE nodes."""
+        return self.num_full_pipelines(num_total_layers) > 0
+
+    def add_request(self, node_id: str) -> None:
+        """Add a request to a node."""
+        with self._lock:
+            if self._nodes.get(node_id) is None:
+                raise ValueError(f"Node {node_id} not found in registry")
+            if self._state.get(node_id) != NodeState.ACTIVE:
+                raise ValueError(f"Node {node_id} is not ACTIVE")
+            self.node_assigned_request_count[node_id] = (
+                self.node_assigned_request_count.get(node_id, 0) + 1
+            )
+            self._nodes[node_id].add_request()

@@ -253,7 +253,7 @@ def test_single_node_can_host_all_layers_greedy(strategy: Literal["greedy", "dp"
     )
     initialized = alloc.global_allocation()
     assert initialized is True
-    assert node_management.num_full_pipelines(model.num_layers) > 0
+    assert node_management.has_full_pipeline(model.num_layers)
     assert node.start_layer == 0 and node.end_layer == model.num_layers
 
 

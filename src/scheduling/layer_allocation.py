@@ -223,7 +223,7 @@ class BaseLayerAllocator:
         """
 
         # If we don't currently have a full pipeline covering [0, L), force rebalance
-        if not self.node_management.num_full_pipelines(self.num_total_layers) > 0:
+        if not self.node_management.has_full_pipeline(self.num_total_layers):
             return True
 
         available_nodes = self.node_management.snapshot()
@@ -727,10 +727,7 @@ class GreedyLayerAllocator(BaseLayerAllocator):
                 logger.debug("[Greedy] Unable to form complete pipeline; stopping")
                 break
 
-        if (
-            not any_assigned
-            or not self.node_management.num_full_pipelines(self.num_total_layers) > 0
-        ):
+        if not any_assigned or not self.node_management.has_full_pipeline(self.num_total_layers):
             logger.warning("[Greedy] global_allocation produced no full pipeline")
             return False
         if self.trim_layers_on_turning_points:
@@ -936,7 +933,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
                 continue
             logger.debug("[DP] Adjusting pipeline with %d nodes", len(pl_nodes))
             self.adjust_pipeline_layers(pl_nodes, assume_sorted=False)
-        if not self.node_management.num_full_pipelines(self.num_total_layers) > 0:
+        if not self.node_management.has_full_pipeline(self.num_total_layers):
             logger.warning("[DP] Allocation did not produce a full pipeline")
             return False
         if self.trim_layers_on_turning_points:
