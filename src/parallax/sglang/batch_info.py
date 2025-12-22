@@ -92,12 +92,8 @@ def form_sgl_batch_prefill(
     )
     schedule_batch.prepare_for_extend()
 
-    # Set global_num_tokens for DP attention support
-    # Since Parallax bypasses sglang's scheduler, we need to set these manually
-    # global_num_tokens must have dp_size elements (one per DP rank)
     num_tokens = schedule_batch.extend_num_tokens
     dp_size = model_runner.dp_size
-    # In Parallax's pipeline-parallel setup, we assume all DP ranks process the same tokens
     schedule_batch.global_num_tokens = [num_tokens] * dp_size
     schedule_batch.global_num_tokens_for_logprob = [num_tokens] * dp_size
 
@@ -211,12 +207,8 @@ def form_sgl_batch_decode(
     running_batch.seq_lens_cpu[ready_indices] += 1
     running_batch.orig_seq_lens[ready_indices] += 1
 
-    # Set global_num_tokens for DP attention support
-    # For decode, num_tokens equals batch_size (1 token per request)
-    # global_num_tokens must have dp_size elements (one per DP rank)
     num_tokens = len(ready_indices)
     dp_size = model_runner.dp_size
-    # In Parallax's pipeline-parallel setup, we assume all DP ranks process the same tokens
     ret.global_num_tokens = [num_tokens] * dp_size
     ret.global_num_tokens_for_logprob = [num_tokens] * dp_size
 

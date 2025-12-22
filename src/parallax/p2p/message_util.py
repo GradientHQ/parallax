@@ -145,7 +145,7 @@ def proto_to_abort_request(proto_request: forward_pb2.AbortRequest) -> List[Inte
             request_id=proto_req.rid,
             current_position=0,
             status=status,
-            routing_table=list(proto_req.routing_table),  # Convert to list for pickle
+            routing_table=list(proto_req.routing_table),
         )
 
         requests.append(request)
@@ -155,8 +155,6 @@ def proto_to_abort_request(proto_request: forward_pb2.AbortRequest) -> List[Inte
 
 def proto_to_sampling_params(proto: forward_pb2.SamplingParams) -> SamplingParams:
     """Convert protobuf message to SamplingParams."""
-    # Note: In protobuf, empty messages are not None but empty objects
-    # We need to check if the message has any fields set
     if proto is None or not proto.ByteSize():
         return SamplingParams()
     sampling_params = SamplingParams(

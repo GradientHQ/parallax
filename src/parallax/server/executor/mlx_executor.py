@@ -143,7 +143,6 @@ class MLXExecutor(BaseExecutor):
         if key_dim is not None and value_dim is not None:
             conv_dim = key_dim * 2 + value_dim
 
-        # Support both naming conventions for indexer config
         index_head_dim = self.config.get("index_head_dim", None)
         index_n_heads = self.config.get("index_n_heads", None)
 
