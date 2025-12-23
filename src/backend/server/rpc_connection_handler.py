@@ -79,7 +79,7 @@ class RPCConnectionHandler(ConnectionHandler):
         try:
             node = self.build_node(message)
             # Check if node exists in scheduler
-            if node.node_id not in self.scheduler.node_id_to_node:
+            if self.scheduler.get_node(node.node_id) is None:
                 # Node not found, automatically join it (e.g., after model switch)
                 logger.info(
                     f"Node {node.node_id} not found in scheduler, auto-joining via node_update"
@@ -167,7 +167,7 @@ class RPCConnectionHandler(ConnectionHandler):
         list_node_allocations = self.scheduler.list_node_allocations()
         for node_id, start_layer, end_layer in list_node_allocations:
             if current_node_id == node_id:
-                node = self.scheduler.node_id_to_node.get(node_id)
+                node = self.scheduler.get_node(node_id)
                 if node:
                     return {
                         "node_id": node_id,

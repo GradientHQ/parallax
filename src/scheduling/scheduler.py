@@ -127,6 +127,20 @@ class Scheduler:
         except Exception:  # best-effort eager allocation
             pass
 
+    def list_node_allocations(
+        self, total_layers: Optional[int] = None
+    ) -> List[Tuple[str, int, int]]:
+        """Return current (node_id, start_layer, end_layer) allocations.
+
+        This is a small convenience wrapper around `NodeManager.list_node_allocations` and is
+        relied upon by some callers (e.g. backend RPC handler, docs).
+        """
+        return self.node_manager.list_node_allocations(total_layers or self.num_layers)
+
+    def get_node(self, node_id: str) -> Optional[Node]:
+        """Fetch a node by id (compat helper for callers that shouldn't reach into NodeManager)."""
+        return self.node_manager.get(node_id)
+
     def _maybe_expand_rr_pipelines(self) -> None:
         """RR-only: try to allocate/register additional pipelines from STANDBY nodes.
 
@@ -467,7 +481,7 @@ class Scheduler:
                                 node_id
                             ]
                         logger.debug(
-                            "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d",
+                            "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d | active %s",
                             node_id,
                             start_layer,
                             end_layer,
@@ -475,6 +489,7 @@ class Scheduler:
                             capacity,
                             latency_str,
                             n_hosted_requests,
+                            node.is_active,
                         )
                 except Exception as exc:
                     logger.warning(f"Allocation logger error: {exc}")
