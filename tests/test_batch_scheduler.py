@@ -109,9 +109,6 @@ def test_kv_cache_admission_guard_blocks_prefill():
 
 
 def test_kv_cache_full_allocation_prefill():
-    # A KV manager that allows everything (mocking sufficient memory)
-    # But we will use specific behavior to test full allocation logic if needed.
-    # Here we just verify that passing enable_full_allocation=True works with scheduler.
     cache_mgr = FakeCacheManager(allow=True)
     sched = Scheduler(
         max_batch_size=2,
