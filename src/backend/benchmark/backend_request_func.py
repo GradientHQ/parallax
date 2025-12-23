@@ -138,8 +138,6 @@ async def async_request_openai_completions(
             exc_info = sys.exc_info()
             output.error = "".join(traceback.format_exception(*exc_info))
 
-    if pbar:
-        pbar.update(1)
     return output
 
 
@@ -188,6 +186,10 @@ async def async_request_openai_chat_completions(
             "stream": True,
             "stream_options": {
                 "include_usage": True,
+            },
+            "sampling_params": {
+                # TODO: Remove this.
+                "ignore_eos": True
             },
         }
         if request_func_input.ignore_eos:
@@ -262,8 +264,6 @@ async def async_request_openai_chat_completions(
             exc_info = sys.exc_info()
             output.error = "".join(traceback.format_exception(*exc_info))
 
-    if pbar:
-        pbar.update(1)
     return output
 
 
