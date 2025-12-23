@@ -225,11 +225,6 @@ class Scheduler:
                 logger.info(
                     f"[RR] register_pipelines with bootstrap success, number of pipelines: {len(self.request_router.get_registered_pipelines())}"
                 )
-                for pipeline_id, pipeline in self.request_router.get_registered_pipelines().items():
-                    logger.info(f"[RR] pipeline {pipeline_id}: {pipeline}")
-                    for node_id in pipeline:
-                        node = self.node_manager.get(node_id)
-                        logger.info(f"[RR] node {node_id}: {node.start_layer} - {node.end_layer}")
 
             except Exception as exc:
                 logger.warning(
@@ -472,40 +467,77 @@ class Scheduler:
         )
         self._dispatch_thread.start()
 
+        def _log_current_allocations() -> None:
+            assignments = self.node_manager.list_node_allocations(self.num_layers)
+            header = f"Current allocations ({len(assignments)} nodes)"
+            sep = "-" * len(header)
+            logger.debug("%s\n%s", header, sep)
+            for node_id, start_layer, end_layer in assignments:
+                node = self.node_manager.get(node_id)
+                if node is None:
+                    raise ValueError(f"Node {node_id} not found in node manager")
+                # Snapshot values to avoid recomputing/logging side-effects twice
+                capacity = node.max_requests
+                current = node.current_requests
+                latency = node.layer_latency_ms
+                latency_str = "inf" if latency == float("inf") else f"{latency:.2f}"
+                n_hosted_requests = 0
+                if node_id in self.node_manager.node_assigned_request_count:
+                    n_hosted_requests = self.node_manager.node_assigned_request_count[node_id]
+                logger.debug(
+                    "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d | active %s",
+                    node_id,
+                    start_layer,
+                    end_layer,
+                    current,
+                    capacity,
+                    latency_str,
+                    n_hosted_requests,
+                    node.is_active,
+                )
+
+        def _log_rr_registered_pipelines() -> None:
+            if self.routing_strategy != "rr":
+                return
+            pipelines = self.node_manager.get_registered_pipelines()
+            p_header = f"Registered pipelines ({len(pipelines)})"
+            p_sep = "-" * len(p_header)
+            logger.debug("%s\n%s", p_header, p_sep)
+            if not pipelines:
+                logger.debug("  (none)")
+                return
+
+            for pid in sorted(pipelines.keys()):
+                node_ids = pipelines.get(pid, [])
+                logger.debug("  pipeline %-3d | stages=%d", pid, len(node_ids))
+                for idx, nid in enumerate(node_ids):
+                    n = self.node_manager.get(nid)
+                    if n is None:
+                        logger.debug("    [%02d] %-16s (missing)", idx, nid)
+                        continue
+                    s = -1 if n.start_layer is None else int(n.start_layer)
+                    e = -1 if n.end_layer is None else int(n.end_layer)
+                    lat = n.layer_latency_ms
+                    lat_str = "inf" if lat == float("inf") else f"{lat:.2f}"
+                    logger.debug(
+                        "    [%02d] %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | active %s",
+                        idx,
+                        nid,
+                        s,
+                        e,
+                        n.current_requests,
+                        n.max_requests,
+                        lat_str,
+                        n.is_active,
+                    )
+
         # Start periodic allocation logger thread
         def _alloc_log_loop() -> None:
             """Periodically log current layer allocations."""
             while not self._stop_event.is_set():
                 try:
-                    assignments = self.node_manager.list_node_allocations(self.num_layers)
-                    header = f"Current allocations ({len(assignments)} nodes)"
-                    sep = "-" * len(header)
-                    logger.debug("%s\n%s", header, sep)
-                    for node_id, start_layer, end_layer in assignments:
-                        node = self.node_manager.get(node_id)
-                        if node is None:
-                            raise ValueError(f"Node {node_id} not found in node manager")
-                        # Snapshot values to avoid recomputing/logging side-effects twice
-                        capacity = node.max_requests
-                        current = node.current_requests
-                        latency = node.layer_latency_ms
-                        latency_str = "inf" if latency == float("inf") else f"{latency:.2f}"
-                        n_hosted_requests = 0
-                        if node_id in self.node_manager.node_assigned_request_count:
-                            n_hosted_requests = self.node_manager.node_assigned_request_count[
-                                node_id
-                            ]
-                        logger.debug(
-                            "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d | active %s",
-                            node_id,
-                            start_layer,
-                            end_layer,
-                            current,
-                            capacity,
-                            latency_str,
-                            n_hosted_requests,
-                            node.is_active,
-                        )
+                    _log_current_allocations()
+                    _log_rr_registered_pipelines()
                 except Exception as exc:
                     logger.warning(f"Allocation logger error: {exc}")
                 time.sleep(max(1.0, allocation_log_interval))
