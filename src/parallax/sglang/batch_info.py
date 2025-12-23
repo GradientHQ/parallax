@@ -201,8 +201,8 @@ def form_sgl_batch_decode(
         running_batch.device, non_blocking=True
     )
     running_batch.seq_lens[ready_indices_device].add_(1)
+    running_batch.seq_lens_cpu[ready_indices_device].add_(1)
     running_batch.orig_seq_lens[ready_indices_device].add_(1)
-    running_batch.seq_lens_cpu[ready_indices].add_(1)
 
     model_worker_batch = ret.get_model_worker_batch()
     if requests[0].lora_id is not None:
