@@ -78,9 +78,9 @@ def form_sgl_batch_prefill(
         page_size=model_runner.server_args.page_size,
         device=model_runner.device,
         token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
-        evictable_size=0,
+        evictable_size=lambda: 0,
+        evict=dummy_evict,
     )
-    dummy_tree_cache.evict = dummy_evict
     schedule_batch = ScheduleBatch.init_new(
         reqs=sgl_reqs,
         req_to_token_pool=model_runner.req_to_token_pool,
