@@ -196,6 +196,13 @@ class Scheduler:
 
     def bootstrap(self, reboot: bool = False) -> bool:
         """Initial Node Allocation Assignment."""
+        if reboot:
+            # Clear any fixed pipeline registrations; they are no longer valid.
+            # This also detaches member nodes and clears their layer allocations.
+            self.node_manager.clear_registered_pipelines()
+            self._bootstrapped = False
+            self._bootstrapped_event.clear()
+
         if self._bootstrapped_event.is_set() and not reboot:
             return True
         # Check if we have enough nodes for bootstraping
@@ -209,6 +216,9 @@ class Scheduler:
         success = self.layer_allocator.allocate_from_standby()
         if not success:
             logger.warning("Global allocation failed to produce a full pipeline")
+            # Stay un-bootstrapped so future joins can retry bootstrap.
+            self._bootstrapped = False
+            self._bootstrapped_event.clear()
             return False
 
         assignments = self.node_manager.list_node_allocations(self.num_layers)

@@ -351,7 +351,14 @@ def test_round_robin_pipeline_diversity():
     t2.rtt_to_nodes[m2.node_id] = 4.0
     m2.rtt_to_nodes[t2.node_id] = 4.0
 
-    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
+    rr.clear_registered_pipelines()
+    h1.set_layer_allocation(0, 1)
+    h2.set_layer_allocation(0, 1)
+    m1.set_layer_allocation(1, 2)
+    m2.set_layer_allocation(1, 2)
+    t1.set_layer_allocation(2, 3)
+    t2.set_layer_allocation(2, 3)
+
     pp = rr.register_pipelines(nodes, num_layers)
     assert len(pp) == 2
     assert pp[1] == ["h1", "m2", "t2"]

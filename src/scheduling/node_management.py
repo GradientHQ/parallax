@@ -267,6 +267,11 @@ class NodeManager:
                         raise ValueError(
                             f"Node {nid} is already registered to pipeline {self._node_to_pipeline[nid]}"
                         )
+                    if nid not in self._nodes:
+                        logger.warning(f"Node {nid} not found in registry")
+                    if self._state.get(nid) != NodeState.ACTIVE:
+                        logger.warning(f"Node {nid} is not ACTIVE.")
+                        self._state[nid] = NodeState.ACTIVE
                     self._node_to_pipeline[nid] = pid
 
             return {pid: list(p) for pid, p in self._registered_pipelines.items()}
@@ -296,7 +301,8 @@ class NodeManager:
             return {pid: list(p) for pid, p in self._registered_pipelines.items()}
 
     def clear_registered_pipelines(self) -> None:
-        """Clear any fixed pipeline registrations."""
+        """Clear any fixed pipeline registrations and detach member nodes."""
+        self.standby(list(self._node_to_pipeline.keys()))
         with self._lock:
             self._registered_pipelines = {}
             self._node_to_pipeline = {}

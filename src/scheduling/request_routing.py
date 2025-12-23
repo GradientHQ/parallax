@@ -533,6 +533,10 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
         selected_pipelines = self._select_best_pipelines(all_pipelines, nodes)
         return self._node_manager.register_pipelines(selected_pipelines)
 
+    def clear_registered_pipelines(self) -> None:
+        """Clear currently registered fixed pipelines."""
+        self._node_manager.clear_registered_pipelines()
+
     def get_registered_pipelines(self) -> Dict[int, List[str]]:
         """Return currently registered fixed pipelines (proxy to NodeManager).
 
