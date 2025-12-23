@@ -41,7 +41,7 @@ def get_current_device():
 
 def get_device_dtype(dtype_str: str, device: str):
     """Gets the real data type according to current device"""
-    if device == "cuda":
+    if device is not None and device.startswith("cuda"):
         dtype_map = {
             "float16": torch.float16,
             "bfloat16": torch.bfloat16,

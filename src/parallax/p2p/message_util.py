@@ -145,7 +145,7 @@ def proto_to_abort_request(proto_request: forward_pb2.AbortRequest) -> List[Inte
             request_id=proto_req.rid,
             current_position=0,
             status=status,
-            routing_table=proto_req.routing_table,
+            routing_table=list(proto_req.routing_table),
         )
         request.abort = True
 
@@ -156,7 +156,7 @@ def proto_to_abort_request(proto_request: forward_pb2.AbortRequest) -> List[Inte
 
 def proto_to_sampling_params(proto: forward_pb2.SamplingParams) -> SamplingParams:
     """Convert protobuf message to SamplingParams."""
-    if proto is None:
+    if proto is None or not proto.ByteSize():
         return SamplingParams()
     sampling_params = SamplingParams(
         max_new_tokens=proto.max_new_tokens,
@@ -201,7 +201,7 @@ def sampling_params_to_proto(params: SamplingParams) -> forward_pb2.SamplingPara
 
 def tensor_to_bytes(tensor: Any, device: Optional[str] = "mlx") -> bytes:
     """Convert tensor to protobuf Tensor using safetensor serialization."""
-    if device == "cuda":
+    if device is not None and device.startswith("cuda"):
         from safetensors.torch import save
 
         # Convert tensor to CPU
@@ -224,7 +224,7 @@ def bytes_to_tensor(
     device: Optional[str] = "mlx",
 ) -> Any:
     """Convert bytes (safetensor format) to tensor."""
-    if device == "cuda":
+    if device is not None and device.startswith("cuda"):
         from safetensors.torch import load
 
         tensor_dict = load(tensor)

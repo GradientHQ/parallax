@@ -33,9 +33,12 @@ def create_executor_config(args: argparse.Namespace, shared_state=None):
         "executor_input_ipc_addr": args.executor_input_ipc,
         "executor_output_ipc_addr": args.executor_output_ipc,
         "attention_backend": args.attention_backend,
+        "enable_dp_attention": getattr(args, "enable_dp_attention", False),
         "moe_runner_backend": args.moe_runner_backend,
         "tp_rank": args.tp_rank,
         "tp_size": args.tp_size,
+        "dp_rank": getattr(args, "dp_rank", 0),
+        "dp_size": getattr(args, "dp_size", 1),
         "nccl_port": args.nccl_port,
         "shared_state": shared_state,
         "use_hfcache": args.use_hfcache,
@@ -65,7 +68,7 @@ def create_from_args(
     config = create_executor_config(args, shared_state)
     if device is None:
         device = get_current_device()
-    if device == "cuda":
+    if device is not None and device.startswith("cuda"):
         if args.gpu_backend == "sglang":
             from parallax.server.executor.sglang_executor import SGLExecutor
 

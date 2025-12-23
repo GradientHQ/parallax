@@ -66,6 +66,7 @@ class SGLExecutor(BaseExecutor):
         executor_output_ipc_addr: Optional[str] = None,
         # GPU Specialized Configs
         attention_backend: Optional[str] = "flashinfer",
+        enable_dp_attention: bool = False,
         moe_runner_backend: Optional[str] = "auto",
         enable_lora: Optional[bool] = False,
         max_lora_rank: Optional[int] = None,
@@ -79,6 +80,8 @@ class SGLExecutor(BaseExecutor):
         # Tensor Parallel Configs
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
+        dp_rank: Optional[int] = 0,
+        dp_size: Optional[int] = 1,
         nccl_port: Optional[int] = 4000,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
@@ -109,12 +112,15 @@ class SGLExecutor(BaseExecutor):
             "end_layer": end_layer,
             "kv_cache_memory_fraction": kv_cache_memory_fraction,
             "attention_backend": attention_backend,
+            "enable_dp_attention": enable_dp_attention,
             "kv_block_size": kv_block_size,
             "max_num_tokens_per_batch": max_num_tokens_per_batch,
             "dtype": dtype,
             "moe_runner_backend": moe_runner_backend,
             "tp_rank": tp_rank,
             "tp_size": tp_size,
+            "dp_rank": dp_rank,
+            "dp_size": dp_size,
             "nccl_port": nccl_port,
             "using_hfcache": use_hfcache,
             "enable_lora": self.enable_lora,
@@ -136,6 +142,12 @@ class SGLExecutor(BaseExecutor):
         logger.debug(
             f"SGLang model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
         )
+
+        # Set device to specific CUDA device based on tp_rank
+        # This ensures tensors are moved to the correct GPU
+        if device is None or device == "cuda":
+            device = f"cuda:{tp_rank}"
+
         super().__init__(
             start_layer=start_layer,
             end_layer=end_layer,
@@ -155,6 +167,8 @@ class SGLExecutor(BaseExecutor):
             executor_output_ipc_addr=executor_output_ipc_addr,
             tp_rank=tp_rank,
             tp_size=tp_size,
+            dp_rank=dp_rank,
+            dp_size=dp_size,
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
         )
@@ -260,6 +274,10 @@ class SGLExecutor(BaseExecutor):
             return
         if self.tp_size > 1:
             requests = self._tensor_parallel_broadcast_byobj(requests)
+            for req in requests:
+                if hasattr(req, "hidden_states") and req.hidden_states is not None:
+                    if hasattr(req.hidden_states, "to"):  # PyTorch tensor
+                        req.hidden_states = req.hidden_states.to(self.device)
         if len(requests) > 0:
             logger.debug(f"Handling {len(requests)} requests.")
 
