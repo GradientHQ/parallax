@@ -316,9 +316,7 @@ class SchedulerManage:
 
         # todo rebalance status
         status = (
-            NODE_STATUS_AVAILABLE
-            if self.scheduler.node_manager.has_full_pipeline(active_only=True)
-            else NODE_STATUS_WAITING
+            NODE_STATUS_AVAILABLE if self.scheduler.has_full_pipeline() else NODE_STATUS_WAITING
         )
         logger.debug(f"SchedulerManage status queried: {status}")
         return status

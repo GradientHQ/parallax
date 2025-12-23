@@ -141,6 +141,10 @@ class Scheduler:
         """Fetch a node by id (compat helper for callers that shouldn't reach into NodeManager)."""
         return self.node_manager.get(node_id)
 
+    def has_full_pipeline(self) -> bool:
+        """Check if there is a full pipeline among ACTIVE nodes."""
+        return self.node_manager.has_full_pipeline(self.num_layers)
+
     def _maybe_expand_rr_pipelines(self) -> None:
         """RR-only: try to allocate/register additional pipelines from STANDBY nodes.
 
