@@ -8,7 +8,10 @@ import threading
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
+from parallax_utils.logging_config import get_logger
 from scheduling.node import Node
+
+logger = get_logger(__name__)
 
 
 class NodeState(str, Enum):
@@ -82,9 +85,17 @@ class NodeManager:
         with self._lock:
             self._state.pop(node_id, None)
             removed = self._nodes.pop(node_id, None)
+            self.node_assigned_request_count.pop(node_id, None)
             pipeline_id = self._node_to_pipeline.pop(node_id, None)
             if pipeline_id is not None:
                 pipeline_nodes = self._registered_pipelines.pop(pipeline_id, [])
+                logger.warning(
+                    "Node %s left; removing pipeline_id=%s from registered pipelines and detaching %d member(s): %s",
+                    node_id,
+                    pipeline_id,
+                    len(pipeline_nodes),
+                    pipeline_nodes,
+                )
 
                 # This pipeline is no longer valid if any member leaves; detach all members.
                 for nid in pipeline_nodes:

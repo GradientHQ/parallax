@@ -311,20 +311,26 @@ class Scheduler:
                 self.leave(node.node_id)
 
     # Dynamic node management
-    def join(self, node: Node, bootstrap: bool = False) -> None:
+    def join(self, node: Node) -> None:
         """Add a node to allocation and refresh plan and materialized nodes."""
+        bootstrapped = self._bootstrapped_event.is_set()
         logger.info(
-            "Joining node %s (kv_ratio=%.2f, param_ratio=%.2f, manual_assignment=%s)",
+            "Joining node %s (kv_ratio=%.2f, param_ratio=%.2f, manual_assignment=%s, bootstrapped=%s)",
             node.node_id,
             node.kvcache_mem_ratio,
             node.param_mem_ratio,
             node.manual_layer_assignment,
+            bootstrapped,
         )
         if self.node_manager.get(node.node_id) is None:
             self.node_manager.upsert(node)
-            # Greedily assign lightest layer in case of dynamic pipelines router
-            if self._bootstrapped_event.is_set() and self.dynamic_pipelines_router:
-                self.layer_allocator.dynamic_join(node)
+            if bootstrapped:
+                if self.dynamic_pipelines_router:
+                    # for dynamic pipelines router, join the node to the lightest layer
+                    self.layer_allocator.dynamic_join(node)
+                if self.routing_strategy == "rr":
+                    # for RR mode, try allocate from standby and expand the pipelines
+                    self._maybe_expand_rr_pipelines()
 
         # Manual layer assignment bypasses bootstrap waiting
         if node.manual_layer_assignment:
@@ -350,7 +356,7 @@ class Scheduler:
                     )
                     self._bootstrapped = True
                     self._bootstrapped_event.set()
-        elif not bootstrap:
+        elif bootstrapped:
             self.node_manager.upsert(node)
 
         # Notify waiters that node count changed
@@ -399,6 +405,8 @@ class Scheduler:
                 logger.warning("Re-bootstrapping for global rebalance")
                 self.bootstrap(reboot=True)
 
+        self.alloc_log_snapshot(reason=f"after leave {node_id}")
+
         with self._node_count_cv:
             self._node_count_cv.notify_all()
 
@@ -438,6 +446,80 @@ class Scheduler:
         )
         return req.request_id, path, latency
 
+    def _log_current_allocations(self) -> None:
+        assignments = self.node_manager.list_node_allocations(self.num_layers)
+        header = f"Current allocations ({len(assignments)} nodes)"
+        sep = "-" * len(header)
+        logger.debug("%s\n%s", header, sep)
+        for node_id, start_layer, end_layer in assignments:
+            node = self.node_manager.get(node_id)
+            if node is None:
+                raise ValueError(f"Node {node_id} not found in node manager")
+            # Snapshot values to avoid recomputing/logging side-effects twice
+            capacity = node.max_requests
+            current = node.current_requests
+            latency = node.layer_latency_ms
+            latency_str = "inf" if latency == float("inf") else f"{latency:.2f}"
+            n_hosted_requests = 0
+            if node_id in self.node_manager.node_assigned_request_count:
+                n_hosted_requests = self.node_manager.node_assigned_request_count[node_id]
+            logger.debug(
+                "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d | active %s",
+                node_id,
+                start_layer,
+                end_layer,
+                current,
+                capacity,
+                latency_str,
+                n_hosted_requests,
+                node.is_active,
+            )
+
+    def _log_rr_registered_pipelines(self) -> None:
+        if self.routing_strategy != "rr":
+            return
+        pipelines = self.node_manager.get_registered_pipelines()
+        p_header = f"Registered pipelines ({len(pipelines)})"
+        p_sep = "-" * len(p_header)
+        logger.debug("%s\n%s", p_header, p_sep)
+        if not pipelines:
+            logger.debug("  (none)")
+            return
+
+        for pid in sorted(pipelines.keys()):
+            node_ids = pipelines.get(pid, [])
+            logger.debug("  pipeline %-3d | stages=%d", pid, len(node_ids))
+            for idx, nid in enumerate(node_ids):
+                n = self.node_manager.get(nid)
+                if n is None:
+                    logger.debug("    [%02d] %-16s (missing)", idx, nid)
+                    continue
+                s = -1 if n.start_layer is None else int(n.start_layer)
+                e = -1 if n.end_layer is None else int(n.end_layer)
+                lat = n.layer_latency_ms
+                lat_str = "inf" if lat == float("inf") else f"{lat:.2f}"
+                logger.debug(
+                    "    [%02d] %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | active %s",
+                    idx,
+                    nid,
+                    s,
+                    e,
+                    n.current_requests,
+                    n.max_requests,
+                    lat_str,
+                    n.is_active,
+                )
+
+    def alloc_log_snapshot(self, *, reason: Optional[str] = None) -> None:
+        """Emit a one-time snapshot of current allocations/pipelines (useful after mutations)."""
+        if reason:
+            logger.debug("Allocation snapshot (%s)", reason)
+        try:
+            self._log_current_allocations()
+            self._log_rr_registered_pipelines()
+        except Exception as exc:
+            logger.warning(f"Allocation logger error: {exc}")
+
     def run(self, *, poll_interval: float = 0.05, allocation_log_interval: float = 5.0) -> None:
         """Run the scheduler concurrently until `stop()` is called.
 
@@ -467,77 +549,12 @@ class Scheduler:
         )
         self._dispatch_thread.start()
 
-        def _log_current_allocations() -> None:
-            assignments = self.node_manager.list_node_allocations(self.num_layers)
-            header = f"Current allocations ({len(assignments)} nodes)"
-            sep = "-" * len(header)
-            logger.debug("%s\n%s", header, sep)
-            for node_id, start_layer, end_layer in assignments:
-                node = self.node_manager.get(node_id)
-                if node is None:
-                    raise ValueError(f"Node {node_id} not found in node manager")
-                # Snapshot values to avoid recomputing/logging side-effects twice
-                capacity = node.max_requests
-                current = node.current_requests
-                latency = node.layer_latency_ms
-                latency_str = "inf" if latency == float("inf") else f"{latency:.2f}"
-                n_hosted_requests = 0
-                if node_id in self.node_manager.node_assigned_request_count:
-                    n_hosted_requests = self.node_manager.node_assigned_request_count[node_id]
-                logger.debug(
-                    "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d | active %s",
-                    node_id,
-                    start_layer,
-                    end_layer,
-                    current,
-                    capacity,
-                    latency_str,
-                    n_hosted_requests,
-                    node.is_active,
-                )
-
-        def _log_rr_registered_pipelines() -> None:
-            if self.routing_strategy != "rr":
-                return
-            pipelines = self.node_manager.get_registered_pipelines()
-            p_header = f"Registered pipelines ({len(pipelines)})"
-            p_sep = "-" * len(p_header)
-            logger.debug("%s\n%s", p_header, p_sep)
-            if not pipelines:
-                logger.debug("  (none)")
-                return
-
-            for pid in sorted(pipelines.keys()):
-                node_ids = pipelines.get(pid, [])
-                logger.debug("  pipeline %-3d | stages=%d", pid, len(node_ids))
-                for idx, nid in enumerate(node_ids):
-                    n = self.node_manager.get(nid)
-                    if n is None:
-                        logger.debug("    [%02d] %-16s (missing)", idx, nid)
-                        continue
-                    s = -1 if n.start_layer is None else int(n.start_layer)
-                    e = -1 if n.end_layer is None else int(n.end_layer)
-                    lat = n.layer_latency_ms
-                    lat_str = "inf" if lat == float("inf") else f"{lat:.2f}"
-                    logger.debug(
-                        "    [%02d] %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | active %s",
-                        idx,
-                        nid,
-                        s,
-                        e,
-                        n.current_requests,
-                        n.max_requests,
-                        lat_str,
-                        n.is_active,
-                    )
-
         # Start periodic allocation logger thread
         def _alloc_log_loop() -> None:
             """Periodically log current layer allocations."""
             while not self._stop_event.is_set():
                 try:
-                    _log_current_allocations()
-                    _log_rr_registered_pipelines()
+                    self.alloc_log_snapshot()
                 except Exception as exc:
                     logger.warning(f"Allocation logger error: {exc}")
                 time.sleep(max(1.0, allocation_log_interval))
@@ -643,7 +660,7 @@ class Scheduler:
             # During bootstrap (no full pipeline yet), only declare nodes; no dynamic assignment.
             # After bootstrap, allow dynamic light-weight joins.
             # Exception: manual layer assignments are processed immediately regardless of bootstrap state.
-            self.join(node, bootstrap=not self._bootstrapped_event.is_set())
+            self.join(node)
             joined_any = True
             if node.manual_layer_assignment:
                 had_manual_assignment = True
@@ -671,8 +688,6 @@ class Scheduler:
                     self.node_manager.num_standby_nodes,
                     self.min_nodes_bootstrapping,
                 )
-        # After bootstrapped, opportunistically try to form/register additional RR pipelines from standby.
-        self._maybe_expand_rr_pipelines()
 
     def _process_leaves(self) -> None:
         """Handle pending leave events safely."""

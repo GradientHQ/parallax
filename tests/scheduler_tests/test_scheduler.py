@@ -337,6 +337,10 @@ def test_complicated_rr():
     assert sched.node_manager.num_nodes == 3
     assert sched.node_manager.num_active_nodes == 2
     assert sched.node_manager.num_standby_nodes == 1
+    # Leaving any member should invalidate its entire registered pipeline.
+    registered_after_leave = sched.node_manager.get_registered_pipelines()
+    assert len(registered_after_leave) == 1
+    assert all(n3.node_id not in p and n4.node_id not in p for p in registered_after_leave.values())
 
     sched.enqueue_join(n3)
     sched._process_joins()  # type: ignore[attr-defined]
