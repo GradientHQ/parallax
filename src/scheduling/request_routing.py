@@ -438,7 +438,7 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
     def _select_best_pipelines(
         self, all_pipelines: List[List[str]], nodes: List[Node]
     ) -> List[List[str]]:
-        """Helper: Select best pipeline per head minimizing node reuse and latency.
+        """Helper: Select best node-disjoint pipelines minimizing latency.
 
         Note: currently we don't consider cross-chain sum of RTTs.
         Leaving this to the DP case.
@@ -453,6 +453,9 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
         for p in all_pipelines:
             if not p:
                 continue
+            # Strict: no node can appear twice within a single pipeline.
+            if len(set(p)) != len(p):
+                continue
             head = p[0]
             cost = estimate_pipeline_latency(p, id_to_node=id_to_node)
 
@@ -463,40 +466,34 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
         sorted_heads = sorted(by_head.keys(), key=lambda h: min(c for _, c in by_head[h]))
 
         selected = []
-        node_usage: Dict[str, int] = {}
+        used_nodes: set[str] = set()
 
         for head in sorted_heads:
             candidates = by_head[head]
             best_p = None
-            # Score: (max_usage_in_path, sum_usage_in_path, cost)
-            best_score = (float("inf"), float("inf"), float("inf"))
+            best_cost = float("inf")
 
             for p, cost in candidates:
-                # Calculate usage stats of any node in this path
-                max_use = 0
-                sum_use = 0
-                for nid in p:
-                    u = node_usage.get(nid, 0)
-                    if u > max_use:
-                        max_use = u
-                    sum_use += u
-
-                if max_use > 0:
+                # Strict: no node overlap across selected pipelines.
+                if any(nid in used_nodes for nid in p):
                     continue
-
-                score = (max_use, sum_use, cost)
-                if score < best_score:
-                    best_score = score
+                if cost < best_cost:
+                    best_cost = cost
                     best_p = p
 
             if best_p:
                 selected.append(best_p)
                 for nid in best_p:
-                    node_usage[nid] = node_usage.get(nid, 0) + 1
+                    used_nodes.add(nid)
+
+        # Hard safety: ensure node-disjointness (both within and across pipelines).
+        flat = [nid for p in selected for nid in p]
+        if len(flat) != len(set(flat)):
+            raise ValueError(f"Selected pipelines have node overlap: {selected}")
 
         logger.debug(
             f"Pipeline selection: selected {len(selected)} pipelines (1 per head). "
-            f"Max node overlap: {max(node_usage.values()) if node_usage else 0}"
+            f"Node-disjoint: {len(flat) == len(set(flat))}"
         )
         return selected
 
@@ -535,6 +532,13 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
         # Score: based on estimated latency
         selected_pipelines = self._select_best_pipelines(all_pipelines, nodes)
         return self._node_manager.register_pipelines(selected_pipelines)
+
+    def get_registered_pipelines(self) -> Dict[int, List[str]]:
+        """Return currently registered fixed pipelines (proxy to NodeManager).
+
+        This is primarily used by the scheduler for logging/observability.
+        """
+        return self._node_manager.get_registered_pipelines()
 
     def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
         """Return the next viable *registered* pipeline in round-robin order.

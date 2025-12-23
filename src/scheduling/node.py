@@ -387,6 +387,10 @@ class Node:
         if self.rtt_to_nodes is None:
             return float("inf")
         if other.node_id not in self.rtt_to_nodes:
+            # Best-effort fallback: in real deployments RTT may be reported only from one side.
+            # Treat RTT as symmetric for routing/selection purposes if reverse RTT exists.
+            if other.rtt_to_nodes is not None and self.node_id in other.rtt_to_nodes:
+                return other.rtt_to_nodes[self.node_id]
             logger.warning("Cannot find RTT from node %s to node %s", self.node_id, other.node_id)
             return float("inf")
         return self.rtt_to_nodes[other.node_id]

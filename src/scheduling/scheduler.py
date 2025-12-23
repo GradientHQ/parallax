@@ -222,8 +222,19 @@ class Scheduler:
                 self.request_router.register_pipelines(
                     self.node_manager.active_nodes, self.num_layers
                 )
+                logger.info(
+                    f"[RR] register_pipelines with bootstrap success, number of pipelines: {len(self.request_router.get_registered_pipelines())}"
+                )
+                for pipeline_id, pipeline in self.request_router.get_registered_pipelines().items():
+                    logger.info(f"[RR] pipeline {pipeline_id}: {pipeline}")
+                    for node_id in pipeline:
+                        node = self.node_manager.get(node_id)
+                        logger.info(f"[RR] node {node_id}: {node.start_layer} - {node.end_layer}")
+
             except Exception as exc:
-                logger.debug(f"[RR] register_pipelines after bootstrap failed (best-effort): {exc}")
+                logger.warning(
+                    f"[RR] register_pipelines after bootstrap failed (best-effort): {exc}"
+                )
 
         self._bootstrapped = True
         self._bootstrapped_event.set()
@@ -336,7 +347,7 @@ class Scheduler:
             self.layer_allocator.allocate(node, node.start_layer, node.end_layer)
 
             # Check if manual allocations now cover the full pipeline
-            if self.node_manager.has_full_pipeline(self.num_layers):
+            if self.has_full_pipeline():
                 if not self._bootstrapped:
                     logger.info(
                         "Manual layer assignments have established a full pipeline; "
@@ -524,7 +535,6 @@ class Scheduler:
             self._process_node_updates()
             self._process_joins()
             self._process_leaves()
-            self._maybe_expand_rr_pipelines()
             now = time.time()
             if now - last_hb_check >= max(0.5, poll_interval) and not self.enable_weight_refit:
                 self.checking_node_heartbeat()

@@ -67,9 +67,11 @@ def test_optimal_path_missing_rtt():
     nodes = [n1, n2]
     set_rtt_from_coords(nodes)
 
-    # Manually remove the RTT info between n1 and n2
+    # Manually remove the RTT info in both directions
     if n2.node_id in n1.rtt_to_nodes:
         del n1.rtt_to_nodes[n2.node_id]
+    if n1.node_id in n2.rtt_to_nodes:
+        del n2.rtt_to_nodes[n1.node_id]
 
     router = DynamicProgrammingRouting()
     node_ids, latency = router.find_optimal_path(nodes, num_layers)
@@ -423,3 +425,51 @@ def test_rr_24_node_topology_utilization():
     # We have 24 nodes available.
     # Ideally 24. Allow slight slack if topology logic is tricky, but should be > 20.
     assert len(unique_nodes_used) >= 24
+
+
+def test_rr_select_best_pipelines_no_node_overlap_establishes_three_pipelines():
+    """40-layer model, 6 identical nodes each holding 20 layers => 3 disjoint pipelines.
+
+    Topology:
+      - 3x heads covering [0, 20)
+      - 3x tails covering [20, 40)
+    Total candidate pipelines = 3*3 = 9, but we must register only node-disjoint ones => 3.
+    """
+    num_layers = 40
+    model = build_model(num_layers)
+
+    nodes: list[Node] = []
+    # 3 heads [0, 20)
+    for i in range(3):
+        n = build_node(f"h{i}", model)
+        n.set_layer_allocation(0, 20)
+        n.set_layer_latency_ms(1.0)
+        nodes.append(n)
+    # 3 tails [20, 40)
+    for i in range(3):
+        n = build_node(f"t{i}", model)
+        n.set_layer_allocation(20, 40)
+        n.set_layer_latency_ms(1.0)
+        nodes.append(n)
+
+    # Mock RTT to be 0 so cost is purely node latency.
+    for n in nodes:
+        n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
+
+    node_manager = build_node_management(nodes)
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
+    registered = rr.register_pipelines(nodes, num_layers)
+
+    assert len(registered) == 3
+
+    # Must use all 6 nodes exactly once across pipelines (no overlap).
+    flat = [nid for p in registered.values() for nid in p]
+    assert len(flat) == 6
+    assert len(set(flat)) == 6
+
+    id_to_node = {n.node_id: n for n in nodes}
+    for p in registered.values():
+        assert len(p) == 2
+        h, t = p
+        assert (id_to_node[h].start_layer, id_to_node[h].end_layer) == (0, 20)
+        assert (id_to_node[t].start_layer, id_to_node[t].end_layer) == (20, 40)

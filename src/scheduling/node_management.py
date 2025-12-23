@@ -251,6 +251,11 @@ class NodeManager:
             for pid, p in enumerate(pipelines):
                 self._registered_pipelines[pid] = list(p)
                 for nid in p:
+                    # Strict enforcement: a node must belong to exactly one pipeline.
+                    if nid in self._node_to_pipeline:
+                        raise ValueError(
+                            f"Node {nid} is already registered to pipeline {self._node_to_pipeline[nid]}"
+                        )
                     self._node_to_pipeline[nid] = pid
 
             return {pid: list(p) for pid, p in self._registered_pipelines.items()}
