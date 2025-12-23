@@ -515,8 +515,10 @@ class Scheduler:
         if reason:
             logger.debug("Allocation snapshot (%s)", reason)
         try:
-            self._log_current_allocations()
-            self._log_rr_registered_pipelines()
+            if self.routing_strategy == "rr":
+                self._log_rr_registered_pipelines()
+            else:
+                self._log_current_allocations()
         except Exception as exc:
             logger.warning(f"Allocation logger error: {exc}")
 
