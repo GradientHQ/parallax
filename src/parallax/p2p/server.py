@@ -760,6 +760,7 @@ class GradientServer:
                                 self.model_name = None
                                 if self._shared_state is not None:
                                     self._shared_state.set_status(self.status.value)
+                                    self._shared_state.update_metrics(current_requests=0)
                                     self._shared_state.set("model_name", None)
                                 logger.debug(
                                     "Status set to JOINING and model_name to None because no valid layer allocation received yet."

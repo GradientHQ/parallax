@@ -570,6 +570,11 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
                     raise ValueError(
                         f"To be dispatched node {nid} in pipeline {candidate} not found in node manager!"
                     )
+                if not id_to_node[nid].is_active:
+                    # If node is not active, skip the pipeline
+                    logger.warning(f"Pipeline {candidate} is not active, skipping")
+                    latency = float("inf")
+
             if latency != float("inf"):
                 return list(candidate), float(latency)
 
