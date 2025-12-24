@@ -18,17 +18,17 @@ class DeepSeekSparseCache(KVCache):
         head_dim: int,
         head_dim_v: int,
         dtype: mx.Dtype,
-        indexer_key_head_dim: int,
-        indexer_num_kv_heads: int,
+        index_head_dim: int,
+        index_n_heads: int,
     ):
         super().__init__(num_blocks, block_size, num_kv_heads, head_dim, head_dim_v, dtype)
         self.indexer_key_cache = mx.zeros(
             (
                 1,
                 num_blocks,
-                indexer_num_kv_heads,
+                index_n_heads,
                 block_size,
-                indexer_key_head_dim,
+                index_head_dim,
             ),
             dtype=dtype,
         )

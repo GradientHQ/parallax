@@ -138,8 +138,6 @@ async def async_request_openai_completions(
             exc_info = sys.exc_info()
             output.error = "".join(traceback.format_exception(*exc_info))
 
-    if pbar:
-        pbar.update(1)
     return output
 
 
@@ -189,9 +187,12 @@ async def async_request_openai_chat_completions(
             "stream_options": {
                 "include_usage": True,
             },
+            "sampling_params": {
+                "top_k": 3,
+            },
         }
         if request_func_input.ignore_eos:
-            payload["ignore_eos"] = request_func_input.ignore_eos
+            payload["sampling_params"]["ignore_eos"] = request_func_input.ignore_eos
         if request_func_input.extra_body:
             payload.update(request_func_input.extra_body)
         headers = {
@@ -237,7 +238,7 @@ async def async_request_openai_chat_completions(
                                         last_token_timestamp = timestamp
 
                                     generated_text += content
-                            elif usage := data.get("usage"):
+                            if usage := data.get("usage"):
                                 # Capture token count from trailing usage event
                                 output.output_tokens = usage.get("completion_tokens")
 
@@ -262,8 +263,6 @@ async def async_request_openai_chat_completions(
             exc_info = sys.exc_info()
             output.error = "".join(traceback.format_exception(*exc_info))
 
-    if pbar:
-        pbar.update(1)
     return output
 
 

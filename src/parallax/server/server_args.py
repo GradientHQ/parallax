@@ -162,6 +162,12 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--enable-dp-attention",
+        action="store_true",
+        help="Enable data parallel attention (e.g. for DeepSeek)",
+    )
+
+    parser.add_argument(
         "--moe-runner-backend",
         type=str,
         default="auto",
@@ -241,6 +247,7 @@ def parse_args() -> argparse.Namespace:
 
     # Tensor parallel configuration
     parser.add_argument("--tp-size", type=int, default=1, help="Tensor parallel size")
+    parser.add_argument("--dp-size", type=int, default=1, help="Data parallel size")
 
     parser.add_argument(
         "--nccl-port",

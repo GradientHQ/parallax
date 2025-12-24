@@ -91,6 +91,12 @@ def form_sgl_batch_prefill(
         spec_algorithm=SpeculativeAlgorithm.NONE,
     )
     schedule_batch.prepare_for_extend()
+
+    num_tokens = schedule_batch.extend_num_tokens
+    dp_size = model_runner.dp_size
+    schedule_batch.global_num_tokens = [num_tokens] * dp_size
+    schedule_batch.global_num_tokens_for_logprob = [num_tokens] * dp_size
+
     model_worker_batch = schedule_batch.get_model_worker_batch()
     forward_batch = ForwardBatch.init_new(model_worker_batch, model_runner)
     return schedule_batch, forward_batch
@@ -200,6 +206,11 @@ def form_sgl_batch_decode(
     running_batch.seq_lens[ready_indices] += 1
     running_batch.seq_lens_cpu[ready_indices] += 1
     running_batch.orig_seq_lens[ready_indices] += 1
+
+    num_tokens = len(ready_indices)
+    dp_size = model_runner.dp_size
+    ret.global_num_tokens = [num_tokens] * dp_size
+    ret.global_num_tokens_for_logprob = [num_tokens] * dp_size
 
     model_worker_batch = ret.get_model_worker_batch()
     if requests[0].lora_id is not None:

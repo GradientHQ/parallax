@@ -92,7 +92,7 @@ class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
             return mx.array(topk_list)
         else:
             if target_len < self.index_topk:
-                return mx.array([[-1] * self.index_topk] * batch)
+                return mx.full((batch, target_len, self.index_topk), -1, dtype=mx.int32)
             scores = q @ k.swapaxes(-1, -2)
             scores = mx.maximum(scores, 0)
             weights = self.weights_proj(x) * (self.n_heads**-0.5)
@@ -200,6 +200,8 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
                 k_seq = target_len
                 sparse_mask = mx.zeros((batch, target_len, k_seq), dtype=mx.bool_)
                 sparse_mask = mx.put_along_axis(sparse_mask, topk_indices, mx.array(True), axis=-1)
+                all_minus_one = (topk_indices == -1).all(axis=-1, keepdims=True)
+                sparse_mask = mx.where(all_minus_one, True, sparse_mask)
                 sparse_mask = sparse_mask[:, None, :, :]
                 if mask is not None:
                     mask = mask + (1 - sparse_mask) * -1e9
