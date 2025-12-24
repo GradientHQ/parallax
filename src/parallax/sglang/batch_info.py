@@ -219,16 +219,15 @@ def release_sglang_request(running_batch: ScheduleBatch, request_id: str):
     seq_lens_cpu = running_batch.seq_lens.cpu().numpy()
     idx = find_index(running_batch, request_id)
     req = running_batch.reqs.pop(idx)
-    running_batch.seq_lens = torch.cat(running_batch.seq_lens[:idx], running_batch.seq_lens[idx+1:])
-    running_batch.seq_lens_cpu = torch.cat(running_batch.seq_lens_cpu[:idx], running_batch.seq_lens_cpu[idx+1:])
-    running_batch.orig_seq_lens = torch.cat(running_batch.orig_seq_lens[:idx], running_batch.orig_seq_lens[idx+1:])
-
-    # Free kv cache
     page_size = running_batch.token_to_kv_pool_allocator.page_size
     last_uncached_pos = (len(req.prefix_indices) // page_size) * page_size
     end_pos = last_uncached_pos + seq_lens_cpu[idx]
+    running_batch.seq_lens = torch.cat((running_batch.seq_lens[:idx], running_batch.seq_lens[idx+1:]))
+    running_batch.seq_lens_cpu = torch.cat((running_batch.seq_lens_cpu[:idx], running_batch.seq_lens_cpu[idx+1:]))
+    running_batch.orig_seq_lens = torch.cat((running_batch.orig_seq_lens[:idx], running_batch.orig_seq_lens[idx+1:]))
+
+    # Free kv cache
     token_indices = running_batch.req_to_token_pool.req_to_token[
-        req.req_pool_idx, last_uncached_pos : end_pos
-    ]
+            req.req_pool_idx][last_uncached_pos : end_pos]
     running_batch.token_to_kv_pool_allocator.free(token_indices)
     running_batch.req_to_token_pool.free(req.req_pool_idx)
