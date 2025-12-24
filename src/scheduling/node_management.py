@@ -317,7 +317,9 @@ class NodeManager:
         with self._lock:
             return self._node_to_pipeline.get(node_id)
 
-    def report_pipeline_capacity(self) -> Tuple[Optional[Dict[int, int]], int]:
+    def report_pipeline_capacity(
+        self,
+    ) -> Tuple[Optional[Dict[int, Tuple[int, int]]], int, int]:
         """Return per-pipeline bottleneck load + total request capacity across pipelines.
 
         Definitions:
@@ -326,15 +328,15 @@ class NodeManager:
         - Total capacity = sum(per-pipeline capacity) across all registered pipelines
 
         Returns:
-            per_pipeline_min: A dictionary of pipeline ids to their (minimum capacity, minimum remaining) tuple.
+            per_pipeline_min: Dict of pipeline id -> (min_node_capacity, min_remaining_capacity).
             total_capacity: The total capacity of all registered pipelines.
             cur_capacity: The current capacity (counting existing request load) of all registered pipelines.
         """
         with self._lock:
             if not self._registered_pipelines:
-                return None, 0
+                return None, 0, 0
 
-            per_pipeline_min: Dict[int, int] = {}
+            per_pipeline_min: Dict[int, Tuple[int, int]] = {}
             cur_capacity = 0
             total_capacity = 0
 

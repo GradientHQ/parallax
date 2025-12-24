@@ -110,6 +110,8 @@ class Scheduler:
         # Latest formatted allocation snapshot (string) for status/inspection.
         # This is updated by `emit_alloc_log_snapshot()`.
         self.alloc_log_snapshot: str = ""
+        # Avoid spamming: only emit the "all nodes active" INFO log on transitions.
+        self._all_nodes_active_logged: bool = False
         # Thread-safe bootstrap state
         self._bootstrapped: bool = False
         self._bootstrapped_event: threading.Event = threading.Event()
@@ -505,6 +507,14 @@ class Scheduler:
         p_header = f"Registered pipelines ({len(pipelines)})"
         p_sep = "-" * len(p_header)
         lines: List[str] = [p_header, p_sep]
+        # Include capacity summary in the RR snapshot message.
+        per_pipeline_min, total_capacity, cur_capacity = self.report_pipeline_capacity()
+        if per_pipeline_min is None:
+            lines.append("Capacity: (no registered pipelines)")
+        else:
+            lines.append(
+                f"Capacity: total={total_capacity} cur={cur_capacity} per_pipeline={per_pipeline_min}"
+            )
         if not pipelines:
             lines.append("  (none)")
             return "\n".join(lines)
@@ -559,11 +569,13 @@ class Scheduler:
             logger.debug("Allocation snapshot\n%s", snapshot)
         return snapshot
 
-    def report_pipeline_capacity(self) -> Tuple[Optional[Dict[int, int]], int]:
+    def report_pipeline_capacity(
+        self,
+    ) -> Tuple[Optional[Dict[int, Tuple[int, int]]], int, int]:
         """Helper to report the current pipeline capacity.
 
         Returns:
-            per_pipeline_min: A dictionary of pipeline ids to their (minimum capacity, minimum remaining) tuple.
+            per_pipeline_min: Dict of pipeline id -> (min_node_capacity, min_remaining_capacity).
             total_capacity: The total capacity of all registered pipelines.
             cur_capacity: The current capacity (counting existing request load) of all registered pipelines.
         """
@@ -606,6 +618,17 @@ class Scheduler:
                     self.emit_alloc_log_snapshot()
                 except Exception as exc:
                     logger.warning(f"Allocation logger error: {exc}")
+
+                # After bootstrap, periodically check if *all* nodes report active and log once.
+                if self._bootstrapped_event.is_set():
+                    nodes = self.node_manager.nodes
+                    if nodes:
+                        all_active = all(n.is_active for n in nodes)
+                        if all_active and not self._all_nodes_active_logged:
+                            logger.info("All %d nodes are active", len(nodes))
+                            self._all_nodes_active_logged = True
+                        elif not all_active:
+                            self._all_nodes_active_logged = False
                 time.sleep(max(1.0, allocation_log_interval))
 
         self._alloc_log_thread = threading.Thread(
