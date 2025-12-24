@@ -197,6 +197,9 @@ def form_sgl_batch_decode(
     ret.prepare_for_decode()
     # TODO: this is a hack to make the seq_lens correct due to select_batch is not refference running batch's seq_lens
     # need to fix this
+    print("running_batch.seq_lens.shape=", running_batch.seq_lens.shape)
+    print("running_batch.seq_lens", running_batch.seq_lens)
+    print("ready_indices", ready_indices)
     running_batch.seq_lens[ready_indices] += 1
     running_batch.seq_lens_cpu[ready_indices] += 1
     running_batch.orig_seq_lens[ready_indices] += 1
