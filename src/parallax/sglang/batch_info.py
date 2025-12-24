@@ -226,8 +226,9 @@ def release_sglang_request(running_batch: ScheduleBatch, request_id: str):
     # Free kv cache
     page_size = running_batch.token_to_kv_pool_allocator.page_size
     last_uncached_pos = (len(req.prefix_indices) // page_size) * page_size
+    end_pos = last_uncached_pos + seq_lens_cpu[idx]
     token_indices = running_batch.req_to_token_pool.req_to_token[
-        req.req_pool_idx, last_uncached_pos : seq_lens_cpu[idx]
+        req.req_pool_idx, last_uncached_pos : end_pos
     ]
     running_batch.token_to_kv_pool_allocator.free(token_indices)
     running_batch.req_to_token_pool.free(req.req_pool_idx)
