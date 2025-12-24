@@ -107,6 +107,9 @@ class Scheduler:
         self._event_thread: Optional[threading.Thread] = None
         self._dispatch_thread: Optional[threading.Thread] = None
         self._alloc_log_thread: Optional[threading.Thread] = None
+        # Latest formatted allocation snapshot (string) for status/inspection.
+        # This is updated by `emit_alloc_log_snapshot()`.
+        self.alloc_log_snapshot: str = ""
         # Thread-safe bootstrap state
         self._bootstrapped: bool = False
         self._bootstrapped_event: threading.Event = threading.Event()
@@ -243,6 +246,8 @@ class Scheduler:
 
         self._bootstrapped = True
         self._bootstrapped_event.set()
+        # Snapshot at INFO after bootstrap since allocations/pipelines may have materially changed.
+        self.emit_alloc_log_snapshot(reason="after bootstrap")
         return True
 
     def update_last_refit_time(self):
@@ -370,6 +375,8 @@ class Scheduler:
             self.node_manager.upsert(node)
 
         # Notify waiters that node count changed
+        # Snapshot at INFO after join since allocations/pipelines may have changed.
+        self.emit_alloc_log_snapshot(reason=f"after join {node.node_id}")
         with self._node_count_cv:
             self._node_count_cv.notify_all()
 
@@ -415,7 +422,8 @@ class Scheduler:
                 logger.warning("Re-bootstrapping for global rebalance")
                 self.bootstrap(reboot=True)
 
-        self.alloc_log_snapshot(reason=f"after leave {node_id}")
+        # Snapshot at INFO after leave since allocations/pipelines may have changed.
+        self.emit_alloc_log_snapshot(reason=f"after leave {node_id}")
 
         with self._node_count_cv:
             self._node_count_cv.notify_all()
@@ -456,11 +464,11 @@ class Scheduler:
         )
         return req.request_id, path, latency
 
-    def _log_current_allocations(self) -> None:
+    def _format_current_allocations_snapshot(self) -> str:
         assignments = self.node_manager.list_node_allocations(self.num_layers)
         header = f"Current allocations ({len(assignments)} nodes)"
         sep = "-" * len(header)
-        logger.debug("%s\n%s", header, sep)
+        lines: List[str] = [header, sep]
         for node_id, start_layer, end_layer in assignments:
             node = self.node_manager.get(node_id)
             if node is None:
@@ -473,64 +481,93 @@ class Scheduler:
             n_hosted_requests = 0
             if node_id in self.node_manager.node_assigned_request_count:
                 n_hosted_requests = self.node_manager.node_assigned_request_count[node_id]
-            logger.debug(
-                "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d | active %s",
-                node_id,
-                start_layer,
-                end_layer,
-                current,
-                capacity,
-                latency_str,
-                n_hosted_requests,
-                node.is_active,
+            lines.append(
+                "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d | active %s"
+                % (
+                    node_id,
+                    start_layer,
+                    end_layer,
+                    current,
+                    capacity,
+                    latency_str,
+                    n_hosted_requests,
+                    node.is_active,
+                )
             )
+        if len(lines) == 2:
+            lines.append("  (none)")
+        return "\n".join(lines)
 
-    def _log_rr_registered_pipelines(self) -> None:
+    def _format_rr_registered_pipelines_snapshot(self) -> str:
         if self.routing_strategy != "rr":
-            return
+            return ""
         pipelines = self.node_manager.get_registered_pipelines()
         p_header = f"Registered pipelines ({len(pipelines)})"
         p_sep = "-" * len(p_header)
-        logger.debug("%s\n%s", p_header, p_sep)
+        lines: List[str] = [p_header, p_sep]
         if not pipelines:
-            logger.debug("  (none)")
-            return
+            lines.append("  (none)")
+            return "\n".join(lines)
 
         for pid in sorted(pipelines.keys()):
             node_ids = pipelines.get(pid, [])
-            logger.debug("  pipeline %-3d | stages=%d", pid, len(node_ids))
+            lines.append("  pipeline %-3d | stages=%d" % (pid, len(node_ids)))
             for idx, nid in enumerate(node_ids):
                 n = self.node_manager.get(nid)
                 if n is None:
-                    logger.debug("    [%02d] %-16s (missing)", idx, nid)
+                    lines.append("    [%02d] %-16s (missing)" % (idx, nid))
                     continue
                 s = -1 if n.start_layer is None else int(n.start_layer)
                 e = -1 if n.end_layer is None else int(n.end_layer)
                 lat = n.layer_latency_ms
                 lat_str = "inf" if lat == float("inf") else f"{lat:.2f}"
-                logger.debug(
-                    "    [%02d] %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | active %s",
-                    idx,
-                    nid,
-                    s,
-                    e,
-                    n.current_requests,
-                    n.max_requests,
-                    lat_str,
-                    n.is_active,
+                lines.append(
+                    "    [%02d] %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | active %s"
+                    % (
+                        idx,
+                        nid,
+                        s,
+                        e,
+                        n.current_requests,
+                        n.max_requests,
+                        lat_str,
+                        n.is_active,
+                    )
                 )
+        return "\n".join(lines)
 
-    def alloc_log_snapshot(self, *, reason: Optional[str] = None) -> None:
-        """Emit a one-time snapshot of current allocations/pipelines (useful after mutations)."""
-        if reason:
-            logger.debug("Allocation snapshot (%s)", reason)
+    def emit_alloc_log_snapshot(self, *, reason: Optional[str] = None) -> str:
+        """Update `self.alloc_log_snapshot` and emit it.
+
+        - Periodic/heartbeat snapshots (no reason) are logged at DEBUG.
+        - Mutating events (join/leave/bootstrap) provide a reason and are logged at INFO.
+        """
         try:
             if self.routing_strategy == "rr":
-                self._log_rr_registered_pipelines()
+                snapshot = self._format_rr_registered_pipelines_snapshot()
             else:
-                self._log_current_allocations()
+                snapshot = self._format_current_allocations_snapshot()
         except Exception as exc:
-            logger.warning(f"Allocation logger error: {exc}")
+            snapshot = f"(failed to build allocation snapshot: {exc})"
+            logger.warning("Allocation snapshot build error: %s", exc)
+
+        self.alloc_log_snapshot = snapshot
+
+        if reason:
+            logger.info("Allocation snapshot (%s)\n%s", reason, snapshot)
+        else:
+            logger.debug("Allocation snapshot\n%s", snapshot)
+        return snapshot
+
+    def report_pipeline_capacity(self) -> Tuple[Optional[Dict[int, int]], int]:
+        """Helper to report the current pipeline capacity.
+
+        Returns:
+            per_pipeline_min: A dictionary of pipeline ids to their (minimum capacity, minimum remaining) tuple.
+            total_capacity: The total capacity of all registered pipelines.
+            cur_capacity: The current capacity (counting existing request load) of all registered pipelines.
+        """
+        return self.node_manager.report_pipeline_capacity()
 
     def run(self, *, poll_interval: float = 0.05, allocation_log_interval: float = 5.0) -> None:
         """Run the scheduler concurrently until `stop()` is called.
@@ -566,7 +603,7 @@ class Scheduler:
             """Periodically log current layer allocations."""
             while not self._stop_event.is_set():
                 try:
-                    self.alloc_log_snapshot()
+                    self.emit_alloc_log_snapshot()
                 except Exception as exc:
                     logger.warning(f"Allocation logger error: {exc}")
                 time.sleep(max(1.0, allocation_log_interval))

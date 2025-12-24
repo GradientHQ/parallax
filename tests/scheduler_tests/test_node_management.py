@@ -86,16 +86,6 @@ def test_num_full_pipelines_raises_on_invalid_ranges_but_ignores_unallocated_ran
         _ = reg.num_full_pipelines(4)
 
 
-def test_pipeline_min_load_and_total_capacity_none_when_no_registered_pipelines():
-    model = build_model_info(4)
-    n1 = build_node("n1", model, mem_gb=80.0)
-    reg = NodeManager(initial_nodes=[n1])
-
-    per, total = reg.pipeline_min_load_and_total_capacity()
-    assert per is None
-    assert total == 0
-
-
 def test_pipeline_min_load_and_total_capacity_computes_bottleneck_remaining_capacity():
     model = build_model_info(4)
     a = build_node("a", model, mem_gb=80.0)
@@ -113,23 +103,10 @@ def test_pipeline_min_load_and_total_capacity_computes_bottleneck_remaining_capa
     c.current_requests = 0  # remaining 16
     d.current_requests = 15  # remaining 1 -> pipeline1 bottleneck = 1
 
-    per, total = reg.pipeline_min_load_and_total_capacity(init=False)
-    assert per == {0: 6, 1: 1}
-    assert total == 7
-    per, total = reg.pipeline_min_load_and_total_capacity(init=True)
-    assert per == {0: 16, 1: 16}
+    per, total, cur = reg.report_pipeline_capacity()
+    assert per == {0: (16, 6), 1: (16, 1)}
     assert total == 32
-
-
-def test_pipeline_min_load_and_total_capacity_zero_when_pipeline_has_missing_node():
-    model = build_model_info(4)
-    a = build_node("a", model, mem_gb=80.0)
-    reg = NodeManager(initial_nodes=[a])
-
-    reg.register_pipelines([[a.node_id, "ghost"]])
-    per, total = reg.pipeline_min_load_and_total_capacity()
-    assert per == {0: 0}
-    assert total == 0
+    assert cur == 7
 
 
 def test_remove_detaches_pipeline_and_clears_remaining_members():

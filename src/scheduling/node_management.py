@@ -317,9 +317,7 @@ class NodeManager:
         with self._lock:
             return self._node_to_pipeline.get(node_id)
 
-    def pipeline_min_load_and_total_capacity(
-        self, init: bool = True
-    ) -> Tuple[Optional[Dict[int, int]], int]:
+    def report_pipeline_capacity(self) -> Tuple[Optional[Dict[int, int]], int]:
         """Return per-pipeline bottleneck load + total request capacity across pipelines.
 
         Definitions:
@@ -327,47 +325,47 @@ class NodeManager:
         - Per-pipeline capacity = min(remaining capacity of each worker in that pipeline)
         - Total capacity = sum(per-pipeline capacity) across all registered pipelines
 
-        Safety/edge-cases:
-        - If no pipelines are registered, returns (None, 0)
-        - If a pipeline is empty or references any missing node, that pipeline capacity is 0
-
-        Args:
-            init: If True, checking capacity only, not accoutning for current requests
+        Returns:
+            per_pipeline_min: A dictionary of pipeline ids to their (minimum capacity, minimum remaining) tuple.
+            total_capacity: The total capacity of all registered pipelines.
+            cur_capacity: The current capacity (counting existing request load) of all registered pipelines.
         """
         with self._lock:
             if not self._registered_pipelines:
                 return None, 0
 
             per_pipeline_min: Dict[int, int] = {}
+            cur_capacity = 0
             total_capacity = 0
 
             # Iterate deterministically for stable display/tests.
             for pid in sorted(self._registered_pipelines.keys()):
                 node_ids = self._registered_pipelines.get(pid, [])
                 if not node_ids:
-                    per_pipeline_min[pid] = 0
-                    continue
+                    raise ValueError(f"Pipeline {pid} is empty")
 
-                min_remaining: Optional[int] = None
-                missing = False
+                min_cur_capacity = None
+                min_node_capacity = None
                 for nid in node_ids:
                     node = self._nodes.get(nid)
                     if node is None:
-                        missing = True
-                        break
-                    if init:
-                        remaining = node.max_requests
-                    else:
-                        remaining = max(0, node.max_requests - node.current_requests)
-                    min_remaining = (
-                        remaining if min_remaining is None else min(min_remaining, remaining)
+                        raise ValueError(f"Node {nid} not found in registry, but in pipeline {pid}")
+
+                    node_capacity = node.max_requests
+                    node_cur_capacity = max(0, node_capacity - node.current_requests)
+                    min_cur_capacity = (
+                        node_cur_capacity
+                        if min_cur_capacity is None
+                        else min(min_cur_capacity, node_cur_capacity)
+                    )
+                    min_node_capacity = (
+                        node_capacity
+                        if min_node_capacity is None
+                        else min(min_node_capacity, node_capacity)
                     )
 
-                if missing or min_remaining is None:
-                    per_pipeline_min[pid] = 0
-                    continue
+                per_pipeline_min[pid] = (int(min_node_capacity), int(min_cur_capacity))
+                total_capacity += int(min_node_capacity)
+                cur_capacity += int(min_cur_capacity)
 
-                per_pipeline_min[pid] = int(min_remaining)
-                total_capacity += int(min_remaining)
-
-            return per_pipeline_min, int(total_capacity)
+            return per_pipeline_min, int(total_capacity), int(cur_capacity)
