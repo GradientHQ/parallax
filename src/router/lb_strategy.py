@@ -13,7 +13,7 @@ from typing import List, Literal, Protocol, TypeVar
 
 T = TypeVar("T")
 
-StrategyName = Literal["performance", "round_robin", "random"]
+StrategyName = Literal["round_robin", "performance", "random"]
 
 
 class Strategy(Protocol[T]):
@@ -132,9 +132,33 @@ class RoundRobinStrategy:
         # Stable ordering: prefer `base_url` if present, otherwise fallback to str().
         ordered.sort(key=lambda x: getattr(x, "base_url", str(x)))
 
-        idx = self._cursor % len(ordered)
-        self._cursor += 1
-        return ordered[idx]
+        # "Round robin" here means: always pick the endpoint with the smallest
+        # normalized load (inflight / max_running_request). Even if inflight exceeds
+        # max_running_request, we still allow selection as requested.
+        #
+        # Tie-breaker uses cursor-based rotation for fairness.
+        n = len(ordered)
+        start = self._cursor % n
+
+        best_idx: int = start
+        best_score: float = float("inf")
+
+        for step in range(n):
+            idx = (start + step) % n
+            cand = ordered[idx]
+            m = getattr(cand, "metrics", None)
+            inflight = int(getattr(m, "inflight", 0)) if m is not None else 0
+            maxr = getattr(m, "max_running_request", None) if m is not None else None
+            denom = 1
+            if isinstance(maxr, int) and maxr > 0:
+                denom = maxr
+            score = float(inflight) / float(denom)
+            if score < best_score:
+                best_score = score
+                best_idx = idx
+
+        self._cursor = best_idx + 1
+        return ordered[best_idx]
 
 
 def make_strategy(name: StrategyName, *, performance_cfg: PerformanceConfig) -> Strategy:

@@ -144,6 +144,7 @@ class SchedulerManage:
                 ),
                 "node_list": self.get_node_list(),
                 "need_more_nodes": self.need_more_nodes(),
+                "max_running_request": self.scheduler.report_pipeline_capacity()[1],
             },
         }
 
@@ -151,7 +152,7 @@ class SchedulerManage:
         if self.scheduler is None:
             return []
 
-        return [self.build_node_info(node) for node in self.scheduler.nodes]
+        return [self.build_node_info(node) for node in self.scheduler.node_manager.nodes]
 
     def build_node_info(self, node):
         return {

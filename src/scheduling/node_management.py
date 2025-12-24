@@ -218,7 +218,6 @@ class NodeManager:
         segments = self.list_node_allocations(total_layers)
         if not segments:
             return 0
-
         # DP over layer boundaries: ways[pos] = number of ways to reach boundary `pos`.
         # Initialize at boundary 0.
         ways: Dict[int, int] = {0: 1}

@@ -46,7 +46,7 @@ THROUGHPUT_DISPLAY_LAG_SEC = 3
 @dataclass
 class RouterConfig:
     # Load balancing strategy.
-    strategy: StrategyName = "performance"
+    strategy: StrategyName = "round_robin"
 
     # Performance-strategy config (also owns the scorer-related knobs).
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
@@ -82,6 +82,9 @@ class EndpointMetrics:
     last_status: Optional[str] = None
     last_status_ts: Optional[float] = None
     last_status_error: Optional[str] = None
+
+    # Capacity hint from downstream cluster status.
+    max_running_request: Optional[int] = None
 
     # Recent per-request samples for simple UI charting.
     # Each entry: {"ts": float, "ttft_ms": float|None, "tpot_ms": float|None, "output_units": int|None}
@@ -351,6 +354,7 @@ class EndpointRegistry:
         *,
         status_ok: Optional[bool] = None,
         status_val: Optional[str] = None,
+        max_running_request: Optional[int] = None,
         status_error: Optional[str] = None,
         status_ts: Optional[float] = None,
     ) -> Endpoint:
@@ -377,6 +381,7 @@ class EndpointRegistry:
                 ep.metrics.last_status = status_val
                 ep.metrics.last_status_ts = time.time() if status_ts is None else status_ts
                 ep.metrics.last_status_error = status_error
+                ep.metrics.max_running_request = max_running_request
             self._endpoints[base_url] = ep
             self._throughput_buckets.setdefault(base_url, deque())
             return ep
@@ -451,12 +456,13 @@ class EndpointRegistry:
                 return False, None, f"Non-200 status: {resp.status_code}"
             data = resp.json()
             status_val = data.get("data", {}).get("status") if isinstance(data, dict) else None
+            max_running_request = data.get("data", {}).get("max_running_request") if isinstance(data, dict) else None
             ok = status_val == "available"
             if not ok:
-                return False, status_val, f"Not available: {status_val}"
-            return True, status_val, None
+                return False, status_val, 0, f"Not available: {status_val}"
+            return True, status_val, max_running_request, None
         except Exception as e:
-            return False, None, str(e)
+            return False, None, 0, str(e)
 
     async def _refresh_endpoint_status_if_needed(self, ep: Endpoint, *, now_ts: float) -> None:
         cfg = self._config
@@ -464,7 +470,7 @@ class EndpointRegistry:
         if last_ts is not None and (now_ts - last_ts) < cfg.status_check_ttl_sec:
             return
 
-        ok_raw, status_val, err = await self.probe_endpoint_status(ep.base_url)
+        ok_raw, status_val, max_running_request, err = await self.probe_endpoint_status(ep.base_url)
         ok: Optional[bool] = bool(ok_raw)
 
         async with self._lock:
@@ -473,6 +479,7 @@ class EndpointRegistry:
                 return
             cur.metrics.last_status_ok = ok
             cur.metrics.last_status = status_val
+            cur.metrics.max_running_request = max_running_request
             cur.metrics.last_status_ts = now_ts
             cur.metrics.last_status_error = err
 
@@ -546,6 +553,8 @@ class EndpointRegistry:
 
         try:
             return self._strategy.select(endpoints)
+        except ValueError as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Strategy error: {e}") from e
 
@@ -854,7 +863,7 @@ async def register(raw_request: Request) -> JSONResponse:
     base_url = str(base_url).strip().rstrip("/")
 
     # Readiness check before registering (use the same path/logic as routing).
-    ok, status_val, err = await registry.probe_endpoint_status(base_url)
+    ok, status_val, max_running_request, err = await registry.probe_endpoint_status(base_url)
     if status_val is None:
         detail = err if err is not None else f"Not available: {status_val}"
         raise HTTPException(status_code=400, detail=f"Endpoint not ready: {detail}")
@@ -864,6 +873,7 @@ async def register(raw_request: Request) -> JSONResponse:
             base_url,
             status_ok=ok,
             status_val=status_val,
+            max_running_request=max_running_request,
             status_error=err,
         )
     except ValueError as e:
