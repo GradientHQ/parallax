@@ -240,5 +240,7 @@ def release_sglang_request(running_batch: ScheduleBatch, request_id: str):
     print("token_indices=", token_indices)
     running_batch.token_to_kv_pool_allocator.free(token_indices)
     running_batch.req_to_token_pool.free(req.req_pool_idx)
-    running_batch.req_pool_indices.pop(idx)
+    running_batch.req_pool_indices = torch.cat(
+        (running_batch.req_pool_indices[:idx], running_batch.req_pool_indices[idx + 1 :])
+    )
     print("req_pool_indices after=", running_batch.req_pool_indices)
