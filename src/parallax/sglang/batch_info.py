@@ -197,9 +197,6 @@ def form_sgl_batch_decode(
     ret.prepare_for_decode()
     # TODO: this is a hack to make the seq_lens correct due to select_batch is not refference running batch's seq_lens
     # need to fix this
-    print("running_batch.seq_lens.shape=", running_batch.seq_lens.shape)
-    print("running_batch.seq_lens", running_batch.seq_lens)
-    print("ready_indices", ready_indices)
     running_batch.seq_lens[ready_indices] += 1
     running_batch.seq_lens_cpu[ready_indices] += 1
     running_batch.orig_seq_lens[ready_indices] += 1
@@ -222,12 +219,19 @@ def release_sglang_request(running_batch: ScheduleBatch, request_id: str):
     page_size = running_batch.token_to_kv_pool_allocator.page_size
     last_uncached_pos = (len(req.prefix_indices) // page_size) * page_size
     end_pos = last_uncached_pos + seq_lens_cpu[idx]
-    running_batch.seq_lens = torch.cat((running_batch.seq_lens[:idx], running_batch.seq_lens[idx+1:]))
-    running_batch.seq_lens_cpu = torch.cat((running_batch.seq_lens_cpu[:idx], running_batch.seq_lens_cpu[idx+1:]))
-    running_batch.orig_seq_lens = torch.cat((running_batch.orig_seq_lens[:idx], running_batch.orig_seq_lens[idx+1:]))
+    running_batch.seq_lens = torch.cat(
+        (running_batch.seq_lens[:idx], running_batch.seq_lens[idx + 1 :])
+    )
+    running_batch.seq_lens_cpu = torch.cat(
+        (running_batch.seq_lens_cpu[:idx], running_batch.seq_lens_cpu[idx + 1 :])
+    )
+    running_batch.orig_seq_lens = torch.cat(
+        (running_batch.orig_seq_lens[:idx], running_batch.orig_seq_lens[idx + 1 :])
+    )
 
     # Free kv cache
-    token_indices = running_batch.req_to_token_pool.req_to_token[
-            req.req_pool_idx][last_uncached_pos : end_pos]
+    token_indices = running_batch.req_to_token_pool.req_to_token[req.req_pool_idx][
+        last_uncached_pos:end_pos
+    ]
     running_batch.token_to_kv_pool_allocator.free(token_indices)
     running_batch.req_to_token_pool.free(req.req_pool_idx)

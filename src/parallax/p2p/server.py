@@ -201,6 +201,7 @@ class TransformerConnectionHandler(ConnectionHandler):
             logger.exception(f"Error in chat completion: {e}")
             yield b"internal server error"
 
+
 def check_and_run_weight_refit(gradient_server, message):
     """
     Check and trigger weight refit process.
@@ -283,9 +284,7 @@ def check_and_run_weight_refit(gradient_server, message):
             f"Finish download weight_version={weight_version}, last_refit_time={gradient_server.last_refit_time}"
         )
     else:
-        logger.warning(
-            f"Already satisfies weight_version={weight_version}"
-        )
+        logger.warning(f"Already satisfies weight_version={weight_version}")
     gradient_server.refit_finish = True
 
 
@@ -434,7 +433,6 @@ class GradientServer:
                 return False
 
         return True
-
 
     def run(self):
         if self.build_lattica():
@@ -765,7 +763,11 @@ class GradientServer:
                                     logger.info(f"Server begin weight refit process.")
                                     if self.refit_finish:
                                         self.refit_finish = False
-                                        t = threading.Thread(target=check_and_run_weight_refit, args=(self, refit_message), daemon=True)
+                                        t = threading.Thread(
+                                            target=check_and_run_weight_refit,
+                                            args=(self, refit_message),
+                                            daemon=True,
+                                        )
                                         t.start()
                                 else:
                                     logger.warning(
