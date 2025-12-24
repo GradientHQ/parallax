@@ -173,7 +173,7 @@ class EndpointRegistry:
         if len(series) < THROUGHPUT_HISTORY_SEC:
             series = ([0] * (THROUGHPUT_HISTORY_SEC - len(series))) + series
         elif len(series) > THROUGHPUT_HISTORY_SEC:
-            series = series[-THROUGHPUT_HISTORY_SEC :]
+            series = series[-THROUGHPUT_HISTORY_SEC:]
 
         return start_sec, series
 
@@ -456,7 +456,9 @@ class EndpointRegistry:
                 return False, None, f"Non-200 status: {resp.status_code}"
             data = resp.json()
             status_val = data.get("data", {}).get("status") if isinstance(data, dict) else None
-            max_running_request = data.get("data", {}).get("max_running_request") if isinstance(data, dict) else None
+            max_running_request = (
+                data.get("data", {}).get("max_running_request") if isinstance(data, dict) else None
+            )
             ok = status_val == "available"
             if not ok:
                 return False, status_val, 0, f"Not available: {status_val}"
@@ -596,7 +598,11 @@ class EndpointRegistry:
             if tpot_ms is not None:
                 ep.metrics.last_tpot_ms = tpot_ms
                 ep.metrics.ema_tpot_ms = self._ema(ep.metrics.ema_tpot_ms, tpot_ms)
-            if isinstance(output_units, int) and output_units > 0 and isinstance(output_buckets, dict):
+            if (
+                isinstance(output_units, int)
+                and output_units > 0
+                and isinstance(output_buckets, dict)
+            ):
                 self._record_output_buckets(base_url, output_buckets)
             # Store a per-request sample for UI charting.
             ep.metrics.request_samples.append(
