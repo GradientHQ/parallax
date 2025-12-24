@@ -187,10 +187,6 @@ async def async_request_openai_chat_completions(
             "stream_options": {
                 "include_usage": True,
             },
-            "sampling_params": {
-                # TODO: Remove this.
-                "ignore_eos": True
-            },
         }
         if request_func_input.ignore_eos:
             payload["ignore_eos"] = request_func_input.ignore_eos
