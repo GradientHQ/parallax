@@ -219,6 +219,9 @@ def release_sglang_request(running_batch: ScheduleBatch, request_id: str):
     seq_lens_cpu = running_batch.seq_lens.cpu().numpy()
     idx = find_index(running_batch, request_id)
     req = running_batch.reqs.pop(idx)
+    running_batch.seq_lens = torch.cat(running_batch.seq_lens[:idx], running_batch.seq_lens[idx+1:])
+    running_batch.seq_lens_cpu = torch.cat(running_batch.seq_lens_cpu[:idx], running_batch.seq_lens_cpu[idx+1:])
+    running_batch.orig_seq_lens = torch.cat(running_batch.orig_seq_lens[:idx], running_batch.orig_seq_lens[idx+1:])
 
     # Free kv cache
     page_size = running_batch.token_to_kv_pool_allocator.page_size
