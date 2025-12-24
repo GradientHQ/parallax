@@ -139,7 +139,10 @@ class NodeManager:
 
         # Do per-node work outside the registry lock to reduce contention.
         for node in nodes_to_clear:
+            # TODO: Remove Runtime KV Cache
             node.clear_layer_allocation()
+            # Reset current requests
+            node.current_requests = 0
 
     def ids_to_nodes(self, node_ids: List[str]) -> List[Node]:
         """Return a copy of nodes, optionally filtered by node_ids."""
