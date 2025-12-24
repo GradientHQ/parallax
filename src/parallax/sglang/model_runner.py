@@ -241,6 +241,7 @@ def form_sgl_server_args(
         lora_eviction_policy=lora_eviction_policy,
         lora_backend=lora_backend,
         max_lora_chunk_size=max_lora_chunk_size,
+        disable_radix_cache=True,
     )
     return sgl_server_args
 
