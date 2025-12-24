@@ -230,14 +230,9 @@ def release_sglang_request(running_batch: ScheduleBatch, request_id: str):
     )
 
     # Free kv cache
-    print("req_pool_indices before=", running_batch.req_pool_indices)
-    print("req_token_len=", len(running_batch.req_to_token_pool.req_to_token))
-    print("req_pool_len=", len(running_batch.req_to_token_pool.req_to_token[req.req_pool_idx]))
-    print("req_pool=", running_batch.req_to_token_pool.req_to_token[req.req_pool_idx])
     token_indices = running_batch.req_to_token_pool.req_to_token[req.req_pool_idx][
         last_uncached_pos:end_pos
     ]
-    print("token_indices=", token_indices)
     running_batch.token_to_kv_pool_allocator.free(token_indices)
     running_batch.req_to_token_pool.free(req.req_pool_idx)
-    print("req_pool_indices after=", running_batch.req_pool_indices)
+    running_batch.req_pool_indices.pop(idx)
