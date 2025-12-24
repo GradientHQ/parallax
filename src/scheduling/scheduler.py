@@ -201,17 +201,22 @@ class Scheduler:
 
     def bootstrap(self, reboot: bool = False) -> bool:
         """Initial Node Allocation Assignment."""
+        overide_min_node_check = False
         if reboot:
             # Clear any fixed pipeline registrations; they are no longer valid.
             # This also detaches member nodes and clears their layer allocations.
             self.node_manager.clear_registered_pipelines()
             self._bootstrapped = False
             self._bootstrapped_event.clear()
+            overide_min_node_check = True
 
         if self._bootstrapped_event.is_set() and not reboot:
             return True
         # Check if we have enough nodes for bootstraping
-        if self.node_manager.num_nodes < self.min_nodes_bootstrapping:
+        if (
+            self.node_manager.num_nodes < self.min_nodes_bootstrapping
+            and not overide_min_node_check
+        ):
             logger.info(
                 f"Bootstrap deferred: have {self.node_manager.num_nodes} nodes; need >= {self.min_nodes_bootstrapping}"
             )
