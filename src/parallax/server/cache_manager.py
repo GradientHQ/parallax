@@ -509,6 +509,9 @@ class CacheManager:
         context_len = self.context_lengths.get(request_id, 0)
 
         num_full_blocks = context_len // self.block_size
+        
+        if num_full_blocks == 0:
+            return
 
         registered_nodes = self.prefix_cache.request_to_nodes.get(request_id, [])
         num_registered = len(registered_nodes)

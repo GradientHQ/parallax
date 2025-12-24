@@ -323,7 +323,12 @@ class MLXExecutor(BaseExecutor):
         requests = prepared_inputs["requests"]
         for i, req in enumerate(requests):
             if req.is_prefill:
-                lengths[i] = prepared_inputs.get("context_lengths")[i]
+                # Use actual_processed_lengths if available (for prefix cache case),
+                # otherwise use context_lengths (total_length)
+                if "actual_processed_lengths" in prepared_inputs:
+                    lengths[i] = prepared_inputs.get("actual_processed_lengths")[i]
+                else:
+                    lengths[i] = prepared_inputs.get("context_lengths")[i]
             elif req.is_decoding:
                 lengths[i] = 1
             else:
@@ -339,9 +344,6 @@ class MLXExecutor(BaseExecutor):
                 if req.is_prefill:
                     # Insert all full blocks from this prefill into the prefix cache
                     self.cache_manager.insert_full_blocks_to_cache(req.request_id)
-                    logger.debug(
-                        f"Inserted full blocks for request {req.request_id} to prefix cache"
-                    )
 
         # Process last peer: need additional sampling + detokenization
         if return_decoded_tokens:
@@ -380,6 +382,7 @@ class MLXExecutor(BaseExecutor):
         block_tables_list = []
         context_lengths_list = []
         prefix_lens_list = []  # Track matched prefix lengths for each request
+        actual_processed_lengths_list = []  # Track actual processed token lengths for each request
 
         for req in batched_requests:
             assert req.is_prefill, f"Request {req.request_id} is not a prefill request."
@@ -407,10 +410,12 @@ class MLXExecutor(BaseExecutor):
                         # All tokens cached - keep the last token and adjust prefix_len
                         new_tokens = req.input_ids[-1:]
                         prefix_lens_list[-1] = matched_tokens - 1
+                        actual_processed_lengths_list.append(1)
                         logger.debug(
                             f"Request {req.request_id}: Full cache hit, keeping last token for logits"
                         )
                     else:
+                        actual_processed_lengths_list.append(len(new_tokens))
                         logger.debug(
                             f"Request {req.request_id}: Skipping {matched_tokens} cached tokens, "
                             f"processing {len(new_tokens)} new tokens"
@@ -418,6 +423,7 @@ class MLXExecutor(BaseExecutor):
                     h_or_tokens_list.append(new_tokens)
                 else:
                     h_or_tokens_list.append(req.input_ids)
+                    actual_processed_lengths_list.append(len(req.input_ids))
             else:
                 if matched_tokens > 0 and self.enable_prefix_cache:
                     # Skip the prefix hidden states that correspond to cached tokens
@@ -426,9 +432,13 @@ class MLXExecutor(BaseExecutor):
                         # All tokens cached - keep the last hidden state
                         new_hidden = req.hidden_states[-1:]
                         prefix_lens_list[-1] = matched_tokens - 1
+                        actual_processed_lengths_list.append(1)
+                    else:
+                        actual_processed_lengths_list.append(new_hidden.shape[0])
                     h_or_tokens_list.append(new_hidden)
                 else:
                     h_or_tokens_list.append(req.hidden_states)
+                    actual_processed_lengths_list.append(req.hidden_states.shape[0])
 
             block_table = self.cache_manager.get_block_table(req.request_id)
             block_tables_list.append(block_table)
@@ -490,6 +500,8 @@ class MLXExecutor(BaseExecutor):
 
         # Convert prefix_lens to tensor for models that need RoPE offset adjustment
         prefix_lens_tensor = mx.array(prefix_lens_list, dtype=mx.int32)
+        # Convert actual_processed_lengths to tensor for correct logit selection
+        actual_processed_lengths_tensor = mx.array(actual_processed_lengths_list, dtype=mx.int32)
 
         ret = {
             "h_or_tokens": padded_inputs,
@@ -501,6 +513,7 @@ class MLXExecutor(BaseExecutor):
             "slot_mapping": slot_mapping_tensor,
             "state_slot_mapping": state_slot_mapping,
             "prefix_lens": prefix_lens_tensor,  # For RoPE offset calculation
+            "actual_processed_lengths": actual_processed_lengths_tensor,  # For correct logit selection
         }
         logger.debug(f"Prepared MLX prefill batch (size={batch_size})")
         return ret
