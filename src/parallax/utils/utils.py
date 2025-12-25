@@ -373,6 +373,11 @@ def calculate_cid_manual(data: bytes) -> str:
     return cid_string
 
 
+def save_tensor_to_disk(tensors, refit_weight_path, idx):
+    save_file_path = refit_weight_path + "/model_" + str(idx) + ".safetensors"
+    save_file(tensors, save_file_path)
+
+
 def inplace_insert_value_with_idx(tensor_list, value, idx):
     while len(tensor_list) < idx + 1:
         tensor_list.append(None)
@@ -402,10 +407,19 @@ def concat_weight_partition(refit_weight_path):
     sorted_keys = sorted(original_tensors.keys())
     prev_key = None
     concate_list = []
+    file_idx = 0
+    max_size = 1024 * 1024 * 1024  # max size 1GB
+    param_size = 0
     for key in sorted_keys:
         val = original_tensors[key]
         if "part" not in key:
             tensors[key] = val
+            param_size += val.numel() * val.element_size()
+            if param_size > max_size:
+                save_tensor_to_disk(tensors, refit_weight_path, file_idx)
+                file_idx += 1
+                param_size = 0
+                tensors = {}
             continue
 
         name_split = key.split(".")
@@ -424,6 +438,12 @@ def concat_weight_partition(refit_weight_path):
                 cur_name_list.append("weight")
                 final_key = ".".join(cur_name_list)
                 tensors[final_key] = concate_result
+                param_size += concate_result.numel() * concate_result.element_size()
+                if param_size > max_size:
+                    save_tensor_to_disk(tensors, refit_weight_path, file_idx)
+                    file_idx += 1
+                    param_size = 0
+                    tensors = {}
 
                 # for next tensor
                 concate_list = []
@@ -437,5 +457,5 @@ def concat_weight_partition(refit_weight_path):
         final_key = ".".join(cur_name_list)
         tensors[final_key] = concate_result
 
-    save_file_path = refit_weight_path + "/model.safetensors"
-    save_file(tensors, save_file_path)
+    save_tensor_to_disk(tensors, refit_weight_path, file_idx)
+
