@@ -392,7 +392,7 @@ def save_tensor_to_disk(tensors, refit_weight_path, idx):
 
 
 def check_tensor_size_and_save(tensors, refit_weight_path, idx):
-    max_size = 1024 * 1024 * 1024   # max size: 1G
+    max_size = 1024 * 1024 * 1024  # max size: 1G
 
     param_size = 0
     for tensor in tensors.values():
