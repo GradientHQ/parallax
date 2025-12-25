@@ -372,6 +372,12 @@ def calculate_cid_manual(data: bytes) -> str:
     return cid_string
 
 
+def inplace_insert_value_with_idx(tensor_list, value, idx):
+    while len(tensor_list) < idx + 1:
+        tensor_list.append(None)
+    tensor_list[idx] = value
+
+
 def concat_weight_partition(weight_files, refit_weight_path):
     """
     Concat partial weight into one safetensor.
@@ -382,7 +388,7 @@ def concat_weight_partition(weight_files, refit_weight_path):
     tensors = {}
     original_tensors = {}
     for wf in weight_files:
-        with safe_open(wf, framework="pt") as f:
+        with safe_open(wf, framework="pt", device="cpu") as f:
             for k in f.keys():
                 original_tensors[k] = f.get_tensor(k)
     for wf in weight_files:
@@ -394,22 +400,27 @@ def concat_weight_partition(weight_files, refit_weight_path):
     concate_list = []
     for key in sorted_keys:
         val = original_tensors[key]
+        name_split = key.split(".")
+        cur_name_list = name_split[:-1]
+        weight_name = name_split[-1]
+        cur_idx = int(weight_name.removeprefix("weight_part"))
         if "part" not in key:
             tensors[key] = val
         elif prev_key is None:
-            concate_list.append(val)
+            inplace_insert_value_with_idx(concate_list, val, cur_idx)
             prev_key = key
         else:
             prev_name_list = prev_key.split(".")[:-1]
-            cur_name_list = key.split(".")[:-1]
             if prev_name_list == cur_name_list:
-                concate_list.append(val)
+                inplace_insert_value_with_idx(concate_list, val, cur_idx)
             else:
                 concate_result = torch.cat(concate_list, 0)
                 cur_name_list.append("weight")
                 final_key = ".".join(cur_name_list)
                 tensors[final_key] = concate_result
-                concate_list = [val]
+                # for next tensor
+                concate_list = []
+                inplace_insert_value_with_idx(concate_list, val, cur_idx)
             prev_key = key
     if concate_list:
         concate_result = torch.cat(concate_list, 0)
