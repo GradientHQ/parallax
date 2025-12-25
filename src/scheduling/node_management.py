@@ -5,8 +5,9 @@ Node registry and lifecycle management.
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from parallax_utils.logging_config import get_logger
 from scheduling.node import Node
@@ -19,6 +20,165 @@ class NodeState(str, Enum):
 
     ACTIVE = "active"
     STANDBY = "standby"
+
+
+@dataclass
+class Pipeline:
+    """A fixed pipeline definition for **RR (round-robin) routing only**.
+
+    This is a *static/registered* pipeline: an ordered list of participating node ids
+    representing the stages of a full end-to-end execution path.
+    """
+
+    nodes: List[Node]
+
+    min_node_capacity: int = field(init=False, default=0)
+    min_remaining_capacity: int = field(init=False, default=0)
+
+    def __post_init__(self) -> None:
+        if not self.nodes:
+            raise ValueError("Pipeline is empty")
+
+        self.nodes.sort(
+            key=lambda n: (
+                float("inf") if n.start_layer is None else int(n.start_layer),
+                float("inf") if n.end_layer is None else int(n.end_layer),
+            )
+        )
+
+        # No gap, no overlap.
+        model_num_layers = int(self.nodes[0].model_info.num_layers)
+        for n in self.nodes:
+            if int(n.model_info.num_layers) != model_num_layers:
+                raise ValueError(
+                    f"Pipeline nodes disagree on model num_layers: expected {model_num_layers}, got {n.model_info.num_layers} on node {n.node_id}"
+                )
+            if n.start_layer is None or n.end_layer is None:
+                raise ValueError(
+                    f"Pipeline node {n.node_id} missing layer allocation: start_layer={n.start_layer}, end_layer={n.end_layer}"
+                )
+            s, e = int(n.start_layer), int(n.end_layer)
+            if s < 0 or e <= s or e > model_num_layers:
+                raise ValueError(
+                    f"Pipeline node {n.node_id} has invalid layer range: [{s}, {e}) for total_layers={model_num_layers}"
+                )
+
+        first = self.nodes[0]
+        if int(first.start_layer) != 0:  # type: ignore[arg-type]
+            raise ValueError(
+                f"Pipeline must start at layer 0; got start_layer={first.start_layer} on node {first.node_id}"
+            )
+
+        for prev, cur in zip(self.nodes, self.nodes[1:]):
+            prev_end = int(prev.end_layer)  # type: ignore[arg-type]
+            cur_start = int(cur.start_layer)  # type: ignore[arg-type]
+            if cur_start != prev_end:
+                raise ValueError(
+                    f"Pipeline is not contiguous between {prev.node_id} and {cur.node_id}: "
+                    f"prev_end={prev_end}, cur_start={cur_start}"
+                )
+
+        last = self.nodes[-1]
+        if int(last.end_layer) != model_num_layers:  # type: ignore[arg-type]
+            raise ValueError(
+                f"Pipeline must end at total_layers={model_num_layers}; got end_layer={last.end_layer} on node {last.node_id}"
+            )
+
+        # Initialize capacity fields.
+        self.recompute_capacity()
+
+    @property
+    def node_ids(self) -> Tuple[str, ...]:
+        """Stage-ordered node ids (derived; not stored)."""
+        return tuple(n.node_id for n in self.nodes)
+
+    @classmethod
+    def from_node_ids(
+        cls, node_ids: Sequence[str], *, nodes_by_id: Mapping[str, Node]
+    ) -> "Pipeline":
+        """Build a Pipeline from node ids using the current node registry."""
+        nodes: List[Node] = []
+        for nid in node_ids:
+            n = nodes_by_id.get(nid)
+            if n is None:
+                raise ValueError(f"Node {nid} not found in registry")
+            nodes.append(n)
+        return cls(nodes=list(nodes))
+
+    @property
+    def num_stages(self) -> int:
+        """Number of stages in this pipeline (one stage per node)."""
+        return len(self.nodes)
+
+    @property
+    def is_ready(self) -> bool:
+        """True iff all member nodes are currently active/ready for RR serving.
+
+        RR fixed pipelines are registered at bootstrap, but node liveness/load can
+        change over time. This property checks the *live* `Node.is_active` flag for
+        every stage.
+        """
+        return all(bool(getattr(n, "is_active", False)) for n in self.nodes)
+
+    def capacity_report(self) -> Tuple[int, int]:
+        """Backward-compatible helper returning (min_node_capacity, min_remaining_capacity).
+
+        - Per-node capacity is `node.max_requests`
+        - Remaining capacity is `max(0, node.max_requests - node.current_requests)`
+        - Pipeline capacity is the bottleneck (min) across stages.
+        """
+        self.recompute_capacity()
+        return int(self.min_node_capacity), int(self.min_remaining_capacity)
+
+    def recompute_capacity(self) -> None:
+        """Recompute and store capacity fields for this RR fixed pipeline.
+
+        Fields updated:
+        - `min_node_capacity`: min(node.max_requests) across stages
+        - `min_remaining_capacity`: min(max(0, max_requests - current_requests)) across stages
+        """
+        min_node_capacity: Optional[int] = None
+        min_remaining_capacity: Optional[int] = None
+
+        for node in self.nodes:
+            node_capacity = int(node.max_requests)
+            node_remaining = int(max(0, node_capacity - int(node.current_requests)))
+
+            min_node_capacity = (
+                node_capacity
+                if min_node_capacity is None
+                else min(min_node_capacity, node_capacity)
+            )
+            min_remaining_capacity = (
+                node_remaining
+                if min_remaining_capacity is None
+                else min(min_remaining_capacity, node_remaining)
+            )
+
+        self.min_node_capacity = int(min_node_capacity or 0)
+        self.min_remaining_capacity = int(min_remaining_capacity or 0)
+
+    def detach_on_member_leave(self, leaving_node_id: str, *, node_manager: "NodeManager") -> None:
+        """RR-only: if any member leaves, the whole fixed pipeline becomes invalid.
+
+        We:
+        - remove all node->pipeline membership for members
+        - transition remaining members to STANDBY
+        - clear their layer allocations and reset their in-flight request count
+        """
+        pipeline_node_ids = list(self.node_ids)
+        remaining = [nid for nid in pipeline_node_ids if nid != leaving_node_id]
+
+        nodes_to_clear: List[Node] = []
+        with node_manager._lock:
+            for nid in pipeline_node_ids:
+                node_manager._node_to_pipeline.pop(nid, None)
+            if remaining:
+                nodes_to_clear = node_manager._standby_locked(remaining, allow_missing=True)
+
+        for node in nodes_to_clear:
+            node.clear_serving_state()
+            node.current_requests = 0
 
 
 class NodeManager:
@@ -34,7 +194,8 @@ class NodeManager:
         self._lock = threading.RLock()
         self._nodes: Dict[str, Node] = {}
         self._state: Dict[str, NodeState] = {}
-        self._registered_pipelines: Dict[int, List[str]] = {}
+        # Only used for routing_strategy == "rr" (fixed/registered pipelines).
+        self._registered_pipelines: Dict[int, Pipeline] = {}
         self._node_to_pipeline: Dict[str, int] = {}
         self.node_assigned_request_count: Dict[str, int] = {}
 
@@ -81,14 +242,17 @@ class NodeManager:
 
     def remove(self, node_id: str) -> Optional[Node]:
         """Remove a node; returns removed node if present."""
-        nodes_to_clear: List[Node] = []
+        pipeline_to_detach: Optional[Pipeline] = None
         with self._lock:
             self._state.pop(node_id, None)
             removed = self._nodes.pop(node_id, None)
+            if removed is None:
+                return None
             self.node_assigned_request_count.pop(node_id, None)
             pipeline_id = self._node_to_pipeline.pop(node_id, None)
             if pipeline_id is not None:
-                pipeline_nodes = self._registered_pipelines.pop(pipeline_id, [])
+                pipeline = self._registered_pipelines.pop(pipeline_id, None)
+                pipeline_nodes = list(pipeline.node_ids) if pipeline is not None else []
                 logger.warning(
                     "Node %s left; removing pipeline_id=%s from registered pipelines and detaching %d member(s): %s",
                     node_id,
@@ -96,21 +260,9 @@ class NodeManager:
                     len(pipeline_nodes),
                     pipeline_nodes,
                 )
-
-                # This pipeline is no longer valid if any member leaves; detach all members.
-                for nid in pipeline_nodes:
-                    self._node_to_pipeline.pop(nid, None)
-
-                # Transition remaining members to STANDBY while holding the lock,
-                # but clear per-node allocations outside the lock.
-                remaining = [nid for nid in pipeline_nodes if nid != node_id]
-                nodes_to_clear = self._standby_locked(remaining, allow_missing=True)
-
-        for node in nodes_to_clear:
-            node.clear_layer_allocation()
-
-        # In case it got rejoined in the system without clearing status
-        removed.clear_layer_allocation()
+                if pipeline is not None:
+                    pipeline.detach_on_member_leave(node_id, node_manager=self)
+        removed.clear_serving_state()
         return removed
 
     def get(self, node_id: str) -> Optional[Node]:
@@ -140,9 +292,7 @@ class NodeManager:
         # Do per-node work outside the registry lock to reduce contention.
         for node in nodes_to_clear:
             # TODO: Remove Runtime KV Cache
-            node.clear_layer_allocation()
-            # Reset current requests
-            node.current_requests = 0
+            node.clear_serving_state()
 
     def ids_to_nodes(self, node_ids: List[str]) -> List[Node]:
         """Return a copy of nodes, optionally filtered by node_ids."""
@@ -263,21 +413,19 @@ class NodeManager:
             self._node_to_pipeline = {}
 
             for pid, p in enumerate(pipelines):
-                self._registered_pipelines[pid] = list(p)
+                self._registered_pipelines[pid] = Pipeline.from_node_ids(p, nodes_by_id=self._nodes)
                 for nid in p:
                     # Strict enforcement: a node must belong to exactly one pipeline.
                     if nid in self._node_to_pipeline:
                         raise ValueError(
                             f"Node {nid} is already registered to pipeline {self._node_to_pipeline[nid]}"
                         )
-                    if nid not in self._nodes:
-                        logger.warning(f"Node {nid} not found in registry")
                     if self._state.get(nid) != NodeState.ACTIVE:
                         logger.warning(f"Node {nid} is not ACTIVE.")
                         self._state[nid] = NodeState.ACTIVE
                     self._node_to_pipeline[nid] = pid
 
-            return {pid: list(p) for pid, p in self._registered_pipelines.items()}
+            return {pid: list(p.node_ids) for pid, p in self._registered_pipelines.items()}
 
     def extend_registered_pipelines(self, pipelines: List[List[str]]) -> Dict[int, List[str]]:
         """Append additional pipelines to the registry (thread-safe).
@@ -294,14 +442,14 @@ class NodeManager:
                     continue
                 pid = next_pid
                 next_pid += 1
-                self._registered_pipelines[pid] = list(p)
+                self._registered_pipelines[pid] = Pipeline.from_node_ids(p, nodes_by_id=self._nodes)
                 for nid in p:
                     if nid in self._node_to_pipeline:
                         raise ValueError(
                             f"Node {nid} is already registered to pipeline {self._node_to_pipeline[nid]}"
                         )
                     self._node_to_pipeline[nid] = pid
-            return {pid: list(p) for pid, p in self._registered_pipelines.items()}
+            return {pid: list(p.node_ids) for pid, p in self._registered_pipelines.items()}
 
     def clear_registered_pipelines(self) -> None:
         """Clear any fixed pipeline registrations and detach member nodes."""
@@ -310,10 +458,24 @@ class NodeManager:
             self._registered_pipelines = {}
             self._node_to_pipeline = {}
 
-    def get_registered_pipelines(self) -> Dict[int, List[str]]:
-        """Return a copy of the currently registered fixed pipelines."""
+    def get_registered_pipelines(self) -> Dict[int, Pipeline]:
+        """Return the currently registered RR fixed pipelines as `Pipeline` objects.
+
+        This is intended for observability/routing helpers that want richer per-pipeline
+        metadata (stages, readiness, capacity fields). Callers should treat returned
+        objects as read-only.
+        """
         with self._lock:
-            return {pid: list(p) for pid, p in self._registered_pipelines.items()}
+            return dict(self._registered_pipelines)
+
+    def get_registered_pipeline_node_ids(self) -> Dict[int, List[str]]:
+        """Return a copy of the currently registered RR fixed pipelines as node-id lists.
+
+        This preserves the original `{pipeline_id: [node_id, ...]}` view for callers that
+        only need ids (e.g. UI formatting or external APIs).
+        """
+        with self._lock:
+            return {pid: list(p.node_ids) for pid, p in self._registered_pipelines.items()}
 
     def pipeline_id_of_node(self, node_id: str) -> Optional[int]:
         """Return the pipeline id a node is registered to (if any)."""
@@ -322,13 +484,12 @@ class NodeManager:
 
     def report_pipeline_capacity(
         self,
+        ready: bool = True,
     ) -> Tuple[Optional[Dict[int, Tuple[int, int]]], int, int]:
         """Return per-pipeline bottleneck load + total request capacity across pipelines.
 
-        Definitions:
-        - Per-node remaining request capacity = max(0, node.max_requests - node.current_requests)
-        - Per-pipeline capacity = min(remaining capacity of each worker in that pipeline)
-        - Total capacity = sum(per-pipeline capacity) across all registered pipelines
+        Args:
+            ready: If True, requires all nodes in the pipeline to be is_active (ready to serve);
 
         Returns:
             per_pipeline_min: Dict of pipeline id -> (min_node_capacity, min_remaining_capacity).
@@ -345,32 +506,11 @@ class NodeManager:
 
             # Iterate deterministically for stable display/tests.
             for pid in sorted(self._registered_pipelines.keys()):
-                node_ids = self._registered_pipelines.get(pid, [])
-                if not node_ids:
-                    raise ValueError(f"Pipeline {pid} is empty")
-
-                min_cur_capacity = None
-                min_node_capacity = None
-                for nid in node_ids:
-                    node = self._nodes.get(nid)
-                    if node is None:
-                        raise ValueError(f"Node {nid} not found in registry, but in pipeline {pid}")
-
-                    node_capacity = node.max_requests
-                    node_cur_capacity = max(0, node_capacity - node.current_requests)
-                    min_cur_capacity = (
-                        node_cur_capacity
-                        if min_cur_capacity is None
-                        else min(min_cur_capacity, node_cur_capacity)
-                    )
-                    min_node_capacity = (
-                        node_capacity
-                        if min_node_capacity is None
-                        else min(min_node_capacity, node_capacity)
-                    )
-
-                per_pipeline_min[pid] = (int(min_node_capacity), int(min_cur_capacity))
-                total_capacity += int(min_node_capacity)
-                cur_capacity += int(min_cur_capacity)
+                pipeline = self._registered_pipelines[pid]
+                pipeline.recompute_capacity()
+                remaining_capacity = int(pipeline.min_remaining_capacity) if not ready else 0
+                per_pipeline_min[pid] = (int(pipeline.min_node_capacity), remaining_capacity)
+                total_capacity += int(pipeline.min_node_capacity)
+                cur_capacity += remaining_capacity
 
             return per_pipeline_min, int(total_capacity), int(cur_capacity)

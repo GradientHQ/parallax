@@ -94,6 +94,13 @@ def test_pipeline_min_load_and_total_capacity_computes_bottleneck_remaining_capa
     d = build_node("d", model, mem_gb=80.0)
     reg = NodeManager(initial_nodes=[a, b, c, d])
 
+    # RR fixed pipelines require full, contiguous coverage with no gap/overlap.
+    # Pipelines: [a,b] and [c,d], each covering [0,2) -> [2,4).
+    a.set_layer_allocation(0, 2)
+    b.set_layer_allocation(2, 4)
+    c.set_layer_allocation(0, 2)
+    d.set_layer_allocation(2, 4)
+
     # Pipelines: [a,b] and [c,d]
     reg.register_pipelines([[a.node_id, b.node_id], [c.node_id, d.node_id]])
 
@@ -103,10 +110,15 @@ def test_pipeline_min_load_and_total_capacity_computes_bottleneck_remaining_capa
     c.current_requests = 0  # remaining 16
     d.current_requests = 15  # remaining 1 -> pipeline1 bottleneck = 1
 
-    per, total, cur = reg.report_pipeline_capacity()
+    per, total, cur = reg.report_pipeline_capacity(ready=False)
     assert per == {0: (16, 6), 1: (16, 1)}
     assert total == 32
     assert cur == 7
+
+    per, total, cur = reg.report_pipeline_capacity(ready=True)
+    assert per == {0: (16, 0), 1: (16, 0)}
+    assert total == 32
+    assert cur == 0
 
 
 def test_remove_detaches_pipeline_and_clears_remaining_members():
@@ -122,7 +134,7 @@ def test_remove_detaches_pipeline_and_clears_remaining_members():
 
     removed = reg.remove(a.node_id)
     assert removed is a
-    assert reg.get_registered_pipelines() == {}
+    assert reg.get_registered_pipeline_node_ids() == {}
     assert reg.pipeline_id_of_node(b.node_id) is None
     assert reg.state_of(b.node_id) == NodeState.STANDBY
     assert b.start_layer is None and b.end_layer is None

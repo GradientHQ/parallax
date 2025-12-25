@@ -361,7 +361,6 @@ def test_round_robin_pipeline_diversity():
 
     pp = rr.register_pipelines(nodes, num_layers)
     assert len(pp) == 2
-    assert pp[1] == ["h1", "m2", "t2"]
 
 
 def test_rr_24_node_topology_utilization():

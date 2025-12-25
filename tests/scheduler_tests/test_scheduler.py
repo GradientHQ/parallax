@@ -271,7 +271,7 @@ def test_rr_expand_pipelines_from_newly_joined_standby_nodes():
     ok = sched.bootstrap()
     assert ok
 
-    registered = sched.node_manager.get_registered_pipelines()
+    registered = sched.node_manager.get_registered_pipeline_node_ids()
     assert len(registered) == 1
 
     # Join another node; scheduler should keep it STANDBY, then expand RR pipelines
@@ -283,7 +283,7 @@ def test_rr_expand_pipelines_from_newly_joined_standby_nodes():
     sched._rr_last_expand_ts = 0.0  # type: ignore[attr-defined]
     sched._maybe_expand_rr_pipelines()  # type: ignore[attr-defined]
 
-    registered2 = sched.node_manager.get_registered_pipelines()
+    registered2 = sched.node_manager.get_registered_pipeline_node_ids()
     assert len(registered2) == 2
     # Both nodes should now be ACTIVE
     assert sched.node_manager.num_active_nodes == 2
@@ -307,7 +307,7 @@ def test_complicated_rr():
     ok = sched.bootstrap()
     assert ok
 
-    registered = sched.node_manager.get_registered_pipelines()
+    registered = sched.node_manager.get_registered_pipeline_node_ids()
     assert len(registered) == 1
     print(sched.node_manager.list_node_allocations(model.num_layers))
 
@@ -315,7 +315,7 @@ def test_complicated_rr():
     # by allocating from STANDBY and extending registered pipelines.
     sched.enqueue_join(n3)
     sched._process_joins()  # type: ignore[attr-defined]
-    registered = sched.node_manager.get_registered_pipelines()
+    registered = sched.node_manager.get_registered_pipeline_node_ids()
     assert len(registered) == 1
     print(sched.node_manager.list_node_allocations(model.num_layers))
     assert sched.node_manager.num_active_nodes == 2
@@ -325,7 +325,7 @@ def test_complicated_rr():
     sched._process_joins()  # type: ignore[attr-defined]
     sched._maybe_expand_rr_pipelines()  # type: ignore[attr-defined]
 
-    registered2 = sched.node_manager.get_registered_pipelines()
+    registered2 = sched.node_manager.get_registered_pipeline_node_ids()
     print(sched.node_manager.list_node_allocations(model.num_layers))
     assert len(registered2) == 2
     assert sched.node_manager.num_active_nodes == 4
@@ -338,7 +338,7 @@ def test_complicated_rr():
     assert sched.node_manager.num_active_nodes == 2
     assert sched.node_manager.num_standby_nodes == 1
     # Leaving any member should invalidate its entire registered pipeline.
-    registered_after_leave = sched.node_manager.get_registered_pipelines()
+    registered_after_leave = sched.node_manager.get_registered_pipeline_node_ids()
     assert len(registered_after_leave) == 1
     assert all(n3.node_id not in p and n4.node_id not in p for p in registered_after_leave.values())
 

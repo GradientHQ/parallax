@@ -516,7 +516,7 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
         Returns:
             A mapping `{pipeline_id: [node_id, ...]}` in the registration order.
         """
-        existing = self._node_manager.get_registered_pipelines()
+        existing = self._node_manager.get_registered_pipeline_node_ids()
         if existing:
             logger.warning("Pipelines already registered in node manager, re-registering")
             self._node_manager.clear_registered_pipelines()
@@ -542,7 +542,7 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
 
         This is primarily used by the scheduler for logging/observability.
         """
-        return self._node_manager.get_registered_pipelines()
+        return self._node_manager.get_registered_pipeline_node_ids()
 
     def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
         """Return the next viable *registered* pipeline in round-robin order.
@@ -552,7 +552,8 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
         """
         pipelines = self._node_manager.get_registered_pipelines()
         if not pipelines:
-            pipelines = self.register_pipelines(nodes, num_layers)
+            _ = self.register_pipelines(nodes, num_layers)
+            pipelines = self._node_manager.get_registered_pipelines()
 
         id_to_node: Dict[str, Node] = {n.node_id: n for n in nodes}
 
@@ -561,19 +562,22 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
         total_pipelines = len(pipelines_list)
         while attempts < total_pipelines:
             pid = self._rr_cursor % total_pipelines
-            candidate = pipelines_list[pid]
+            candidate_pipeline = pipelines_list[pid]
+            candidate = list(candidate_pipeline.node_ids)
             self._rr_cursor += 1
             attempts += 1
+
+            # If any stage is not ready, skip quickly.
+            if not candidate_pipeline.is_ready:
+                logger.warning(f"Pipeline {candidate} is not ready, skipping")
+                continue
+
             latency = estimate_pipeline_latency(candidate, id_to_node=id_to_node)
             for nid in candidate:
                 if nid not in id_to_node:
                     raise ValueError(
                         f"To be dispatched node {nid} in pipeline {candidate} not found in node manager!"
                     )
-                if not id_to_node[nid].is_active:
-                    # If node is not active, skip the pipeline
-                    logger.warning(f"Pipeline {candidate} is not active, skipping")
-                    latency = float("inf")
 
             if latency != float("inf"):
                 return list(candidate), float(latency)

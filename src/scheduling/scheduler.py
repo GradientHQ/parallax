@@ -150,6 +150,20 @@ class Scheduler:
         """Check if there is a full pipeline among ACTIVE nodes."""
         return self.node_manager.has_full_pipeline(self.num_layers)
 
+    def _routing_ready(self) -> bool:
+        """Return True iff routing can proceed right now.
+
+        - RR: requires at least one *registered* pipeline and at least one of them is ready
+          (all member nodes have `node.is_active == True`).
+        - DP: requires that current ACTIVE allocations contain at least one full pipeline.
+        """
+        if self.routing_strategy == "rr":
+            pipelines = self.node_manager.get_registered_pipelines()
+            if not pipelines:
+                return False
+            return any(p.is_ready for p in pipelines.values())
+        return self.has_full_pipeline()
+
     def _maybe_expand_rr_pipelines(self) -> None:
         """RR-only: try to allocate/register additional pipelines from STANDBY nodes.
 
@@ -451,6 +465,9 @@ class Scheduler:
 
     def dispatch_next_request(self) -> Optional[Tuple[str, List[str], float]]:
         """Route the next request in the wait pool; returns (request_id, path, latency)."""
+        # Don't dequeue requests until routing is actually possible.
+        if not self._routing_ready():
+            return None
         try:
             req = self._request_queue.get_nowait()
         except queue.Empty:
@@ -513,7 +530,9 @@ class Scheduler:
         p_sep = "-" * len(p_header)
         lines: List[str] = [p_header, p_sep]
         # Include capacity summary in the RR snapshot message.
-        per_pipeline_min, total_capacity, cur_capacity = self.report_pipeline_capacity()
+        per_pipeline_min, total_capacity, cur_capacity = (
+            self.node_manager.report_pipeline_capacity()
+        )
         if per_pipeline_min is None:
             lines.append("Capacity: (no registered pipelines)")
         else:
@@ -525,13 +544,13 @@ class Scheduler:
             return "\n".join(lines)
 
         for pid in sorted(pipelines.keys()):
-            node_ids = pipelines.get(pid, [])
-            lines.append("  pipeline %-3d | stages=%d" % (pid, len(node_ids)))
-            for idx, nid in enumerate(node_ids):
-                n = self.node_manager.get(nid)
-                if n is None:
-                    lines.append("    [%02d] %-16s (missing)" % (idx, nid))
-                    continue
+            p = pipelines[pid]
+            p.recompute_capacity()
+            lines.append(
+                "  pipeline %-3d | stages=%d | ready=%s | cap=%d cur=%d"
+                % (pid, p.num_stages, p.is_ready, p.min_node_capacity, p.min_remaining_capacity)
+            )
+            for idx, n in enumerate(p.nodes):
                 s = -1 if n.start_layer is None else int(n.start_layer)
                 e = -1 if n.end_layer is None else int(n.end_layer)
                 lat = n.layer_latency_ms
@@ -540,7 +559,7 @@ class Scheduler:
                     "    [%02d] %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | active %s"
                     % (
                         idx,
-                        nid,
+                        n.node_id,
                         s,
                         e,
                         n.current_requests,
@@ -574,18 +593,6 @@ class Scheduler:
             logger.debug("Allocation snapshot\n%s", snapshot)
         return snapshot
 
-    def report_pipeline_capacity(
-        self,
-    ) -> Tuple[Optional[Dict[int, Tuple[int, int]]], int, int]:
-        """Helper to report the current pipeline capacity.
-
-        Returns:
-            per_pipeline_min: Dict of pipeline id -> (min_node_capacity, min_remaining_capacity).
-            total_capacity: The total capacity of all registered pipelines.
-            cur_capacity: The current capacity (counting existing request load) of all registered pipelines.
-        """
-        return self.node_manager.report_pipeline_capacity()
-
     def run(self, *, poll_interval: float = 0.05, allocation_log_interval: float = 5.0) -> None:
         """Run the scheduler concurrently until `stop()` is called.
 
@@ -604,6 +611,10 @@ class Scheduler:
 
         # Bootstrap gating
         if not self._wait_for_bootstrap(poll_interval):
+            return
+
+        # Don't start dispatcher until routing is actually possible.
+        if not self._routing_ready():
             return
 
         # Start dispatcher only after successful bootstrap
