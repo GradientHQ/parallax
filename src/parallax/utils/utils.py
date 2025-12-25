@@ -458,4 +458,3 @@ def concat_weight_partition(refit_weight_path):
         tensors[final_key] = concate_result
 
     save_tensor_to_disk(tensors, refit_weight_path, file_idx)
-
