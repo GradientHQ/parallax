@@ -1,6 +1,7 @@
 """Utility functions."""
 
 import base64
+import glob
 import hashlib
 import os
 import random
@@ -406,6 +407,9 @@ def concat_weight_partition(weight_files, refit_weight_path):
     {original_name}_part{i}
     e.g. model.embed_tokens.weight_part0
     """
+    weight_files = glob.glob(refit_weight_path + "/*.safetensors")
+    assert weight_files, f"Weight safetensors files not found in path: {refit_weight_path}"
+
     tensors = {}
     original_tensors = {}
     for wf in weight_files:
