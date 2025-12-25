@@ -11,6 +11,21 @@
 
 namespace parallax_ext {
 
+std::string get_type_string(mx::Dtype t) {
+    if (t == mx::float32) return "float";
+    if (t == mx::float16) return "half";
+    if (t == mx::bfloat16) return "bfloat16_t";
+    if (t == mx::uint8) return "uchar"; // 对应 cache 的 uint8
+    throw std::runtime_error("Unsupported dtype");
+}
+
+static size_t calculate_shared_memory_size(int max_seq_len, int head_size,
+                                        int num_threads, int num_simd_lanes) {
+  size_t logits_size = max_seq_len * sizeof(float);
+  size_t reduction_size = 2 * (num_threads / num_simd_lanes) * sizeof(float);
+  size_t output_size = head_size * sizeof(float);
+  return std::max(logits_size + reduction_size, output_size);
+}
 
 mx::array paged_attention_v1(
     const mx::array& query,         // [num_seqs, num_heads, head_size]
@@ -56,6 +71,7 @@ void PagedAttentionV1::eval_gpu(
     auto& block_tables = inputs[3];
     auto& seq_lens = inputs[4];
     auto& out = outputs[0];
+    int head_size = q.shape(2);
 
     // Each primitive carries the stream it should execute on
     // and each stream carries its device identifiers
@@ -84,9 +100,9 @@ void PagedAttentionV1::eval_gpu(
     // Resolve name of kernel
     std::string kname;
     std::string hash_name = "";
-    kname = "paged_attention_" + type_to_name(out);
-    kname += "_cache_" + type_to_name(k);
-    kname += "_hs" + std::to_string(num_kv_heads_);
+    kname = "paged_attention_" + get_type_string(out.dtype());
+    kname += "_cache_" + get_type_string(k.dtype());
+    kname += "_hs" + std::to_string(head_size);
     kname += "_bs" + std::to_string(block_size_);
     kname += "_nt" + std::to_string(num_threads);
     kname += "_nsl" + std::to_string(num_simd_lanes);
@@ -101,6 +117,17 @@ void PagedAttentionV1::eval_gpu(
     // Prepare to encode kernel
     auto& compute_encoder = d.get_command_encoder(s.index);
     compute_encoder.set_compute_pipeline_state(kernel);
+
+    // Shared Memory 
+    const int padded_max_context_len = ((max_seq_len_ + block_size_ - 1) / block_size_) * block_size_;
+    const int num_simds = num_threads / num_simd_lanes;
+    const int logits_size = padded_max_context_len * sizeof(float);
+    const int outputs_size = (num_simds / 2) * head_size * sizeof(float);
+    const size_t shared_memory_size = std::max(logits_size, outputs_size);
+    
+    // set Threadgroup Memory (index 0)
+    compute_encoder.set_threadgroup_memory_length(shared_memory_size, 0);
+
 
     // Calculate parameters
     float softcapping_ = 1.0;       // hard code for not use
@@ -118,16 +145,23 @@ void PagedAttentionV1::eval_gpu(
     compute_encoder.set_input_array(k, 4);
     compute_encoder.set_input_array(v, 5);
     // Skip k_scale and v_scale for non-fp8 (buffers 6, 7)
-    compute_encoder.set_bytes(num_kv_heads_, 8);
-    compute_encoder.set_bytes(scale_, 9);
-    compute_encoder.set_bytes(softcapping_, 10);
+    int32_t num_kv_heads_32 = static_cast<int32_t>(num_kv_heads_);
+    float scale_32 = static_cast<float>(scale_);
+    float softcapping_32 = static_cast<float>(softcapping_);
+    int32_t max_num_blocks_per_seq_32 = static_cast<int32_t>(max_num_blocks_per_seq);
+    int32_t q_stride_32 = static_cast<int32_t>(q_stride);
+    int32_t kv_block_stride_32 = static_cast<int32_t>(kv_block_stride);
+    int32_t kv_head_stride_32 = static_cast<int32_t>(kv_head_stride);
+    compute_encoder.set_bytes(num_kv_heads_32, 8);
+    compute_encoder.set_bytes(scale_32, 9);
+    compute_encoder.set_bytes(softcapping_32, 10);
     compute_encoder.set_input_array(block_tables, 11);
     compute_encoder.set_input_array(seq_lens, 12);
-    compute_encoder.set_bytes(max_num_blocks_per_seq, 13);
+    compute_encoder.set_bytes(max_num_blocks_per_seq_32, 13);
     // Skip alibi_slopes (buffer 14)
-    compute_encoder.set_bytes(q_stride, 14);
-    compute_encoder.set_bytes(kv_block_stride, 15);
-    compute_encoder.set_bytes(kv_head_stride, 16);
+    compute_encoder.set_bytes(q_stride_32, 15);
+    compute_encoder.set_bytes(kv_block_stride_32, 16);
+    compute_encoder.set_bytes(kv_head_stride_32, 17);
 
     // Dispatch configuration
     // Grid: (num_heads, num_seqs, 1) - no partitioning for v1
@@ -136,7 +170,7 @@ void PagedAttentionV1::eval_gpu(
 
     // Launch the grid with the given number of threads divided among
     // the given threadgroups
-    compute_encoder.dispatch_threads(grid, threadgroup);
+    compute_encoder.dispatch_threadgroups(grid, threadgroup);
 }
 
 /** Equivalence check **/
