@@ -322,7 +322,8 @@ class Scheduler:
         for node in self.node_manager.active_nodes:
             if time.time() - node.last_heartbeat > self.heartbeat_timeout:
                 logger.debug(f"Node {node.node_id} heartbeat timeout")
-                self.leave(node.node_id)
+                # Route leave through the event loop so global rebalance/reboot is serialized.
+                self.enqueue_leave(node.node_id)
 
     # Dynamic node management
     def join(self, node: Node) -> None:
@@ -385,40 +386,14 @@ class Scheduler:
         - Nullify the pipeline the node is in;
         - Move all remaining nodes in the pipeline to STANDBY;
 
-        Trigger global rebalance if needed.
+        Note: Global rebalance/reboot is handled by the event loop (`_process_leaves`) to
+        ensure we don't concurrently reboot when multiple leave events arrive.
         """
         node = self.node_manager.get(node_id)
         if node is None:
             raise ValueError(f"Node {node_id} not found in nodes")
         logger.info("Leaving node %s (start=%s, end=%s)", node_id, node.start_layer, node.end_layer)
         self.node_manager.remove(node_id)
-
-        if self.layer_allocator.should_global_rebalance():
-            nodes = self.node_manager.nodes
-            logger.warning("Global rebalance triggered due to node leave")
-
-            # Count manual vs automatic nodes
-            manual_count = sum(1 for n in nodes if n.manual_layer_assignment)
-            total_count = len(nodes)
-            logger.debug(
-                f"Node count: {manual_count} manual, {total_count - manual_count} automatic"
-            )
-            if manual_count == total_count:
-                logger.debug("All nodes are manual assignment, skipping global rebalance")
-            elif manual_count > 0:
-                logger.error(
-                    f"Mixed assignment detected ({manual_count} manual, {total_count - manual_count} automatic); skipping rebalance"
-                )
-            else:
-                self.node_manager.standby([n.node_id for n in self.node_manager.active_nodes])
-                assert (
-                    self.node_manager.num_standby_nodes == self.node_manager.num_nodes
-                ), "All active nodes should be moved to standby"
-                assert (
-                    self.node_manager.num_active_nodes == 0
-                ), "No active nodes before re-bootstrap"
-                logger.warning("Re-bootstrapping for global rebalance")
-                self.bootstrap(reboot=True)
 
         # Snapshot at INFO after leave since allocations/pipelines may have changed.
         self.emit_alloc_log_snapshot(reason=f"after leave {node_id}")
@@ -751,7 +726,12 @@ class Scheduler:
                 )
 
     def _process_leaves(self) -> None:
-        """Handle pending leave events safely."""
+        """Handle pending leave events safely.
+
+        Important: This is the only place we trigger global rebalance/reboot so leave events
+        are serialized by the single event-loop thread.
+        """
+        removed_any = False
         while True:
             try:
                 node_id = self._pending_leaves.get_nowait()
@@ -759,8 +739,48 @@ class Scheduler:
                 break
             try:
                 self.leave(node_id)
+                removed_any = True
             except Exception as exc:
                 logger.warning(f"Leave failed for {node_id}: {exc}")
+
+        # After draining all leaves, decide whether to do a single global rebalance.
+        if not removed_any:
+            return
+
+        if not self.layer_allocator.should_global_rebalance():
+            return
+
+        nodes = self.node_manager.nodes
+        logger.warning("Global rebalance triggered due to node leave")
+
+        # Count manual vs automatic nodes
+        manual_count = sum(1 for n in nodes if n.manual_layer_assignment)
+        total_count = len(nodes)
+        logger.debug(f"Node count: {manual_count} manual, {total_count - manual_count} automatic")
+        if total_count == 0:
+            logger.debug("No nodes left after leave(s); skipping global rebalance")
+            return
+        if manual_count == total_count:
+            logger.debug("All nodes are manual assignment, skipping global rebalance")
+            return
+        if manual_count > 0:
+            logger.error(
+                f"Mixed assignment detected ({manual_count} manual, {total_count - manual_count} automatic); skipping rebalance"
+            )
+            return
+
+        # Move active nodes to standby and re-bootstrap (reboot) once.
+        self.node_manager.standby([n.node_id for n in self.node_manager.active_nodes])
+        assert (
+            self.node_manager.num_standby_nodes == self.node_manager.num_nodes
+        ), "All active nodes should be moved to standby"
+        assert self.node_manager.num_active_nodes == 0, "No active nodes before re-bootstrap"
+        logger.warning("Re-bootstrapping for global rebalance")
+        try:
+            self.bootstrap(reboot=True)
+        finally:
+            # Ensure snapshot reflects post-rebalance state even if bootstrap fails.
+            self.emit_alloc_log_snapshot(reason="after global rebalance")
 
     def stop(self) -> None:
         """Signal background threads to stop and wake any waiters."""
