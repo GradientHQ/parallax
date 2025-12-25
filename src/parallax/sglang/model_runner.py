@@ -4,7 +4,6 @@ We use monkey patch to modify sglang originated methods. The main purpose is to 
 arguments needed by decentralized inference.
 """
 
-import glob
 import logging
 import os
 import random
@@ -14,8 +13,6 @@ import sglang
 import sglang.srt.distributed.parallel_state
 import torch
 from mlx_lm.utils import load_config
-from safetensors import safe_open
-from safetensors.torch import save_file
 from sglang.srt.configs.model_config import ModelConfig
 from sglang.srt.distributed import (
     get_pp_group,

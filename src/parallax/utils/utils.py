@@ -2,9 +2,9 @@
 
 import base64
 import hashlib
+import os
 import random
 import socket
-import os
 from typing import List
 
 import mlx.core as mx
@@ -420,4 +420,3 @@ def concat_weight_partition(weight_files, refit_weight_path):
 
     save_file_path = refit_weight_path + "/model.safetensors"
     save_file(tensors, save_file_path)
-

@@ -9,9 +9,9 @@ It is used to handle the communication between the peers, and communicate with t
 
 import dataclasses
 import enum
+import glob
 import json
 import multiprocessing
-import glob
 import os
 import random
 import threading
@@ -28,7 +28,11 @@ from parallax.p2p.proto import forward_pb2
 from parallax.p2p.utils import AsyncWorker
 from parallax.server.server_info import detect_node_hardware
 from parallax.utils.shared_state import SharedState
-from parallax.utils.utils import calculate_cid_manual, get_zmq_socket, concat_weight_partition
+from parallax.utils.utils import (
+    calculate_cid_manual,
+    concat_weight_partition,
+    get_zmq_socket,
+)
 from parallax_utils.logging_config import get_logger, set_log_level
 
 logger = get_logger(__name__)
@@ -277,7 +281,7 @@ def check_and_run_weight_refit(gradient_server, message):
                 _download_weight_thread(weight_dir, cid)
 
         # step3. concat weight
-        # TODO: Need import torch in concat_weight_partition. Maybe we should justify which backend here. 
+        # TODO: Need import torch in concat_weight_partition. Maybe we should justify which backend here.
         weight_files = glob.glob(weight_dir + "/*.safetensors")
         assert weight_files, f"Weight safetensors files not found in path: {weight_dir}"
         logger.info(f"Begin concat weight from path: {weight_dir}")
