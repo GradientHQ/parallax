@@ -57,7 +57,8 @@ def test_scheduler_join_and_leave():
     assert n3.start_layer is not None and n3.end_layer is not None
 
     # Leave
-    sched.leave(n3.node_id)
+    sched.enqueue_leave(n3.node_id)
+    sched._process_leaves()
     assert n3 not in sched.node_manager.active_nodes
     assert n3 not in sched.node_manager.standby_nodes
 
@@ -95,7 +96,8 @@ def test_scheduler_bootstrap_wait_and_dynamic_events():
 
     # Leave a non-critical node; if still full pipeline, no global rebalance forced
     remaining_before = sched.node_manager.has_full_pipeline(model.num_layers)
-    sched.leave(n3.node_id)
+    sched.enqueue_leave(n3.node_id)
+    sched._process_leaves()  # type: ignore[attr-defined]
     assert sched.node_manager.has_full_pipeline(model.num_layers) == remaining_before
 
     print(sched.node_manager.list_node_allocations(model.num_layers))
@@ -107,7 +109,8 @@ def test_scheduler_bootstrap_wait_and_dynamic_events():
     sched.layer_allocator.allocate(sched.node_manager.nodes[0], 0, model.num_layers - 1)  # type: ignore[attr-defined]
     # Now leave that node to break coverage and trigger global rebalance path
     core_id = sched.node_manager.nodes[0].node_id
-    sched.leave(core_id)
+    sched.enqueue_leave(core_id)
+    sched._process_leaves()  # type: ignore[attr-defined]
 
 
 def test_scheduler_single_node_leave_then_rejoin_reassigns_layers():
@@ -128,7 +131,9 @@ def test_scheduler_single_node_leave_then_rejoin_reassigns_layers():
     assert n1.start_layer is not None and n1.end_layer is not None
 
     # Simulate node leave (e.g., the process was killed)
-    sched.leave(n1.node_id)
+    sched.enqueue_leave(n1.node_id)
+    sched._process_leaves()  # type: ignore[attr-defined]
+
     assert n1 not in sched.node_manager.nodes
     assert not sched.node_manager.has_full_pipeline(model.num_layers)
 
@@ -201,7 +206,8 @@ def test_scheduler_three_nodes_sequential_join_leave_rejoin():
 
     # Step 4: n1 leaves and rejoins
     n1_id = n1.node_id
-    sched.leave(n1_id)
+    sched.enqueue_leave(n1_id)
+    sched._process_leaves()  # type: ignore[attr-defined]
     assert n1 not in sched.node_manager.nodes
     assert sched.node_manager.num_nodes == 2
     print(sched.node_manager.list_node_allocations(model.num_layers))
@@ -218,7 +224,8 @@ def test_scheduler_three_nodes_sequential_join_leave_rejoin():
 
     # Step 5: n2 leaves and rejoins
     n2_id = n2.node_id
-    sched.leave(n2_id)
+    sched.enqueue_leave(n2_id)
+    sched._process_leaves()  # type: ignore[attr-defined]
     assert n2 not in sched.node_manager.nodes
     assert sched.node_manager.num_nodes == 2
     assert sched.node_manager.has_full_pipeline(model.num_layers)
@@ -234,7 +241,8 @@ def test_scheduler_three_nodes_sequential_join_leave_rejoin():
 
     # Step 6: n3 leaves and rejoins
     n3_id = n3.node_id
-    sched.leave(n3_id)
+    sched.enqueue_leave(n3_id)
+    sched._process_leaves()
     assert n3 not in sched.node_manager.nodes
     assert sched.node_manager.num_nodes == 2
     assert sched.node_manager.has_full_pipeline(model.num_layers)
