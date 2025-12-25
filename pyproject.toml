@@ -19,7 +19,7 @@ dependencies = [
   "msgpack>=1.0.7",
   "safetensors>=0.5.1",
   "huggingface-hub",
-  "transformers==4.57.1",
+  "transformers>=5.0.0rc1",
   "jinja2>=3.1.0",
   "numpy>=1.26",
   "pyzmq>=25.0",
@@ -43,19 +43,19 @@ parallax = "parallax.cli:main"
 
 mac = [
   "torch==2.8.0",
-  "mlx-lm==0.28.4",
+  "mlx-lm==0.30.0",
   "mlx==0.30.0",
 ]
 
 gpu = [
   "sglang[all]==0.5.5",
-  "mlx-lm==0.28.4",
+  "mlx-lm==0.30.0",
   "mlx[cpu]==0.30.0",
 ]
 
 vllm = [
   "vllm==0.11.0",
-  "mlx-lm==0.28.4",
+  "mlx-lm==0.30.0",
   "mlx[cpu]==0.30.0",
 ]
 
