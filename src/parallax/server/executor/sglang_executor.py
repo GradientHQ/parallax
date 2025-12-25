@@ -193,8 +193,7 @@ class SGLExecutor(BaseExecutor):
                 # launch a subthread to concat weight files and save to disk
                 t = threading.Thread(
                         target=concat_weight_partition,
-                        args=(self, refit_weight_path,),
-                        kwargs=None,
+                        args=(refit_weight_path),
                         daemon=True,
                     )
                 t.start()
