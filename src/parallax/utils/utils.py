@@ -4,6 +4,7 @@ import base64
 import hashlib
 import random
 import socket
+import os
 from typing import List
 
 import mlx.core as mx
@@ -12,6 +13,8 @@ import psutil
 import torch
 import zmq
 from mlx_lm.utils import _download, load_config
+from safetensors import safe_open
+from safetensors.torch import save_file
 
 from parallax.utils.selective_download import download_metadata_only
 
@@ -367,3 +370,54 @@ def calculate_cid_manual(data: bytes) -> str:
     base32_str = base64.b32encode(cid_bytes).decode("ascii").lower().rstrip("=")
     cid_string = "b" + base32_str
     return cid_string
+
+
+def concat_weight_partition(weight_files, refit_weight_path):
+    """
+    Concat partial weight into one safetensor.
+    Partitioned weight should be named in the following format:
+    {original_name}_part{i}
+    e.g. model.embed_tokens.weight_part0
+    """
+    tensors = {}
+    original_tensors = {}
+    for wf in weight_files:
+        with safe_open(wf, framework="pt") as f:
+            for k in f.keys():
+                original_tensors[k] = f.get_tensor(k)
+    for wf in weight_files:
+        os.remove(wf)
+
+    # Concatenate if needed and save the final tensors
+    sorted_keys = sorted(original_tensors.keys())
+    prev_key = None
+    concate_list = []
+    for key in sorted_keys:
+        val = original_tensors[key]
+        if "part" not in key:
+            tensors[key] = val
+        elif prev_key is None:
+            concate_list.append(val)
+            prev_key = key
+        else:
+            prev_name_list = prev_key.split(".")[:-1]
+            cur_name_list = key.split(".")[:-1]
+            if prev_name_list == cur_name_list:
+                concate_list.append(val)
+            else:
+                concate_result = torch.cat(concate_list, 0)
+                cur_name_list.append("weight")
+                final_key = ".".join(cur_name_list)
+                tensors[final_key] = concate_result
+                concate_list = [val]
+            prev_key = key
+    if concate_list:
+        concate_result = torch.cat(concate_list, 0)
+        cur_name_list = prev_key.split(".")[:-1]
+        cur_name_list.append("weight")
+        final_key = ".".join(cur_name_list)
+        tensors[final_key] = concate_result
+
+    save_file_path = refit_weight_path + "/model.safetensors"
+    save_file(tensors, save_file_path)
+
