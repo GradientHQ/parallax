@@ -405,7 +405,7 @@ def check_tensor_size_and_save(tensors, refit_weight_path, idx):
         return False
 
 
-def concat_weight_partition(refit_weight_path, **kwargs):
+def concat_weight_partition(refit_weight_path):
     """
     Concat partial weight into one safetensor.
     Partitioned weight should be named in the following format:
