@@ -383,8 +383,6 @@ def inplace_insert_value_with_idx(tensor_list, value, idx):
 def save_tensor_to_disk(tensors, refit_weight_path, idx):
     save_file_path = refit_weight_path + "/model_" + str(idx) + ".safetensors"
     save_file(tensors, save_file_path)
-    # sleep to avoid GIL issues
-    time.sleep(0.1)
 
 
 def check_tensor_size_and_save(tensors, refit_weight_path, idx):
@@ -416,8 +414,6 @@ def concat_weight_partition(refit_weight_path):
         with safe_open(wf, framework="pt", device="cpu") as f:
             for k in f.keys():
                 original_tensors[k] = f.get_tensor(k)
-        # sleep to avoid GIL issues
-        time.sleep(0.1)
     for wf in weight_files:
         os.remove(wf)
 
