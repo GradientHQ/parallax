@@ -279,10 +279,7 @@ def test_rr_expand_pipelines_from_newly_joined_standby_nodes():
     sched.enqueue_join(n2)
     sched._process_joins()  # type: ignore[attr-defined]
 
-    # Throttle logic uses time; force allow another expansion attempt if needed.
-    sched._rr_last_expand_ts = 0.0  # type: ignore[attr-defined]
-    sched._maybe_expand_rr_pipelines()  # type: ignore[attr-defined]
-
+    sched.request_router.expand_pipelines()
     registered2 = sched.node_manager.get_registered_pipeline_node_ids()
     assert len(registered2) == 2
     # Both nodes should now be ACTIVE
@@ -323,7 +320,7 @@ def test_complicated_rr():
 
     sched.enqueue_join(n4)
     sched._process_joins()  # type: ignore[attr-defined]
-    sched._maybe_expand_rr_pipelines()  # type: ignore[attr-defined]
+    sched.request_router.expand_pipelines()
 
     registered2 = sched.node_manager.get_registered_pipeline_node_ids()
     print(sched.node_manager.list_node_allocations(model.num_layers))

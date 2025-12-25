@@ -110,12 +110,14 @@ def test_pipeline_min_load_and_total_capacity_computes_bottleneck_remaining_capa
     c.current_requests = 0  # remaining 16
     d.current_requests = 15  # remaining 1 -> pipeline1 bottleneck = 1
 
-    per, total, cur = reg.report_pipeline_capacity(ready=False)
+    per, total, cur = reg.report_pipeline_capacity(ready_only=False)
     assert per == {0: (16, 6), 1: (16, 1)}
     assert total == 32
     assert cur == 7
 
-    per, total, cur = reg.report_pipeline_capacity(ready=True)
+    a.is_active = False
+    d.is_active = False
+    per, total, cur = reg.report_pipeline_capacity(ready_only=True)
     assert per == {0: (16, 0), 1: (16, 0)}
     assert total == 32
     assert cur == 0

@@ -330,14 +330,16 @@ class NodeManager:
                 n for n in self._nodes.values() if self._state.get(n.node_id) == NodeState.STANDBY
             ]
 
-    def list_node_allocations(self, total_layers: int) -> List[Tuple[str, int, int]]:
+    def list_node_allocations(
+        self, total_layers: int, ready_only: bool = False
+    ) -> List[Tuple[str, int, int]]:
         """Snapshot ACTIVE segments as (node_id, start, end) under the registry lock."""
         if total_layers <= 0:
             return []
         segments: List[Tuple[str, int, int]] = []
         with self._lock:
             for nid, node in self._nodes.items():
-                if self._state.get(nid) != NodeState.ACTIVE:
+                if self._state.get(nid) != NodeState.ACTIVE or (ready_only and not node.is_active):
                     continue
                 s, e = node.start_layer, node.end_layer
                 if s is None or e is None:
@@ -347,7 +349,7 @@ class NodeManager:
                 segments.append((nid, int(s), int(e)))
         return segments
 
-    def num_full_pipelines(self, total_layers: int) -> int:
+    def num_full_pipelines(self, total_layers: int, ready_only: bool = False) -> int:
         """Count how many complete pipelines exist among ACTIVE nodes.
 
         A "pipeline" is a sequence of ACTIVE nodes whose allocated layer ranges form
@@ -365,7 +367,7 @@ class NodeManager:
         if total_layers <= 0:
             return 0
 
-        segments = self.list_node_allocations(total_layers)
+        segments = self.list_node_allocations(total_layers, ready_only)
         if not segments:
             return 0
 
@@ -383,9 +385,9 @@ class NodeManager:
 
         return int(ways.get(total_layers, 0))
 
-    def has_full_pipeline(self, num_total_layers: int) -> bool:
+    def has_full_pipeline(self, num_total_layers: int, ready_only: bool = False) -> bool:
         """Check if there is a full pipeline among ACTIVE nodes."""
-        return self.num_full_pipelines(num_total_layers) > 0
+        return self.num_full_pipelines(num_total_layers, ready_only) > 0
 
     def add_request(self, node_id: str) -> None:
         """Add a request to a node."""
@@ -484,12 +486,12 @@ class NodeManager:
 
     def report_pipeline_capacity(
         self,
-        ready: bool = True,
+        ready_only: bool = True,
     ) -> Tuple[Optional[Dict[int, Tuple[int, int]]], int, int]:
         """Return per-pipeline bottleneck load + total request capacity across pipelines.
 
         Args:
-            ready: If True, requires all nodes in the pipeline to be is_active (ready to serve);
+            ready_only: If True, requires all nodes in the pipeline to be is_active (ready to serve);
 
         Returns:
             per_pipeline_min: Dict of pipeline id -> (min_node_capacity, min_remaining_capacity).
@@ -508,7 +510,9 @@ class NodeManager:
             for pid in sorted(self._registered_pipelines.keys()):
                 pipeline = self._registered_pipelines[pid]
                 pipeline.recompute_capacity()
-                remaining_capacity = int(pipeline.min_remaining_capacity) if not ready else 0
+                remaining_capacity = int(pipeline.min_remaining_capacity)
+                if ready_only and not pipeline.is_ready:
+                    remaining_capacity = 0
                 per_pipeline_min[pid] = (int(pipeline.min_node_capacity), remaining_capacity)
                 total_capacity += int(pipeline.min_node_capacity)
                 cur_capacity += remaining_capacity

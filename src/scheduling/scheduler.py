@@ -20,7 +20,6 @@ from scheduling.node import Node, RequestSignal
 from scheduling.node_management import NodeManager
 from scheduling.request_routing import (
     DynamicProgrammingRouting,
-    RandomizedOverDynamicPipelinesRouting,
     RoundRobinOverFixedPipelinesRouting,
 )
 
@@ -85,9 +84,11 @@ class Scheduler:
         self.min_nodes_bootstrapping = min_nodes_bootstrapping
 
         self.request_router = (
-            DynamicProgrammingRouting()
+            DynamicProgrammingRouting(self.node_manager, self.num_layers)
             if routing_strategy == "dp"
-            else RoundRobinOverFixedPipelinesRouting(self.node_manager)
+            else RoundRobinOverFixedPipelinesRouting(
+                self.node_manager, self.num_layers, self.layer_allocator
+            )
         )
 
         self._request_queue: "queue.Queue[RequestSignal]" = queue.Queue()
@@ -150,69 +151,6 @@ class Scheduler:
         """Check if there is a full pipeline among ACTIVE nodes."""
         return self.node_manager.has_full_pipeline(self.num_layers)
 
-    def _routing_ready(self) -> bool:
-        """Return True iff routing can proceed right now.
-
-        - RR: requires at least one *registered* pipeline and at least one of them is ready
-          (all member nodes have `node.is_active == True`).
-        - DP: requires that current ACTIVE allocations contain at least one full pipeline.
-        """
-        if self.routing_strategy == "rr":
-            pipelines = self.node_manager.get_registered_pipelines()
-            if not pipelines:
-                return False
-            return any(p.is_ready for p in pipelines.values())
-        return self.has_full_pipeline()
-
-    def _maybe_expand_rr_pipelines(self) -> None:
-        """RR-only: try to allocate/register additional pipelines from STANDBY nodes.
-
-        This is a best-effort opportunistic expansion. It never touches ACTIVE nodes because
-        allocator `allocate_from_standby()` only draws from the STANDBY pool.
-        """
-        if self.routing_strategy != "rr":
-            return
-        if not self._bootstrapped_event.is_set():
-            return
-
-        standby_nodes = self.node_manager.standby_nodes
-        if not standby_nodes:
-            return
-
-        before_active_ids = {n.node_id for n in self.node_manager.active_nodes}
-        ok = self.layer_allocator.allocate_from_standby()
-        if not ok:
-            return
-        after_active_ids = {n.node_id for n in self.node_manager.active_nodes}
-        newly_active_ids = after_active_ids - before_active_ids
-        if not newly_active_ids:
-            return
-        newly_active_nodes = self.node_manager.ids_to_nodes(list(newly_active_ids))
-        new_pipelines = RandomizedOverDynamicPipelinesRouting.pipeline_discovery(
-            newly_active_nodes, self.num_layers
-        )
-        if not new_pipelines:
-            logger.warning("[RR] No new pipelines found for extended RR")
-            return
-
-        # Only extend with pipelines that do not overlap existing registered nodes.
-        filtered: List[List[str]] = []
-        for p in new_pipelines:
-            if all(self.node_manager.pipeline_id_of_node(nid) is None for nid in p):
-                filtered.append(p)
-        if not filtered:
-            return
-
-        try:
-            self.node_manager.extend_registered_pipelines(filtered)
-            logger.info(
-                "[RR] Added %d new pipeline(s) from %d newly-active node(s)",
-                len(filtered),
-                len(newly_active_nodes),
-            )
-        except Exception as exc:
-            logger.warning(f"[RR] Failed to extend registered pipelines (best-effort): {exc}")
-
     def bootstrap(self, reboot: bool = False) -> bool:
         """Initial Node Allocation Assignment."""
         overide_min_node_check = False
@@ -248,23 +186,7 @@ class Scheduler:
         assignments = self.node_manager.list_node_allocations(self.num_layers)
         logger.info(f"Layer allocator assignments: {assignments}")
 
-        # For fixed (RR) routing: register a pipeline set immediately after bootstrap.
-        if self.routing_strategy == "rr" and isinstance(
-            self.request_router, RoundRobinOverFixedPipelinesRouting
-        ):
-            try:
-                self.request_router.register_pipelines(
-                    self.node_manager.active_nodes, self.num_layers
-                )
-                logger.info(
-                    f"[RR] register_pipelines with bootstrap success, number of pipelines: {len(self.request_router.get_registered_pipelines())}"
-                )
-
-            except Exception as exc:
-                logger.warning(
-                    f"[RR] register_pipelines after bootstrap failed (best-effort): {exc}"
-                )
-
+        self.request_router.bootstrap()
         self._bootstrapped = True
         self._bootstrapped_event.set()
         # Snapshot at INFO after bootstrap since allocations/pipelines may have materially changed.
@@ -364,9 +286,10 @@ class Scheduler:
                 if self.dynamic_pipelines_router:
                     # for dynamic pipelines router, join the node to the lightest layer
                     self.layer_allocator.dynamic_join(node)
-                if self.routing_strategy == "rr":
-                    # for RR mode, try allocate from standby and expand the pipelines
-                    self._maybe_expand_rr_pipelines()
+                try:
+                    self.request_router.expand_pipelines()
+                except NotImplementedError:
+                    pass
 
         # Manual layer assignment bypasses bootstrap waiting
         if node.manual_layer_assignment:
@@ -466,7 +389,7 @@ class Scheduler:
     def dispatch_next_request(self) -> Optional[Tuple[str, List[str], float]]:
         """Route the next request in the wait pool; returns (request_id, path, latency)."""
         # Don't dequeue requests until routing is actually possible.
-        if not self._routing_ready():
+        if not self.request_router.routing_ready():
             return None
         try:
             req = self._request_queue.get_nowait()
@@ -474,9 +397,7 @@ class Scheduler:
             req = None
         if req is None:
             return None
-        path, latency = self.request_router.find_optimal_path(
-            self.node_manager.active_nodes, self.num_layers
-        )
+        path, latency = self.request_router.find_optimal_path()
         req.routing_table = path
         # Update simple load counters
         for node_id in path:
@@ -488,88 +409,6 @@ class Scheduler:
         )
         return req.request_id, path, latency
 
-    def _format_current_allocations_snapshot(self) -> str:
-        assignments = self.node_manager.list_node_allocations(self.num_layers)
-        header = f"Current allocations ({len(assignments)} nodes)"
-        sep = "-" * len(header)
-        lines: List[str] = [header, sep]
-        for node_id, start_layer, end_layer in assignments:
-            node = self.node_manager.get(node_id)
-            if node is None:
-                raise ValueError(f"Node {node_id} not found in node manager")
-            # Snapshot values to avoid recomputing/logging side-effects twice
-            capacity = node.max_requests
-            current = node.current_requests
-            latency = node.layer_latency_ms
-            latency_str = "inf" if latency == float("inf") else f"{latency:.2f}"
-            n_hosted_requests = 0
-            if node_id in self.node_manager.node_assigned_request_count:
-                n_hosted_requests = self.node_manager.node_assigned_request_count[node_id]
-            lines.append(
-                "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d | active %s"
-                % (
-                    node_id,
-                    start_layer,
-                    end_layer,
-                    current,
-                    capacity,
-                    latency_str,
-                    n_hosted_requests,
-                    node.is_active,
-                )
-            )
-        if len(lines) == 2:
-            lines.append("  (none)")
-        return "\n".join(lines)
-
-    def _format_rr_registered_pipelines_snapshot(self) -> str:
-        if self.routing_strategy != "rr":
-            return ""
-        pipelines = self.node_manager.get_registered_pipelines()
-        p_header = f"Registered pipelines ({len(pipelines)})"
-        p_sep = "-" * len(p_header)
-        lines: List[str] = [p_header, p_sep]
-        # Include capacity summary in the RR snapshot message.
-        per_pipeline_min, total_capacity, cur_capacity = (
-            self.node_manager.report_pipeline_capacity()
-        )
-        if per_pipeline_min is None:
-            lines.append("Capacity: (no registered pipelines)")
-        else:
-            lines.append(
-                f"Capacity: total={total_capacity} cur={cur_capacity} per_pipeline={per_pipeline_min}"
-            )
-        if not pipelines:
-            lines.append("  (none)")
-            return "\n".join(lines)
-
-        for pid in sorted(pipelines.keys()):
-            p = pipelines[pid]
-            p.recompute_capacity()
-            lines.append(
-                "  pipeline %-3d | stages=%d | ready=%s | cap=%d cur=%d"
-                % (pid, p.num_stages, p.is_ready, p.min_node_capacity, p.min_remaining_capacity)
-            )
-            for idx, n in enumerate(p.nodes):
-                s = -1 if n.start_layer is None else int(n.start_layer)
-                e = -1 if n.end_layer is None else int(n.end_layer)
-                lat = n.layer_latency_ms
-                lat_str = "inf" if lat == float("inf") else f"{lat:.2f}"
-                lines.append(
-                    "    [%02d] %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | active %s"
-                    % (
-                        idx,
-                        n.node_id,
-                        s,
-                        e,
-                        n.current_requests,
-                        n.max_requests,
-                        lat_str,
-                        n.is_active,
-                    )
-                )
-        return "\n".join(lines)
-
     def emit_alloc_log_snapshot(self, *, reason: Optional[str] = None) -> str:
         """Update `self.alloc_log_snapshot` and emit it.
 
@@ -577,10 +416,7 @@ class Scheduler:
         - Mutating events (join/leave/bootstrap) provide a reason and are logged at INFO.
         """
         try:
-            if self.routing_strategy == "rr":
-                snapshot = self._format_rr_registered_pipelines_snapshot()
-            else:
-                snapshot = self._format_current_allocations_snapshot()
+            snapshot = self.request_router.scheduler_format_snapshot()
         except Exception as exc:
             snapshot = f"(failed to build allocation snapshot: {exc})"
             logger.warning("Allocation snapshot build error: %s", exc)

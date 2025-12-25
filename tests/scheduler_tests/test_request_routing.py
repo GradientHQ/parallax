@@ -34,8 +34,10 @@ def test_optimal_path_simple_chain():
     n2.set_layer_allocation(split, num_layers)
     set_rtt_from_coords([n1, n2])
 
-    router = DynamicProgrammingRouting()
-    node_ids, latency = router.find_optimal_path([n1, n2], num_layers)
+    node_manager = build_node_management([n1, n2])
+    node_manager.activate([n1.node_id, n2.node_id])
+    router = DynamicProgrammingRouting(node_manager, total_layers=num_layers)
+    node_ids, latency = router.find_optimal_path()
 
     assert node_ids == ["n1", "n2"]
     expected = float(n1.layer_latency_ms) + float(n1.get_rtt_to(n2)) + float(n2.layer_latency_ms)
@@ -49,8 +51,10 @@ def test_optimal_path_single_node():
     n = build_node("solo", model, tflops=250.0, x=0.0, y=0.0)
     n.set_layer_allocation(0, num_layers)
 
-    router = DynamicProgrammingRouting()
-    node_ids, latency = router.find_optimal_path([n], num_layers)
+    node_manager = build_node_management([n])
+    node_manager.activate([n.node_id])
+    router = DynamicProgrammingRouting(node_manager, total_layers=num_layers)
+    node_ids, latency = router.find_optimal_path()
 
     assert node_ids == ["solo"]
     assert latency == pytest.approx(float(n.layer_latency_ms), rel=1e-6)
@@ -73,8 +77,10 @@ def test_optimal_path_missing_rtt():
     if n1.node_id in n2.rtt_to_nodes:
         del n2.rtt_to_nodes[n1.node_id]
 
-    router = DynamicProgrammingRouting()
-    node_ids, latency = router.find_optimal_path(nodes, num_layers)
+    node_manager = build_node_management(nodes)
+    node_manager.activate([n.node_id for n in nodes])
+    router = DynamicProgrammingRouting(node_manager, total_layers=num_layers)
+    node_ids, latency = router.find_optimal_path()
 
     assert node_ids == []
     assert latency == float("inf")
@@ -108,9 +114,11 @@ def test_optimal_path_parametrized(
         n.set_layer_allocation(start, end)
         nodes.append(n)
 
-    router = DynamicProgrammingRouting()
+    node_manager = build_node_management(nodes)
+    node_manager.activate([n.node_id for n in nodes])
+    router = DynamicProgrammingRouting(node_manager, total_layers=num_layers)
     set_rtt_from_coords(nodes)
-    node_ids, latency = router.find_optimal_path(nodes, num_layers)
+    node_ids, latency = router.find_optimal_path()
     assert node_ids == expected_path
     # Sanity: latency equals sum of node latencies along path plus RTTs
     total = 0.0
@@ -151,7 +159,7 @@ def test_turning_points(
         n.set_layer_allocation(start, end)
         nodes.append(n)
 
-    DynamicProgrammingRouting()
+    # Turning points are computed directly from the node list; no router instance needed.
     set_rtt_from_coords(nodes)
     turns = find_turning_points(nodes, num_layers)
     # Order-insensitive comparison: we only require the same set of truncation points
@@ -175,12 +183,14 @@ def test_round_robin_pipelines_cycle_between_two_complete_paths():
     set_rtt_from_coords(nodes)
 
     node_manager = build_node_management(nodes)
-    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
-    registered = rr.register_pipelines(nodes, num_layers)
+    node_manager.activate([n.node_id for n in nodes])
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager, total_layers=num_layers)
+    rr.bootstrap()
+    registered = node_manager.get_registered_pipeline_node_ids()
     assert len(registered) == 2
     paths = []
     for _ in range(4):
-        node_ids, latency = rr.find_optimal_path(nodes, num_layers)
+        node_ids, latency = rr.find_optimal_path()
         assert node_ids in (["a", "b"], ["c", "d"])
         # Latency equals sum of node latencies plus one RTT
         n0 = next(n for n in nodes if n.node_id == node_ids[0])
@@ -217,10 +227,12 @@ def test_round_robin_skips_overloaded_pipeline():
     p1b.current_requests = p1b.max_requests
 
     node_manager = build_node_management(nodes)
-    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
+    node_manager.activate([n.node_id for n in nodes])
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager, total_layers=num_layers)
+    rr.bootstrap()
     # Multiple calls should always pick the viable pipeline [p2a, p2b]
     for _ in range(3):
-        node_ids, latency = rr.find_optimal_path(nodes, num_layers)
+        node_ids, latency = rr.find_optimal_path()
         assert node_ids == ["p2a", "p2b"]
         n0, n1 = p2a, p2b
         expected = (
@@ -230,7 +242,7 @@ def test_round_robin_skips_overloaded_pipeline():
 
     # Now overload p2a as well -> no viable pipelines
     p2a.current_requests = p2a.max_requests
-    node_ids, latency = rr.find_optimal_path(nodes, num_layers)
+    node_ids, latency = rr.find_optimal_path()
     assert node_ids == []
     assert latency == float("inf")
 
@@ -333,8 +345,10 @@ def test_round_robin_pipeline_diversity():
         n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
 
     node_manager = build_node_management(nodes)
-    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
-    pipelines = rr.register_pipelines(nodes, num_layers)
+    node_manager.activate([n.node_id for n in nodes])
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager, total_layers=num_layers)
+    rr.bootstrap()
+    pipelines = node_manager.get_registered_pipeline_node_ids()
 
     assert len(pipelines) == 1
     assert pipelines[0] == ["h2", "m1", "t1"]
@@ -359,7 +373,12 @@ def test_round_robin_pipeline_diversity():
     t1.set_layer_allocation(2, 3)
     t2.set_layer_allocation(2, 3)
 
-    pp = rr.register_pipelines(nodes, num_layers)
+    # Rebuild a fresh manager for a clean lifecycle state (all STANDBY) before re-activating.
+    node_manager2 = build_node_management(nodes)
+    node_manager2.activate([n.node_id for n in nodes])
+    rr.node_manager = node_manager2
+    rr.bootstrap()
+    pp = node_manager2.get_registered_pipeline_node_ids()
     assert len(pp) == 2
 
 
@@ -410,14 +429,15 @@ def test_rr_24_node_topology_utilization():
     for n in nodes:
         n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
 
-    randomized = RandomizedOverDynamicPipelinesRouting()
-    pipelines = randomized.pipeline_discovery(nodes, num_layers)
+    pipelines = RandomizedOverDynamicPipelinesRouting.pipeline_discovery(nodes, num_layers)
 
     assert len(pipelines) == 756
 
     node_manager = build_node_management(nodes)
-    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
-    pipelines = rr.register_pipelines(nodes, num_layers)
+    node_manager.activate([n.node_id for n in nodes])
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager, total_layers=num_layers)
+    rr.bootstrap()
+    pipelines = node_manager.get_registered_pipeline_node_ids()
     assert len(pipelines) == 6
 
     unique_nodes_used = set()
@@ -463,9 +483,11 @@ def test_rr_select_best_pipelines_no_node_overlap_establishes_three_pipelines():
         n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
 
     node_manager = build_node_management(nodes)
-    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
-    registered = rr.register_pipelines(nodes, num_layers)
+    node_manager.activate([n.node_id for n in nodes])
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager, total_layers=num_layers)
+    rr.bootstrap()
 
+    registered = node_manager.get_registered_pipeline_node_ids()
     assert len(registered) == 3
 
     # Must use all 6 nodes exactly once across pipelines (no overlap).

@@ -50,6 +50,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
 
 from parallax_utils.logging_config import get_logger
+from scheduling.layer_allocation import BaseLayerAllocator
 from scheduling.node import Node
 from scheduling.node_management import NodeManager
 
@@ -177,28 +178,68 @@ def find_turning_points(nodes: List[Node], num_layers: int) -> List[Tuple[str, i
 
 
 class RequestRoutingStrategy(ABC):
-    """Interface for request routing strategies.
+    """Interface for request routing strategies."""
 
-    A routing strategy consumes the current list of nodes (including their
-    allocated layer ranges, load, and RTTs) and produces:
-    - a **node-id path** (ordered list of node ids), and
-    - an **estimated end-to-end latency** in milliseconds.
-
-    Implementations must treat missing RTT or overloaded nodes as invalid.
-    """
+    def __init__(self, node_manager: NodeManager, total_layers: int = 0) -> None:
+        self.node_manager: NodeManager = node_manager
+        self.total_layers: int = total_layers
 
     @abstractmethod
-    def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
+    def find_optimal_path(self) -> Tuple[List[str], float]:
         """Return the chosen node-id path and its estimated latency.
 
-        Args:
-            nodes: Current nodes with live allocation/load/RTT state.
-            num_layers: Total decoder layers in the model.
-
-        Returns:
-            (node_ids, latency_ms). If no valid route exists, returns ([], inf).
+        Routers should pull the latest node snapshot from `self.node_manager`.
         """
         raise NotImplementedError
+
+    def bootstrap(self) -> None:
+        """Optional bootstrap for best-effort initialization."""
+        return None
+
+    def routing_ready(self) -> bool:
+        """Return True iff the router can dispatch requests right now."""
+        return True
+
+    def expand_pipelines(self) -> None:
+        """Opportunistically expand pipelines for fixed-pipeline routers.
+
+        - DP: no-op
+        - RandomizedOverDynamicPipelinesRouting: raises NotImplementedError (not a fixed registry)
+        - RR: allocate from STANDBY + discover + extend registered fixed pipelines
+        """
+        return None
+
+    def scheduler_format_snapshot(self) -> str:
+        """Return a human-readable snapshot string for logs/observability."""
+        assignments = self.node_manager.list_node_allocations(self.total_layers)
+        header = f"Current allocations ({len(assignments)} nodes)"
+        sep = "-" * len(header)
+        lines: List[str] = [header, sep]
+        for node_id, start_layer, end_layer in assignments:
+            node = self.node_manager.get(node_id)
+            if node is None:
+                raise ValueError(f"Node {node_id} not found in node manager")
+            capacity = node.max_requests
+            current = node.current_requests
+            latency = node.layer_latency_ms
+            latency_str = "inf" if latency == float("inf") else f"{latency:.2f}"
+            n_hosted_requests = int(self.node_manager.node_assigned_request_count.get(node_id, 0))
+            lines.append(
+                "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d | active %s"
+                % (
+                    node_id,
+                    start_layer,
+                    end_layer,
+                    current,
+                    capacity,
+                    latency_str,
+                    n_hosted_requests,
+                    node.is_active,
+                )
+            )
+        if len(lines) == 2:
+            lines.append("  (none)")
+        return "\n".join(lines)
 
 
 class DynamicProgrammingRouting(RequestRoutingStrategy):
@@ -215,7 +256,7 @@ class DynamicProgrammingRouting(RequestRoutingStrategy):
       minimum-latency node sequence and total latency.
     """
 
-    def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
+    def find_optimal_path(self) -> Tuple[List[str], float]:
         """Compute a minimum-latency node-id path using shard-level DP.
 
         The DP treats each node's allocated range `[start_layer, end_layer)` as a
@@ -226,6 +267,9 @@ class DynamicProgrammingRouting(RequestRoutingStrategy):
         Returns ([], inf) if no full cover `[0, num_layers)` exists or if any
         required RTT is missing.
         """
+        nodes = self.node_manager.active_nodes
+        num_layers = self.total_layers
+
         if num_layers <= 0 or not nodes:
             return [], 0.0
 
@@ -294,6 +338,48 @@ class DynamicProgrammingRouting(RequestRoutingStrategy):
         path_indices.reverse()
         return [nodes[i].node_id for i in path_indices], dp[end_idx]
 
+    def scheduler_format_snapshot(self) -> str:
+        assignments = self.node_manager.list_node_allocations(self.num_layers)
+        header = f"Current allocations ({len(assignments)} nodes)"
+        sep = "-" * len(header)
+        lines: List[str] = [header, sep]
+        for node_id, start_layer, end_layer in assignments:
+            node = self.node_manager.get(node_id)
+            if node is None:
+                raise ValueError(f"Node {node_id} not found in node manager")
+            # Snapshot values to avoid recomputing/logging side-effects twice
+            capacity = node.max_requests
+            current = node.current_requests
+            latency = node.layer_latency_ms
+            latency_str = "inf" if latency == float("inf") else f"{latency:.2f}"
+            n_hosted_requests = 0
+            if node_id in self.node_manager.node_assigned_request_count:
+                n_hosted_requests = self.node_manager.node_assigned_request_count[node_id]
+            lines.append(
+                "  %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | assigned request count %3d | active %s"
+                % (
+                    node_id,
+                    start_layer,
+                    end_layer,
+                    current,
+                    capacity,
+                    latency_str,
+                    n_hosted_requests,
+                    node.is_active,
+                )
+            )
+        if len(lines) == 2:
+            lines.append("  (none)")
+        return "\n".join(lines)
+
+    def routing_ready(self) -> bool:
+        """Return True iff DP routing can find a finite-latency path right now."""
+        node_ids, lat = self.find_optimal_path()
+        return bool(node_ids) and lat != float("inf")
+
+    def expand_pipelines(self) -> None:
+        return None
+
 
 class RandomizedOverDynamicPipelinesRouting(RequestRoutingStrategy):
     """
@@ -304,7 +390,8 @@ class RandomizedOverDynamicPipelinesRouting(RequestRoutingStrategy):
     use `RoundRobinOverFixedPipelinesRouting` instead.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, node_manager: NodeManager, total_layers: int = 0) -> None:
+        super().__init__(node_manager=node_manager, total_layers=total_layers)
         self._pipelines: Optional[List[List[str]]] = None
         self._rng = random.Random()
 
@@ -384,7 +471,7 @@ class RandomizedOverDynamicPipelinesRouting(RequestRoutingStrategy):
             index.setdefault(n.start_layer, []).append(n)
         return index
 
-    def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
+    def find_optimal_path(self) -> Tuple[List[str], float]:
         """Randomly choose among cached complete pipelines, skipping overloaded ones.
 
         Selection procedure:
@@ -392,6 +479,8 @@ class RandomizedOverDynamicPipelinesRouting(RequestRoutingStrategy):
         - Filter to those that are viable under current load and RTT availability.
         - Randomly choose one viable pipeline and return its latency estimate.
         """
+        nodes = self.node_manager.active_nodes
+        num_layers = self.total_layers
         if not nodes or num_layers <= 0:
             return [], float("inf")
 
@@ -412,6 +501,11 @@ class RandomizedOverDynamicPipelinesRouting(RequestRoutingStrategy):
         chosen, latency = self._rng.choice(viable)
         return list(chosen), float(latency)
 
+    def expand_pipelines(self) -> None:
+        raise NotImplementedError(
+            "RandomizedOverDynamicPipelinesRouting does not support pipeline expansion."
+        )
+
 
 class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
     """
@@ -431,9 +525,15 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
     5 x path A, and 1 x path B.
     """
 
-    def __init__(self, node_manager: NodeManager) -> None:
-        self._node_manager = node_manager
+    def __init__(
+        self,
+        node_manager: NodeManager,
+        total_layers: int,
+        layer_allocator: Optional[BaseLayerAllocator] = None,
+    ) -> None:
+        super().__init__(node_manager=node_manager, total_layers=total_layers)
         self._rr_cursor: int = 0
+        self.layer_allocator = layer_allocator
 
     def _select_best_pipelines(
         self, all_pipelines: List[List[str]], nodes: List[Node]
@@ -497,11 +597,7 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
         )
         return selected
 
-    def register_pipelines(
-        self,
-        nodes: List[Node],
-        num_layers: int,
-    ) -> Dict[int, List[str]]:
+    def bootstrap(self) -> Dict[int, List[str]]:
         """Search → score → register a fixed set of pipelines.
 
         Args:
@@ -512,16 +608,15 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
                 no node id appears in more than one registered pipeline.
             skip_overloaded_at_register: If True, exclude pipelines that are
                 already invalid due to overloaded nodes at registration time.
-
-        Returns:
-            A mapping `{pipeline_id: [node_id, ...]}` in the registration order.
         """
-        existing = self._node_manager.get_registered_pipeline_node_ids()
+        existing = self.node_manager.get_registered_pipeline_node_ids()
         if existing:
             logger.warning("Pipelines already registered in node manager, re-registering")
-            self._node_manager.clear_registered_pipelines()
+            self.node_manager.clear_registered_pipelines()
             self._rr_cursor = 0
 
+        nodes = self.node_manager.active_nodes
+        num_layers = self.total_layers
         if not nodes or num_layers <= 0:
             return {}
 
@@ -531,31 +626,134 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
             return {}
         # Score: based on estimated latency
         selected_pipelines = self._select_best_pipelines(all_pipelines, nodes)
-        return self._node_manager.register_pipelines(selected_pipelines)
+        return self.node_manager.register_pipelines(selected_pipelines)
 
     def clear_registered_pipelines(self) -> None:
         """Clear currently registered fixed pipelines."""
-        self._node_manager.clear_registered_pipelines()
+        self.node_manager.clear_registered_pipelines()
 
     def get_registered_pipelines(self) -> Dict[int, List[str]]:
         """Return currently registered fixed pipelines (proxy to NodeManager).
 
         This is primarily used by the scheduler for logging/observability.
         """
-        return self._node_manager.get_registered_pipeline_node_ids()
+        return self.node_manager.get_registered_pipeline_node_ids()
 
-    def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
+    def routing_ready(self) -> bool:
+        """Return True if there's at least one `ready` pipleline among active nodes.
+
+        so that RR routing can actually find a finite-latency path.
+        """
+        pipelines = self.node_manager.get_registered_pipelines()
+        if not pipelines:
+            return False
+        return any(p.is_ready for p in pipelines.values())
+
+    def expand_pipelines(self) -> None:
+        """RR-only: allocate from STANDBY and extend registered pipelines best-effort."""
+        if self.layer_allocator is None:
+            raise NotImplementedError(
+                "RoundRobinOverFixedPipelinesRouting.expand_pipelines requires a layer allocator"
+            )
+        standby_nodes = self.node_manager.standby_nodes
+        if not standby_nodes:
+            return
+
+        before_active_ids = {n.node_id for n in self.node_manager.active_nodes}
+        ok = self.layer_allocator.allocate_from_standby()
+        if not ok:
+            return
+
+        after_active_ids = {n.node_id for n in self.node_manager.active_nodes}
+        newly_active_ids = after_active_ids - before_active_ids
+        if not newly_active_ids:
+            return
+
+        newly_active_nodes = self.node_manager.ids_to_nodes(list(newly_active_ids))
+        new_pipelines = RandomizedOverDynamicPipelinesRouting.pipeline_discovery(
+            newly_active_nodes, self.total_layers
+        )
+        if not new_pipelines:
+            logger.warning("[RR] No new pipelines found for extended RR")
+            return
+
+        filtered: List[List[str]] = []
+        for p in new_pipelines:
+            if all(self.node_manager.pipeline_id_of_node(nid) is None for nid in p):
+                filtered.append(p)
+        if not filtered:
+            return
+
+        try:
+            self.node_manager.extend_registered_pipelines(filtered)
+            logger.info(
+                "[RR] Added %d new pipeline(s) from %d newly-active node(s)",
+                len(filtered),
+                len(newly_active_nodes),
+            )
+        except Exception as exc:
+            logger.warning(f"[RR] Failed to extend registered pipelines (best-effort): {exc}")
+
+    def scheduler_format_snapshot(self) -> str:
+        pipelines = self.node_manager.get_registered_pipelines()
+        p_header = f"Registered pipelines ({len(pipelines)})"
+        p_sep = "-" * len(p_header)
+        lines: List[str] = [p_header, p_sep]
+
+        per_pipeline_min, total_capacity, cur_capacity = self.node_manager.report_pipeline_capacity(
+            ready=True
+        )
+        if per_pipeline_min is None:
+            lines.append("Capacity: (no registered pipelines)")
+        else:
+            lines.append(
+                f"Capacity: total={total_capacity} cur={cur_capacity} per_pipeline={per_pipeline_min}"
+            )
+
+        if not pipelines:
+            lines.append("  (none)")
+            return "\n".join(lines)
+
+        for pid in sorted(pipelines.keys()):
+            p = pipelines[pid]
+            p.recompute_capacity()
+            lines.append(
+                "  pipeline %-3d | stages=%d | ready=%s | cap=%d cur=%d"
+                % (pid, p.num_stages, p.is_ready, p.min_node_capacity, p.min_remaining_capacity)
+            )
+            for idx, n in enumerate(p.nodes):
+                s = -1 if n.start_layer is None else int(n.start_layer)
+                e = -1 if n.end_layer is None else int(n.end_layer)
+                lat = n.layer_latency_ms
+                lat_str = "inf" if lat == float("inf") else f"{lat:.2f}"
+                lines.append(
+                    "    [%02d] %-16s layers [%3d, %3d) | load %3d/%-3d | latency %7s ms | active %s"
+                    % (
+                        idx,
+                        n.node_id,
+                        s,
+                        e,
+                        n.current_requests,
+                        n.max_requests,
+                        lat_str,
+                        n.is_active,
+                    )
+                )
+        return "\n".join(lines)
+
+    def find_optimal_path(self) -> Tuple[List[str], float]:
         """Return the next viable *registered* pipeline in round-robin order.
 
         Returns ([], inf) if nothing is registered or if all registered pipelines
         are currently invalid due to overload/missing RTT/missing nodes.
         """
-        pipelines = self._node_manager.get_registered_pipelines()
+        pipelines = self.node_manager.get_registered_pipelines()
         if not pipelines:
-            _ = self.register_pipelines(nodes, num_layers)
-            pipelines = self._node_manager.get_registered_pipelines()
+            _ = self.bootstrap()
+            pipelines = self.node_manager.get_registered_pipelines()
 
-        id_to_node: Dict[str, Node] = {n.node_id: n for n in nodes}
+        # Build lookup from the latest node snapshot.
+        id_to_node: Dict[str, Node] = {n.node_id: n for n in self.node_manager.nodes}
 
         attempts = 0
         pipelines_list = [pipelines[k] for k in sorted(pipelines.keys())]
