@@ -383,6 +383,19 @@ def save_tensor_to_disk(tensors, refit_weight_path, idx):
     save_file(tensors, save_file_path)
 
 
+def check_tensor_size_and_save(tensors, refit_weight_path, idx):
+    max_size = 1024 * 1024 * 1024   # max size: 1G
+
+    param_size = 0
+    for tensor in tensors.values():
+        param_size += tensor.numel() * tensor.element_size()
+    if param_size > max_size:
+        save_tensor_to_disk(tensors, refit_weight_path, idx)
+        return True
+    else:
+        return False
+
+
 def concat_weight_partition(weight_files, refit_weight_path):
     """
     Concat partial weight into one safetensor.
@@ -408,7 +421,12 @@ def concat_weight_partition(weight_files, refit_weight_path):
         val = original_tensors[key]
         if "part" not in key:
             tensors[key] = val
+            flag = check_tensor_size_and_save(tensors, refit_weight_path, file_idx)
+            if flag:
+                tensors = {}
+                file_idx += 1
             continue
+
         name_split = key.split(".")
         cur_name_list = name_split[:-1]
         weight_name = name_split[-1]
@@ -425,14 +443,16 @@ def concat_weight_partition(weight_files, refit_weight_path):
                 cur_name_list.append("weight")
                 final_key = ".".join(cur_name_list)
                 tensors[final_key] = concate_result
-                save_tensor_to_disk(tensors, refit_weight_path, file_idx)
-                tensors = {}
-                file_idx += 1
+                flag = check_tensor_size_and_save(tensors, refit_weight_path, file_idx)
+                if flag:
+                    tensors = {}
+                    file_idx += 1
 
                 # for next tensor
                 concate_list = []
                 inplace_insert_value_with_idx(concate_list, val, cur_idx)
             prev_key = key
+
     if concate_list:
         concate_result = torch.cat(concate_list, 0)
         cur_name_list = prev_key.split(".")[:-1]
