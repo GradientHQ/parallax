@@ -9,7 +9,6 @@ It is used to handle the communication between the peers, and communicate with t
 
 import dataclasses
 import enum
-import glob
 import json
 import multiprocessing
 import os
@@ -282,9 +281,7 @@ def check_and_run_weight_refit(gradient_server, message):
 
         # step3. concat weight
         # workaround: create sub-process to avoid GIL issues for lattica
-        logger.info(
-            f"Start sub-process to concat weight partitions in {weight_dir}"
-        )
+        logger.info(f"Start sub-process to concat weight partitions in {weight_dir}")
         process = multiprocessing.Process(
             target=concat_weight_partition,
             args=(weight_dir,),
