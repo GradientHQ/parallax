@@ -94,8 +94,9 @@ def form_sgl_batch_prefill(
 
     num_tokens = schedule_batch.extend_num_tokens
     dp_size = model_runner.dp_size
-    schedule_batch.global_num_tokens = [num_tokens] * dp_size
-    schedule_batch.global_num_tokens_for_logprob = [num_tokens] * dp_size
+    if dp_size > 1:
+        schedule_batch.global_num_tokens = [num_tokens] * dp_size
+        schedule_batch.global_num_tokens_for_logprob = [num_tokens] * dp_size
 
     model_worker_batch = schedule_batch.get_model_worker_batch()
     forward_batch = ForwardBatch.init_new(model_worker_batch, model_runner)
@@ -209,8 +210,9 @@ def form_sgl_batch_decode(
 
     num_tokens = len(ready_indices)
     dp_size = model_runner.dp_size
-    ret.global_num_tokens = [num_tokens] * dp_size
-    ret.global_num_tokens_for_logprob = [num_tokens] * dp_size
+    if dp_size > 1:
+        ret.global_num_tokens = [num_tokens] * dp_size
+        ret.global_num_tokens_for_logprob = [num_tokens] * dp_size
 
     model_worker_batch = ret.get_model_worker_batch()
     if requests[0].lora_id is not None:
