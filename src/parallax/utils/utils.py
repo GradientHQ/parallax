@@ -378,6 +378,11 @@ def inplace_insert_value_with_idx(tensor_list, value, idx):
     tensor_list[idx] = value
 
 
+def save_tensor_to_disk(tensors, refit_weight_path, idx):
+    save_file_path = refit_weight_path + "/model_" + str(idx) + ".safetensors"
+    save_file(tensors, save_file_path)
+
+
 def concat_weight_partition(weight_files, refit_weight_path):
     """
     Concat partial weight into one safetensor.
@@ -398,6 +403,7 @@ def concat_weight_partition(weight_files, refit_weight_path):
     sorted_keys = sorted(original_tensors.keys())
     prev_key = None
     concate_list = []
+    file_idx = 0
     for key in sorted_keys:
         val = original_tensors[key]
         if "part" not in key:
@@ -419,6 +425,10 @@ def concat_weight_partition(weight_files, refit_weight_path):
                 cur_name_list.append("weight")
                 final_key = ".".join(cur_name_list)
                 tensors[final_key] = concate_result
+                save_tensor_to_disk(tensors, refit_weight_path, file_idx)
+                tensors = {}
+                file_idx += 1
+
                 # for next tensor
                 concate_list = []
                 inplace_insert_value_with_idx(concate_list, val, cur_idx)
@@ -430,5 +440,5 @@ def concat_weight_partition(weight_files, refit_weight_path):
         final_key = ".".join(cur_name_list)
         tensors[final_key] = concate_result
 
-    save_file_path = refit_weight_path + "/model.safetensors"
-    save_file(tensors, save_file_path)
+    if len(tensors) > 0:
+        save_tensor_to_disk(tensors, refit_weight_path, file_idx)
