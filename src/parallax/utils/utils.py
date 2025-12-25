@@ -6,7 +6,6 @@ import hashlib
 import os
 import random
 import socket
-import time
 from typing import List
 
 import mlx.core as mx
@@ -380,24 +379,6 @@ def inplace_insert_value_with_idx(tensor_list, value, idx):
     tensor_list[idx] = value
 
 
-def save_tensor_to_disk(tensors, refit_weight_path, idx):
-    save_file_path = refit_weight_path + "/model_" + str(idx) + ".safetensors"
-    save_file(tensors, save_file_path)
-
-
-def check_tensor_size_and_save(tensors, refit_weight_path, idx):
-    max_size = 1024 * 1024 * 1024  # max size: 1G
-
-    param_size = 0
-    for tensor in tensors.values():
-        param_size += tensor.numel() * tensor.element_size()
-    if param_size > max_size:
-        save_tensor_to_disk(tensors, refit_weight_path, idx)
-        return True
-    else:
-        return False
-
-
 def concat_weight_partition(refit_weight_path):
     """
     Concat partial weight into one safetensor.
@@ -421,15 +402,10 @@ def concat_weight_partition(refit_weight_path):
     sorted_keys = sorted(original_tensors.keys())
     prev_key = None
     concate_list = []
-    file_idx = 0
     for key in sorted_keys:
         val = original_tensors[key]
         if "part" not in key:
             tensors[key] = val
-            flag = check_tensor_size_and_save(tensors, refit_weight_path, file_idx)
-            if flag:
-                tensors = {}
-                file_idx += 1
             continue
 
         name_split = key.split(".")
@@ -448,10 +424,6 @@ def concat_weight_partition(refit_weight_path):
                 cur_name_list.append("weight")
                 final_key = ".".join(cur_name_list)
                 tensors[final_key] = concate_result
-                flag = check_tensor_size_and_save(tensors, refit_weight_path, file_idx)
-                if flag:
-                    tensors = {}
-                    file_idx += 1
 
                 # for next tensor
                 concate_list = []
@@ -465,5 +437,5 @@ def concat_weight_partition(refit_weight_path):
         final_key = ".".join(cur_name_list)
         tensors[final_key] = concate_result
 
-    if len(tensors) > 0:
-        save_tensor_to_disk(tensors, refit_weight_path, file_idx)
+    save_file_path = refit_weight_path + "/model.safetensors"
+    save_file(tensors, save_file_path)
