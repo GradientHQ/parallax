@@ -380,6 +380,7 @@ def test_round_robin_pipeline_diversity():
     rr.bootstrap()
     pp = node_manager2.get_registered_pipeline_node_ids()
     assert len(pp) == 2
+    assert pp[1] == ["h2", "m2", "t1"]
 
 
 def test_rr_24_node_topology_utilization():

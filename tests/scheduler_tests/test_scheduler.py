@@ -52,7 +52,8 @@ def test_scheduler_join_and_leave():
 
     # Join a new node
     n3 = build_node("rtx4090-x", model, tflops=82.6, mem_gb=24.0, x=0, y=1)
-    sched.join(n3)
+    sched.enqueue_join(n3)
+    sched._process_joins()
     assert n3.start_layer is not None and n3.end_layer is not None
 
     # Leave

@@ -104,6 +104,7 @@ class Scheduler:
         # Concurrency controls
         self._stop_event: threading.Event = threading.Event()
         self._wake_event: threading.Event = threading.Event()
+        self._bootstrapped_event: threading.Event = threading.Event()
         self._node_count_cv: threading.Condition = threading.Condition()
         self._event_thread: Optional[threading.Thread] = None
         self._dispatch_thread: Optional[threading.Thread] = None
@@ -113,25 +114,15 @@ class Scheduler:
         self.alloc_log_snapshot: str = ""
         # Avoid spamming: only emit the "all nodes active" INFO log on transitions.
         self._all_nodes_active_logged: bool = False
-        # Thread-safe bootstrap state
-        self._bootstrapped: bool = False
-        self._bootstrapped_event: threading.Event = threading.Event()
-        logger.debug(
+        logger.info(
             f"Scheduler initialized, min_nodes_bootstrapping {self.min_nodes_bootstrapping}, "
-            f"strategy {strategy}, rebalance threshold {rebalance_threshold}"
+            f"Layer allocations trategy {strategy}, Request routing strategy {routing_strategy}."
         )
 
         # Weight refit
         self.refit_request = {}
         self.refit_set = set()
         self.last_refit_time = 0.0
-
-        # Eager bootstrap for initial allocation if enough nodes are present
-        try:
-            self.bootstrap()
-
-        except Exception:  # best-effort eager allocation
-            pass
 
     def list_node_allocations(
         self, total_layers: Optional[int] = None
@@ -153,24 +144,27 @@ class Scheduler:
 
     def bootstrap(self, reboot: bool = False) -> bool:
         """Initial Node Allocation Assignment."""
+        logger.info("[Scheduler] Starting Bootstrap")
         overide_min_node_check = False
         if reboot:
             # Clear any fixed pipeline registrations; they are no longer valid.
             # This also detaches member nodes and clears their layer allocations.
+            logger.info("[Scheduler] Rebooting, moving every node to standby")
             self.node_manager.clear_registered_pipelines()
-            self._bootstrapped = False
             self._bootstrapped_event.clear()
             overide_min_node_check = True
-
-        if self._bootstrapped_event.is_set() and not reboot:
-            return True
+        else:
+            # If we already bootstrapped, return True
+            if self._bootstrapped_event.is_set():
+                logger.info("[Scheduler] Already bootstrapped, returning Success")
+                return True
         # Check if we have enough nodes for bootstraping
         if (
             self.node_manager.num_nodes < self.min_nodes_bootstrapping
             and not overide_min_node_check
         ):
             logger.info(
-                f"Bootstrap deferred: have {self.node_manager.num_nodes} nodes; need >= {self.min_nodes_bootstrapping}"
+                f"[Scheduler] Bootstrap deferred: have {self.node_manager.num_nodes} nodes; need >= {self.min_nodes_bootstrapping}"
             )
             return False
 
@@ -179,18 +173,16 @@ class Scheduler:
         if not success:
             logger.warning("Global allocation failed to produce a full pipeline")
             # Stay un-bootstrapped so future joins can retry bootstrap.
-            self._bootstrapped = False
             self._bootstrapped_event.clear()
             return False
 
         assignments = self.node_manager.list_node_allocations(self.num_layers)
-        logger.info(f"Layer allocator assignments: {assignments}")
+        logger.info(f"[Scheduler] Post Bootstrap Layer Assignments: {assignments}")
 
         self.request_router.bootstrap()
-        self._bootstrapped = True
         self._bootstrapped_event.set()
         # Snapshot at INFO after bootstrap since allocations/pipelines may have materially changed.
-        self.emit_alloc_log_snapshot(reason="after bootstrap")
+        self.emit_alloc_log_snapshot(reason="Post Bootstrap")
         return True
 
     def update_last_refit_time(self):
@@ -308,12 +300,11 @@ class Scheduler:
 
             # Check if manual allocations now cover the full pipeline
             if self.has_full_pipeline():
-                if not self._bootstrapped:
+                if not self._bootstrapped_event.is_set():
                     logger.info(
-                        "Manual layer assignments have established a full pipeline; "
+                        "[Scheduler] Manual layer assignments have established a full pipeline; "
                         "marking scheduler as bootstrapped"
                     )
-                    self._bootstrapped = True
                     self._bootstrapped_event.set()
         elif bootstrapped:
             self.node_manager.upsert(node)
@@ -540,14 +531,7 @@ class Scheduler:
         logger.debug("Waiting for bootstrap")
         while not self._stop_event.is_set() and not self._bootstrapped_event.is_set():
             with self._node_count_cv:
-                if self.node_manager.num_nodes < self.min_nodes_bootstrapping:
-                    self._node_count_cv.wait(timeout=max(0.5, poll_interval))
-                    continue
-            boot_ok = self.bootstrap()
-            if boot_ok:
-                break
-            with self._node_count_cv:
-                self._node_count_cv.wait(timeout=max(1.0, poll_interval))
+                self._node_count_cv.wait(timeout=max(0.5, poll_interval))
         return not self._stop_event.is_set()
 
     def _process_node_updates(self) -> None:
@@ -634,6 +618,6 @@ class Scheduler:
 
     def need_more_nodes(self):
         return (
-            not self._bootstrapped
+            not self._bootstrapped_event.is_set()
             and self.node_manager.num_standby_nodes >= self.min_nodes_bootstrapping
         )

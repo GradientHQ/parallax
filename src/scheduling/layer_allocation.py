@@ -154,7 +154,12 @@ class BaseLayerAllocator:
             )
         node.set_layer_allocation(start_layer, end_layer)
         self.node_management.activate([node.node_id])
-        logger.debug("Allocated node %s to layers [%d, %d)", node.node_id, start_layer, end_layer)
+        logger.debug(
+            "[LayerAllocator] Allocated node %s to layers [%d, %d)",
+            node.node_id,
+            start_layer,
+            end_layer,
+        )
         for layer_id in range(start_layer, end_layer):
             if layer_id not in self.layer_to_load:
                 raise ValueError(f"Layer {layer_id} not found in layer_to_load")
@@ -164,11 +169,14 @@ class BaseLayerAllocator:
     def deallocate(self, node: Node) -> None:
         """Deallocate a node from its assigned layers."""
         if node.start_layer is None or node.end_layer is None:
-            logger.info("Node must have start_layer and end_layer")
+            logger.info("[LayerAllocator] Node must have start_layer and end_layer")
             return
         start_layer, end_layer = node.start_layer, node.end_layer
         logger.debug(
-            "Deallocating node %s from layers [%d, %d)", node.node_id, start_layer, end_layer
+            "[LayerAllocator] Deallocating node %s from layers [%d, %d)",
+            node.node_id,
+            start_layer,
+            end_layer,
         )
         for layer_id in range(start_layer, end_layer):
             if layer_id in self.layer_to_load:
@@ -185,7 +193,9 @@ class BaseLayerAllocator:
         """In case of using Dynamic Programming request router, a node is joined dynamically to the lightest layers."""
         lightest_layer = self.get_lightest_layer()
         logger.info(
-            "Joining node %s with the lightest layer %d", node.node_id, lightest_layer.layer_id
+            "[LayerAllocator] Joining node %s with the lightest layer %d",
+            node.node_id,
+            lightest_layer.layer_id,
         )
         if lightest_layer is None:
             raise ValueError("No layers to assign")
@@ -195,7 +205,7 @@ class BaseLayerAllocator:
         # Greedily assign layers that the node can host
         end_layer = self._adjust_end_layer_for_tail(node, start_layer)
         logger.info(
-            "Dynamic assignment candidate for %s: start=%d end=%d",
+            "[LayerAllocator] Dynamic assignment candidate for %s: start=%d end=%d",
             node.node_id,
             start_layer,
             end_layer,
@@ -257,7 +267,7 @@ class BaseLayerAllocator:
 
         decision = coefficient_of_variation > self.rebalance_threshold
         logger.debug(
-            "Global rebalance check: cv=%.4f threshold=%.4f -> %s",
+            "[LayerAllocator] Global rebalance check: cv=%.4f threshold=%.4f -> %s",
             coefficient_of_variation,
             self.rebalance_threshold,
             decision,
@@ -642,13 +652,15 @@ class GreedyLayerAllocator(BaseLayerAllocator):
 
         available_nodes = self.node_management.standby_nodes
         logger.info(
-            "[Greedy] Starting allocate_from_standby with %d nodes for %d layers",
+            "[Greedy LayerAllocator] Starting allocate_from_standby with %d nodes for %d layers",
             len(available_nodes),
             num_total_layers,
         )
 
         for n in available_nodes:
-            logger.info(f"Node {n.node_id} has capacity {n.get_decoder_layer_capacity()}")
+            logger.info(
+                f"[Greedy LayerAllocator] Node {n.node_id} has capacity {n.get_decoder_layer_capacity()}"
+            )
         any_assigned = False
 
         # Read runtime knobs with sensible defaults if `init` wasn't called
@@ -796,7 +808,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
 
         available_nodes = self.node_management.standby_nodes
         logger.info(
-            "[DP] Starting allocate_from_standby with %d nodes for %d layers",
+            "[DPLayerAllocator] Starting allocate_from_standby with %d nodes for %d layers",
             len(available_nodes),
             num_layers,
         )
@@ -805,7 +817,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
 
         if num_layers <= 0 or num_nodes == 0 or total_cap < num_layers:
             logger.warning(
-                "[DP] Insufficient resources: nodes=%d, layers=%d, total_cap=%d",
+                "[DPLayerAllocator] Insufficient resources: nodes=%d, layers=%d, total_cap=%d",
                 num_nodes,
                 num_layers,
                 total_cap,
@@ -813,7 +825,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
             return False
         else:
             logger.info(
-                "[DP] Sufficient resources: nodes=%d, layers=%d, total_cap=%d",
+                "[DPLayerAllocator] Sufficient resources: nodes=%d, layers=%d, total_cap=%d",
                 num_nodes,
                 num_layers,
                 total_cap,
@@ -924,7 +936,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
                     best_path = dict(path)
 
         if best_num_pipes is None or best_num_pipes == 0:
-            logger.debug("[DP] Could not find a feasible number of pipelines")
+            logger.debug("[DPLayerAllocator] Could not find a feasible number of pipelines")
             return False
         self._path = best_path
         pipelines = self._backtrack(best_num_pipes, available_nodes)
@@ -933,23 +945,25 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
         for pl_nodes in pipelines:
             if not pl_nodes:
                 continue
-            logger.debug("[DP] Adjusting pipeline with %d nodes", len(pl_nodes))
+            logger.debug("[DPLayerAllocator] Adjusting pipeline with %d nodes", len(pl_nodes))
             self.adjust_pipeline_layers(pl_nodes, assume_sorted=False)
         if not self.node_management.has_full_pipeline(self.num_total_layers):
-            logger.warning("[DP] Allocation did not produce a full pipeline")
+            logger.warning("[DPLayerAllocator] Allocation did not produce a full pipeline")
             return False
         if self.trim_layers_on_turning_points:
             turning_points = self.adjust_for_turning_points(self.num_total_layers)
-            logger.debug(f"Turning points: {turning_points}")
+            logger.debug(f"[DPLayerAllocator] Turning points: {turning_points}")
         if self.dynamic_pipelines_router:
-            logger.info("[DP] Allocating standby nodes using Dynamic Join (lightest layers)")
+            logger.info(
+                "[DPLayerAllocator] Allocating standby nodes using Dynamic Join (lightest layers)"
+            )
             self.allocate_standby_nodes()
-        logger.info("[DP] allocate_from_standby completed successfully")
+        logger.info("[DPLayerAllocator] allocate_from_standby completed successfully")
         return True
 
     def _backtrack(self, best_num_pipes: int, available_nodes: List[Node]) -> List[List[Node]]:
         # Reconstruct pipelines
-        logger.debug("[DP] Backtracking to construct %d pipelines", best_num_pipes)
+        logger.debug("[DPLayerAllocator] Backtracking to construct %d pipelines", best_num_pipes)
         pipelines: List[List[Node]] = [[] for _ in range(best_num_pipes)]
         # (residual, nodes list)
         open_list: List[Tuple[int, List[Node]]] = []
