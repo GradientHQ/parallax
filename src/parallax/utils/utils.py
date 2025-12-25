@@ -400,13 +400,14 @@ def concat_weight_partition(weight_files, refit_weight_path):
     concate_list = []
     for key in sorted_keys:
         val = original_tensors[key]
+        if "part" not in key:
+            tensors[key] = val
+            continue
         name_split = key.split(".")
         cur_name_list = name_split[:-1]
         weight_name = name_split[-1]
         cur_idx = int(weight_name.removeprefix("weight_part"))
-        if "part" not in key:
-            tensors[key] = val
-        elif prev_key is None:
+        if prev_key is None:
             inplace_insert_value_with_idx(concate_list, val, cur_idx)
             prev_key = key
         else:
