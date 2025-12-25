@@ -43,12 +43,7 @@ from parallax.server.request import (
 from parallax.server.sampling.sampling_params import SamplingParams
 from parallax.server.scheduler import Scheduler
 from parallax.utils.shared_state import SharedState
-from parallax.utils.utils import (
-    WeightRefitStatus,
-    get_current_device,
-    get_device_dtype,
-    get_zmq_socket,
-)
+from parallax.utils.utils import get_current_device, get_device_dtype, get_zmq_socket
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -114,8 +109,6 @@ class BaseExecutor:
         # Runtime weight refit for RL
         self.enable_weight_refit = enable_weight_refit
         self.weight_version = 0
-        self.weight_refit_status = WeightRefitStatus.FINISH_REFIT
-        self.saved_weight_path = ""
 
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")

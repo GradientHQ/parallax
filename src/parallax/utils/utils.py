@@ -1,8 +1,6 @@
 """Utility functions."""
 
 import base64
-from enum import Enum
-import glob
 import hashlib
 import os
 import random
@@ -358,19 +356,12 @@ def get_layer_types(config: dict, start_layer: int, end_layer: int) -> List[str]
     return ["attention"] * num_shard_layers
 
 
-"""Weight refit helpers"""
 # CID constants
 CIDV1 = 0x01
 RAW_CODEC = 0x55
 SHA2_256_CODE = 0x12
 SHA2_256_SIZE = 0x20  # 32 bytes
 
-class WeightRefitStatus(Enum):
-    """Enumeration of possible weight-refit statuses."""
-
-    CONCAT = "CONCAT"
-    READY_FOR_REFIT = "READY_FOR_REFIT"
-    FINISH_REFIT = "FINISH_REFIT"
 
 def calculate_cid_manual(data: bytes) -> str:
     sha256_digest = hashlib.sha256(data).digest()
@@ -405,16 +396,13 @@ def check_tensor_size_and_save(tensors, refit_weight_path, idx):
         return False
 
 
-def concat_weight_partition(refit_weight_path):
+def concat_weight_partition(weight_files, refit_weight_path):
     """
     Concat partial weight into one safetensor.
     Partitioned weight should be named in the following format:
     {original_name}_part{i}
     e.g. model.embed_tokens.weight_part0
     """
-    weight_files = glob.glob(refit_weight_path + "/*.safetensors")
-    assert weight_files, f"Weight safetensors files not found in path: {refit_weight_path}"
-
     tensors = {}
     original_tensors = {}
     for wf in weight_files:

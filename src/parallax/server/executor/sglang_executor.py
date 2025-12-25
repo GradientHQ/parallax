@@ -3,7 +3,6 @@ SGLang backend implementation of high level executor
 """
 
 import time
-import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -26,7 +25,6 @@ from parallax.sglang.batch_info import (
     release_sglang_request,
 )
 from parallax.sglang.model_runner import initialize_sgl_model_runner, refit_sgl_model
-from parallax.utils.utils import WeightRefitStatus, concat_weight_partition
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -181,27 +179,8 @@ class SGLExecutor(BaseExecutor):
 
     def check_and_refit_weight(self, refit_weight_path: str):
         if refit_weight_path == "":
-            if self.weight_refit_status == WeightRefitStatus.READY_FOR_REFIT:
-                refit_sgl_model(self.model_runner, self.saved_weight_path)
-                self.weight_refit_status = WeightRefitStatus.FINISH_REFIT
-            else:
-                return
-        else:
-            if self.weight_refit_status == WeightRefitStatus.FINISH_REFIT:
-                self.weight_refit_status = WeightRefitStatus.CONCAT
-                self.saved_weight_path = refit_weight_path
-                # launch a subthread to concat weight files and save to disk
-                t = threading.Thread(
-                        target=concat_weight_partition,
-                        args=(refit_weight_path),
-                        daemon=True,
-                    )
-                t.start()
-            else:
-                raise ValueError(
-                    f"Receive refit request while not finish previous refit process. "
-                )
-
+            return
+        refit_sgl_model(self.model_runner, refit_weight_path)
 
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"

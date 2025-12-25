@@ -2,7 +2,6 @@
 MLX-LM backend implementation of high level executor
 """
 
-import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -19,13 +18,11 @@ from parallax.server.request import (
 from parallax.server.sampling.sampler import SamplingBatchInfo
 from parallax.server.shard_loader import MLXModelLoader
 from parallax.utils.utils import (
-    WeightRefitStatus,
     combine_padding_and_causal_masks,
     create_causal_mask,
     get_device_dtype,
     get_layer_types,
     pad_inputs,
-    concat_weight_partition,
 )
 from parallax_utils.logging_config import get_logger
 
@@ -319,26 +316,8 @@ class MLXExecutor(BaseExecutor):
 
     def check_and_refit_weight(self, refit_weight_path: str):
         if refit_weight_path == "":
-            if self.weight_refit_status == WeightRefitStatus.READY_FOR_REFIT:
-                self.shard_loader.update_weight_from_disk(self.model_shard, self.saved_weight_path)
-                self.weight_refit_status = WeightRefitStatus.FINISH_REFIT
-            else:
-                return
-        else:
-            if self.weight_refit_status == WeightRefitStatus.FINISH_REFIT:
-                self.weight_refit_status = WeightRefitStatus.CONCAT
-                self.saved_weight_path = refit_weight_path
-                # launch a subthread to concat weight files and save to disk
-                t = threading.Thread(
-                        target=concat_weight_partition,
-                        args=(refit_weight_path),
-                        daemon=True,
-                    )
-                t.start()
-            else:
-                raise ValueError(
-                    f"Receive refit request while not finish previous refit process. "
-                )
+            return
+        self.shard_loader.update_weight_from_disk(self.model_shard, refit_weight_path)
 
     def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """Process a batch of requests in MLX."""
