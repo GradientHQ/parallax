@@ -281,7 +281,6 @@ def check_and_run_weight_refit(gradient_server, message):
                 _download_weight_thread(weight_dir, cid)
 
         # step3. concat weight
-        # TODO: Need import torch in concat_weight_partition. Maybe we should justify which backend here.
         weight_files = glob.glob(weight_dir + "/*.safetensors")
         assert weight_files, f"Weight safetensors files not found in path: {weight_dir}"
         logger.info(f"Begin concat weight from path: {weight_dir}")
