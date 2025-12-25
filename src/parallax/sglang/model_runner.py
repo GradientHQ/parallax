@@ -4,6 +4,7 @@ We use monkey patch to modify sglang originated methods. The main purpose is to 
 arguments needed by decentralized inference.
 """
 
+import glob
 import logging
 import os
 import random
@@ -13,6 +14,8 @@ import sglang
 import sglang.srt.distributed.parallel_state
 import torch
 from mlx_lm.utils import load_config
+from safetensors import safe_open
+from safetensors.torch import save_file
 from sglang.srt.configs.model_config import ModelConfig
 from sglang.srt.distributed import (
     get_pp_group,
@@ -377,11 +380,67 @@ def initialize_sgl_model_runner(
     return model_runner, config, tokenizer
 
 
+def concat_weight_partition(weight_files, refit_weight_path):
+    """
+    Concat partial weight into one safetensor.
+    Partitioned weight should be named in the following format:
+    {original_name}_part{i}
+    e.g. model.embed_tokens.weight_part0
+    """
+    tensors = {}
+    original_tensors = {}
+    for wf in weight_files:
+        with safe_open(wf, framework="pt") as f:
+            for k in f.keys():
+                original_tensors[k] = f.get_tensor(k)
+    for wf in weight_files:
+        os.remove(wf)
+
+    # Concatenate if needed and save the final tensors
+    sorted_keys = sorted(original_tensors.keys())
+    prev_key = None
+    concate_list = []
+    for key in sorted_keys:
+        val = original_tensors[key]
+        if "part" not in key:
+            tensors[key] = val
+        elif prev_key is None:
+            concate_list.append(val)
+            prev_key = key
+        else:
+            prev_name_list = prev_key.split(".")[:-1]
+            cur_name_list = key.split(".")[:-1]
+            if prev_name_list == cur_name_list:
+                concate_list.append(val)
+            else:
+                concate_result = torch.cat(concate_list, 0)
+                cur_name_list.append("weight")
+                final_key = ".".join(cur_name_list)
+                tensors[final_key] = concate_result
+                concate_list = [val]
+            prev_key = key
+    if concate_list:
+        concate_result = torch.cat(concate_list, 0)
+        cur_name_list = prev_key.split(".")[:-1]
+        cur_name_list.append("weight")
+        final_key = ".".join(cur_name_list)
+        tensors[final_key] = concate_result
+
+    save_file_path = refit_weight_path + "/model.safetensors"
+    save_file(tensors, save_file_path)
+
+
 def refit_sgl_model(
     model_runner: ParallaxModelRunner,
     refit_weight_path: str,
+    is_partition: Optional[bool] = True,
 ):
     """Runtime weight refit from disk"""
     logger.info(f"Begin refit weight from path: {refit_weight_path}")
+    weight_files = glob.glob(refit_weight_path + "/*.safetensors")
+    assert weight_files, f"Weight safetensors files not found in path: {refit_weight_path}"
+
+    if is_partition:
+        concat_weight_partition(weight_files, refit_weight_path)
 
     model_runner.update_weights_from_disk(model_path=refit_weight_path, load_format="auto")
