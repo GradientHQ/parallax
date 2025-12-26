@@ -10,6 +10,7 @@ from sglang.srt.managers.schedule_batch import ScheduleBatch
 from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
 from sglang.srt.utils import broadcast_pyobj
 from sglang.srt.utils.common import SUPPORTED_LORA_TARGET_MODULES
+from sglang.srt.mem_cache.radix_cache import RadixCache as PageRadixCache
 
 from parallax.server.executor.base_executor import BaseExecutor
 from parallax.server.request import (
@@ -158,6 +159,17 @@ class SGLExecutor(BaseExecutor):
         self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
         self.tp_group = self.model_runner.tp_group
         self.tp_cpu_group = self.tp_group.cpu_group
+        
+        # create a page tree cache for sglang prefill
+        if enable_prefix_cache:
+            self.page_tree_cache = PageRadixCache(
+                self.model_runner.req_to_token_pool,
+                self.model_runner.token_to_kv_pool_allocator,
+                self.model_runner.page_size,
+            )
+            logger.info(f"Sglang Page tree cache created with page size {self.model_runner.page_size}")
+        else:
+            self.page_tree_cache = None
 
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
@@ -445,6 +457,7 @@ class SGLExecutor(BaseExecutor):
         schedule_batch, forward_batch = form_sgl_batch_prefill(
             batched_requests,
             self.model_runner,
+            self.page_tree_cache,
         )
         self.cur_batch = schedule_batch
 
