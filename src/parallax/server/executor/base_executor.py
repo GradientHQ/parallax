@@ -191,6 +191,15 @@ class BaseExecutor:
         self.max_sequence_length = max_sequence_length
         self.model_path = None
 
+        # Log executor ready status
+        logger.info(
+            f"Executor loaded successfully and ready to serve requests "
+            f"(layers [{self.start_layer}, {self.end_layer}), "
+            f"tp_rank={self.tp_rank}/{self.tp_size}, "
+            f"device={self.device}, "
+            f"num_shard_layers={self.num_shard_layers})"
+        )
+
     @abstractmethod
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
