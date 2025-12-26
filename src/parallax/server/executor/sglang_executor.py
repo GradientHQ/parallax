@@ -190,6 +190,7 @@ class SGLExecutor(BaseExecutor):
             )
         else:
             self.page_tree_cache = None
+
     def check_and_refit_weight(self, refit_weight_path: str):
         if refit_weight_path == "":
             return

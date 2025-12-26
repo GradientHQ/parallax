@@ -253,7 +253,7 @@ def release_sglang_request(running_batch: ScheduleBatch, request_id: str):
     seq_lens_cpu = running_batch.seq_lens.cpu().numpy()
     idx = find_index(running_batch, request_id)
     req = running_batch.reqs.pop(idx)
-    
+
     # use running batch's tree cache to release kv cache
     tree_cache = running_batch.tree_cache
 
