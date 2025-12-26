@@ -13,7 +13,7 @@ class TestPagedKVIntegration(unittest.TestCase):
         # Skip entire test class if Metal is not available
         if not is_metal_available():
             self.skipTest("Metal backend not available (requires macOS with Metal support)")
-        
+
         self.num_layers = 1
         self.num_kv_heads = 4
         self.head_dim = 16

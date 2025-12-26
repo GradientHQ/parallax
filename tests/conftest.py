@@ -1,9 +1,10 @@
 """
 Pytest configuration and fixtures for parallax tests.
 """
+
 import pytest
 
-from parallax.utils.utils import is_metal_available, get_current_device
+from parallax.utils.utils import get_current_device, is_metal_available
 
 
 def pytest_configure(config):
@@ -29,7 +30,7 @@ def pytest_collection_modifyitems(config, items):
     """Automatically skip tests that require Metal if Metal is not available"""
     metal_available = is_metal_available()
     current_device = get_current_device()
-    
+
     for item in items:
         # Skip tests marked with @pytest.mark.metal if Metal is not available
         if item.get_closest_marker("metal") and not metal_available:
@@ -37,18 +38,17 @@ def pytest_collection_modifyitems(config, items):
                 reason="Metal backend not available (requires macOS with Metal support)"
             )
             item.add_marker(skip_marker)
-        
+
         # Skip tests marked with @pytest.mark.mlx if not on MLX device
         if item.get_closest_marker("mlx") and current_device != "mlx":
             skip_marker = pytest.mark.skip(
                 reason=f"MLX device not available (current device: {current_device})"
             )
             item.add_marker(skip_marker)
-        
+
         # Skip tests marked with @pytest.mark.cuda if CUDA is not available
         if item.get_closest_marker("cuda") and current_device != "cuda":
             skip_marker = pytest.mark.skip(
                 reason=f"CUDA device not available (current device: {current_device})"
             )
             item.add_marker(skip_marker)
-

@@ -58,7 +58,7 @@ class TestPagedAttention:
         """Test reshape_and_cache and paged_attention with different dtypes on small data."""
         if not is_metal_available():
             pytest.skip("Metal backend not available (requires macOS with Metal support)")
-        
+
         # Check for bfloat16 support
         if dtype == mx.bfloat16:
             try:
@@ -193,7 +193,7 @@ class TestPagedAttention:
         """
         if not is_metal_available():
             pytest.skip("Metal backend not available (requires macOS with Metal support)")
-        
+
         batch_size = params["bs"]
         seq_len = params["len"]
         num_heads = params["heads"]
@@ -287,7 +287,7 @@ class TestPagedAttention:
         """
         if not is_metal_available():
             pytest.skip("Metal backend not available (requires macOS with Metal support)")
-        
+
         # Config
         batch_size = 8
         num_heads = 32

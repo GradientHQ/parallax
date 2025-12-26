@@ -34,6 +34,7 @@ def is_metal_available():
     """Check if MLX Metal backend is available"""
     try:
         import mlx.core as mx
+
         mx.metal.device_info()
         return True
     except (RuntimeError, AttributeError, ImportError):
