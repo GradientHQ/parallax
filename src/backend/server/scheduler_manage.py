@@ -144,7 +144,9 @@ class SchedulerManage:
                 ),
                 "node_list": self.get_node_list(),
                 "need_more_nodes": self.need_more_nodes(),
-                "max_running_request": self.scheduler.report_pipeline_capacity()[1],
+                "max_running_request": (
+                    self.scheduler.report_pipeline_capacity()[1] if self.scheduler else 0
+                ),
             },
         }
 

@@ -3,11 +3,13 @@
     <img src="docs/images/parallax.png" width="720">
     <div align="center">
       <p style="font-size: 1.3em; font-weight: 600; margin-bottom: 10px;">Trusted by Partners</p>
-      <img src="docs/images/qwen.avif" alt="Qwen" height="30" style="margin: 0 20px;">
       <img src="docs/images/sglang.png" alt="SGLang" height="28" style="margin: 0 20px;">
+      <img src="docs/images/vllm.png" alt="vLLM" height="30" style="margin: 0 20px;">
+      <img src="docs/images/qwen.avif" alt="Qwen" height="30" style="margin: 0 20px;">
+      <img src="docs/images/deepseek.png" alt="DeepSeek" height="30" style="margin: 0 20px;">
       <img src="docs/images/kimi.png" alt="Kimi" height="30" style="margin: 0 20px;">
       <img src="docs/images/minimax.png" alt="Minimax" height="30" style="margin: 0 10px;">
-      <img src="docs/images/zai.svg"za alt="ZAI" height="30" style="margin: 0 10px;"/>
+      <img src="docs/images/zai.svg" alt="ZAI" height="30" style="margin: 0 10px;"/>
     </div>
   </p>
 
@@ -35,13 +37,13 @@ A fully decentralized inference engine developed by [Gradient](https://gradient.
 - **Host local LLM on personal devices**
 - **Cross-platform support**
 - **Pipeline parallel model sharding**
-- **Dynamic KV cache management & continuous batching for Mac**
+- **Paged KV cache management & continuous batching for Mac**
 - **Dynamic request scheduling and routing for high performance**
 
 The backend architecture:
 
 * P2P communication powered by [Lattica](https://github.com/GradientHQ/lattica)
-* GPU backend powered by [SGLang](https://github.com/sgl-project/sglang)
+* GPU backend powered by [SGLang](https://github.com/sgl-project/sglang) and [vLLM](https://github.com/vllm-project/vllm)
 * MAC backend powered by [MLX LM](https://github.com/ml-explore/mlx-lm)
 
 ## User Guide
@@ -57,7 +59,7 @@ We warmly welcome contributions of all kinds! For guidelines on how to get invol
 
 |              | Provider     | HuggingFace Collection  |  Blog  | Description |
 |:-------------|:-------------|:----------------------------:|:----------------------------:|:----------------------------|
-|DeepSeek      | Deepseek     | [DeepSeek-V3.1](https://huggingface.co/collections/deepseek-ai/deepseek-v31) <br>[DeepSeek-R1](https://huggingface.co/collections/deepseek-ai/deepseek-r1) <br>[DeepSeek-V3](https://huggingface.co/collections/deepseek-ai/deepseek-v3) <br>[DeepSeek-V2](https://huggingface.co/collections/deepseek-ai/deepseek-v2) | [DeepSeek V3.1: The New Frontier in Artificial Intelligence](https://deepseek.ai/blog/deepseek-v31) | "DeepSeek" is an advanced large language model series from Deepseek AI, offering multiple generations such as DeepSeek-V3.1, DeepSeek-R1, DeepSeek-V2, and DeepSeek-V3. These models are designed for powerful natural language understanding and generation, with various sizes and capabilities for research and production use. |
+|DeepSeek      | Deepseek     | [DeepSeek-V3.2](https://huggingface.co/deepseek-ai/DeepSeek-V3.2)<br>[DeepSeek-R1](https://huggingface.co/collections/deepseek-ai/deepseek-r1) <br>| [Deep Seek AI Launches Revolutionary Language Model](https://deepseek.ai/blog/deepseek-v32) | Deep Seek AI is proud to announce the launch of our latest language model, setting new standards in natural language processing and understanding. This breakthrough represents a significant step forward in AI technology, offering unprecedented capabilities in text generation, comprehension, and analysis. |
 |MiniMax-M2    | MiniMax AI  | [MiniMax-M2](https://huggingface.co/MiniMaxAI/MiniMax-M2) | [MiniMax M2 & Agent: Ingenious in Simplicity](https://www.minimax.io/news/minimax-m2) | MiniMax-M2 is a compact, fast, and cost-effective MoE model (230B parameters, 10B active) built for advanced coding and agentic workflows. It offers state-of-the-art intelligence and coding abilities, delivering efficient, reliable tool use and strong multi-step reasoning for developers and agents, with high throughput and low latency for easy deployment. |
 |GLM-4.6       | Z AI | [GLM-4.6](https://huggingface.co/zai-org/GLM-4.6) | [GLM-4.6: Advanced Agentic, Reasoning and Coding Capabilities](https://z.ai/blog/glm-4.6) | GLM-4.6 improves upon GLM-4.5 with a longer 200K token context window, stronger coding and reasoning performance, enhanced tool-use and agent integration, and refined writing quality. Outperforms previous versions and is highly competitive with leading open-source models across coding, reasoning, and agent benchmarks. |
 |Kimi-K2       | Moonshot AI  | [Kimi-K2](https://huggingface.co/collections/moonshotai/kimi-k2-6871243b990f2af5ba60617d) | [Kimi K2: Open Agentic Intelligence](https://moonshotai.github.io/Kimi-K2/) | "Kimi-K2" is Moonshot AI's Kimi-K2 model family, including Kimi-K2-Base, Kimi-K2-Instruct and Kimi-K2-Thinking. Kimi K2 Thinking is a state-of-the-art open-source agentic model designed for deep, step-by-step reasoning and dynamic tool use. It features native INT4 quantization and a 256k context window for fast, memory-efficient inference. Uniquely stable in long-horizon tasks, Kimi K2 enables reliable autonomous workflows with consistent performance across hundreds of tool calls.
