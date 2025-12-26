@@ -7,10 +7,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.managers.schedule_batch import ScheduleBatch
+from sglang.srt.mem_cache.radix_cache import RadixCache as PageRadixCache
 from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
 from sglang.srt.utils import broadcast_pyobj
 from sglang.srt.utils.common import SUPPORTED_LORA_TARGET_MODULES
-from sglang.srt.mem_cache.radix_cache import RadixCache as PageRadixCache
 
 from parallax.server.executor.base_executor import BaseExecutor
 from parallax.server.request import (
@@ -159,7 +159,7 @@ class SGLExecutor(BaseExecutor):
         self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
         self.tp_group = self.model_runner.tp_group
         self.tp_cpu_group = self.tp_group.cpu_group
-        
+
         # create a page tree cache for sglang prefill
         if enable_prefix_cache:
             self.page_tree_cache = PageRadixCache(
@@ -167,7 +167,9 @@ class SGLExecutor(BaseExecutor):
                 self.model_runner.token_to_kv_pool_allocator,
                 self.model_runner.page_size,
             )
-            logger.info(f"Sglang Page tree cache created with page size {self.model_runner.page_size}")
+            logger.info(
+                f"Sglang Page tree cache created with page size {self.model_runner.page_size}"
+            )
         else:
             self.page_tree_cache = None
 

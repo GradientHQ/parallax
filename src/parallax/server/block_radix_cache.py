@@ -159,7 +159,7 @@ class BlockRadixCache:
         new_node.parent = parent_node
         if lock:
             new_node.lock_ref += 1
-        
+
         parent_node.children[first_token] = new_node
 
         self.num_cached_blocks += 1

@@ -509,7 +509,7 @@ class CacheManager:
         context_len = self.context_lengths.get(request_id, 0)
 
         num_full_blocks = context_len // self.block_size
-        
+
         if num_full_blocks == 0:
             return
 
