@@ -1,8 +1,17 @@
 #include <dlfcn.h>
 #include <filesystem>
 #include <string>
+#include "utils.h"
 
 namespace parallax_ext {
+
+std::string get_type_string(mx::Dtype t) {
+    if (t == mx::float32) return "float";
+    if (t == mx::float16) return "half";
+    if (t == mx::bfloat16) return "bfloat16_t";
+    if (t == mx::uint8) return "uchar"; 
+    throw std::runtime_error("Unsupported dtype");
+}
 
 std::string current_binary_dir()
 {

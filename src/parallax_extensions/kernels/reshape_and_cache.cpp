@@ -78,8 +78,8 @@ void ReshapeAndCache::eval_gpu(
     // Resolve name of kernel
     std::string kname;
     std::string hash_name = "";
-    kname = "reshape_and_cache_kv_" + type_to_name(key);
-    kname += "_cache_" + type_to_name(key_cache);
+    kname = "reshape_and_cache_kv_" + get_type_string(key.dtype());
+    kname += "_cache_" + get_type_string(key_cache.dtype());
 
     // Load the metal library
     auto lib = d.get_library("parallax_ext", current_binary_dir());
@@ -104,9 +104,14 @@ void ReshapeAndCache::eval_gpu(
     // Skip k_scale and v_scale for non-fp8 (buffers 5, 6)
     compute_encoder.set_bytes(key_stride, 7);
     compute_encoder.set_bytes(value_stride, 8);
-    compute_encoder.set_bytes(num_heads, 9);
-    compute_encoder.set_bytes(head_size, 10);
-    compute_encoder.set_bytes(block_size, 11);
+    int32_t num_heads_32 = static_cast<int32_t>(num_heads);
+    int32_t head_size_32 = static_cast<int32_t>(head_size);
+    int32_t block_size_32 = static_cast<int32_t>(block_size);
+    int32_t x_32 = static_cast<int32_t>(x); 
+    compute_encoder.set_bytes(num_heads_32, 9);
+    compute_encoder.set_bytes(head_size_32, 10);
+    compute_encoder.set_bytes(block_size_32, 11);
+    compute_encoder.set_bytes(x_32, 12);
 
     // Dispatch configuration
     const uint64_t num_threads = std::min<uint64_t>(512, num_heads * head_size);
@@ -115,7 +120,7 @@ void ReshapeAndCache::eval_gpu(
 
     // Launch the grid with the given number of threads divided among
     // the given threadgroups
-    compute_encoder.dispatch_threads(grid, threadgroup);
+    compute_encoder.dispatch_threadgroups(grid, threadgroup);
 }
 
 /** Equivalence check **/

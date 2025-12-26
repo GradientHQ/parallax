@@ -11,13 +11,6 @@
 
 namespace parallax_ext {
 
-std::string get_type_string(mx::Dtype t) {
-    if (t == mx::float32) return "float";
-    if (t == mx::float16) return "half";
-    if (t == mx::bfloat16) return "bfloat16_t";
-    if (t == mx::uint8) return "uchar"; // 对应 cache 的 uint8
-    throw std::runtime_error("Unsupported dtype");
-}
 
 static size_t calculate_shared_memory_size(int max_seq_len, int head_size,
                                         int num_threads, int num_simd_lanes) {
