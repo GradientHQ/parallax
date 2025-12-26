@@ -15,7 +15,7 @@ from mlx_lm.utils import _download, load_model
 from parallax.p2p.message_util import proto_to_request, request_to_proto
 from parallax.server.request import InitialRequest
 from parallax.utils.tokenizer_utils import load_tokenizer
-from parallax.utils.utils import get_current_device
+from parallax.utils.utils import get_current_device, is_metal_available, is_cuda_available
 
 MLX_MODEL_REPO = "mlx-community/Qwen3-0.6B-bf16"
 CUDA_MODEL_REPO = "Qwen/Qwen3-0.6B"
@@ -92,8 +92,23 @@ def run_executor_pipeline_stage(executor, requests, batch_type, is_last_peer):
 def test_decode_pipeline_multiple_steps(pipeline_devices, pp_end_layers, num_decode_steps):
     """Tests a multi-step decode pipeline with batched requests."""
     device = get_current_device()
+    
+    # Skip if pipeline requires Metal but Metal is not available
+    if "mlx" in pipeline_devices and not is_metal_available():
+        pytest.skip("Metal backend not available (requires macOS with Metal support)")
+    
+    # Skip if pipeline requires CUDA but CUDA is not available
+    if "cuda" in pipeline_devices and not is_cuda_available():
+        pytest.skip("CUDA backend not available (requires NVIDIA GPU with CUDA support)")
+    
+    # Skip if on MLX device but pipeline requires CUDA
     if device == "mlx" and "cuda" in pipeline_devices:
-        return
+        pytest.skip("CUDA not available on MLX device")
+    
+    # Skip if Metal is not available (needed for MLX reference generation)
+    # MLX CPU backend has compilation issues on some systems
+    if not is_metal_available():
+        pytest.skip("Metal backend not available - MLX CPU backend has compilation issues on this system")
 
     # 1. Setup executors
     # Calculate memory fraction for each executor based on how many executors share the same device

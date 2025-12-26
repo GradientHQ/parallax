@@ -30,6 +30,16 @@ def is_mps_available():
     return torch.mps.is_available()
 
 
+def is_metal_available():
+    """Check if MLX Metal backend is available"""
+    try:
+        import mlx.core as mx
+        mx.metal.device_info()
+        return True
+    except (RuntimeError, AttributeError, ImportError):
+        return False
+
+
 def get_current_device():
     """
     Returns the backend device name.
