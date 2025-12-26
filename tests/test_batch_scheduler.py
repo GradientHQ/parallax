@@ -1,3 +1,5 @@
+from typing import Optional
+
 from parallax.server.request import InitialRequest, Request, RequestStatus
 from parallax.server.scheduler import Scheduler
 
@@ -10,12 +12,14 @@ class FakeCacheManager:
     def has_request(self, request_id: str) -> bool:
         return request_id in self._reqs
 
-    def allocate_request(self, request_id: str, num_tokens: int) -> bool:
+    def allocate_request(
+        self, request_id: str, prompt_len: int, token_ids: Optional[list[int]] = None
+    ) -> tuple[bool, int]:
         """PagedKV interface."""
         if not self.allow:
-            return False
+            return False, 0
         self._reqs.add(request_id)
-        return True
+        return True, 0
 
 
 def make_prefill(rid: str, prompt_len: int) -> InitialRequest:

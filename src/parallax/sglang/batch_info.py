@@ -6,7 +6,7 @@ ScheduleBatch -> ModelWorkerBatch -> ForwardBatch
 """
 
 from types import SimpleNamespace
-from typing import List
+from typing import List, Optional
 
 import torch
 from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
@@ -18,6 +18,7 @@ from sglang.srt.sampling.sampling_batch_info import (
 from sglang.srt.sampling.sampling_params import SamplingParams as SGLSamplingParams
 from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
 
+from parallax.server.executor.sglang_executor import PageRadixCache
 from parallax.server.request import Request
 from parallax.server.sampling.sampling_params import (
     SamplingParams as ParallaxSamplingParams,
@@ -46,7 +47,9 @@ def transform_sampling_params_to_sglang(old_params: ParallaxSamplingParams) -> S
     return params
 
 
-def transform_requests_to_sglang(old_requests: List[Request]) -> List[Req]:
+def transform_requests_to_sglang(
+    old_requests: List[Request], page_tree_cache: Optional[PageRadixCache] = None
+) -> List[Req]:
     """Transforms Parallax Request to SGLang.Req format"""
     reqs = []
     for old_req in old_requests:
@@ -58,7 +61,29 @@ def transform_requests_to_sglang(old_requests: List[Request]) -> List[Req]:
             sampling_params=sampling_params,
             lora_id=old_req.lora_id,
         )
-        req.init_next_round_input()
+
+        # Debug: Log before cache lookup
+        if page_tree_cache is not None:
+            logger.debug(
+                f"[PageRadixCache] Before init_next_round_input for request {old_req.request_id}: "
+                f"input_ids length={len(old_req.input_ids)}, "
+                f"page_tree_cache available"
+            )
+
+        req.init_next_round_input(page_tree_cache)
+
+        # Debug: Log after cache lookup
+        if page_tree_cache is not None:
+            prefix_indices_len = len(req.prefix_indices) if hasattr(req, "prefix_indices") else 0
+            input_len = len(req.origin_input_ids) if hasattr(req, "origin_input_ids") else 0
+            logger.debug(
+                f"[PageRadixCache] After init_next_round_input for request {old_req.request_id}: "
+                f"prefix_indices length={prefix_indices_len}, "
+                f"origin_input_ids length={input_len}, "
+                f"matched_tokens={prefix_indices_len}, "
+                f"cache_hit_ratio={prefix_indices_len/input_len if input_len > 0 else 0:.2%}"
+            )
+
         reqs.append(req)
     return reqs
 
@@ -66,10 +91,11 @@ def transform_requests_to_sglang(old_requests: List[Request]) -> List[Req]:
 def form_sgl_batch_prefill(
     requests: List[Request],
     model_runner: ModelRunner,
+    page_tree_cache: Optional[PageRadixCache] = None,
 ) -> ForwardBatch:
     """Initialize a prefill ScheduleBatch -> ModelWorkerBatch -> ForwardBatch workflow"""
 
-    sgl_reqs = transform_requests_to_sglang(requests)
+    sgl_reqs = transform_requests_to_sglang(requests, page_tree_cache)
 
     def dummy_evict(*args):
         pass
@@ -85,7 +111,7 @@ def form_sgl_batch_prefill(
         reqs=sgl_reqs,
         req_to_token_pool=model_runner.req_to_token_pool,
         token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
-        tree_cache=dummy_tree_cache,
+        tree_cache=page_tree_cache if page_tree_cache is not None else dummy_tree_cache,
         model_config=model_runner.model_config,
         enable_overlap=False,
         spec_algorithm=SpeculativeAlgorithm.NONE,
@@ -229,25 +255,36 @@ def release_sglang_request(running_batch: ScheduleBatch, request_id: str):
     seq_lens_cpu = running_batch.seq_lens.cpu().numpy()
     idx = find_index(running_batch, request_id)
     req = running_batch.reqs.pop(idx)
-    page_size = running_batch.token_to_kv_pool_allocator.page_size
-    last_uncached_pos = (len(req.prefix_indices) // page_size) * page_size
-    end_pos = last_uncached_pos + seq_lens_cpu[idx]
-    running_batch.seq_lens = torch.cat(
-        (running_batch.seq_lens[:idx], running_batch.seq_lens[idx + 1 :])
-    )
-    running_batch.seq_lens_cpu = torch.cat(
-        (running_batch.seq_lens_cpu[:idx], running_batch.seq_lens_cpu[idx + 1 :])
-    )
-    running_batch.orig_seq_lens = torch.cat(
-        (running_batch.orig_seq_lens[:idx], running_batch.orig_seq_lens[idx + 1 :])
-    )
 
-    # Free kv cache
-    token_indices = running_batch.req_to_token_pool.req_to_token[req.req_pool_idx][
-        last_uncached_pos:end_pos
-    ]
-    running_batch.token_to_kv_pool_allocator.free(token_indices)
-    running_batch.req_to_token_pool.free(req.req_pool_idx)
-    running_batch.req_pool_indices = torch.cat(
-        (running_batch.req_pool_indices[:idx], running_batch.req_pool_indices[idx + 1 :])
-    )
+    # use running batch's tree cache to release kv cache
+    tree_cache = running_batch.tree_cache
+
+    # for completed requests, is_insert=True to insert into prefix cache
+    # for aborted requests, is_insert=False to not insert into prefix cache
+    is_insert = True  # can be adjusted based on request status
+
+    if isinstance(tree_cache, PageRadixCache):
+        tree_cache.cache_finished_req(req)
+    else:
+        page_size = running_batch.token_to_kv_pool_allocator.page_size
+        last_uncached_pos = (len(req.prefix_indices) // page_size) * page_size
+        end_pos = last_uncached_pos + seq_lens_cpu[idx]
+        running_batch.seq_lens = torch.cat(
+            (running_batch.seq_lens[:idx], running_batch.seq_lens[idx + 1 :])
+        )
+        running_batch.seq_lens_cpu = torch.cat(
+            (running_batch.seq_lens_cpu[:idx], running_batch.seq_lens_cpu[idx + 1 :])
+        )
+        running_batch.orig_seq_lens = torch.cat(
+            (running_batch.orig_seq_lens[:idx], running_batch.orig_seq_lens[idx + 1 :])
+        )
+
+        # Free kv cache
+        token_indices = running_batch.req_to_token_pool.req_to_token[req.req_pool_idx][
+            last_uncached_pos:end_pos
+        ]
+        running_batch.token_to_kv_pool_allocator.free(token_indices)
+        running_batch.req_to_token_pool.free(req.req_pool_idx)
+        running_batch.req_pool_indices = torch.cat(
+            (running_batch.req_pool_indices[:idx], running_batch.req_pool_indices[idx + 1 :])
+        )
