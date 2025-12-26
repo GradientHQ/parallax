@@ -2,6 +2,7 @@
 SGLang backend implementation of high level executor
 """
 
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -24,7 +25,7 @@ from parallax.sglang.batch_info import (
     form_sgl_batch_prefill,
     release_sglang_request,
 )
-from parallax.sglang.model_runner import initialize_sgl_model_runner
+from parallax.sglang.model_runner import initialize_sgl_model_runner, refit_sgl_model
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -66,6 +67,7 @@ class SGLExecutor(BaseExecutor):
         executor_output_ipc_addr: Optional[str] = None,
         # GPU Specialized Configs
         attention_backend: Optional[str] = "flashinfer",
+        enable_dp_attention: bool = False,
         moe_runner_backend: Optional[str] = "auto",
         enable_lora: Optional[bool] = False,
         max_lora_rank: Optional[int] = None,
@@ -79,9 +81,13 @@ class SGLExecutor(BaseExecutor):
         # Tensor Parallel Configs
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
+        dp_rank: Optional[int] = 0,
+        dp_size: Optional[int] = 1,
         nccl_port: Optional[int] = 4000,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
+        # Weight Refit
+        enable_weight_refit: Optional[bool] = False,
     ):
 
         self.enable_lora = True if lora_paths is not None else enable_lora
@@ -107,12 +113,15 @@ class SGLExecutor(BaseExecutor):
             "end_layer": end_layer,
             "kv_cache_memory_fraction": kv_cache_memory_fraction,
             "attention_backend": attention_backend,
+            "enable_dp_attention": enable_dp_attention,
             "kv_block_size": kv_block_size,
             "max_num_tokens_per_batch": max_num_tokens_per_batch,
             "dtype": dtype,
             "moe_runner_backend": moe_runner_backend,
             "tp_rank": tp_rank,
             "tp_size": tp_size,
+            "dp_rank": dp_rank,
+            "dp_size": dp_size,
             "nccl_port": nccl_port,
             "using_hfcache": use_hfcache,
             "enable_lora": self.enable_lora,
@@ -134,6 +143,12 @@ class SGLExecutor(BaseExecutor):
         logger.debug(
             f"SGLang model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
         )
+
+        # Set device to specific CUDA device based on tp_rank
+        # This ensures tensors are moved to the correct GPU
+        if device is None or device == "cuda":
+            device = f"cuda:{tp_rank}"
+
         super().__init__(
             start_layer=start_layer,
             end_layer=end_layer,
@@ -153,7 +168,10 @@ class SGLExecutor(BaseExecutor):
             executor_output_ipc_addr=executor_output_ipc_addr,
             tp_rank=tp_rank,
             tp_size=tp_size,
+            dp_rank=dp_rank,
+            dp_size=dp_size,
             shared_state=shared_state,
+            enable_weight_refit=enable_weight_refit,
         )
         self.cur_batch = None
         self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
@@ -172,6 +190,10 @@ class SGLExecutor(BaseExecutor):
             )
         else:
             self.page_tree_cache = None
+    def check_and_refit_weight(self, refit_weight_path: str):
+        if refit_weight_path == "":
+            return
+        refit_sgl_model(self.model_runner, refit_weight_path)
 
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
@@ -265,6 +287,10 @@ class SGLExecutor(BaseExecutor):
             return
         if self.tp_size > 1:
             requests = self._tensor_parallel_broadcast_byobj(requests)
+            for req in requests:
+                if hasattr(req, "hidden_states") and req.hidden_states is not None:
+                    if hasattr(req.hidden_states, "to"):  # PyTorch tensor
+                        req.hidden_states = req.hidden_states.to(self.device)
         if len(requests) > 0:
             logger.debug(f"Handling {len(requests)} requests.")
 
@@ -284,35 +310,50 @@ class SGLExecutor(BaseExecutor):
                         )
                         continue
 
-                    assert req.next_token_id is not None
-                    original_req.commit_new_token(req.next_token_id)
-                    logger.debug(
-                        f"[FirstPeer-CUDA] Committed token {req.next_token_id} for {req.request_id}, "
-                        f"output_ids now has {len(original_req.output_ids)} tokens"
-                    )
+                    # If it's an abort signal (e.g. from OOM), next_token_id might be None or dummy
+                    if not req.abort and req.next_token_id is not None:
+                        original_req.commit_new_token(req.next_token_id)
+                        logger.debug(
+                            f"[FirstPeer-CUDA] Committed token {req.next_token_id} for {req.request_id}, "
+                            f"output_ids now has {len(original_req.output_ids)} tokens"
+                        )
+
                     if len(req.routing_table) > 0:
                         original_req.routing_table = req.routing_table
 
                     # Check for termination.
+                    if req.abort:
+                        original_req.abort = True
+
                     if self.scheduler.check_and_update_request_status(original_req):
                         logger.debug(f"Releasing resources for finished request {req.request_id}")
                         self.release_and_evict_request(req.request_id)
-                        if not self.is_last_peer:
+                        if not self.is_last_peer and not req.abort:
                             self.finished_batch.append(req)
                     else:
                         self.scheduler.enque_request(original_req)
 
                     # detokenize and send to http server
                     if self.tp_rank == 0:
+                        # Only send token if it's valid
+                        token_to_send = req.next_token_id if req.next_token_id is not None else -1
                         req_dict = {
                             "prompt_tokens": len(req.input_ids),
-                            "next_token_id": req.next_token_id,
+                            "next_token_id": token_to_send,
                             "rid": req.request_id,
                         }
                         if original_req.status == RequestStatus.FINISHED_EOS:
                             req_dict["eos"] = True
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
+                        if original_req.status == RequestStatus.FINISHED_ABORT:
+                            req_dict["abort"] = True
+
+                        # Add prob value for the sampled token (if requested and available)
+                        if original_req.return_probs and req.token_prob is not None:
+                            req_dict["probs"] = req.token_prob
+                        if self.enable_weight_refit:
+                            req_dict["weight_version"] = self.weight_version
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:
@@ -325,7 +366,7 @@ class SGLExecutor(BaseExecutor):
                 ), "Non-first peers must receive IntermediateRequests."
                 if req.is_finished or req.hidden_states is None:
                     self.release_and_evict_request(req.request_id)
-                    if not self.is_last_peer:
+                    if not self.is_last_peer and not req.abort:
                         self.finished_batch.append(req)
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
@@ -340,6 +381,7 @@ class SGLExecutor(BaseExecutor):
 
         forward_batch = prepared_inputs["forward_batch"]
         pp_proxy_tensors = prepared_inputs["pp_proxy_tensors"]
+        requests = prepared_inputs.get("requests", [])
 
         # Execute model with SGLang
         logits_output, _ = self.model_runner.forward(
@@ -363,14 +405,33 @@ class SGLExecutor(BaseExecutor):
         if return_decoded_tokens:
             # Last peer: sample and return token IDs
             next_token_ids = self.model_runner.sample(logits_output, forward_batch)
-            return next_token_ids
+
+            # Only compute probs if any request in the batch needs it
+            # Check if any InitialRequest has return_probs=True
+            needs_probs = any(
+                (isinstance(req, InitialRequest) and req.return_probs)
+                or (isinstance(req, IntermediateRequest) and req.return_probs)
+                for req in requests
+            )
+
+            token_probs = None
+            # Extract probs for the sampled tokens only if needed
+            if needs_probs and hasattr(logits_output, "next_token_logits"):
+                # Get probs for sampled tokens (next_token_logits contains probabilities)
+                real_probs = logits_output.next_token_logits[
+                    torch.arange(len(next_token_ids)), next_token_ids
+                ]
+                token_probs = real_probs.cpu().float().tolist()
+
+            # Return dict with token_ids and optional probs
+            return {"hidden_states": next_token_ids, "probs": token_probs}
         else:
             # Intermediate peer: return hidden states for next peer
             # Note: SGLang stores hidden_states + residual separately
             final_hidden_states = (
                 logits_output.tensors["hidden_states"] + logits_output.tensors["residual"]
             )
-            return final_hidden_states
+            return {"hidden_states": final_hidden_states, "probs": None}
 
     def _release_request(self, rid: str):
         """Release per-request resources in SGLang."""
@@ -378,6 +439,55 @@ class SGLExecutor(BaseExecutor):
             release_sglang_request(self.running_batch, rid)
         except Exception:
             pass
+
+    def _check_kv_cache_available(self, num_tokens: int) -> bool:
+        """
+        Check if there is enough KV cache space for the requested tokens.
+
+        Returns True if there is enough space, False otherwise.
+        """
+        try:
+            allocator = self.model_runner.token_to_kv_pool_allocator
+            available = allocator.available_size()
+
+            if available < num_tokens:
+                logger.warning(
+                    f"KV cache space insufficient: need {num_tokens} tokens, "
+                    f"but only {available} available"
+                )
+                return False
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to check KV cache availability: {e}")
+            # If we can't check, allow the operation to proceed
+            return True
+
+    def _abort_requests_due_to_kv_cache(self, batched_requests: List[Request], reason: str):
+        """
+        Abort requests due to KV cache shortage and notify relevant parties.
+        """
+        logger.warning(f"Aborting {len(batched_requests)} requests due to: {reason}")
+
+        for req in batched_requests:
+            req.update_status(RequestStatus.FINISHED_ABORT)
+
+            # Notify HTTP Server to return partial results
+            if self.is_first_peer and self.tp_rank == 0:
+                req_dict = {
+                    "prompt_tokens": req.prompt_len,
+                    "next_token_id": (
+                        req.output_ids[-1] if hasattr(req, "output_ids") and req.output_ids else -1
+                    ),
+                    "rid": req.request_id,
+                    "abort": True,
+                }
+                if hasattr(self, "send_to_ipc_socket"):
+                    self.send_to_ipc_socket.send_pyobj(req_dict)
+                    time.sleep(0.05)  # Give ZMQ time to flush
+
+            # Add to finished_batch to trigger abort notification to other peers
+            self.finished_batch.append(req)
+            self.scheduler.evict_request(req.request_id)
 
     def _gen_token_id_from_hidden(self, hidden_states) -> Tuple[int, Any]:
         """
@@ -409,6 +519,15 @@ class SGLExecutor(BaseExecutor):
 
         batch_size = len(batched_requests)
         if batch_size == 0:
+            return None
+
+        # Pre-check: Verify KV cache has enough space for prefill
+        total_tokens_needed = sum(req.total_length for req in batched_requests)
+        if not self._check_kv_cache_available(total_tokens_needed):
+            self._abort_requests_due_to_kv_cache(
+                batched_requests,
+                f"KV cache insufficient for prefill ({total_tokens_needed} tokens needed)",
+            )
             return None
 
         # Prepare PP proxy tensors
@@ -479,6 +598,15 @@ class SGLExecutor(BaseExecutor):
 
         batch_size = len(batched_requests)
         if batch_size == 0:
+            return None
+
+        # Pre-check: Verify KV cache has enough space for decode (1 token per request)
+        tokens_needed = batch_size
+        if not self._check_kv_cache_available(tokens_needed):
+            self._abort_requests_due_to_kv_cache(
+                batched_requests,
+                f"KV cache insufficient for decode ({tokens_needed} tokens needed)",
+            )
             return None
 
         # Prepare PP proxy tensors

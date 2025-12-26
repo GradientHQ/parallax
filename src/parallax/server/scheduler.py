@@ -158,7 +158,10 @@ class Scheduler:
             except Exception:
                 pass
         else:
-            raise ValueError(f"Attempted to evict non-existent request {request_id}.")
+            logger.warning(
+                f"Attempted to evict non-existent request {request_id}. It might have been already evicted."
+            )
+            return
 
     def cancel_request(self, request_id: str):
         """Cancels a request from the scheduler."""
@@ -171,22 +174,40 @@ class Scheduler:
 
     def check_and_update_request_status(self, request: InitialRequest) -> bool:
         """Checks if a request has met any finishing conditions and updates its status."""
-        assert self.is_first_peer, "Only first peer can check and update request status."
-        assert (
-            self.eos_token_id is not None
-        ), "EOS token ID must be set for request status checking."
         if request.is_finished:
             return True
 
         finished = False
-        last_token_id = request.output_ids[-1] if request.output_ids else None
         if request.abort:
+            request.update_status(RequestStatus.FINISHED_ABORT)
             finished = True
-        if not request.sampling_params.ignore_eos and (
-            self.eos_token_id
+        elif request.status == RequestStatus.FINISHED_ABORT:
+            # Already marked as ABORT by executor (e.g. OOM)
+            finished = True
+
+        if finished:
+            logger.debug(f"Request {request.request_id} finished with status {request.status}.")
+            # Remove from running requests. The executor will handle KV cache release.
+            self.evict_request(request.request_id)
+            return True
+
+        if not self.is_first_peer:
+            return False
+
+        assert (
+            self.eos_token_id is not None
+        ), "EOS token ID must be set for request status checking."
+
+        last_token_id = request.output_ids[-1] if request.output_ids else None
+        if (
+            not finished
+            and not request.sampling_params.ignore_eos
             and (
-                last_token_id == self.eos_token_id
-                or (isinstance(self.eos_token_id, list) and last_token_id in self.eos_token_id)
+                self.eos_token_id
+                and (
+                    last_token_id == self.eos_token_id
+                    or (isinstance(self.eos_token_id, list) and last_token_id in self.eos_token_id)
+                )
             )
         ):
             request.update_status(RequestStatus.FINISHED_EOS)
@@ -236,7 +257,10 @@ class Scheduler:
                         logger.warning(
                             f"Request {rid} can't be admit to running batch due to KV cache size."
                         )
-                        continue
+                        # Put back to wait queue if allocation fails
+                        self._wait_queue.appendleft(req)
+                        # Stop admitting since we are out of memory
+                        break
                     if matched_tokens > 0:
                         logger.debug(
                             f"Request {rid} matched {matched_tokens} tokens from prefix cache"

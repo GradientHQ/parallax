@@ -38,6 +38,40 @@ scheduler_manage = None
 request_handler = RequestHandler()
 
 
+@app.post("/weight/refit")
+async def weight_refit(raw_request: Request):
+    request_data = await raw_request.json()
+    status = scheduler_manage.weight_refit(request_data)
+    if status:
+        return JSONResponse(
+            content={
+                "type": "weight_refit",
+                "data": None,
+            },
+            status_code=200,
+        )
+    else:
+        return JSONResponse(
+            content={
+                "type": "weight_refit",
+                "data": "Sever not ready",
+            },
+            status_code=500,
+        )
+
+
+@app.get("/weight/refit/timestamp")
+async def weight_refit_timstamp():
+    last_refit_time = scheduler_manage.get_last_refit_time()
+
+    return JSONResponse(
+        content={
+            "latest_timestamp": last_refit_time,
+        },
+        status_code=200,
+    )
+
+
 @app.get("/model/list")
 async def model_list():
     return JSONResponse(
@@ -139,6 +173,13 @@ async def cluster_status():
     )
 
 
+@app.get("/cluster/status_json")
+async def cluster_status_json() -> JSONResponse:
+    if scheduler_manage is None:
+        return JSONResponse(content={"error": "Scheduler is not initialized"}, status_code=503)
+    return JSONResponse(content=scheduler_manage.get_cluster_status(), status_code=200)
+
+
 @app.post("/v1/chat/completions")
 async def openai_v1_chat_completions(raw_request: Request):
     request_data = await raw_request.json()
@@ -189,6 +230,7 @@ if __name__ == "__main__":
         announce_maddrs=args.announce_maddrs,
         http_port=args.port,
         use_hfcache=args.use_hfcache,
+        enable_weight_refit=args.enable_weight_refit,
     )
 
     request_handler.set_scheduler_manage(scheduler_manage)

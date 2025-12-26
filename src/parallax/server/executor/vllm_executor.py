@@ -2,6 +2,7 @@
 vLLM backend implementation of high level executor
 """
 
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -79,6 +80,8 @@ class VLLMExecutor(BaseExecutor):
         nccl_port: Optional[int] = 4000,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
+        # Weight Refit
+        enable_weight_refit: Optional[bool] = False,
     ):
         model_runner_params = {
             "model_repo": model_repo,
@@ -130,6 +133,7 @@ class VLLMExecutor(BaseExecutor):
             tp_rank=tp_rank,
             tp_size=tp_size,
             shared_state=shared_state,
+            enable_weight_refit=enable_weight_refit,
         )
 
     def handle_input_requests(self, requests: List[Request]):
@@ -152,16 +156,21 @@ class VLLMExecutor(BaseExecutor):
                         )
                         continue
 
-                    assert req.next_token_id is not None
-                    original_req.commit_new_token(req.next_token_id)
-                    logger.debug(
-                        f"[FirstPeer-CUDA] Committed token {req.next_token_id} for {req.request_id}, "
-                        f"output_ids now has {len(original_req.output_ids)} tokens"
-                    )
+                    # If it's an abort signal (e.g. from OOM), next_token_id might be None or dummy
+                    if not req.abort and req.next_token_id is not None:
+                        original_req.commit_new_token(req.next_token_id)
+                        logger.debug(
+                            f"[FirstPeer-CUDA] Committed token {req.next_token_id} for {req.request_id}, "
+                            f"output_ids now has {len(original_req.output_ids)} tokens"
+                        )
+
                     if len(req.routing_table) > 0:
                         original_req.routing_table = req.routing_table
 
                     # Check for termination.
+                    if req.abort:
+                        original_req.abort = True
+
                     if self.scheduler.check_and_update_request_status(original_req):
                         logger.debug(f"Releasing resources for finished request {req.request_id}")
                         self.release_and_evict_request(req.request_id)
@@ -172,15 +181,21 @@ class VLLMExecutor(BaseExecutor):
 
                     # detokenize and send to http server
                     if self.tp_rank == 0:
+                        # Only send token if it's valid
+                        token_to_send = req.next_token_id if req.next_token_id is not None else -1
                         req_dict = {
                             "prompt_tokens": len(req.input_ids),
-                            "next_token_id": req.next_token_id,
+                            "next_token_id": token_to_send,
                             "rid": req.request_id,
                         }
                         if original_req.status == RequestStatus.FINISHED_EOS:
                             req_dict["eos"] = True
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
+                        if original_req.status == RequestStatus.FINISHED_ABORT:
+                            req_dict["abort"] = True
+                        if self.enable_weight_refit:
+                            req_dict["weight_version"] = self.weight_version
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:
@@ -232,13 +247,15 @@ class VLLMExecutor(BaseExecutor):
                 for seq in sampled_token_ids:
                     padded_seq = seq + [-1] * (max_len - len(seq))  # Pad with -1
                     padded_tokens.append(padded_seq)
-                return torch.tensor(padded_tokens, dtype=torch.int64)
+                token_ids = torch.tensor(padded_tokens, dtype=torch.int64)
             else:
-                return torch.tensor(sampled_token_ids, dtype=torch.int64)
+                token_ids = torch.tensor(sampled_token_ids, dtype=torch.int64)
+            # vLLM doesn't support probs yet
+            return {"hidden_states": token_ids, "probs": None}
         else:
             # Intermediate peer: return hidden states for next peer
             final_hidden_states = output.tensors["hidden_states"] + output.tensors["residual"]
-            return final_hidden_states
+            return {"hidden_states": final_hidden_states, "probs": None}
 
     def _release_request(self, rid: str):
         """Release per-request resources in vLLM."""
@@ -246,6 +263,33 @@ class VLLMExecutor(BaseExecutor):
             release_vllm_request(self.model_runner, rid)
         except Exception:
             pass
+
+    def _abort_requests_due_to_kv_cache(self, batched_requests: List[Request], reason: str):
+        """
+        Abort requests due to KV cache shortage and notify relevant parties.
+        """
+        logger.warning(f"Aborting {len(batched_requests)} requests due to: {reason}")
+
+        for req in batched_requests:
+            req.update_status(RequestStatus.FINISHED_ABORT)
+
+            # Notify HTTP Server to return partial results
+            if self.is_first_peer and self.tp_rank == 0:
+                req_dict = {
+                    "prompt_tokens": req.prompt_len,
+                    "next_token_id": (
+                        req.output_ids[-1] if hasattr(req, "output_ids") and req.output_ids else -1
+                    ),
+                    "rid": req.request_id,
+                    "abort": True,
+                }
+                if hasattr(self, "send_to_ipc_socket"):
+                    self.send_to_ipc_socket.send_pyobj(req_dict)
+                    time.sleep(0.05)  # Give ZMQ time to flush
+
+            # Add to finished_batch to trigger abort notification to other peers
+            self.finished_batch.append(req)
+            self.scheduler.evict_request(req.request_id)
 
     def _gen_token_id_from_hidden(self, hidden_states) -> Tuple[int, Any]:
         """
@@ -308,6 +352,13 @@ class VLLMExecutor(BaseExecutor):
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
         schedule_outputs_prefill = form_vllm_batch_prefill(batched_requests, self.model_runner)
+
+        # Check if KV cache allocation failed
+        if schedule_outputs_prefill is None:
+            self._abort_requests_due_to_kv_cache(
+                batched_requests, "KV cache insufficient for prefill"
+            )
+            return None
 
         if not self.is_first_peer and pp_proxy_tensors is not None:
             target_tokens = compute_expected_intermediate_tokens(
@@ -374,6 +425,14 @@ class VLLMExecutor(BaseExecutor):
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
         scheduler_outputs_decode = form_vllm_batch_decode(batched_requests, self.model_runner)
+
+        # Check if KV cache allocation failed
+        if scheduler_outputs_decode is None:
+            self._abort_requests_due_to_kv_cache(
+                batched_requests, "KV cache insufficient for decode"
+            )
+            return None
+
         ret = {
             "scheduler_output": scheduler_outputs_decode,
             "pp_proxy_tensors": pp_proxy_tensors,

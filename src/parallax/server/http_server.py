@@ -22,7 +22,7 @@ import traceback
 import uuid
 from dataclasses import dataclass, field
 from http import HTTPStatus
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import fastapi
 import uvicorn
@@ -87,6 +87,12 @@ class HTTPRequestInfo:
     error_message: Optional[str] = None
     error_type: Optional[str] = None
     error_status: HTTPStatus = HTTPStatus.INTERNAL_SERVER_ERROR
+    # probs support
+    return_probs: bool = False  # Whether to return probabilities
+    probs_list: List = field(default_factory=list)  # Store probs for each token
+    token_ids_list: List = field(default_factory=list)  # Store token IDs for each token
+    # Weight version for RL
+    weight_version: Optional[int] = None
 
 
 class HTTPHandler:
@@ -128,6 +134,7 @@ class HTTPHandler:
         rid = request["rid"]
         stream = request.get("stream", False)
         model = request.get("model", "default")
+        return_probs = request.get("return_probs", False)  # Check if probs requested
         chat_object = "chat.completion.chunk" if stream else "chat.completion"
         detokenizer = self.detokenizer_class(self.tokenizer, self.tokenmap)
         create_time = time.time()
@@ -140,6 +147,7 @@ class HTTPHandler:
             create_time=create_time,
             update_time=update_time,
             detokenizer=detokenizer,
+            return_probs=return_probs,
         )
         if stream:
             request_info.token_queue = asyncio.Queue()
@@ -151,6 +159,11 @@ class HTTPHandler:
 
     def send_request(self, request: Dict):
         """Sends the request to model executor using IPC."""
+        # Ensure return_probs is included in the request sent to executor
+        rid = request.get("rid")
+        if rid and rid in self.processing_requests:
+            request_info = self.processing_requests[rid]
+            request["return_probs"] = request_info.return_probs
         self.send_to_executor.send_pyobj(request)
 
     def abort_request(self, request_id: str):
@@ -213,6 +226,14 @@ class HTTPHandler:
         }
         choice = response["choices"][0]
         choice["delta"] = {"role": role, "content": content}
+        # Add probs in the last chunk if requested (convert to object array format)
+        if is_last and request_info.return_probs:
+            choice["probs"] = [
+                {self.tokenizer.decode([token_id]): prob}
+                for token_id, prob in zip(request_info.token_ids_list, request_info.probs_list)
+            ]
+        if request_info.weight_version is not None:
+            response["weight_version"] = request_info.weight_version
         response_json = json.dumps(response, separators=(",", ":"))
         return f"data: {response_json}\n\n".encode()
 
@@ -280,6 +301,14 @@ class HTTPHandler:
             "reasoning_content": None,
             "tool_calls": None,
         }
+        # Add probs if requested (convert to object array format)
+        if request_info.return_probs:
+            choice["probs"] = [
+                {self.tokenizer.decode([token_id]): prob}
+                for token_id, prob in zip(request_info.token_ids_list, request_info.probs_list)
+            ]
+        if request_info.weight_version is not None:
+            response["weight_version"] = request_info.weight_version
         return response
 
     async def _handle_executor_error(self, rid: str, recv_dict: Dict):
@@ -330,8 +359,18 @@ class HTTPHandler:
             request_info.completion_tokens += 1
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
+            request_info.weight_version = recv_dict.get("weight_version", None)
 
-            is_finished = recv_dict.get("eos", False) or recv_dict.get("length", False)
+            # Store probs and token IDs if requested
+            if request_info.return_probs and "probs" in recv_dict:
+                request_info.probs_list.append(recv_dict["probs"])
+                request_info.token_ids_list.append(next_token_id)
+
+            is_finished = (
+                recv_dict.get("eos", False)
+                or recv_dict.get("length", False)
+                or recv_dict.get("abort", False)
+            )
 
             # Only process and send non-EOS tokens
             if not is_finished and len(output) > 0:
@@ -344,7 +383,10 @@ class HTTPHandler:
 
             # If it is the end of the stream, update status and send sentinel
             if is_finished:
-                if recv_dict.get("length", False):
+                if recv_dict.get("abort", False):
+                    logger.warning(f"Request {rid} finished with abort")
+                    request_info.finish_reason = "abort"
+                elif recv_dict.get("length", False):
                     logger.debug(f"Request {rid} finished with length")
                     request_info.finish_reason = "length"
                 elif recv_dict.get("eos", False):

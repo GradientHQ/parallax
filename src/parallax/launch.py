@@ -46,6 +46,8 @@ def _update_args_from_shared_state(args, shared_state: SharedState):
         logger.debug(f"Updated model_path to: {args.model_path}")
     # Update tp_size if provided, otherwise keep current value
     args.tp_size = model_info["tp_size"] or args.tp_size
+    # Update weight refit switch
+    args.enable_weight_refit = model_info["enable_weight_refit"] or args.enable_weight_refit
 
 
 def _stop_executor_processes(executor_subprocs):
@@ -120,6 +122,7 @@ if __name__ == "__main__":
                 pp_end_layer=args.end_layer,
                 hidden_layers=config.get("num_hidden_layers"),
                 tp_size=args.tp_size,
+                dp_size=args.dp_size,
                 tcp_port=args.tcp_port,
                 udp_port=args.udp_port,
                 dht_prefix=args.dht_prefix,
@@ -168,6 +171,7 @@ if __name__ == "__main__":
                 pp_end_layer=args.end_layer,
                 hidden_layers=None,
                 tp_size=args.tp_size,
+                dp_size=args.dp_size,
                 tcp_port=args.tcp_port,
                 udp_port=args.udp_port,
                 dht_prefix=args.dht_prefix,

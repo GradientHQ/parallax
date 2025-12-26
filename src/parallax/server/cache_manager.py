@@ -30,8 +30,8 @@ class CacheManager:
         num_gpu_blocks: Optional[int] = None,
         max_num_seqs: int = 256,  # Max concurrent requests hint
         head_dim_v: Optional[int] = None,
-        indexer_key_head_dim: Optional[int] = None,
-        indexer_num_kv_heads: Optional[int] = None,
+        index_head_dim: Optional[int] = None,
+        index_n_heads: Optional[int] = None,
         # Hybrid Config: List of 'attention' or 'linear' or None (default 'attention')
         layer_types: Optional[List[str]] = None,
         # Linear Model / State Cache Params
@@ -49,8 +49,8 @@ class CacheManager:
         self.num_kv_heads = num_kv_heads
         self.head_dim = head_dim
         self.head_dim_v = head_dim_v if head_dim_v is not None else head_dim
-        self.indexer_key_head_dim = indexer_key_head_dim
-        self.indexer_num_kv_heads = indexer_num_kv_heads
+        self.index_head_dim = index_head_dim
+        self.index_n_heads = index_n_heads
         self.dtype = dtype
         self.block_size = block_size
         self.max_num_seqs = max_num_seqs
@@ -62,6 +62,7 @@ class CacheManager:
         self.linear_v_dim = linear_v_dim
         self.linear_num_k_heads = linear_num_k_heads
         self.linear_num_v_heads = linear_num_v_heads
+        self.cache_memory_fraction = cache_memory_fraction
 
         # Determine layer types
         if layer_types is None:
@@ -75,15 +76,17 @@ class CacheManager:
         self.needs_slots = any(t == "linear" for t in self.layer_types)
 
         if num_gpu_blocks is None and self.needs_blocks:
-            num_gpu_blocks = self._calculate_num_blocks(cache_memory_fraction, dtype)
+            num_gpu_blocks = self._calculate_num_blocks(self.cache_memory_fraction, self.dtype)
         elif not self.needs_blocks:
             num_gpu_blocks = 0
 
         self.num_gpu_blocks = num_gpu_blocks
 
         # 1. Initialize Allocators
-        self.allocator = BlockAllocator(num_gpu_blocks, block_size) if self.needs_blocks else None
-        self.slot_allocator = SlotAllocator(max_num_seqs) if self.needs_slots else None
+        self.allocator = (
+            BlockAllocator(self.num_gpu_blocks, self.block_size) if self.needs_blocks else None
+        )
+        self.slot_allocator = SlotAllocator(self.max_num_seqs) if self.needs_slots else None
 
         # 2. Initialize Layer Caches
         self.caches: List[BaseCache] = []
@@ -94,12 +97,12 @@ class CacheManager:
         if self.needs_blocks:
             logger.info(
                 f"Allocated Paged KV Cache for {self.layer_types.count('attention')} layers: "
-                f"{num_gpu_blocks} blocks, {block_size} block_size"
+                f"{self.num_gpu_blocks} blocks, {self.block_size} block_size"
             )
         if self.needs_slots:
             logger.info(
                 f"Allocated Linear State Cache for {self.layer_types.count('linear')} layers: "
-                f"{max_num_seqs} max slots"
+                f"{self.max_num_seqs} max slots"
             )
 
         # 3. Request State Management
@@ -134,7 +137,7 @@ class CacheManager:
 
     def _create_cache(self, layer_type: str) -> BaseCache:
         if layer_type == "attention":
-            if self.indexer_key_head_dim is not None and self.indexer_num_kv_heads is not None:
+            if self.index_head_dim is not None and self.index_n_heads is not None:
                 return DeepSeekSparseCache(
                     num_blocks=self.num_gpu_blocks,
                     block_size=self.block_size,
@@ -142,8 +145,8 @@ class CacheManager:
                     head_dim=self.head_dim,
                     head_dim_v=self.head_dim_v,
                     dtype=self.dtype,
-                    indexer_key_head_dim=self.indexer_key_head_dim,
-                    indexer_num_kv_heads=self.indexer_num_kv_heads,
+                    index_head_dim=self.index_head_dim,
+                    index_n_heads=self.index_n_heads,
                 )
             else:
                 return KVCache(
@@ -229,9 +232,9 @@ class CacheManager:
         one_layer_block_bytes = (
             self.num_kv_heads * self.block_size * (self.head_dim + self.head_dim_v) * dtype_size
         )
-        if self.indexer_key_head_dim is not None and self.indexer_num_kv_heads is not None:
+        if self.index_head_dim is not None and self.index_n_heads is not None:
             one_layer_block_bytes += (
-                self.indexer_num_kv_heads * self.block_size * self.indexer_key_head_dim * dtype_size
+                self.index_n_heads * self.block_size * self.index_head_dim * dtype_size
             )
 
         # Total bytes per block = Sum over all attention layers

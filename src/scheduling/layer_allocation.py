@@ -3,7 +3,7 @@ Layer allocation and dynamic rebalancing primitives (Phase 1 of scheduling).
 
 Key components:
 - LayerLoad: per-layer hosting power (combined KV memory + FLOPs) tracked in a min-heap;
-- BaseLayerAllocator: shared utilities for static global_allocation(), dynamic join/leave, and
+- BaseLayerAllocator: shared utilities for static allocate_from_standby(), dynamic join/leave, and
   in-place pipeline rebalancing using a water-filling algorithm;
 - GreedyLayerAllocator: builds pipelines greedily to minimize stages and maximize the
   number of pipelines, then rebalances each pipeline in-place;
@@ -26,6 +26,7 @@ from typing import Dict, List, Literal, Optional, Set, Tuple
 from parallax_utils.logging_config import get_logger
 from scheduling.model_info import ModelInfo
 from scheduling.node import Node
+from scheduling.node_management import NodeManager
 
 logger = get_logger(__name__)
 
@@ -81,7 +82,7 @@ class BaseLayerAllocator:
          - each worker node gives up running requests
          - each worker node re-load a different shard.
 
-    Global rebalancing, i.e. re-`global_allocation` is needed when:
+    Global rebalancing, i.e. re-`allocate_from_standby` is needed when:
      - When we find some layers are not hosted by any node,
      - Loads are too imbalanced.
 
@@ -97,40 +98,30 @@ class BaseLayerAllocator:
     def __init__(
         self,
         model_info: ModelInfo,
-        nodes: List[Node],
+        node_management: NodeManager,
         *,
+        dynamic_pipelines_router: bool = False,
         rebalance_threshold: float = 0.25,
         water_filling_max_iterations: int = 40,
-        assign_left_over_nodes: bool = True,
+        trim_layers_on_turning_points: bool = True,
     ) -> None:
         self.model_info = model_info
         self.num_total_layers = model_info.num_layers
-        # Use the caller-provided list object to keep a single authoritative list.
-        # Sort in-place to preserve shared reference with scheduler.
-        self.nodes = nodes
-        self.nodes.sort(key=lambda node: node.get_decoder_layer_capacity(), reverse=True)
-
+        self.node_management = node_management
         self.layer_to_load: Dict[int, LayerLoad] = {}
-        self.node_id_to_node: Dict[str, Node] = {}
-        # Sync dict with initial nodes; prevents declare() from adding duplicates
-        # when allocate_left_over_nodes() processes unallocated nodes
-        for node in self.nodes:
-            self.node_id_to_node[node.node_id] = node
 
-        # Pipeline endpoints for routing
-        self.embedding_node_ids: List[str] = []
-        self.lm_head_node_ids: List[str] = []
-        # How much we value memory vs. FLOPs for hosting power (sum to 1)
+        # True if we should trim layers on turning points
+        # e.g. 4 layers, 2 nodes, [0, 3), [2,4) -> [0, 3), [3, 4);
+        # where we trim the second node.
+        self.trim_layers_on_turning_points = trim_layers_on_turning_points
+
         # Threshold for layer hosting power imbalance to trigger global rebalance
         self.rebalance_threshold = rebalance_threshold
         # Maximum number of iterations to run the water-filling algorithm
         self.water_filling_max_iterations = water_filling_max_iterations
-        # Whether to assign left-over nodes using dynamic policy for
-        # static allocation's leftover nodes
-        self.assign_left_over_nodes = assign_left_over_nodes
 
-        # Node allocation
-        self.node_allocation: Dict[str, Tuple[int, int]] = {}
+        # True if using DP request router, False for fixed pipelines
+        self.dynamic_pipelines_router = dynamic_pipelines_router
 
         # Heapify Layer Loads
         self.layer_loads_heap: List[LayerLoad] = []
@@ -138,18 +129,8 @@ class BaseLayerAllocator:
             layer_load = LayerLoad(layer_id=layer_id, current_kv_size=0)
             self.layer_to_load[layer_id] = layer_load
         self._update_layer_loads_heap()
-        logger.debug(
-            "Initialized LayerAllocator with %d nodes for %d total layers",
-            len(self.nodes),
-            self.num_total_layers,
-        )
 
-    @property
-    def num_nodes(self) -> int:
-        """Number of nodes in the allocator."""
-        return len(self.nodes)
-
-    def validate_allocation(self, start_layer: int, end_layer: int):
+    def _validate_allocation(self, start_layer: int, end_layer: int):
         """Validate the allocation."""
         if start_layer < 0 or end_layer > self.num_total_layers:
             return False
@@ -157,8 +138,8 @@ class BaseLayerAllocator:
             return False
         return True
 
-    def global_allocation(self) -> bool:
-        """Static assignment based on existing nodes. For cold-start and global rebalancing.
+    def allocate_from_standby(self) -> bool:
+        """Static assignment on STANDBY nodes.
 
         Returns:
             True if at least one full pipeline (covering [0, num_total_layers)) was allocated.
@@ -171,14 +152,14 @@ class BaseLayerAllocator:
             raise ValueError(
                 f"Invalid allocation: start_layer {start_layer} >= end_layer {end_layer}"
             )
-        self.node_id_to_node[node.node_id] = node
         node.set_layer_allocation(start_layer, end_layer)
-        self.node_allocation[node.node_id] = (start_layer, end_layer)
-        logger.debug("Allocated node %s to layers [%d, %d)", node.node_id, start_layer, end_layer)
-        if start_layer == 0:
-            self.embedding_node_ids.append(node.node_id)
-        if end_layer == self.num_total_layers:
-            self.lm_head_node_ids.append(node.node_id)
+        self.node_management.activate([node.node_id])
+        logger.debug(
+            "[LayerAllocator] Allocated node %s to layers [%d, %d)",
+            node.node_id,
+            start_layer,
+            end_layer,
+        )
         for layer_id in range(start_layer, end_layer):
             if layer_id not in self.layer_to_load:
                 raise ValueError(f"Layer {layer_id} not found in layer_to_load")
@@ -188,23 +169,19 @@ class BaseLayerAllocator:
     def deallocate(self, node: Node) -> None:
         """Deallocate a node from its assigned layers."""
         if node.start_layer is None or node.end_layer is None:
-            logger.info("Node must have start_layer and end_layer")
+            logger.info("[LayerAllocator] Node must have start_layer and end_layer")
             return
         start_layer, end_layer = node.start_layer, node.end_layer
         logger.debug(
-            "Deallocating node %s from layers [%d, %d)", node.node_id, start_layer, end_layer
+            "[LayerAllocator] Deallocating node %s from layers [%d, %d)",
+            node.node_id,
+            start_layer,
+            end_layer,
         )
-        if node.node_id in self.node_allocation:
-            del self.node_allocation[node.node_id]
-        if node.node_id in self.embedding_node_ids:
-            self.embedding_node_ids.remove(node.node_id)
-        if node.node_id in self.lm_head_node_ids:
-            self.lm_head_node_ids.remove(node.node_id)
         for layer_id in range(start_layer, end_layer):
             if layer_id in self.layer_to_load:
                 self.layer_to_load[layer_id].remove_node(node)
-        node.clear_layer_allocation()
-        node.is_active = False
+        self.node_management.standby([node.node_id])
         self._update_layer_loads_heap()
 
     def reallocate(self, node: Node, start_layer: int, end_layer: int) -> None:
@@ -212,21 +189,14 @@ class BaseLayerAllocator:
         self.deallocate(node)
         self.allocate(node, start_layer, end_layer)
 
-    def declare(self, node: Node) -> None:
-        """Declare a node to the allocator."""
-        if node.node_id not in self.node_id_to_node:
-            self.nodes.append(node)
-            self.node_id_to_node[node.node_id] = node
-        # Keep order deterministic without rebinding the list reference
-        self.nodes.sort(key=lambda node: node.get_decoder_layer_capacity(), reverse=True)
-        logger.debug("Declared node %s (total declared: %d)", node.node_id, len(self.nodes))
-
-    def join(self, node: Node) -> None:
-        """Dynamically assign a new node based on lightest layers."""
-        logger.debug("Joining node dynamically: %s", node.node_id)
-        self.declare(node)
+    def dynamic_join(self, node: Node) -> None:
+        """In case of using Dynamic Programming request router, a node is joined dynamically to the lightest layers."""
         lightest_layer = self.get_lightest_layer()
-        logger.debug("Lightest layer: %s", lightest_layer)
+        logger.info(
+            "[LayerAllocator] Joining node %s with the lightest layer %d",
+            node.node_id,
+            lightest_layer.layer_id,
+        )
         if lightest_layer is None:
             raise ValueError("No layers to assign")
 
@@ -234,49 +204,23 @@ class BaseLayerAllocator:
         start_layer = lightest_layer.layer_id
         # Greedily assign layers that the node can host
         end_layer = self._adjust_end_layer_for_tail(node, start_layer)
-        logger.debug(
-            "Dynamic assignment candidate for %s: start=%d end=%d",
+        logger.info(
+            "[LayerAllocator] Dynamic assignment candidate for %s: start=%d end=%d",
             node.node_id,
             start_layer,
             end_layer,
         )
         self.allocate(node, start_layer, end_layer)
 
-    def leave(self, node_id: str) -> None:
-        """Dynamically remove a node, update layer loads and pipeline endpoints."""
-        node = self.node_id_to_node.get(node_id)
-        if node is None:
-            raise ValueError(f"Node {node_id} not found in allocation")
-        logger.debug("Node leaving allocator: %s", node_id)
-        self.deallocate(node)
-        del self.node_id_to_node[node_id]
-        # Ensure the shared nodes list is updated
-        for node in self.nodes:
-            if node.node_id == node_id:
-                self.nodes.remove(node)
-                break
-
-    def allocate_left_over_nodes(self) -> None:
-        """Assign any nodes without allocations by treating them as dynamic joins.
-
-        During bootstrapping or after a global allocation, some nodes may remain
-        unassigned because they cannot contribute to a full pipeline. This method
-        assigns such nodes one-by-one using the same policy as dynamic `join`:
-        repeatedly host the lightest layers to improve replication and balance.
-        """
-        logger.debug("Allocating left-over nodes (unassigned after global allocation)")
-        # Iterate in capacity order for determinism and better packing
-        for node in sorted(self.nodes, key=lambda n: n.get_decoder_layer_capacity(), reverse=True):
-            if node.node_id not in self.node_allocation:
-                try:
-                    logger.debug("Attempting left-over allocation for %s", node.node_id)
-                    self.join(node)
-                except Exception:
-                    # Best-effort: if no layers can be assigned, skip
-                    logger.debug(
-                        "Left-over allocation skipped for %s (no assignable layers)", node.node_id
-                    )
-                    continue
+    def allocate_standby_nodes(self) -> bool:
+        """In case of enabling dynamic pipelines, allocate left-over nodes to the lightest layers using dynamic join."""
+        if self.dynamic_pipelines_router:
+            left_over_nodes = self.node_management.standby_nodes
+            for node in left_over_nodes:
+                self.dynamic_join(node)
+            return True
+        else:
+            return self.allocate_from_standby()
 
     def should_global_rebalance(self) -> bool:
         """Trigger global rebalance, i.e. re-run `initialize`  if load imbalance is too high.
@@ -289,15 +233,19 @@ class BaseLayerAllocator:
         """
 
         # If we don't currently have a full pipeline covering [0, L), force rebalance
-        if not self.has_full_pipeline():
+        if not self.node_management.has_full_pipeline(self.num_total_layers):
             return True
+
+        # TODO: add more imbalance checks
+
+        available_nodes = self.node_management.nodes
 
         layer_heap = self.layer_loads_heap
         if len(layer_heap) < 2:
             return False
 
         total_cluster_memory = sum(
-            (node.hardware.num_gpus * node.hardware.memory_gb) for node in self.nodes
+            (node.hardware.num_gpus * node.hardware.memory_gb) for node in available_nodes
         )
 
         if total_cluster_memory == 0:
@@ -319,7 +267,7 @@ class BaseLayerAllocator:
 
         decision = coefficient_of_variation > self.rebalance_threshold
         logger.debug(
-            "Global rebalance check: cv=%.4f threshold=%.4f -> %s",
+            "[LayerAllocator] Global rebalance check: cv=%.4f threshold=%.4f -> %s",
             coefficient_of_variation,
             self.rebalance_threshold,
             decision,
@@ -509,14 +457,101 @@ class BaseLayerAllocator:
                 f"Greedy assignment did not cover all layers: remaining {remaining_layers}"
             )
 
-    def list_node_allocations(self) -> List[Tuple[str, int, int]]:
-        """List current per-node layer allocations as (node_id, start_layer, end_layer).
+    def adjust_for_turning_points(self, num_layers: int) -> List[Tuple[str, int, str]]:
+        """Find truncation points (warm-up helper).
 
-        Nodes without an allocation are omitted. Results are sorted by start_layer.
+        Turning points mark where shards can be trimmed based on optimal routing.
+        This is implemented using layer-level DP, with state (layer l, node i that hosts l).
+        Node cost uses the node's per-layer latency proxy; edge cost uses RTT between nodes.
+
+        Returns:
+            A list of (node_id, layer_index, kind), where kind in {"head", "tail"}:
+                - (node, l, "tail"): the route switches away at layer l although node still
+                hosts l, so drop [l, end) on that node.
+                - (node, l, "head"): the route first uses this node at layer l (> start),
+                so drop [start, l) on that node.
         """
-        items = [(node_id, se[0], se[1]) for node_id, se in self.node_allocation.items()]
-        items.sort(key=lambda x: (x[1], x[2], x[0]))
-        return items
+        nodes = self.node_management.active_nodes
+        if num_layers <= 0 or not nodes:
+            return []
+
+        # Build host lists per layer using start/end layer ranges
+        layer_hosts: List[List[int]] = []
+        for l in range(num_layers):
+            hosts = [i for i, n in enumerate(nodes) if n.hosts_layer(l)]
+            layer_hosts.append(hosts)
+
+        # If any layer lacks a host, return empty
+        if any(len(h) == 0 for h in layer_hosts):
+            return []
+
+        # layer_id: node_id -> cost
+        dp: List[Dict[int, float]] = [{i: float("inf") for i in layer_hosts[0]}]
+        back: List[Dict[int, Optional[int]]] = [{i: None for i in layer_hosts[0]}]
+
+        # Init layer 0
+        for i in layer_hosts[0]:
+            dp[0][i] = nodes[i].layer_latency_ms
+
+        # Recurrrence: dp[l+1][g] = min_g' (dp[l][g] + rtt(g,g') + latency(g'))
+        for l in range(1, num_layers):
+            curr: Dict[int, float] = {i: float("inf") for i in layer_hosts[l]}
+            prev_back: Dict[int, Optional[int]] = {i: None for i in layer_hosts[l]}
+            for i in layer_hosts[l]:
+                node_i = nodes[i]
+                best_cost = float("inf")
+                best_j: Optional[int] = None
+                for j, prev_cost in dp[l - 1].items():
+                    if prev_cost == float("inf"):
+                        continue
+                    node_j = nodes[j]
+                    trans = 0.0 if i == j else node_j.get_rtt_to(node_i)
+                    total = prev_cost + trans + node_i.layer_latency_ms
+                    if total < best_cost:
+                        best_cost = total
+                        best_j = j
+                curr[i] = best_cost
+                prev_back[i] = best_j
+            dp.append(curr)
+            back.append(prev_back)
+
+        # Backtrack optimal node index per layer
+        last = dp[-1]
+        end_i = min(last, key=lambda k: last[k])
+        path_idx: List[int] = [end_i]
+        for l in range(num_layers - 1, 0, -1):
+            prev_i = back[l][path_idx[-1]]
+            if prev_i is None:
+                break
+            path_idx.append(prev_i)
+        path_idx.reverse()
+
+        # Identify turning points: tail truncations when switching away
+        turning: List[Tuple[str, int, str]] = []
+        for l in range(1, len(path_idx)):
+            prev_i = path_idx[l - 1]
+            cur_i = path_idx[l]
+            if prev_i == cur_i:
+                continue
+            prev_node = nodes[prev_i]
+            if prev_node.hosts_layer(l):
+                turning.append((nodes[prev_i].node_id, l, "tail"))
+                self.reallocate(nodes[prev_i], prev_node.start_layer, l)
+        # Identify front truncations: for each node on the path, if the first
+        # layer used is greater than its hosted start, we can drop the prefix
+        # [start, first_used_layer)
+        first_used: Dict[int, int] = {}
+        for l, idx in enumerate(path_idx):
+            if idx not in first_used:
+                first_used[idx] = l
+        for idx, l0 in first_used.items():
+            n = nodes[idx]
+            if n.start_layer is None:
+                continue
+            if l0 > n.start_layer:
+                turning.append((n.node_id, l0, "head"))
+                self.reallocate(n, l0, n.end_layer)
+        return turning
 
     def get_lightest_layer(self) -> Optional[LayerLoad]:
         """Return the current lightest-hosted layer from the heap, if any."""
@@ -541,61 +576,6 @@ class BaseLayerAllocator:
             end_layer = min(proposed_start_layer + adjusted_capacity, self.num_total_layers)
 
         return end_layer
-
-    def has_full_pipeline(self, active_only: bool = False) -> bool:
-        """Return True if there exists at least one pipeline covering [0, num_total_layers).
-
-        Checks whether we can chain contiguous node allocations starting at 0 to reach L.
-        This requires that there exists at least one node starting at layer 0 and a chain
-        of contiguous node ranges that reaches num_total_layers.
-        """
-        total_layers = self.num_total_layers
-
-        # Build index of nodes by start_layer
-        start_to_nodes: Dict[int, List[Node]] = {}
-        for node_id, (s, e) in self.node_allocation.items():
-            if s is None or e is None:
-                continue
-            node = self.node_id_to_node.get(node_id)
-            if node is None or (active_only and not node.is_active):
-                continue
-            start_to_nodes.setdefault(s, []).append(node)
-
-        # Must have at least one node starting at layer 0
-        if not start_to_nodes.get(0):
-            return False
-
-        # DFS to check if we can reach total_layers from any head node
-        def can_reach_target(current_end: int) -> bool:
-            if current_end >= total_layers:
-                return current_end == total_layers
-
-            for nxt in start_to_nodes.get(current_end, []):
-                if nxt.end_layer and nxt.end_layer > current_end:
-                    if can_reach_target(nxt.end_layer):
-                        return True
-            return False
-
-        return any(
-            head.end_layer and can_reach_target(head.end_layer)
-            for head in start_to_nodes.get(0, [])
-        )
-
-    def layer_replication_stats(self) -> Tuple[int, int, float]:
-        """Return (min, max, avg) number of nodes hosting each layer.
-
-        Counts the number of hosting nodes per layer from `layer_to_load` and
-        aggregates basic statistics. If there are no layers, returns (0, 0, 0.0).
-        """
-        if not self.layer_to_load:
-            return 0, 0, 0.0
-        counts = [len(layer.hosting_nodes) for layer in self.layer_to_load.values()]
-        if not counts:
-            return 0, 0, 0.0
-        min_hosts = min(counts)
-        max_hosts = max(counts)
-        avg_hosts = float(sum(counts)) / float(len(counts))
-        return min_hosts, max_hosts, avg_hosts
 
 
 class GreedyLayerAllocator(BaseLayerAllocator):
@@ -636,11 +616,12 @@ class GreedyLayerAllocator(BaseLayerAllocator):
     remaining nodes.
     """
 
-    def init(
+    def __init__(
         self,
         *,
         look_ahead_enable: bool = True,
         pipeline_rebalance_strategy: Literal["greedy", "water_filling"] = "water_filling",
+        **kwargs,
     ) -> None:
         """Initialize Greedy allocator runtime knobs.
 
@@ -656,26 +637,30 @@ class GreedyLayerAllocator(BaseLayerAllocator):
             None. Sets internal flags `_look_ahead_enable` and
             `_pipeline_rebalance_strategy`.
         """
+        super().__init__(**kwargs)
         self._look_ahead_enable = look_ahead_enable
         self._pipeline_rebalance_strategy = pipeline_rebalance_strategy
 
-    def global_allocation(self) -> bool:
+    def allocate_from_standby(self) -> bool:
         """
         Allocate layers to nodes greedily to maximize the number of pipelines.
 
         Builds pipelines from the sorted nodes and uses `adjust_pipeline_layers`
         to assign contiguous layer ranges on each pipeline.
         """
-        logger.debug(
-            "[Greedy] Starting global_allocation with %d nodes for %d layers",
-            len(self.nodes),
-            self.model_info.num_layers,
-        )
         num_total_layers = self.model_info.num_layers
 
-        available_nodes = self.nodes.copy()
+        available_nodes = self.node_management.standby_nodes
+        logger.info(
+            "[Greedy LayerAllocator] Starting allocate_from_standby with %d nodes for %d layers",
+            len(available_nodes),
+            num_total_layers,
+        )
+
         for n in available_nodes:
-            logger.warning(f"Node {n.node_id} has capacity {n.get_decoder_layer_capacity()}")
+            logger.info(
+                f"[Greedy LayerAllocator] Node {n.node_id} has capacity {n.get_decoder_layer_capacity()}"
+            )
         any_assigned = False
 
         # Read runtime knobs with sensible defaults if `init` wasn't called
@@ -756,14 +741,16 @@ class GreedyLayerAllocator(BaseLayerAllocator):
                 logger.debug("[Greedy] Unable to form complete pipeline; stopping")
                 break
 
-        if not any_assigned or not self.has_full_pipeline():
-            logger.debug("[Greedy] global_allocation produced no full pipeline")
+        if not any_assigned or not self.node_management.has_full_pipeline(self.num_total_layers):
+            logger.warning("[Greedy] allocate_from_standby produced no full pipeline")
             return False
-        # Assign any nodes that were left unallocated using dynamic policy
-        if self.assign_left_over_nodes:
-            logger.debug("[Greedy] Assigning left-over nodes")
-            self.allocate_left_over_nodes()
-        logger.debug("[Greedy] global_allocation completed successfully")
+        if self.trim_layers_on_turning_points:
+            turning_points = self.adjust_for_turning_points(self.num_total_layers)
+            logger.debug(f"Turning points: {turning_points}")
+        if self.dynamic_pipelines_router:
+            logger.info("[Greedy] Allocating standby nodes using Dynamic Join (lightest layers)")
+            self.allocate_standby_nodes()
+        logger.info("[Greedy] allocate_from_standby completed successfully")
         return True
 
 
@@ -804,45 +791,41 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
 
     def __init__(
         self,
-        model_info: ModelInfo,
-        nodes: List[Node],
-        alpha: float = 2.0,
         *,
-        assign_left_over_nodes: bool = True,
-        rebalance_threshold: float = 0.25,
-        water_filling_max_iterations: int = 40,
+        alpha: float = 2.0,
+        **kwargs,
     ) -> None:
-        super().__init__(
-            model_info,
-            nodes,
-            rebalance_threshold=rebalance_threshold,
-            water_filling_max_iterations=water_filling_max_iterations,
-        )
+        super().__init__(**kwargs)
         # Sort GPUs by layer capacity descending for stronger pruning
         self.alpha = alpha
         self._path: Dict[Tuple[int, Tuple[int, ...], int], Tuple] = {}
 
-    def global_allocation(self) -> bool:
-        logger.debug(
-            "[DP] Starting global_allocation with %d nodes for %d layers",
-            len(self.nodes),
-            self.model_info.num_layers,
+    def allocate_from_standby(self) -> bool:
+        """
+        Allocate nodes in STANDBY pool using dynamic programming.
+        """
+        num_layers = self.model_info.num_layers
+
+        available_nodes = self.node_management.standby_nodes
+        logger.info(
+            "[DPLayerAllocator] Starting allocate_from_standby with %d nodes for %d layers",
+            len(available_nodes),
+            num_layers,
         )
-        num_nodes = len(self.nodes)
-        num_layers = int(self.model_info.num_layers)
-        total_cap = sum(node.get_decoder_layer_capacity() for node in self.nodes)
+        num_nodes = len(available_nodes)
+        total_cap = sum(node.get_decoder_layer_capacity() for node in available_nodes)
 
         if num_layers <= 0 or num_nodes == 0 or total_cap < num_layers:
             logger.warning(
-                "[DP] Insufficient resources: nodes=%d, layers=%d, total_cap=%d",
+                "[DPLayerAllocator] Insufficient resources: nodes=%d, layers=%d, total_cap=%d",
                 num_nodes,
                 num_layers,
                 total_cap,
             )
             return False
         else:
-            logger.debug(
-                "[DP] Sufficient resources: nodes=%d, layers=%d, total_cap=%d",
+            logger.info(
+                "[DPLayerAllocator] Sufficient resources: nodes=%d, layers=%d, total_cap=%d",
                 num_nodes,
                 num_layers,
                 total_cap,
@@ -850,7 +833,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
         # used for pruning
         suffix_sum = [0] * (num_nodes + 1)
         for i in range(num_nodes - 1, -1, -1):
-            suffix_sum[i] = suffix_sum[i + 1] + self.nodes[i].get_decoder_layer_capacity()
+            suffix_sum[i] = suffix_sum[i + 1] + available_nodes[i].get_decoder_layer_capacity()
 
         max_num_pipes = min(num_nodes, total_cap // num_layers)
         best_num_pipes = 0
@@ -891,11 +874,13 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
 
                 # Option 2: Assign to existing open pipeline
                 for j, rj in enumerate(open_residuals):
-                    c_norm = self.nodes[i].get_decoder_layer_capacity()
+                    c_norm = available_nodes[i].get_decoder_layer_capacity()
                     r_after = rj - c_norm
                     if r_after <= 0:
                         # try closing with LM head allowance
-                        c_close = self.nodes[i].get_decoder_layer_capacity(include_lm_head=True)
+                        c_close = available_nodes[i].get_decoder_layer_capacity(
+                            include_lm_head=True
+                        )
                         r_after_close = rj - c_close
                         if r_after_close <= 0:
                             new_open = list(open_residuals)
@@ -923,7 +908,9 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
 
                 # Option 3: start a new pipeline (if we still need more)
                 if new_needed > 0:
-                    c_start = self.nodes[i].get_decoder_layer_capacity(include_input_embed=True)
+                    c_start = available_nodes[i].get_decoder_layer_capacity(
+                        include_input_embed=True
+                    )
                     r_new = num_layers - c_start
                     if r_new <= 0:
                         cost = 1 + dp(i + 1, open_residuals, finished_pipes + 1)
@@ -949,35 +936,40 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
                     best_path = dict(path)
 
         if best_num_pipes is None or best_num_pipes == 0:
-            logger.debug("[DP] Could not find a feasible number of pipelines")
+            logger.debug("[DPLayerAllocator] Could not find a feasible number of pipelines")
             return False
         self._path = best_path
-        pipelines = self._backtrack(best_num_pipes, num_nodes)
+        pipelines = self._backtrack(best_num_pipes, available_nodes)
 
         # Assign layers for each pipeline via in-place rebalancing
         for pl_nodes in pipelines:
             if not pl_nodes:
                 continue
-            logger.debug("[DP] Adjusting pipeline with %d nodes", len(pl_nodes))
+            logger.debug("[DPLayerAllocator] Adjusting pipeline with %d nodes", len(pl_nodes))
             self.adjust_pipeline_layers(pl_nodes, assume_sorted=False)
-        # Assign any nodes that were left unallocated using dynamic policy
-        if self.assign_left_over_nodes:
-            logger.debug("[DP] Assigning left-over nodes")
-            self.allocate_left_over_nodes()
-        if not self.has_full_pipeline():
-            logger.debug("[DP] Allocation did not produce a full pipeline")
+        if not self.node_management.has_full_pipeline(self.num_total_layers):
+            logger.warning("[DPLayerAllocator] Allocation did not produce a full pipeline")
             return False
-        logger.debug("[DP] global_allocation completed successfully")
+        if self.trim_layers_on_turning_points:
+            turning_points = self.adjust_for_turning_points(self.num_total_layers)
+            logger.debug(f"[DPLayerAllocator] Turning points: {turning_points}")
+        if self.dynamic_pipelines_router:
+            logger.info(
+                "[DPLayerAllocator] Allocating standby nodes using Dynamic Join (lightest layers)"
+            )
+            self.allocate_standby_nodes()
+        logger.info("[DPLayerAllocator] allocate_from_standby completed successfully")
         return True
 
-    def _backtrack(self, best_num_pipes: int, num_nodes: int) -> List[List[Node]]:
+    def _backtrack(self, best_num_pipes: int, available_nodes: List[Node]) -> List[List[Node]]:
         # Reconstruct pipelines
-        logger.debug("[DP] Backtracking to construct %d pipelines", best_num_pipes)
+        logger.debug("[DPLayerAllocator] Backtracking to construct %d pipelines", best_num_pipes)
         pipelines: List[List[Node]] = [[] for _ in range(best_num_pipes)]
         # (residual, nodes list)
         open_list: List[Tuple[int, List[Node]]] = []
         i = 0
         finished = 0
+        num_nodes = len(available_nodes)
         while i < num_nodes and finished < best_num_pipes:
             open_tuple = tuple(sorted(r for r, _ in open_list))
             action = self._path.get((i, open_tuple, finished))
@@ -987,7 +979,7 @@ class DynamicProgrammingLayerAllocator(BaseLayerAllocator):
             if kind in ("skip", "done"):
                 i += 1
                 continue
-            node = self.nodes[i]
+            node = available_nodes[i]
             if kind == "assign":
                 j, closed = action[1], action[2]
                 # ensure open_list sorted like open_tuple

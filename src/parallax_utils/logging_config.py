@@ -102,7 +102,7 @@ def _initialize_if_necessary():
         logging.getLogger().setLevel("INFO")
 
         # Allow logs from our main packages by default
-        _enable_default_handler(("parallax", "scheduling", "backend", "sglang"))
+        _enable_default_handler(("parallax", "scheduling", "backend", "sglang", "router"))
 
 
 def set_log_level(level_name: str):

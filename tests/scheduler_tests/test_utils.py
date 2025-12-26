@@ -9,6 +9,7 @@ from typing import Dict, Iterable, List, Tuple
 
 from scheduling.model_info import ModelInfo
 from scheduling.node import Node, NodeHardwareInfo
+from scheduling.node_management import NodeManager
 
 A100_80G = NodeHardwareInfo(
     node_id="a100-80g",
@@ -96,6 +97,11 @@ def build_node(
     # Ensure roofline uses a defined speedup
     setattr(n, "quantization_speedup", 1.0)
     return n
+
+
+def build_node_management(nodes: List[Node]) -> NodeManager:
+    """Create a NodeManager seeded with the given nodes (all start as STANDBY)."""
+    return NodeManager(initial_nodes=list(nodes))
 
 
 def compute_rtts_from_coords(nodes: Iterable[Node]) -> Dict[Tuple[str, str], float]:

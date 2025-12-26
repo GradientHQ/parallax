@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -14,6 +13,7 @@ from vllm.config import (
     ParallelConfig,
     SchedulerConfig,
     VllmConfig,
+    set_current_vllm_config,
 )
 from vllm.distributed.parallel_state import GroupCoordinator as VLLMGroupCoordinator
 from vllm.v1.core.kv_cache_manager import KVCacheManager
@@ -22,6 +22,7 @@ from vllm.v1.core.kv_cache_utils import (
     get_kv_cache_configs,
     get_request_block_hasher,
     init_none_hash,
+    sha256_cbor,
 )
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheGroupSpec, KVCacheTensor
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
@@ -261,21 +262,11 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
 
         self.request_block_hasher = None
         if enable_prefix and kv_cache_manager.block_size is not None:
-            try:
-                hashing_mod = importlib.import_module("vllm.utils.hashing")
-                get_hash_fn_by_name: Callable[[str], Callable[[Any], bytes]] = getattr(
-                    hashing_mod, "get_hash_fn_by_name"
-                )
-                hash_fn = get_hash_fn_by_name(cache_config.prefix_caching_hash_algo)
-                init_none_hash(hash_fn)
-            except (ModuleNotFoundError, AttributeError) as exc:
-                logger.warning("Unable to initialize prefix cache hashing: %s", exc)
-
-                def simple_hash_fn(obj: Any) -> bytes:
-                    return str(hash(str(obj))).encode("utf-8")
-
-                hash_fn = simple_hash_fn
-                logger.info("Using simple fallback hash function for prefix caching")
+            # Use sha256_cbor from vllm.v1.core.kv_cache_utils for hashing
+            # This is the standard hash function in vLLM 0.11+
+            hash_fn = sha256_cbor
+            init_none_hash(hash_fn)
+            logger.debug("Initialized prefix cache hashing with sha256_cbor")
 
             block_size = kv_cache_manager.block_size
             if block_size is None and self.kv_cache_config.kv_cache_groups:
@@ -513,6 +504,10 @@ def initialize_vllm_model_runner(
         instance_id="",
     )
 
+    # Set the global vLLM config to avoid "Current vLLM config is not set" warning
+    set_current_vllm_config(vllm_config)
+    logger.debug("Set current vLLM config globally")
+
     model_runner = ParallaxVLLMModelRunner(
         vllm_config=vllm_config,
         kv_cache_config=None,
@@ -566,5 +561,14 @@ def initialize_vllm_model_runner(
     logger.info("Initializing KV Cache Manager...")
     model_runner.initialize_kv_cache_manager(max_model_len=model_config.max_model_len)
     logger.info("KV Cache Manager initialized successfully")
+
+    # Warm up the model and capture CUDA graphs if enabled
+    # This prevents the first request from triggering compilation/graph capture
+    logger.info("Warming up model and capturing CUDA graphs...")
+    try:
+        model_runner.capture_model()
+        logger.info("Model warmup and CUDA graph capture completed successfully")
+    except Exception as e:
+        logger.warning(f"Failed to capture CUDA graph during initialization: {e}")
 
     return model_runner, config, tokenizer

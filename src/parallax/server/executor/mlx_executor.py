@@ -79,8 +79,14 @@ class MLXExecutor(BaseExecutor):
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
         nccl_port: Optional[int] = 4000,
+        # Data Parallel Configs (not used in MLX, but accepted for compatibility)
+        enable_dp_attention: Optional[bool] = False,
+        dp_rank: Optional[int] = 0,
+        dp_size: Optional[int] = 1,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
+        # Weight Refit
+        enable_weight_refit: Optional[bool] = False,
     ):
         logger.debug(
             f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer})"
@@ -137,8 +143,8 @@ class MLXExecutor(BaseExecutor):
         if key_dim is not None and value_dim is not None:
             conv_dim = key_dim * 2 + value_dim
 
-        indexer_key_head_dim = self.config.get("indexer_key_head_dim", None)
-        indexer_num_kv_heads = self.config.get("indexer_num_kv_heads", None)
+        index_head_dim = self.config.get("index_head_dim", None)
+        index_n_heads = self.config.get("index_n_heads", None)
 
         layer_types = get_layer_types(self.config, start_layer, end_layer)
         logger.debug(f"layer_types: {layer_types}")
@@ -156,8 +162,8 @@ class MLXExecutor(BaseExecutor):
             block_size=kv_block_size,
             cache_memory_fraction=kv_cache_memory_fraction,
             head_dim_v=v_head_dim,
-            indexer_key_head_dim=indexer_key_head_dim,
-            indexer_num_kv_heads=indexer_num_kv_heads,
+            index_head_dim=index_head_dim,
+            index_n_heads=index_n_heads,
             layer_types=layer_types,
             max_num_seqs=max_batch_size // micro_batch_ratio,
             conv_dim=conv_dim,
@@ -188,6 +194,7 @@ class MLXExecutor(BaseExecutor):
             tp_rank=tp_rank,
             tp_size=tp_size,
             shared_state=shared_state,
+            enable_weight_refit=enable_weight_refit,
         )
 
         try:
@@ -237,34 +244,48 @@ class MLXExecutor(BaseExecutor):
                         )
                         continue
 
-                    assert req.next_token_id is not None
-                    original_req.commit_new_token(req.next_token_id)
+                    if not req.abort and req.next_token_id is not None:
+                        original_req.commit_new_token(req.next_token_id)
+
                     if len(req.routing_table) > 0:
                         original_req.routing_table = req.routing_table
 
                     # Check for termination.
+                    if req.abort:
+                        original_req.abort = True
+
                     if self.scheduler.check_and_update_request_status(original_req):
                         self.cache_manager.release_request(original_req.request_id)
                         logger.debug(
                             f"Released resources for finished request {req.request_id}, "
                             f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
                         )
-                        if not self.is_last_peer:
+                        if not self.is_last_peer and not req.abort:
                             self.finished_batch.append(req)
                     else:
                         self.scheduler.enque_request(original_req)
 
                     # detokenize and send to http server
                     if self.tp_rank == 0:
+                        # Only send token if it's valid
+                        token_to_send = req.next_token_id if req.next_token_id is not None else -1
                         req_dict = {
                             "prompt_tokens": len(req.input_ids),
-                            "next_token_id": req.next_token_id,
+                            "next_token_id": token_to_send,
                             "rid": req.request_id,
                         }
                         if original_req.status == RequestStatus.FINISHED_EOS:
                             req_dict["eos"] = True
                         if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
                             req_dict["length"] = True
+                        if original_req.status == RequestStatus.FINISHED_ABORT:
+                            req_dict["abort"] = True
+
+                        # Add prob value for the sampled token (if requested and available)
+                        if original_req.return_probs and req.token_prob is not None:
+                            req_dict["probs"] = req.token_prob
+                        if self.enable_weight_refit:
+                            req_dict["weight_version"] = self.weight_version
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:
@@ -288,11 +309,16 @@ class MLXExecutor(BaseExecutor):
                         f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
                     )
                     self.scheduler.evict_request(req.request_id)
-                    if not self.is_last_peer:
+                    if not self.is_last_peer and not req.abort:
                         self.finished_batch.append(req)
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
+
+    def check_and_refit_weight(self, refit_weight_path: str):
+        if refit_weight_path == "":
+            return
+        self.shard_loader.update_weight_from_disk(self.model_shard, refit_weight_path)
 
     def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """Process a batch of requests in MLX."""
@@ -348,11 +374,48 @@ class MLXExecutor(BaseExecutor):
         # Process last peer: need additional sampling + detokenization
         if return_decoded_tokens:
             sampling_info = SamplingBatchInfo.from_reqs(requests)
-            return mx.array(
+
+            # For MLX, hidden_states at last shard is already logits (after lm_head)
+            # hidden_states shape: [batch_size, seq_len, vocab_size]
+            token_ids = mx.array(
                 self.model_shard.logits_to_tokens(hidden_states, lengths, sampling_info)
             )
 
-        return hidden_states
+            needs_probs = any(
+                (isinstance(req, InitialRequest) and req.return_probs)
+                or (isinstance(req, IntermediateRequest) and req.return_probs)
+                for req in requests
+            )
+
+            token_probs = None
+            if needs_probs:
+                # Extract probability values for sampled tokens
+                try:
+                    # Get last position logits for each request
+                    batch_probs = []
+                    for i, req in enumerate(requests):
+                        if lengths[i] > 0:
+                            # Get logit at last position
+                            last_idx = int(lengths[i]) - 1
+                            last_logits = hidden_states[i, last_idx, :]  # [vocab_size]
+                            probs = last_logits / sampling_info.temperatures.reshape(-1, 1)
+                            probs[:] = mx.softmax(probs, axis=-1)
+                            # logit_value = float(last_logits[token_id])
+                            # batch_logits.append(logit_value)
+                            # Extract probability for the sampled token
+                            token_id = int(token_ids[i])
+                            batch_probs.append(float(probs[i, token_id]))
+
+                    token_probs = batch_probs if batch_probs else None
+                except Exception as e:
+                    logger.debug(f"Failed to extract token probs: {e}")
+                    token_probs = None
+
+            # Return dict with token_ids and optional probs
+            return {"hidden_states": token_ids, "probs": token_probs}
+
+        # Intermediate peer: return hidden states without probs
+        return {"hidden_states": hidden_states, "probs": None}
 
     def _release_request(self, rid: str):
         """Release per-request resources in MLX."""
@@ -527,9 +590,40 @@ class MLXExecutor(BaseExecutor):
         h_or_tokens_list = []
         block_tables_list = []
         context_lengths_list = []
+        valid_requests = []
 
         for req in batched_requests:
             assert req.is_decoding, f"Request {req.request_id} is not a decode request."
+
+            # Allocate slot for new token
+            success = self.cache_manager.append_slot(req.request_id)
+            if not success:
+                logger.error(
+                    f"OOM during decode for {req.request_id}. Aborting request and notifying other nodes."
+                )
+                req.update_status(RequestStatus.FINISHED_ABORT)
+                self.cache_manager.free_request(req.request_id)
+                self.scheduler.evict_request(req.request_id)
+                # Add to finished_batch to trigger abort notification
+                self.finished_batch.append(req)
+
+                # If this is First Peer, we must also notify HTTP Server immediately
+                if self.is_first_peer and self.tp_rank == 0:
+                    req_dict = {
+                        "prompt_tokens": req.prompt_len,
+                        "next_token_id": (
+                            req.output_ids[-1] if req.output_ids else -1
+                        ),  # Best effort to return last token
+                        "rid": req.request_id,
+                        "abort": True,
+                    }
+                    if hasattr(self, "send_to_ipc_socket"):
+                        self.send_to_ipc_socket.send_pyobj(req_dict)
+
+                continue
+
+            # Allocation successful, proceed with batch preparation
+            valid_requests.append(req)
 
             if self.is_first_peer:
                 # First peer input is the last generated token
@@ -552,6 +646,12 @@ class MLXExecutor(BaseExecutor):
             block_tables_list.append(block_table)
             context_lengths_list.append(self.cache_manager.get_context_length(req.request_id))
 
+        # Check if we have any valid requests left
+        if not valid_requests:
+            return None
+
+        batch_size = len(valid_requests)
+
         if isinstance(h_or_tokens_list[0], list):
             # First peer case: h_or_tokens_list is list of list of ints [[token_id], ...]
             padded_inputs = mx.array(h_or_tokens_list, dtype=mx.int32)  # (Batch, 1)
@@ -572,7 +672,7 @@ class MLXExecutor(BaseExecutor):
         # Prepare state slot mapping if needed
         state_slot_mapping = None
         if self.cache_manager.needs_slots:
-            req_ids = [r.request_id for r in batched_requests]
+            req_ids = [r.request_id for r in valid_requests]
             slots = [self.cache_manager.get_slot(rid) for rid in req_ids]
             state_slot_mapping = mx.array(slots, dtype=mx.int32)
 
@@ -580,7 +680,7 @@ class MLXExecutor(BaseExecutor):
             "h_or_tokens": padded_inputs,
             "cache": self.cache_manager.get_caches(),
             "mask": None,
-            "requests": batched_requests,
+            "requests": valid_requests,
             "block_tables": block_tables_tensor,
             "context_lengths": context_lengths_tensor,
             "slot_mapping": None,

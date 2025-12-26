@@ -33,6 +33,7 @@ class SchedulerManage:
         announce_maddrs: List[str] = [],
         http_port: int = 3001,
         use_hfcache: bool = False,
+        enable_weight_refit: bool = False,
     ):
         """Initialize the manager with networking bootstrap parameters."""
         self.initial_peers = initial_peers
@@ -42,6 +43,7 @@ class SchedulerManage:
         self.announce_maddrs = announce_maddrs
         self.http_port = http_port
         self.use_hfcache = use_hfcache
+        self.enable_weight_refit = enable_weight_refit
         self.model_name = None
         self.init_nodes_num = None
         self.scheduler = None
@@ -114,6 +116,19 @@ class SchedulerManage:
             return None
         return self.lattica.peer_id()
 
+    def weight_refit(self, request_data):
+        """
+        Trigger weight refit on every nodes.
+        """
+        if self.scheduler is None:
+            return False
+        self.scheduler.refit_request = request_data
+        self.scheduler.refit_set = set()
+        return True
+
+    def get_last_refit_time(self):
+        return self.scheduler.update_last_refit_time()
+
     def need_more_nodes(self):
         return self.scheduler.need_more_nodes() if self.scheduler else False
 
@@ -129,6 +144,9 @@ class SchedulerManage:
                 ),
                 "node_list": self.get_node_list(),
                 "need_more_nodes": self.need_more_nodes(),
+                "max_running_request": (
+                    self.scheduler.report_pipeline_capacity()[1] if self.scheduler else 0
+                ),
             },
         }
 
@@ -136,7 +154,7 @@ class SchedulerManage:
         if self.scheduler is None:
             return []
 
-        return [self.build_node_info(node) for node in self.scheduler.nodes]
+        return [self.build_node_info(node) for node in self.scheduler.node_manager.nodes]
 
     def build_node_info(self, node):
         return {
@@ -162,7 +180,12 @@ class SchedulerManage:
         self.init_nodes_num = init_nodes_num
 
         model_info = get_model_info(model_name, self.use_hfcache)
-        self.scheduler = Scheduler(model_info, [], min_nodes_bootstrapping=init_nodes_num)
+        self.scheduler = Scheduler(
+            model_info,
+            [],
+            min_nodes_bootstrapping=init_nodes_num,
+            enable_weight_refit=self.enable_weight_refit,
+        )
 
         # Run the scheduler's event/dispatch loops in background so the process
         # can continue to serve RPCs and HTTP traffic.
@@ -296,9 +319,7 @@ class SchedulerManage:
 
         # todo rebalance status
         status = (
-            NODE_STATUS_AVAILABLE
-            if self.scheduler.layer_allocator.has_full_pipeline(active_only=True)
-            else NODE_STATUS_WAITING
+            NODE_STATUS_AVAILABLE if self.scheduler.has_full_pipeline() else NODE_STATUS_WAITING
         )
         logger.debug(f"SchedulerManage status queried: {status}")
         return status

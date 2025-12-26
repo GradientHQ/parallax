@@ -20,8 +20,9 @@ from scheduling.layer_allocation import (
 )
 from scheduling.model_info import ModelInfo
 from scheduling.node import Node, NodeHardwareInfo
+from scheduling.node_management import NodeState
 
-from .test_utils import build_model_info
+from .test_utils import build_model_info, build_node_management
 
 
 def _build_node(gpu_type: str, model: ModelInfo, id_suffix: str = "") -> Node:
@@ -71,7 +72,10 @@ def test_water_filling_rebalance(num_layers: int, gpu_types: list[str], expected
 
     nodes = [_build_node(g, model, id_suffix=f"-{i}") for i, g in enumerate(gpu_types)]
 
-    allocator = GreedyLayerAllocator(model, nodes)
+    node_management = build_node_management(nodes)
+    allocator = GreedyLayerAllocator(
+        model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+    )
     allocator.adjust_pipeline_layers(nodes, assume_sorted=False)
 
     actual_layers = []
@@ -93,14 +97,13 @@ def test_water_filling_rebalance(num_layers: int, gpu_types: list[str], expected
 def _test_gap_patch_rebalance(allocator: BaseLayerAllocator):
     """Sanity checks for gap-patch dynamic rebalancing using allocator state."""
     assert allocator.layer_loads_heap, "Layer loads heap should not be empty"
-    assert allocator.node_id_to_node, "Allocator should have node mappings"
     model_info = allocator.model_info
 
     # Heap top should include a host with minimal per-layer KV memory
     per_node_mem = {
-        nid: (node.per_decoder_layer_kv_cache_memory or 0)
-        for nid, node in allocator.node_id_to_node.items()
-        if nid in allocator.node_allocation
+        nid: ((allocator.node_management.get(nid).per_decoder_layer_kv_cache_memory or 0))  # type: ignore[union-attr]
+        for nid in allocator.layer_loads_heap[0].hosting_nodes
+        if allocator.node_management.get(nid) is not None
     }
     min_mem = min(per_node_mem.values()) if per_node_mem else 0
 
@@ -114,13 +117,14 @@ def _test_gap_patch_rebalance(allocator: BaseLayerAllocator):
     before_mem = allocator.layer_to_load[before_layer_id].current_kv_size
 
     new_node = _build_node("rtx4090", model_info, id_suffix="-gap")
-    allocator.join(new_node)
+    allocator.node_management.upsert(new_node, state=NodeState.STANDBY)
+    allocator.dynamic_join(new_node)
 
     after_mem = allocator.layer_to_load[before_layer_id].current_kv_size
     assert after_mem >= before_mem
     assert new_node.node_id in allocator.layer_to_load[before_layer_id].hosting_nodes
 
-    allocator.leave(new_node.node_id)
+    allocator.deallocate(new_node)
     restored_mem = allocator.layer_to_load[before_layer_id].current_kv_size
     assert new_node.node_id not in allocator.layer_to_load[before_layer_id].hosting_nodes
     assert restored_mem == before_mem
@@ -201,12 +205,17 @@ def test_allocator(
     for i in range(n_4090):
         nodes.append(_build_node("rtx4090", model, id_suffix=f"-{i}"))
 
+    node_management = build_node_management(nodes)
     allocator = (
-        GreedyLayerAllocator(model, nodes, assign_left_over_nodes=False)
+        GreedyLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
         if strategy == "greedy"
-        else DynamicProgrammingLayerAllocator(model, nodes, assign_left_over_nodes=False)
+        else DynamicProgrammingLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
     )
-    allocator.global_allocation()
+    allocator.allocate_from_standby()
     _test_gap_patch_rebalance(allocator)
 
     # Collect (start,end) per node in creation order
@@ -232,14 +241,19 @@ def test_single_node_can_host_all_layers_greedy(strategy: Literal["greedy", "dp"
     """Small model fully hosted by a single strong node (A100-80g)."""
     model = build_model_info(5)
     node = _build_node("a100-80g", model)
+    node_management = build_node_management([node])
     alloc = (
-        GreedyLayerAllocator(model, [node])
+        GreedyLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
         if strategy == "greedy"
-        else DynamicProgrammingLayerAllocator(model, [node])
+        else DynamicProgrammingLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
     )
-    initialized = alloc.global_allocation()
+    initialized = alloc.allocate_from_standby()
     assert initialized is True
-    assert alloc.has_full_pipeline() is True
+    assert node_management.has_full_pipeline(model.num_layers)
     assert node.start_layer == 0 and node.end_layer == model.num_layers
 
 
@@ -250,12 +264,17 @@ def test_mixed_pool_single_host_available(strategy: Literal["greedy", "dp"]):
     a100 = _build_node("a100-80g", model, id_suffix="-a")
     r1 = _build_node("rtx4090", model, id_suffix="-1")
     r2 = _build_node("rtx4090", model, id_suffix="-2")
+    node_management = build_node_management([a100, r1, r2])
     alloc = (
-        GreedyLayerAllocator(model, [a100, r1, r2])
+        GreedyLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
         if strategy == "greedy"
-        else DynamicProgrammingLayerAllocator(model, [a100, r1, r2])
+        else DynamicProgrammingLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
     )
-    initialized = alloc.global_allocation()
+    initialized = alloc.allocate_from_standby()
     assert initialized is True
     # A100 should cover entire model
     assert a100.start_layer == 0 and a100.end_layer == model.num_layers
@@ -268,12 +287,17 @@ def test_pipeline_required_with_midrange_only(strategy: Literal["greedy", "dp"])
     """Model requires pipeline across multiple mid-range GPUs (RTX4090)."""
     model = build_model_info(7)
     nodes = [_build_node("rtx4090", model, id_suffix=f"-{i}") for i in range(3)]
+    node_management = build_node_management(nodes)
     alloc = (
-        GreedyLayerAllocator(model, nodes)
+        GreedyLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
         if strategy == "greedy"
-        else DynamicProgrammingLayerAllocator(model, nodes)
+        else DynamicProgrammingLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
     )
-    ok = alloc.global_allocation()
+    ok = alloc.allocate_from_standby()
     assert ok is True
     # At least two nodes should be assigned to cover 7 layers
     assigned = [(n.node_id, n.start_layer, n.end_layer) for n in nodes if n.start_layer is not None]
@@ -307,11 +331,18 @@ def test_allocator_does_not_duplicate_leftover_nodes(strategy: Literal["greedy",
         nodes = [a100, r1]
         expected_node_count = 2
 
+    node_management = build_node_management(nodes)
     alloc = (
-        GreedyLayerAllocator(model, nodes)
+        GreedyLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
         if strategy == "greedy"
-        else DynamicProgrammingLayerAllocator(model, nodes)
+        else DynamicProgrammingLayerAllocator(
+            model_info=model, node_management=node_management, trim_layers_on_turning_points=False
+        )
     )
-    ok = alloc.global_allocation()
+    ok = alloc.allocate_from_standby()
     assert ok is True
-    assert len(alloc.nodes) == expected_node_count, "Should not duplicate nodes during allocation"
+    assert (
+        node_management.num_nodes == expected_node_count
+    ), "Should not duplicate nodes during allocation"

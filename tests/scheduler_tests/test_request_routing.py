@@ -5,7 +5,8 @@ Covers:
 - Shard-level DP path using `Node` APIs (latency + RTT)
 - Turning point detection via layer-level DP
 - Parametrized scenarios with different splits/overlaps
-- Round-robin baseline pipeline routing and overload skipping
+- Fixed-pipeline round-robin routing and overload skipping
+- Dynamic pipeline discovery enumeration
 """
 
 import pytest
@@ -13,11 +14,13 @@ import pytest
 from scheduling.node import Node
 from scheduling.request_routing import (
     DynamicProgrammingRouting,
-    RoundRobinPipelineRouting,
+    RandomizedOverDynamicPipelinesRouting,
+    RoundRobinOverFixedPipelinesRouting,
+    find_turning_points,
 )
 
 from .test_utils import build_model_info as build_model
-from .test_utils import build_node, set_rtt_from_coords
+from .test_utils import build_node, build_node_management, set_rtt_from_coords
 
 
 def test_optimal_path_simple_chain():
@@ -64,9 +67,11 @@ def test_optimal_path_missing_rtt():
     nodes = [n1, n2]
     set_rtt_from_coords(nodes)
 
-    # Manually remove the RTT info between n1 and n2
+    # Manually remove the RTT info in both directions
     if n2.node_id in n1.rtt_to_nodes:
         del n1.rtt_to_nodes[n2.node_id]
+    if n1.node_id in n2.rtt_to_nodes:
+        del n2.rtt_to_nodes[n1.node_id]
 
     router = DynamicProgrammingRouting()
     node_ids, latency = router.find_optimal_path(nodes, num_layers)
@@ -146,15 +151,15 @@ def test_turning_points(
         n.set_layer_allocation(start, end)
         nodes.append(n)
 
-    router = DynamicProgrammingRouting()
+    DynamicProgrammingRouting()
     set_rtt_from_coords(nodes)
-    turns = router.find_turning_points(nodes, num_layers)
+    turns = find_turning_points(nodes, num_layers)
     # Order-insensitive comparison: we only require the same set of truncation points
     assert set(turns) == set(expected_turns)
 
 
 def test_round_robin_pipelines_cycle_between_two_complete_paths():
-    """Two complete pipelines -> round-robin alternates between them deterministically."""
+    """Two registered fixed pipelines -> round-robin alternates between them deterministically."""
     num_layers = 12
     model = build_model(num_layers)
     # Pipelines: [a(0,6), b(6,12)] and [c(0,4), d(4,12)]
@@ -169,7 +174,10 @@ def test_round_robin_pipelines_cycle_between_two_complete_paths():
     nodes = [a, b, c, d]
     set_rtt_from_coords(nodes)
 
-    rr = RoundRobinPipelineRouting()
+    node_manager = build_node_management(nodes)
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
+    registered = rr.register_pipelines(nodes, num_layers)
+    assert len(registered) == 2
     paths = []
     for _ in range(4):
         node_ids, latency = rr.find_optimal_path(nodes, num_layers)
@@ -190,7 +198,7 @@ def test_round_robin_pipelines_cycle_between_two_complete_paths():
 
 
 def test_round_robin_skips_overloaded_pipeline():
-    """If any node in a pipeline is overloaded, that entire pipeline is skipped."""
+    """If any node in a registered fixed pipeline is overloaded, that pipeline is skipped."""
     num_layers = 10
     model = build_model(num_layers)
     # Two pipelines: [p1a, p1b] and [p2a, p2b]
@@ -208,7 +216,8 @@ def test_round_robin_skips_overloaded_pipeline():
     # Overload p1b to invalidate pipeline 1
     p1b.current_requests = p1b.max_requests
 
-    rr = RoundRobinPipelineRouting()
+    node_manager = build_node_management(nodes)
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
     # Multiple calls should always pick the viable pipeline [p2a, p2b]
     for _ in range(3):
         node_ids, latency = rr.find_optimal_path(nodes, num_layers)
@@ -253,8 +262,7 @@ def test_round_robin_pipeline_discovery_overlapping_heads_and_tails():
         N("t2", 47, 64),
     ]
 
-    rr = RoundRobinPipelineRouting()
-    pipelines = rr.pipeline_discovery(nodes, num_layers)
+    pipelines = RandomizedOverDynamicPipelinesRouting.pipeline_discovery(nodes, num_layers)
 
     # Pipelines should be sequences of node ids
     assert len(pipelines) >= 2
@@ -281,3 +289,194 @@ def test_round_robin_pipeline_discovery_overlapping_heads_and_tails():
     )
     has_expected2 = any(matches_path(r, expected2) for r in ranges)
     assert has_expected1 and has_expected2
+
+
+def test_round_robin_pipeline_diversity():
+    """
+    Scenario:
+    Head nodes: H1, H2
+    Mid nodes: M1 (fast), M2 (slightly slower)
+    Tail nodes: T1
+    Pipelines from H1: [H1, M1, T1] (cost 10), [H1, M2, T1] (cost 12)
+    Pipelines from H2: [H2, M1, T1] (cost 10), [H2, M2, T1] (cost 12)
+    """
+    num_layers = 3
+    model = build_model(num_layers)
+
+    # Construct nodes with explicit latencies to control cost
+    # Costs: H=1, M1=1, M2=3, T=1. RTT=0 for simplicity.
+    # Path 1: 1+1+1 = 3
+    # Path 2: 1+3+1 = 5
+
+    h1 = build_node("h1", model)
+    h1.set_layer_allocation(0, 1)
+    h1.set_layer_latency_ms(1.2)
+    h2 = build_node("h2", model)
+    h2.set_layer_allocation(0, 1)
+    h2.set_layer_latency_ms(1.0)
+
+    m1 = build_node("m1", model)
+    m1.set_layer_allocation(1, 2)
+    m1.set_layer_latency_ms(1.0)
+    m2 = build_node("m2", model)
+    m2.set_layer_allocation(1, 2)
+    m2.set_layer_latency_ms(3.0)
+
+    t1 = build_node("t1", model)
+    t1.set_layer_allocation(2, 3)
+    t1.set_layer_latency_ms(1.0)
+
+    nodes = [h1, h2, m1, m2, t1]
+
+    # Mock RTT to be 0
+    for n in nodes:
+        n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
+
+    node_manager = build_node_management(nodes)
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
+    pipelines = rr.register_pipelines(nodes, num_layers)
+
+    assert len(pipelines) == 1
+    assert pipelines[0] == ["h2", "m1", "t1"]
+
+    t2 = build_node("t2", model)
+    t2.set_layer_allocation(2, 3)
+    t2.set_layer_latency_ms(1.0)
+    nodes.append(t2)
+    node_manager.upsert(t2)
+    for n in nodes:
+        n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
+    # TODO: apparently t2 shouldn't be paired with m2, but with current RR
+    # we don't consider cross-chain sum of RTTs. Leaving this to DP case.
+    t2.rtt_to_nodes[m2.node_id] = 4.0
+    m2.rtt_to_nodes[t2.node_id] = 4.0
+
+    rr.clear_registered_pipelines()
+    h1.set_layer_allocation(0, 1)
+    h2.set_layer_allocation(0, 1)
+    m1.set_layer_allocation(1, 2)
+    m2.set_layer_allocation(1, 2)
+    t1.set_layer_allocation(2, 3)
+    t2.set_layer_allocation(2, 3)
+
+    pp = rr.register_pipelines(nodes, num_layers)
+    assert len(pp) == 2
+    assert pp[1] == ["h2", "m2", "t1"]
+
+
+def test_rr_24_node_topology_utilization():
+    """Verify that with the 24-node topology, we utilize almost all nodes.
+    Topology:
+    - 6x [0, 9)
+    - 5x [9, 18)
+    - 1x [9, 19)
+    - 5x [18, 27)
+    - 1x [19, 28)
+    - 5x [27, 36)
+    - 1x [28, 36)
+    Total 24 nodes.
+    We expect 6 pipelines.
+    Ideally all 24 nodes should be used.
+    """
+    num_layers = 36
+    model = build_model(num_layers)
+    nodes = []
+
+    def add_nodes(count, start, end):
+        len(nodes)
+        for i in range(count):
+            node_id = f"n_{start}_{end}_{i}"
+            n = build_node(node_id, model)
+            n.set_layer_allocation(start, end)
+            # Set uniform latency/RTT so cost doesn't skew selection away from diversity
+            n.set_layer_latency_ms(10.0)
+            nodes.append(n)
+
+    # 6x [0, 9)
+    add_nodes(6, 0, 9)
+    # 5x [9, 18)
+    add_nodes(5, 9, 18)
+    # 1x [9, 19)
+    add_nodes(1, 9, 19)
+    # 5x [18, 27)
+    add_nodes(5, 18, 27)
+    # 1x [19, 28)
+    add_nodes(1, 19, 28)
+    # 5x [27, 36)
+    add_nodes(5, 27, 36)
+    # 1x [28, 36)
+    add_nodes(1, 28, 36)
+
+    # Mock RTT to be 0
+    for n in nodes:
+        n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
+
+    randomized = RandomizedOverDynamicPipelinesRouting()
+    pipelines = randomized.pipeline_discovery(nodes, num_layers)
+
+    assert len(pipelines) == 756
+
+    node_manager = build_node_management(nodes)
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
+    pipelines = rr.register_pipelines(nodes, num_layers)
+    assert len(pipelines) == 6
+
+    unique_nodes_used = set()
+    for p in pipelines.values():
+        for nid in p:
+            unique_nodes_used.add(nid)
+
+    print(f"Used {len(unique_nodes_used)} unique nodes out of {len(nodes)}")
+    # We expect high utilization.
+    # 6 pipelines * 4 stages = 24 slots.
+    # We have 24 nodes available.
+    # Ideally 24. Allow slight slack if topology logic is tricky, but should be > 20.
+    assert len(unique_nodes_used) >= 24
+
+
+def test_rr_select_best_pipelines_no_node_overlap_establishes_three_pipelines():
+    """40-layer model, 6 identical nodes each holding 20 layers => 3 disjoint pipelines.
+
+    Topology:
+      - 3x heads covering [0, 20)
+      - 3x tails covering [20, 40)
+    Total candidate pipelines = 3*3 = 9, but we must register only node-disjoint ones => 3.
+    """
+    num_layers = 40
+    model = build_model(num_layers)
+
+    nodes: list[Node] = []
+    # 3 heads [0, 20)
+    for i in range(3):
+        n = build_node(f"h{i}", model)
+        n.set_layer_allocation(0, 20)
+        n.set_layer_latency_ms(1.0)
+        nodes.append(n)
+    # 3 tails [20, 40)
+    for i in range(3):
+        n = build_node(f"t{i}", model)
+        n.set_layer_allocation(20, 40)
+        n.set_layer_latency_ms(1.0)
+        nodes.append(n)
+
+    # Mock RTT to be 0 so cost is purely node latency.
+    for n in nodes:
+        n.rtt_to_nodes = {other.node_id: 0.0 for other in nodes}
+
+    node_manager = build_node_management(nodes)
+    rr = RoundRobinOverFixedPipelinesRouting(node_manager)
+    registered = rr.register_pipelines(nodes, num_layers)
+
+    assert len(registered) == 3
+
+    # Must use all 6 nodes exactly once across pipelines (no overlap).
+    flat = [nid for p in registered.values() for nid in p]
+    assert len(flat) == 6
+    assert len(set(flat)) == 6
+
+    id_to_node = {n.node_id: n for n in nodes}
+    for p in registered.values():
+        assert len(p) == 2
+        h, t = p
+        assert (id_to_node[h].start_layer, id_to_node[h].end_layer) == (0, 20)
+        assert (id_to_node[t].start_layer, id_to_node[t].end_layer) == (20, 40)

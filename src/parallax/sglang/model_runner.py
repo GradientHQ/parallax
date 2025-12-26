@@ -15,6 +15,7 @@ import torch
 from mlx_lm.utils import load_config
 from sglang.srt.configs.model_config import ModelConfig
 from sglang.srt.distributed import (
+    get_pp_group,
     get_tp_group,
     get_world_group,
     init_distributed_environment,
@@ -67,6 +68,8 @@ class ParallaxModelRunner(SGLModelRunner):
         server_args: ServerArgs,
         pp_start_layer: int,
         pp_end_layer: int,
+        dp_size: int = 1,
+        dp_rank: int = 0,
     ):
         """Add pp_start_layer and pp_end_layer for decentralized model"""
         self.pp_start_layer = pp_start_layer
@@ -86,6 +89,7 @@ class ParallaxModelRunner(SGLModelRunner):
             moe_ep_size=moe_ep_size,
             nccl_port=nccl_port,
             server_args=server_args,
+            dp_rank=dp_rank,
         )
 
     def init_torch_distributed(self):
@@ -174,6 +178,7 @@ class ParallaxModelRunner(SGLModelRunner):
             cpu_group=get_world_group().cpu_group,
         )
         self.tp_group = get_tp_group()
+        self.pp_group = get_pp_group()
         self.attention_tp_group = get_attention_tp_group()
 
         # Check memory for tensor parallelism
@@ -206,7 +211,9 @@ def form_sgl_server_args(
     dtype: str = "bfloat16",
     kv_cache_memory_fraction: float = 0.85,
     tp_size: int = 1,
+    dp_size: int = 1,
     attention_backend: str = "flashinfer",
+    enable_dp_attention: bool = False,
     kv_block_size: int = 64,
     moe_runner_backend="auto",
     enable_lora: Optional[bool] = False,
@@ -224,6 +231,7 @@ def form_sgl_server_args(
         model_path=model_path,
         dtype=dtype,
         attention_backend=attention_backend,
+        enable_dp_attention=enable_dp_attention,
         page_size=kv_block_size,
         mem_fraction_static=kv_cache_memory_fraction,
         moe_runner_backend=moe_runner_backend,
@@ -238,6 +246,7 @@ def form_sgl_server_args(
         lora_eviction_policy=lora_eviction_policy,
         lora_backend=lora_backend,
         max_lora_chunk_size=max_lora_chunk_size,
+        dp_size=dp_size,
     )
     return sgl_server_args
 
@@ -260,6 +269,7 @@ def initialize_sgl_model_runner(
     lora_eviction_policy: Optional[str] = "lru",
     lora_backend: Optional[str] = "triton",
     max_lora_chunk_size: Optional[int] = 128,
+    enable_dp_attention: bool = False,
     **kwargs,
 ):
     """
@@ -274,6 +284,8 @@ def initialize_sgl_model_runner(
     # Extract TP-related parameters from kwargs or use defaults
     tp_rank = kwargs.get("tp_rank", 0)
     tp_size = kwargs.get("tp_size", 1)
+    dp_size = kwargs.get("dp_size", 1)
+    dp_rank = kwargs.get("dp_rank", 0)
     use_hfcache = kwargs.get("use_hfcache", False)
     nccl_port = kwargs.get("nccl_port", None)
     # Use selective download for GPU models to save bandwidth and disk space
@@ -312,7 +324,9 @@ def initialize_sgl_model_runner(
         dtype,
         kv_cache_memory_fraction,
         tp_size,
+        dp_size,
         attention_backend,
+        enable_dp_attention,
         kv_block_size,
         moe_runner_backend,
         enable_lora,
@@ -357,5 +371,17 @@ def initialize_sgl_model_runner(
         server_args=server_args,
         pp_start_layer=start_layer,
         pp_end_layer=end_layer,
+        dp_rank=dp_rank,
+        dp_size=dp_size,
     )
     return model_runner, config, tokenizer
+
+
+def refit_sgl_model(
+    model_runner: ParallaxModelRunner,
+    refit_weight_path: str,
+):
+    """Runtime weight refit from disk"""
+    logger.info(f"Begin refit weight from path: {refit_weight_path}")
+
+    model_runner.update_weights_from_disk(model_path=refit_weight_path, load_format="auto")

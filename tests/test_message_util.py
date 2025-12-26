@@ -245,6 +245,7 @@ class TestMessageUtil:
         intermediate_reqs = proto_to_abort_request(abort_proto)
         assert len(intermediate_reqs) == 2
         assert intermediate_reqs[0].request_id == "abort1"
-        assert intermediate_reqs[0].status == RequestStatus.FINISHED_EOS
+        assert intermediate_reqs[0].status == RequestStatus.FINISHED_ABORT
+        assert intermediate_reqs[0].abort is True
         assert intermediate_reqs[0].routing_table == ["nodeA", "nodeB"]
         assert intermediate_reqs[1].request_id == "abort2"
