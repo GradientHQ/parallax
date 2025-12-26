@@ -70,4 +70,4 @@ We warmly welcome contributions of all kinds! For guidelines on how to get invol
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=GradientHQ/parallax&type=date&legend=top-left)](https://www.star-history.com/#GradientHQ/parallax&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=GradientHQ/parallax&type=timeline&logscale&legend=top-left)](https://www.star-history.com/#GradientHQ/parallax&type=timeline&logscale&legend=top-left)
