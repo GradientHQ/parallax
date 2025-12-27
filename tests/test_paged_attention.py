@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
+from parallax.utils.utils import is_metal_available
 
 
 def ref_masked_attention(q, k, v, scale):
@@ -55,6 +56,9 @@ class TestPagedAttention:
     @pytest.mark.parametrize("dtype", [mx.float32, mx.float16, mx.bfloat16])
     def test_basic_functionality(self, dtype):
         """Test reshape_and_cache and paged_attention with different dtypes on small data."""
+        if not is_metal_available():
+            pytest.skip("Metal backend not available (requires macOS with Metal support)")
+
         # Check for bfloat16 support
         if dtype == mx.bfloat16:
             try:
@@ -187,6 +191,9 @@ class TestPagedAttention:
         Test paged_attention correctness on larger scales with MHA/GQA.
         Uses float16 for reasonable memory usage/precision check.
         """
+        if not is_metal_available():
+            pytest.skip("Metal backend not available (requires macOS with Metal support)")
+
         batch_size = params["bs"]
         seq_len = params["len"]
         num_heads = params["heads"]
@@ -278,6 +285,9 @@ class TestPagedAttention:
         """
         Benchmark PagedAttention vs Native MLX SDPA.
         """
+        if not is_metal_available():
+            pytest.skip("Metal backend not available (requires macOS with Metal support)")
+
         # Config
         batch_size = 8
         num_heads = 32

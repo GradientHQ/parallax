@@ -22,7 +22,7 @@ repos:
     rev: 5.13.2
     hooks:
       - id: isort
-        language_version: python3.11
+        language_version: python3
         args: ["--profile", "black"]
         exclude: '^src/parallax/p2p/proto/forward_pb2\.py$'
 
@@ -30,5 +30,5 @@ repos:
     rev: 24.3.0
     hooks:
       - id: black
-        language_version: python3.11
+        language_version: python3
         exclude: '^src/parallax/p2p/proto/forward_pb2\.py$'

@@ -12,7 +12,7 @@ from mlx_lm.utils import _download, load_model
 from parallax.server.cache_manager import CacheManager
 from parallax.server.shard_loader import MLXModelLoader
 from parallax.utils.tokenizer_utils import load_tokenizer
-from parallax.utils.utils import pad_inputs
+from parallax.utils.utils import is_metal_available, pad_inputs
 
 REPO_ID = "mlx-community/Qwen3-0.6B-bf16"
 TOTAL_LAYERS = 28
@@ -34,6 +34,9 @@ def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
     """Load sharded model based on layers_config and
     compare its forward pass with a full reference model.
     """
+    if not is_metal_available():
+        pytest.skip("Metal backend not available (requires macOS with Metal support)")
+
     dtype = mx.bfloat16
 
     # Load sharded models
