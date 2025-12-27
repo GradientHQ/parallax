@@ -1,7 +1,9 @@
 """Utility functions."""
 
 import base64
+import glob
 import hashlib
+import os
 import random
 import socket
 from typing import List
@@ -12,6 +14,8 @@ import psutil
 import torch
 import zmq
 from mlx_lm.utils import _download, load_config
+from safetensors import safe_open
+from safetensors.torch import save_file
 
 from parallax.utils.selective_download import download_metadata_only
 
@@ -367,3 +371,88 @@ def calculate_cid_manual(data: bytes) -> str:
     base32_str = base64.b32encode(cid_bytes).decode("ascii").lower().rstrip("=")
     cid_string = "b" + base32_str
     return cid_string
+
+
+def inplace_insert_value_with_idx(tensor_list, value, idx):
+    while len(tensor_list) < idx + 1:
+        tensor_list.append(None)
+    tensor_list[idx] = value
+
+
+def concat_weight_partition(refit_weight_path):
+    """
+    Concat partial weight into one safetensor.
+    Partitioned weight should be named in the following format:
+    {original_name}_part{i}
+    e.g. model.embed_tokens.weight_part0
+    """
+    weight_files = glob.glob(refit_weight_path + "/*.safetensors")
+    assert weight_files, f"Weight safetensors files not found in path: {refit_weight_path}"
+
+    tensors = {}
+    original_tensors = {}
+    for wf in weight_files:
+        with safe_open(wf, framework="pt", device="cpu") as f:
+            for k in f.keys():
+                original_tensors[k] = f.get_tensor(k)
+    for wf in weight_files:
+        os.remove(wf)
+
+    # Concatenate if needed and save the final tensors
+    sorted_keys = sorted(original_tensors.keys())
+    prev_key = None
+    concate_list = []
+    file_idx = 0
+    max_size = 1024 * 1024 * 1024  # max size 1GB
+    param_size = 0
+    for key in sorted_keys:
+        val = original_tensors[key]
+        if "part" not in key:
+            tensors[key] = val
+            param_size += val.numel() * val.element_size()
+            if param_size > max_size:
+                save_file_name = refit_weight_path + "/model_" + str(file_idx) + ".safetensors"
+                save_file(tensors, save_file_name)
+                file_idx += 1
+                param_size = 0
+                tensors = {}
+            continue
+
+        name_split = key.split(".")
+        cur_name_list = name_split[:-1]
+        weight_name = name_split[-1]
+        cur_idx = int(weight_name.removeprefix("weight_part"))
+        if prev_key is None:
+            inplace_insert_value_with_idx(concate_list, val, cur_idx)
+            prev_key = key
+        else:
+            prev_name_list = prev_key.split(".")[:-1]
+            if prev_name_list == cur_name_list:
+                inplace_insert_value_with_idx(concate_list, val, cur_idx)
+            else:
+                concate_result = torch.cat(concate_list, 0)
+                cur_name_list.append("weight")
+                final_key = ".".join(cur_name_list)
+                tensors[final_key] = concate_result
+                param_size += val.numel() * val.element_size()
+                if param_size > max_size:
+                    save_file_name = refit_weight_path + "/model_" + str(file_idx) + ".safetensors"
+                    save_file(tensors, save_file_name)
+                    file_idx += 1
+                    param_size = 0
+                    tensors = {}
+
+                # for next tensor
+                concate_list = []
+                inplace_insert_value_with_idx(concate_list, val, cur_idx)
+            prev_key = key
+
+    if concate_list:
+        concate_result = torch.cat(concate_list, 0)
+        cur_name_list = prev_key.split(".")[:-1]
+        cur_name_list.append("weight")
+        final_key = ".".join(cur_name_list)
+        tensors[final_key] = concate_result
+
+    save_file_name = refit_weight_path + "/model_" + str(file_idx) + ".safetensors"
+    save_file(tensors, save_file_name)

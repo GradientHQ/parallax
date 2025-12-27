@@ -27,9 +27,11 @@ MODELS = {
     "openai/gpt-oss-safeguard-20b": "lmstudio-community/gpt-oss-safeguard-20b-MLX-MXFP4",
     "openai/gpt-oss-safeguard-120b": "lmstudio-community/gpt-oss-safeguard-120b-MLX-MXFP4",
     # zai-org GLM4 Models
+    "zai-org/GLM-4.7": "mlx-community/GLM-4.7-4bit",
     "zai-org/GLM-4.6": "mlx-community/GLM-4.6-4bit",
     "zai-org/GLM-4.6-FP8": "mlx-community/GLM-4.6-4bit",
     "zai-org/GLM-4.5-Air": "lmstudio-community/GLM-4.5-Air-MLX-8bit",
+    "zai-org/GLM-4.7": "mlx-community/GLM-4.7-4bit",
     # Other Models
     "MiniMaxAI/MiniMax-M2": "mlx-community/MiniMax-M2-4bit",
     # ======================================= End ========================================#

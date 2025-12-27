@@ -87,6 +87,8 @@ jobs:
     - name: Run E2E tests (macOS only)
       if: steps.changes.outputs.src == 'true' && runner.os == 'macOS'
       shell: bash
+      env:
+        TERM: xterm-256color
       run: |
         # Start the server
         python src/parallax/launch.py \
@@ -99,10 +101,10 @@ jobs:
         PID=$!
 
         echo "Waiting for server to start..."
-        # Poll to check if the port is ready (wait up to 60 seconds)
-        for i in {1..30}; do
+        # Poll to check if the port is ready (wait up to 120 seconds)
+        for i in {1..60}; do
           # If curl succeeds (200) or returns 405 (Method Not Allowed), the port is open
-          if curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/v1/chat/completions | grep -qE "200|400|405"; then
+          if curl -s --max-time 5 --connect-timeout 2 -o /dev/null -w "%{http_code}" http://localhost:3000/v1/chat/completions | grep -qE "200|400|405"; then
              echo "Server is up!"
              break
           fi
@@ -113,17 +115,24 @@ jobs:
              exit 1
           fi
 
-          if [ $i -eq 30 ]; then
-             echo "Server failed to start within 60 seconds"
+          if [ $i -eq 60 ]; then
+             echo "Server failed to start within 120 seconds"
              kill $PID 2>/dev/null
              exit 1
           fi
           sleep 2
         done
 
+        # Wait additional time to ensure server is fully ready (model loaded, KV cache allocated, etc.)
+        echo "Waiting for server to be fully ready..."
+        sleep 10
+
         echo "Sending test request..."
-        # Capture the response
-        RESPONSE=$(curl --fail --silent --show-error --location 'http://localhost:3000/v1/chat/completions' \
+        # Capture the response with increased timeout (5 minutes for model inference)
+        RESPONSE=$(curl --fail --silent --show-error --location \
+          --max-time 300 \
+          --connect-timeout 10 \
+          'http://localhost:3000/v1/chat/completions' \
           --header 'Content-Type: application/json' \
           --data '{
             "messages": [

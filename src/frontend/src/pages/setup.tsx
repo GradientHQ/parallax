@@ -100,7 +100,7 @@ export default function PageSetup() {
 
         <Stack direction='row' justifyContent='space-between' alignItems='center' gap={2}>
           <Typography color='text.secondary'>
-            Are you nodes within the same local network?
+            Are your nodes within the same local network?
           </Typography>
           <ToggleButtonGroup
             sx={{ width: '10rem', textTransform: 'none' }}

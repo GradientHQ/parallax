@@ -27,7 +27,11 @@ from parallax.p2p.proto import forward_pb2
 from parallax.p2p.utils import AsyncWorker
 from parallax.server.server_info import detect_node_hardware
 from parallax.utils.shared_state import SharedState
-from parallax.utils.utils import calculate_cid_manual, get_zmq_socket
+from parallax.utils.utils import (
+    calculate_cid_manual,
+    concat_weight_partition,
+    get_zmq_socket,
+)
 from parallax_utils.logging_config import get_logger, set_log_level
 
 logger = get_logger(__name__)
@@ -261,11 +265,8 @@ def check_and_run_weight_refit(gradient_server, message):
 
     random.seed(time.time())
     random.shuffle(cid_list)
-    # max_concurrency = 1
-    # count = len(cid_list)
 
     # step2. save weight to disk
-    # concurrency_loop = (count - 1) // max_concurrency + 1
     weight_dir = os.path.join("/tmp", str(time_stamp))
     folder = os.path.exists(weight_dir)
     if not folder:
@@ -277,7 +278,18 @@ def check_and_run_weight_refit(gradient_server, message):
                 cid = cid_list.pop()
                 logger.info(f"Start downloading refit weight {cid}")
                 _download_weight_thread(weight_dir, cid)
-        # step3. send ipc message to update weight
+
+        # step3. concat weight
+        # workaround: create sub-process to avoid GIL issues for lattica
+        logger.info(f"Start sub-process to concat weight partitions in {weight_dir}")
+        process = multiprocessing.Process(
+            target=concat_weight_partition,
+            args=(weight_dir,),
+        )
+        process.start()
+        process.join()
+
+        # step4. send ipc message to update weight
         gradient_server.connection_handler.ipc_weight_refit(weight_dir, weight_version)
         gradient_server.last_refit_time = float(time_stamp)
         logger.info(
