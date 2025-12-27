@@ -43,8 +43,8 @@ PUBLIC_RELAY_SERVERS = [
 
 
 def check_python_version():
-    """Check if Python version is 3.11 or higher."""
-    if sys.version_info < (3, 11) or sys.version_info >= (3, 14):
+    """Check if Python version is 3.10 or higher."""
+    if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
         logger.info(
             f"Error: Python 3.11 or higher and less than 3.14 is required. Current version is {sys.version_info.major}.{sys.version_info.minor}."
         )
