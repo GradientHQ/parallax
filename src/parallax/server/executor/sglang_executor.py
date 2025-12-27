@@ -24,6 +24,7 @@ from parallax.sglang.batch_info import (
     form_sgl_batch_prefill,
     release_sglang_request,
 )
+from parallax.sglang.cache_adapter import SGLangCacheAdapter
 from parallax.sglang.model_runner import initialize_sgl_model_runner, refit_sgl_model
 from parallax_utils.logging_config import get_logger
 
@@ -57,6 +58,7 @@ class SGLExecutor(BaseExecutor):
         kv_block_size: int = 64,
         kv_cache_memory_fraction: float = 0.8,
         enable_prefix_cache: Optional[bool] = False,
+        enable_full_allocation: bool = False,
         # Communication Configs
         # P2P Communication Configs
         send_to_peer_addr: Optional[str] = None,
@@ -143,6 +145,10 @@ class SGLExecutor(BaseExecutor):
             f"SGLang model runner initialized. num_layers={self.config.get('num_hidden_layers')}"
         )
 
+        if enable_full_allocation:
+            self.cache_manager = SGLangCacheAdapter(self.model_runner)
+        else:
+            self.cache_manager = None
         # Set device to specific CUDA device based on tp_rank
         # This ensures tensors are moved to the correct GPU
         if device is None or device == "cuda":
@@ -160,6 +166,7 @@ class SGLExecutor(BaseExecutor):
             micro_batch_ratio=micro_batch_ratio,
             scheduler_wait_ms=scheduler_wait_ms,
             request_timeout_s=request_timeout_s,
+            enable_full_allocation=enable_full_allocation,
             layer_latency_update_every=layer_latency_update_every,
             send_to_peer_addr=send_to_peer_addr,
             recv_from_peer_addr=recv_from_peer_addr,
