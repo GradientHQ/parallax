@@ -9,10 +9,18 @@ import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from parallax.server.executor.sglang_executor import SGLExecutor
 from parallax.server.request import InitialRequest
 from parallax.server.sampling.sampling_params import SamplingParams
 from parallax.utils.utils import is_cuda_available
+
+# Delay import of SGLExecutor to avoid import errors when sglang is not available
+# This allows test collection to succeed even if sglang is not installed
+SGLExecutor = None
+try:
+    from parallax.server.executor.sglang_executor import SGLExecutor
+except ImportError:
+    # sglang not available, tests will be skipped
+    pass
 
 CUDA_MODEL_REPO = "Qwen/Qwen3-0.6B"
 TOTAL_LAYERS = 28
@@ -55,6 +63,8 @@ def test_cuda_shard_prefill(layers_config: List[Tuple[int, int]], ref_model_and_
     and verifies they can process requests correctly. This is similar to test_model.py
     but uses parallax's SGLExecutor instead of direct model loading.
     """
+    if SGLExecutor is None:
+        pytest.skip("sglang not available (install with 'pip install -e .[gpu]')")
     if not is_cuda_available():
         pytest.skip("CUDA not available")
 
@@ -160,6 +170,8 @@ def test_cuda_executor_pipeline(ref_model_and_tokenizer):
 
     This test creates a 2-stage pipeline and verifies it can process requests.
     """
+    if SGLExecutor is None:
+        pytest.skip("sglang not available (install with 'pip install -e .[gpu]')")
     if not is_cuda_available():
         pytest.skip("CUDA not available")
 
