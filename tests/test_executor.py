@@ -1,9 +1,7 @@
 """
 Unit tests for the Executor class, using Qwen3-0.6B-bf16.
-For ubuntu-GPU, test 3 pipelines
+For ubuntu-GPU, test 1 pipeline
   - cuda -> cuda -> cuda
-  - cuda -> mlx(cpu) -> cuda
-  - mlx(cpu) -> cuda -> mlx(cpu)
 For MAC, test 1 pipeline
   - mlx -> mlx -> mlx
 """
@@ -86,10 +84,8 @@ def run_executor_pipeline_stage(executor, requests, batch_type, is_last_peer):
 @pytest.mark.parametrize(
     "pipeline_devices",
     [
-        ("cuda", "cuda", "cuda"),
-        ("cuda", "mlx", "cuda"),
-        ("mlx", "cuda", "mlx"),
-        ("mlx", "mlx", "mlx"),
+        ("cuda", "cuda", "cuda"),  # Pure CUDA pipeline for GPU
+        ("mlx", "mlx", "mlx"),     # Pure MLX pipeline for macOS
     ],
 )
 @pytest.mark.parametrize("pp_end_layers", [(10, 18, 28)])

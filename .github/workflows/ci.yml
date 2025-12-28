@@ -70,8 +70,8 @@ jobs:
         # Install extras dependencies based on matrix variable
         pip install -e ".[${{ matrix.extras }}]"
 
-    - name: Run Unit Tests (macOS only)
-      if: steps.changes.outputs.src == 'true' && runner.os == 'macOS'
+    - name: Run Unit Tests
+      if: steps.changes.outputs.src == 'true'
       shell: bash
       run: |
         pytest tests/ -v --cov=src/parallax --cov-report=xml
@@ -84,18 +84,28 @@ jobs:
         fail_ci_if_error: false
         token: ${{ secrets.CODECOV_TOKEN }}
 
-    - name: Run E2E tests (macOS only)
-      if: steps.changes.outputs.src == 'true' && runner.os == 'macOS'
+    - name: Run E2E tests
+      if: steps.changes.outputs.src == 'true'
       shell: bash
       run: |
+        # Determine backend based on OS
+        if [ "${{ runner.os }}" == "macOS" ]; then
+          # macOS uses MLX backend (default)
+          BACKEND_ARGS=""
+        else
+          # Linux uses CUDA backend
+          BACKEND_ARGS="--gpu-backend sglang"
+        fi
+        
         # Start the server
         python src/parallax/launch.py \
           --model-path Qwen/Qwen3-0.6B \
           --max-num-tokens-per-batch 16384 \
-          --kv-block-size 1024 \
+          --kv-block-size 32 \
           --max-batch-size 128 \
           --start-layer 0 \
-          --end-layer 28 &
+          --end-layer 28 \
+          $BACKEND_ARGS &
         PID=$!
 
         echo "Waiting for server to start..."
