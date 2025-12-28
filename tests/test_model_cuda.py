@@ -50,7 +50,7 @@ def ref_model_and_tokenizer():
 @pytest.mark.cuda
 def test_cuda_shard_prefill(layers_config: List[Tuple[int, int]], ref_model_and_tokenizer):
     """Test sharded CUDA model forward pass using parallax SGLExecutor.
-    
+
     This test creates multiple SGLExecutor instances for different layer ranges
     and verifies they can process requests correctly. This is similar to test_model.py
     but uses parallax's SGLExecutor instead of direct model loading.
@@ -157,7 +157,7 @@ def test_cuda_shard_prefill(layers_config: List[Tuple[int, int]], ref_model_and_
 @pytest.mark.cuda
 def test_cuda_executor_pipeline(ref_model_and_tokenizer):
     """Test a simple CUDA executor pipeline with multiple stages.
-    
+
     This test creates a 2-stage pipeline and verifies it can process requests.
     """
     if not is_cuda_available():

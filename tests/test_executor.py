@@ -85,7 +85,7 @@ def run_executor_pipeline_stage(executor, requests, batch_type, is_last_peer):
     "pipeline_devices",
     [
         ("cuda", "cuda", "cuda"),  # Pure CUDA pipeline for GPU
-        ("mlx", "mlx", "mlx"),     # Pure MLX pipeline for macOS
+        ("mlx", "mlx", "mlx"),  # Pure MLX pipeline for macOS
     ],
 )
 @pytest.mark.parametrize("pp_end_layers", [(10, 18, 28)])

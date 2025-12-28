@@ -96,7 +96,7 @@ jobs:
           # Linux uses CUDA backend
           BACKEND_ARGS="--gpu-backend sglang"
         fi
-        
+
         # Start the server
         python src/parallax/launch.py \
           --model-path Qwen/Qwen3-0.6B \
