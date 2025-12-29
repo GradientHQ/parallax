@@ -1,5 +1,3 @@
-# Copyright © 2023-2024 Apple Inc.
-
 from mlx import extension
 from setuptools import setup
 
