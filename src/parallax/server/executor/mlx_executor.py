@@ -150,7 +150,7 @@ class MLXExecutor(BaseExecutor):
         logger.debug(f"layer_types: {layer_types}")
         time.sleep(5)
 
-        model_type = self.config.get("model_type", None)
+        sliding_window = self.config.get("sliding_window", None)
 
         logger.debug(
             "Initializing CacheManager (mlx) with block_size=%d, layers=%d",
@@ -175,7 +175,7 @@ class MLXExecutor(BaseExecutor):
             linear_v_dim=linear_value_head_dim,
             linear_num_k_heads=linear_num_key_heads,
             linear_num_v_heads=linear_num_value_heads,
-            model_type=model_type,
+            sliding_window=sliding_window,
         )
         super().__init__(
             start_layer=start_layer,

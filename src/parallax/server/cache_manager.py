@@ -40,7 +40,7 @@ class CacheManager:
         linear_v_dim: Optional[int] = None,
         linear_num_k_heads: Optional[int] = None,
         linear_num_v_heads: Optional[int] = None,
-        model_type: Optional[str] = None,
+        sliding_window: Optional[int] = None,
     ):
         self.num_layers = num_layers
         self.num_kv_heads = num_kv_heads
@@ -51,7 +51,7 @@ class CacheManager:
         self.dtype = dtype
         self.block_size = block_size
         self.max_num_seqs = max_num_seqs
-        self.model_type = model_type
+        self.sliding_window = sliding_window
 
         # Linear cache params (store for memory calculation)
         self.conv_dim = conv_dim
@@ -124,8 +124,9 @@ class CacheManager:
                     index_head_dim=self.index_head_dim,
                     index_n_heads=self.index_n_heads,
                 )
-            elif self.model_type and self.model_type != "gpt_oss":
-                return KVCachePacked(
+            elif self.sliding_window is not None:
+                # KVCache for gpt-oss
+                return KVCache(
                     num_blocks=self.num_gpu_blocks,
                     block_size=self.block_size,
                     num_kv_heads=self.num_kv_heads,
@@ -134,7 +135,8 @@ class CacheManager:
                     dtype=self.dtype,
                 )
             else:
-                return KVCache(
+                # KVCachePacked for models with parallax_extensions ops
+                return KVCachePacked(
                     num_blocks=self.num_gpu_blocks,
                     block_size=self.block_size,
                     num_kv_heads=self.num_kv_heads,
