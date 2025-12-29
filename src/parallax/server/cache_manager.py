@@ -5,7 +5,7 @@ import mlx.core as mx
 from parallax.server.cache.allocator import BlockAllocator, SlotAllocator
 from parallax.server.cache.base import BaseCache
 from parallax.server.cache.dsa_cache import DeepSeekSparseCache
-from parallax.server.cache.kv_cache import KVCachePacked
+from parallax.server.cache.kv_cache import KVCache, KVCachePacked
 from parallax.server.cache.linear_cache import LinearCache
 from parallax_utils.logging_config import get_logger
 
@@ -40,6 +40,7 @@ class CacheManager:
         linear_v_dim: Optional[int] = None,
         linear_num_k_heads: Optional[int] = None,
         linear_num_v_heads: Optional[int] = None,
+        model_type: Optional[str] = None,
     ):
         self.num_layers = num_layers
         self.num_kv_heads = num_kv_heads
@@ -50,6 +51,7 @@ class CacheManager:
         self.dtype = dtype
         self.block_size = block_size
         self.max_num_seqs = max_num_seqs
+        self.model_type = model_type
 
         # Linear cache params (store for memory calculation)
         self.conv_dim = conv_dim
@@ -122,8 +124,17 @@ class CacheManager:
                     index_head_dim=self.index_head_dim,
                     index_n_heads=self.index_n_heads,
                 )
-            else:
+            elif self.model_type and self.model_type != "gpt_oss":
                 return KVCachePacked(
+                    num_blocks=self.num_gpu_blocks,
+                    block_size=self.block_size,
+                    num_kv_heads=self.num_kv_heads,
+                    head_dim=self.head_dim,
+                    head_dim_v=self.head_dim_v,
+                    dtype=self.dtype,
+                )
+            else:
+                return KVCache(
                     num_blocks=self.num_gpu_blocks,
                     block_size=self.block_size,
                     num_kv_heads=self.num_kv_heads,

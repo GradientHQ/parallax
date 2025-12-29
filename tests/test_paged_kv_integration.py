@@ -31,6 +31,7 @@ class TestPagedKVIntegration(unittest.TestCase):
             dtype=self.dtype,
             block_size=self.block_size,
             cache_memory_fraction=0.5,
+            model_type="gpt_oss",
         )
 
         # Ensure we have enough blocks for testing
