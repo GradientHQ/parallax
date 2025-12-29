@@ -69,6 +69,7 @@ class BaseExecutor:
         micro_batch_ratio: int = 2,
         scheduler_wait_ms: int = 500,
         request_timeout_s: Optional[int] = 600,
+        enable_full_allocation: bool = False,
         # Metrics Configs
         layer_latency_update_every: int = 4096,
         # Communication Configs
@@ -157,9 +158,10 @@ class BaseExecutor:
             is_first_peer=self.is_first_peer,
             tokenizer=self.tokenizer,
             eos_token_id=self.eos_token_id,
-            cache_manager=self.cache_manager if self.device == "mlx" else None,
+            cache_manager=self.cache_manager,
             request_timeout_s=request_timeout_s,
             shared_state=self.shared_state,
+            enable_full_allocation=enable_full_allocation,
         )
         logger.debug(
             f"Scheduler initialized (max_batch_size={max_batch_size}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"
@@ -311,21 +313,19 @@ class BaseExecutor:
                     elif recv_req[0] == b"abort":
                         abort_request = forward_pb2.AbortRequest()
                         abort_request.ParseFromString(recv_req[1])
+
                         recv_req = proto_to_abort_request(abort_request)
                         recv_reqs.extend(recv_req)
-
+                        if not self.is_last_peer:
+                            logger.info(
+                                f"Propagating abort for {len(recv_req)} requests to downstream."
+                            )
+                            self.finished_batch.extend(recv_req)
                     elif recv_req[0] == b"refit":
                         refit_weight_path = recv_req[1].decode("ascii")
                         self.weight_version = int(recv_req[2].decode("ascii"))
                     else:
                         raise ValueError(f"Unknown request type: {recv_req[0]}")
-                    # First peer is responsible for tokenization
-                    # if self.is_first_peer and isinstance(recv_req, InitialRequest):
-                    #     recv_req.input_ids = self.tokenizer.encode(recv_req.prompt)
-                    #     recv_req.prompt_len = len(recv_req.input_ids)
-                    #     recv_req.max_total_length = min(
-                    #         recv_req.max_total_length, recv_req.prompt_len + recv_req.max_new_tokens
-                    #     )
 
                 except zmq.ZMQError:
                     break

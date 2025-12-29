@@ -246,7 +246,9 @@ class CacheManager:
 
         return blocks_ok and slots_ok
 
-    def allocate_request(self, request_id: str, prompt_len: int) -> bool:
+    def allocate_request(
+        self, request_id: str, prompt_len: int, pre_alloc_size: Optional[int] = None
+    ) -> bool:
         if request_id in self.block_tables:
             return True
 
@@ -260,7 +262,8 @@ class CacheManager:
         # 2. Allocate Blocks (if needed)
         blocks = []
         if self.needs_blocks:
-            num_blocks = (prompt_len + self.block_size - 1) // self.block_size
+            alloc_len = pre_alloc_size if pre_alloc_size is not None else prompt_len
+            num_blocks = (alloc_len + self.block_size - 1) // self.block_size
             blocks = self.allocator.allocate(num_blocks)
             if len(blocks) < num_blocks:
                 if blocks:
@@ -320,7 +323,13 @@ class CacheManager:
             raise ValueError(f"Request {request_id} not found")
 
         current_len = self.context_lengths[request_id]
-        if current_len % self.block_size == 0:
+        new_len = current_len + 1
+
+        # Check if we need more blocks
+        needed_blocks = (new_len + self.block_size - 1) // self.block_size
+        current_blocks = len(self.block_tables[request_id])
+
+        if needed_blocks > current_blocks:
             new_blocks = self.allocator.allocate(1)
             if not new_blocks:
                 return False

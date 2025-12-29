@@ -106,6 +106,7 @@ class TestCreateExecutorConfig:
             lora_backend="triton",
             max_lora_chunk_size=128,
             enable_weight_refit=False,
+            enable_full_allocation=False,
         )
         args = argparse.Namespace(
             model_path="mlx-community/Qwen3-0.6B-bf16",
@@ -138,6 +139,7 @@ class TestCreateExecutorConfig:
             lora_backend="triton",
             max_lora_chunk_size=128,
             enable_weight_refit=False,
+            enable_full_allocation=False,
         )
 
         config = create_executor_config(args)
