@@ -286,7 +286,9 @@ def check_and_run_weight_refit(gradient_server, message):
                 cid = cid_list.pop()
                 logger.info(f"Start downloading refit weight {cid}")
                 res = _download_weight_thread(weight_dir, cid)
-                download_res = download_res and res
+                if not res:
+                    download_res = False
+                    break
 
         if not download_res:
             gradient_server.last_refit_time = float(time_stamp)
