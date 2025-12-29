@@ -5,7 +5,7 @@ import mlx.core as mx
 from parallax.server.cache.allocator import BlockAllocator, SlotAllocator
 from parallax.server.cache.base import BaseCache
 from parallax.server.cache.dsa_cache import DeepSeekSparseCache
-from parallax.server.cache.kv_cache import KVCache
+from parallax.server.cache.kv_cache import KVCachePacked
 from parallax.server.cache.linear_cache import LinearCache
 from parallax_utils.logging_config import get_logger
 
@@ -123,7 +123,7 @@ class CacheManager:
                     index_n_heads=self.index_n_heads,
                 )
             else:
-                return KVCache(
+                return KVCachePacked(
                     num_blocks=self.num_gpu_blocks,
                     block_size=self.block_size,
                     num_kv_heads=self.num_kv_heads,
