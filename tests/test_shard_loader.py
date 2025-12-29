@@ -2,11 +2,15 @@
 Tests for the shard_loader module.
 """
 
+import sys
 from unittest.mock import Mock, patch
+
+import pytest
 
 from parallax.server.shard_loader import MLXModelLoader
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
 class TestMLXModelLoader:
     """Test MLXModelLoader functionality."""
 
