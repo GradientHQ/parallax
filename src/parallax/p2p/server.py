@@ -13,6 +13,7 @@ import json
 import multiprocessing
 import os
 import random
+import shutil
 import threading
 import time
 from typing import List, Optional
@@ -303,7 +304,10 @@ def check_and_run_weight_refit(gradient_server, message):
 
         # step4. send ipc message to update weight
         gradient_server.connection_handler.ipc_weight_refit(weight_dir, weight_version)
-        gradient_server.last_refit_time = float(time_stamp)
+        last_refit_time = float(time_stamp)
+        gradient_server.last_refit_time = last_refit_time
+        gradient_server.refit_timestamp_history.append(last_refit_time)
+        gradient_server.check_and_release_disk_weight()
         logger.info(
             f"Finish download weight_version={weight_version}, last_refit_time={gradient_server.last_refit_time}"
         )
@@ -365,6 +369,7 @@ class GradientServer:
         self.enable_weight_refit = False
         self.last_refit_time = 0.0
         self.refit_finish = True
+        self.refit_timestamp_history = []
         self.prefix_id = f"{dht_prefix}_announce"
         self.lattica = None
         self.routing_table = None
@@ -399,6 +404,20 @@ class GradientServer:
                 status=self.status.value,
                 _layer_allocation_changed=self._layer_allocation_changed,
             )
+
+    def check_and_release_disk_weight(self):
+        # only save 2 history versions of weight
+        while len(self.refit_timestamp_history) > 2:
+            time_stamp = self.refit_timestamp_history.pop(0)
+            weight_dir = os.path.join("/tmp", str(time_stamp))
+            if os.path.isdir(weight_dir):
+                try:
+                    shutil.rmtree(weight_dir)
+                    logger.info(f"Folder '{weight_dir}' and all its contents have been removed.")
+                except OSError as e:
+                    logger.exception(f"Error: {weight_dir} : {e.strerror}")
+            else:
+                logger.warning(f"Folder '{weight_dir}' does not exist.")
 
     def build_lattica(self):
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs)
