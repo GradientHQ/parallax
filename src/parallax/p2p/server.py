@@ -217,11 +217,16 @@ def check_and_run_weight_refit(gradient_server, message):
 
     def _download_weight_thread(weight_dir, cid):
         raw_data = None
+        time_out = 10 * 60  # 10 minutes timeout
         time_begin_get_block = time.time()
         time_end_get_block = None
         peer_id = None
         while True:
             try:
+                cur_time = time.time()
+                if cur_time - time_begin_get_block > time_out:
+                    logger.warning(f"Failed to get_block after 10 minutes! cid={cid}")
+                    return False
                 peer_id, raw_data = gradient_server.lattica.get_block(cid, timeout_secs=30)
                 cid_manual = calculate_cid_manual(raw_data)
                 if cid_manual != cid:
@@ -248,6 +253,7 @@ def check_and_run_weight_refit(gradient_server, message):
         logger.info(
             f"Finish download cid={cid}, file_size={file_size_mb}MB, get_block={interval_get_block}s, write_file={interval_write_file}s, peer_id={peer_id}"
         )
+        return True
 
     # add sleep 60s for direct connection first
     logger.info(f"Start dealing weight refit message: {message}.")
@@ -271,13 +277,19 @@ def check_and_run_weight_refit(gradient_server, message):
     folder = os.path.exists(weight_dir)
     if not folder:
         os.makedirs(weight_dir)
+        download_res = True
         while True:
             if len(cid_list) == 0:
                 break
             else:
                 cid = cid_list.pop()
                 logger.info(f"Start downloading refit weight {cid}")
-                _download_weight_thread(weight_dir, cid)
+                res = _download_weight_thread(weight_dir, cid)
+                download_res = download_res and res
+
+        if not download_res:
+            gradient_server.last_refit_time = float(time_stamp)
+            logger.info(f"Error in updating weight. Still holds the previous version of weight.")
 
         # step3. concat weight
         # workaround: create sub-process to avoid GIL issues for lattica
