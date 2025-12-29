@@ -2,6 +2,8 @@
 Pytest configuration and fixtures for parallax tests.
 """
 
+import sys
+
 import pytest
 
 from parallax.utils.utils import get_current_device, is_metal_available
@@ -12,6 +14,16 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "metal: mark test as requiring Metal backend")
     config.addinivalue_line("markers", "cuda: mark test as requiring CUDA backend")
     config.addinivalue_line("markers", "mlx: mark test as requiring MLX backend (Metal on macOS)")
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Skip collecting parallax_extensions tests on non-macOS platforms"""
+    # Check if this is a parallax_extensions test file
+    if "parallax_extensions_tests" in str(collection_path):
+        # Skip on non-macOS platforms (parallax_extensions requires Metal/MLX)
+        if sys.platform != "darwin":
+            return True
+    return False
 
 
 @pytest.fixture(scope="session")
