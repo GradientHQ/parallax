@@ -1363,7 +1363,7 @@ template <typename T, int HEAD_SIZE, int NUM_THREADS, int NUM_SIMD_LANES,
   instantiate_paged_attention_heads(type, cache_type, 32, num_threads,         \
                                     num_simd_lanes, partition_size);           \
   instantiate_paged_attention_heads(type, cache_type, 64, num_threads,         \
-                                    num_simd_lanes, partition_size);           
+                                    num_simd_lanes, partition_size);
 
 // TODO: tune num_threads = 256
 // NOTE: partition_size = 0

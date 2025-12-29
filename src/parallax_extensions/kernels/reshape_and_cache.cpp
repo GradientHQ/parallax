@@ -107,7 +107,7 @@ void ReshapeAndCache::eval_gpu(
     int32_t num_heads_32 = static_cast<int32_t>(num_heads);
     int32_t head_size_32 = static_cast<int32_t>(head_size);
     int32_t block_size_32 = static_cast<int32_t>(block_size);
-    int32_t x_32 = static_cast<int32_t>(x); 
+    int32_t x_32 = static_cast<int32_t>(x);
     compute_encoder.set_bytes(num_heads_32, 9);
     compute_encoder.set_bytes(head_size_32, 10);
     compute_encoder.set_bytes(block_size_32, 11);

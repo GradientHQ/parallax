@@ -111,13 +111,13 @@ void PagedAttentionV1::eval_gpu(
     auto& compute_encoder = d.get_command_encoder(s.index);
     compute_encoder.set_compute_pipeline_state(kernel);
 
-    // Shared Memory 
+    // Shared Memory
     const int padded_max_context_len = ((max_seq_len_ + block_size_ - 1) / block_size_) * block_size_;
     const int num_simds = num_threads / num_simd_lanes;
     const int logits_size = padded_max_context_len * sizeof(float);
     const int outputs_size = (num_simds / 2) * head_size * sizeof(float);
     const size_t shared_memory_size = std::max(logits_size, outputs_size);
-    
+
     // set Threadgroup Memory (index 0)
     compute_encoder.set_threadgroup_memory_length(shared_memory_size, 0);
 
