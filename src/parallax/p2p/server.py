@@ -411,7 +411,7 @@ class GradientServer:
         # only save 2 history versions of weight
         while len(self.refit_timestamp_history) > 2:
             time_stamp = self.refit_timestamp_history.pop(0)
-            weight_dir = os.path.join("/tmp", str(time_stamp))
+            weight_dir = os.path.join("/tmp", str(int(time_stamp)))
             if os.path.isdir(weight_dir):
                 try:
                     shutil.rmtree(weight_dir)
