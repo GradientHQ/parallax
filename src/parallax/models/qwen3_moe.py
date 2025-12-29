@@ -10,8 +10,8 @@ from mlx_lm.models.qwen3_moe import Attention as MLXQwen3MoeAttention
 from mlx_lm.models.qwen3_moe import ModelArgs
 from mlx_lm.models.qwen3_moe import Qwen3MoeDecoderLayer as MLXQwen3MoeBlock
 
-from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
 from parallax.server.cache.base import BaseCache
+from parallax_extensions.ops import paged_attention_v1, reshape_and_cache
 
 
 class ParallaxQwen3MoeAttention(MLXQwen3MoeAttention):
@@ -92,7 +92,7 @@ class ParallaxQwen3MoeAttention(MLXQwen3MoeAttention):
         # 3. Compute Attention
         if target_len == 1:
             # Decode Phase: Use Paged Attention Kernel
-            output = paged_attention(
+            output = paged_attention_v1(
                 queries_rotated,
                 key_cache_global,
                 value_cache_global,

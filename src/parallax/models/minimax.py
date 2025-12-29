@@ -8,8 +8,8 @@ from mlx_lm.models.minimax import MiniMaxAttention as MLXMiniMaxAttention
 from mlx_lm.models.minimax import MiniMaxDecoderLayer as MLXMiniMaxBlock
 from mlx_lm.models.minimax import ModelArgs
 
-from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
 from parallax.server.cache.base import BaseCache
+from parallax_extensions.ops import paged_attention_v1, reshape_and_cache
 
 
 class ParallaxMiniMaxAttention(MLXMiniMaxAttention):
@@ -76,7 +76,7 @@ class ParallaxMiniMaxAttention(MLXMiniMaxAttention):
         # 3. Compute Attention
         if target_len == 1:
             # Decode Phase: Use Paged Attention Kernel
-            output = paged_attention(
+            output = paged_attention_v1(
                 queries_rotated,
                 key_cache_global,
                 value_cache_global,

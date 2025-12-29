@@ -13,8 +13,8 @@ from mlx_lm.models.qwen3_next import Qwen3NextAttention as MLXQwen3NextAttention
 from mlx_lm.models.qwen3_next import Qwen3NextDecoderLayer as MLXQwen3NextBlock
 from mlx_lm.models.qwen3_next import Qwen3NextGatedDeltaNet as MLXQwen3NextGatedDeltaNet
 
-from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
 from parallax.server.cache.base import BaseCache
+from parallax_extensions.ops import paged_attention_v1, reshape_and_cache
 
 
 class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
@@ -72,7 +72,7 @@ class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
             slot_mapping=slot_mapping,
         )
         if target_len == 1:
-            output = paged_attention(
+            output = paged_attention_v1(
                 queries_rotated,
                 key_cache_global,
                 value_cache_global,
