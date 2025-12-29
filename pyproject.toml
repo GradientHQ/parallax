@@ -1,4 +1,4 @@
-gbuild-system]
+[build-system]
 requires = ["setuptools>=68", "wheel", "poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
