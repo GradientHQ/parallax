@@ -34,5 +34,5 @@ The pre-built package should be already installed in the parallax project.
 ### Usage Example
 ```python
 import mlx.core as mx
-from parallax_extensions import paged_attention_v1
+from parallax_extensions.ops import paged_attention_v1
 ```
