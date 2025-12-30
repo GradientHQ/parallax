@@ -152,6 +152,17 @@ class MLXExecutor(BaseExecutor):
 
         sliding_window = self.config.get("sliding_window", None)
 
+        # Validate and adjust block size for Metal backend
+        supported_block_sizes = [8, 16, 32, 64]
+        if kv_block_size not in supported_block_sizes:
+            nearest_block_size = min(supported_block_sizes, key=lambda x: abs(x - kv_block_size))
+            logger.warning(
+                f"Block size {kv_block_size} is not supported for MLX Metal backend. "
+                f"Supported block sizes are {supported_block_sizes}. "
+                f"Automatically adjusting to supported block size: {nearest_block_size}"
+            )
+            kv_block_size = nearest_block_size
+
         logger.debug(
             "Initializing CacheManager (mlx) with block_size=%d, layers=%d",
             kv_block_size,
