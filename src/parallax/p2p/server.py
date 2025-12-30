@@ -13,6 +13,7 @@ import json
 import multiprocessing
 import os
 import random
+import shutil
 import threading
 import time
 from typing import List, Optional
@@ -217,11 +218,16 @@ def check_and_run_weight_refit(gradient_server, message):
 
     def _download_weight_thread(weight_dir, cid):
         raw_data = None
+        time_out = 10 * 60  # 10 minutes timeout
         time_begin_get_block = time.time()
         time_end_get_block = None
         peer_id = None
         while True:
             try:
+                cur_time = time.time()
+                if cur_time - time_begin_get_block > time_out:
+                    logger.warning(f"Failed to get_block after 10 minutes! cid={cid}")
+                    return False
                 peer_id, raw_data = gradient_server.lattica.get_block(cid, timeout_secs=30)
                 cid_manual = calculate_cid_manual(raw_data)
                 if cid_manual != cid:
@@ -248,6 +254,7 @@ def check_and_run_weight_refit(gradient_server, message):
         logger.info(
             f"Finish download cid={cid}, file_size={file_size_mb}MB, get_block={interval_get_block}s, write_file={interval_write_file}s, peer_id={peer_id}"
         )
+        return True
 
     # add sleep 60s for direct connection first
     logger.info(f"Start dealing weight refit message: {message}.")
@@ -271,13 +278,21 @@ def check_and_run_weight_refit(gradient_server, message):
     folder = os.path.exists(weight_dir)
     if not folder:
         os.makedirs(weight_dir)
+        download_res = True
         while True:
             if len(cid_list) == 0:
                 break
             else:
                 cid = cid_list.pop()
                 logger.info(f"Start downloading refit weight {cid}")
-                _download_weight_thread(weight_dir, cid)
+                res = _download_weight_thread(weight_dir, cid)
+                if not res:
+                    download_res = False
+                    break
+
+        if not download_res:
+            gradient_server.last_refit_time = float(time_stamp)
+            logger.info(f"Error in updating weight. Still holds the previous version of weight.")
 
         # step3. concat weight
         # workaround: create sub-process to avoid GIL issues for lattica
@@ -291,7 +306,10 @@ def check_and_run_weight_refit(gradient_server, message):
 
         # step4. send ipc message to update weight
         gradient_server.connection_handler.ipc_weight_refit(weight_dir, weight_version)
-        gradient_server.last_refit_time = float(time_stamp)
+        last_refit_time = float(time_stamp)
+        gradient_server.last_refit_time = last_refit_time
+        gradient_server.refit_timestamp_history.append(last_refit_time)
+        gradient_server.check_and_release_disk_weight()
         logger.info(
             f"Finish download weight_version={weight_version}, last_refit_time={gradient_server.last_refit_time}"
         )
@@ -353,6 +371,7 @@ class GradientServer:
         self.enable_weight_refit = False
         self.last_refit_time = 0.0
         self.refit_finish = True
+        self.refit_timestamp_history = []
         self.prefix_id = f"{dht_prefix}_announce"
         self.lattica = None
         self.routing_table = None
@@ -387,6 +406,20 @@ class GradientServer:
                 status=self.status.value,
                 _layer_allocation_changed=self._layer_allocation_changed,
             )
+
+    def check_and_release_disk_weight(self):
+        # only save 2 history versions of weight
+        while len(self.refit_timestamp_history) > 2:
+            time_stamp = self.refit_timestamp_history.pop(0)
+            weight_dir = os.path.join("/tmp", str(int(time_stamp)))
+            if os.path.isdir(weight_dir):
+                try:
+                    shutil.rmtree(weight_dir)
+                    logger.info(f"Folder '{weight_dir}' and all its contents have been removed.")
+                except OSError as e:
+                    logger.exception(f"Error: {weight_dir} : {e.strerror}")
+            else:
+                logger.warning(f"Folder '{weight_dir}' does not exist.")
 
     def build_lattica(self):
         self.lattica = Lattica.builder().with_listen_addrs(self.host_maddrs)

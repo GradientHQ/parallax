@@ -175,6 +175,7 @@ class MLXExecutor(BaseExecutor):
             linear_v_dim=linear_value_head_dim,
             linear_num_k_heads=linear_num_key_heads,
             linear_num_v_heads=linear_num_value_heads,
+            enable_prefix_cache=enable_prefix_cache,
             sliding_window=sliding_window,
         )
         super().__init__(
@@ -329,6 +330,8 @@ class MLXExecutor(BaseExecutor):
         # Note: Paged Attention writes KV cache in-place within the model (via reshape_and_cache).
         # The returned 'hidden_states' is what we need.
         # The returned cache tuple (_, _) is ignored/unused here.
+        logger.debug(f"prefix_cache is {'on' if self.enable_prefix_cache else 'off'}")
+        logger.debug(f"prefix_lens: {prepared_inputs.get('prefix_lens')}")
         hidden_states = self.model_shard(
             h_or_tokens=prepared_inputs["h_or_tokens"],
             cache=prepared_inputs["cache"],
@@ -337,6 +340,7 @@ class MLXExecutor(BaseExecutor):
             context_lengths=prepared_inputs.get("context_lengths"),
             slot_mapping=prepared_inputs.get("slot_mapping"),
             state_slot_mapping=prepared_inputs.get("state_slot_mapping"),
+            prefix_lens=prepared_inputs.get("prefix_lens"),  # For RoPE offset in prefix cache
         )
 
         logger.debug(
@@ -349,7 +353,12 @@ class MLXExecutor(BaseExecutor):
         requests = prepared_inputs["requests"]
         for i, req in enumerate(requests):
             if req.is_prefill:
-                lengths[i] = prepared_inputs.get("context_lengths")[i]
+                # Use actual_processed_lengths if available (for prefix cache case),
+                # otherwise use context_lengths (total_length)
+                if "actual_processed_lengths" in prepared_inputs:
+                    lengths[i] = prepared_inputs.get("actual_processed_lengths")[i]
+                else:
+                    lengths[i] = prepared_inputs.get("context_lengths")[i]
             elif req.is_decoding:
                 lengths[i] = 1
             else:
@@ -359,13 +368,12 @@ class MLXExecutor(BaseExecutor):
         # because they are written in-place to the global cache.
         # self.cache_manager.update_requests(...) is REMOVED.
 
-        # Update prefix cache (TODO: Adapt to PagedKV)
+        # Update prefix cache: insert full blocks after prefill
         if self.enable_prefix_cache:
-            pass
-            # for _, req in enumerate(requests):
-            #    if req.is_prefill:
-            #        keys, values = self.cache_manager.gather_kv_cache(req.request_id)
-            #        self.prefix_cache.cache_unfinished_request(req, keys, values)
+            for req in requests:
+                if req.is_prefill:
+                    # Insert all full blocks from this prefill into the prefix cache
+                    self.cache_manager.insert_full_blocks_to_cache(req.request_id)
 
         # Process last peer: need additional sampling + detokenization
         if return_decoded_tokens:
@@ -440,21 +448,64 @@ class MLXExecutor(BaseExecutor):
         h_or_tokens_list = []
         block_tables_list = []
         context_lengths_list = []
-
-        # TODO: Adapt Prefix Cache to PagedKV
+        prefix_lens_list = []  # Track matched prefix lengths for each request
+        actual_processed_lengths_list = []  # Track actual processed token lengths for each request
 
         for req in batched_requests:
             assert req.is_prefill, f"Request {req.request_id} is not a prefill request."
-            if self.is_first_peer:
-                h_or_tokens_list.append(req.input_ids)
-            else:
-                h_or_tokens_list.append(req.hidden_states)
 
-            # Allocate Paged KV blocks
-            # For first peer and intermediate peers, we allocate based on prompt length
-            success = self.cache_manager.allocate_request(req.request_id, req.total_length)
+            # Allocate Paged KV blocks with prefix cache support
+            # For first peer, pass input_ids for prefix matching
+            token_ids = None
+            if self.is_first_peer and self.enable_prefix_cache:
+                token_ids = req.input_ids
+
+            success, matched_tokens = self.cache_manager.allocate_request(
+                req.request_id, req.total_length, token_ids=token_ids
+            )
             if not success:
                 raise RuntimeError(f"OOM during prefill allocation for {req.request_id}")
+
+            prefix_lens_list.append(matched_tokens)
+
+            if self.is_first_peer:
+                if matched_tokens > 0 and self.enable_prefix_cache:
+                    # Skip the prefix tokens that are already cached
+                    # But we must keep at least the last token to generate next token logits
+                    new_tokens = req.input_ids[matched_tokens:]
+                    if len(new_tokens) == 0:
+                        # All tokens cached - keep the last token and adjust prefix_len
+                        new_tokens = req.input_ids[-1:]
+                        prefix_lens_list[-1] = matched_tokens - 1
+                        actual_processed_lengths_list.append(1)
+                        logger.debug(
+                            f"Request {req.request_id}: Full cache hit, keeping last token for logits"
+                        )
+                    else:
+                        actual_processed_lengths_list.append(len(new_tokens))
+                        logger.debug(
+                            f"Request {req.request_id}: Skipping {matched_tokens} cached tokens, "
+                            f"processing {len(new_tokens)} new tokens"
+                        )
+                    h_or_tokens_list.append(new_tokens)
+                else:
+                    h_or_tokens_list.append(req.input_ids)
+                    actual_processed_lengths_list.append(len(req.input_ids))
+            else:
+                if matched_tokens > 0 and self.enable_prefix_cache:
+                    # Skip the prefix hidden states that correspond to cached tokens
+                    new_hidden = req.hidden_states[matched_tokens:]
+                    if new_hidden.shape[0] == 0:
+                        # All tokens cached - keep the last hidden state
+                        new_hidden = req.hidden_states[-1:]
+                        prefix_lens_list[-1] = matched_tokens - 1
+                        actual_processed_lengths_list.append(1)
+                    else:
+                        actual_processed_lengths_list.append(new_hidden.shape[0])
+                    h_or_tokens_list.append(new_hidden)
+                else:
+                    h_or_tokens_list.append(req.hidden_states)
+                    actual_processed_lengths_list.append(req.hidden_states.shape[0])
 
             block_table = self.cache_manager.get_block_table(req.request_id)
             block_tables_list.append(block_table)
@@ -468,19 +519,22 @@ class MLXExecutor(BaseExecutor):
         else:
             padded_inputs, padding_mask = pad_inputs(0, h_or_tokens_list, self.dtype)
 
-        # Generate slot_mapping (Batch * MaxLen) for prefill
+        # Generate slot_mapping for prefill (only for NEW tokens, starting from prefix_len)
         max_len = padded_inputs.shape[1]
         slot_mapping_flat = []
 
         for i, req in enumerate(batched_requests):
             block_table = block_tables_list[i]
-            length = req.total_length
+            prefix_len = prefix_lens_list[i]
+            total_len = req.total_length
+            new_tokens_len = total_len - prefix_len
 
             for seq_idx in range(max_len):
-                if seq_idx < length:
-                    # Valid token
-                    block_idx = seq_idx // self.cache_manager.block_size
-                    block_offset = seq_idx % self.cache_manager.block_size
+                if seq_idx < new_tokens_len:
+                    # Valid new token - map to position after prefix
+                    actual_pos = prefix_len + seq_idx
+                    block_idx = actual_pos // self.cache_manager.block_size
+                    block_offset = actual_pos % self.cache_manager.block_size
                     physical_block = block_table[block_idx]
                     slot = physical_block * self.cache_manager.block_size + block_offset
                     slot_mapping_flat.append(slot)
@@ -511,6 +565,11 @@ class MLXExecutor(BaseExecutor):
             slots = [self.cache_manager.get_slot(rid) for rid in req_ids]
             state_slot_mapping = mx.array(slots, dtype=mx.int32)
 
+        # Convert prefix_lens to tensor for models that need RoPE offset adjustment
+        prefix_lens_tensor = mx.array(prefix_lens_list, dtype=mx.int32)
+        # Convert actual_processed_lengths to tensor for correct logit selection
+        actual_processed_lengths_tensor = mx.array(actual_processed_lengths_list, dtype=mx.int32)
+
         ret = {
             "h_or_tokens": padded_inputs,
             "cache": self.cache_manager.get_caches(),
@@ -520,6 +579,8 @@ class MLXExecutor(BaseExecutor):
             "context_lengths": context_lengths_tensor,
             "slot_mapping": slot_mapping_tensor,
             "state_slot_mapping": state_slot_mapping,
+            "prefix_lens": prefix_lens_tensor,  # For RoPE offset calculation
+            "actual_processed_lengths": actual_processed_lengths_tensor,  # For correct logit selection
         }
         logger.debug(f"Prepared MLX prefill batch (size={batch_size})")
         return ret
@@ -573,6 +634,17 @@ class MLXExecutor(BaseExecutor):
                 h_or_tokens_list.append([req.output_ids[-1]])
             else:
                 h_or_tokens_list.append(req.hidden_states)
+
+            # Update token_ids for prefix cache (if enabled)
+            if self.enable_prefix_cache and self.is_first_peer:
+                # Add the new token to the request's token_ids
+                self.cache_manager.update_request_tokens(req.request_id, [req.output_ids[-1]])
+
+            # Allocate slot for new token
+            # Note: append_slot will automatically insert full blocks to prefix cache
+            success = self.cache_manager.append_slot(req.request_id)
+            if not success:
+                raise RuntimeError(f"OOM during decode for {req.request_id}")
 
             block_table = self.cache_manager.get_block_table(req.request_id)
             block_tables_list.append(block_table)
