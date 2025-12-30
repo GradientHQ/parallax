@@ -28,10 +28,11 @@ from parallax.p2p.proto import forward_pb2
 from parallax.p2p.utils import AsyncWorker
 from parallax.server.server_info import detect_node_hardware
 from parallax.utils.shared_state import SharedState
-from parallax.utils.utils import (
+from parallax.utils.utils import get_zmq_socket
+from parallax.utils.weight_refit_utils import (
     calculate_cid_manual,
     concat_weight_partition,
-    get_zmq_socket,
+    filer_weight_cid_list,
 )
 from parallax_utils.logging_config import get_logger, set_log_level
 
@@ -262,14 +263,20 @@ def check_and_run_weight_refit(gradient_server, message):
     time.sleep(60)
     # step1. Check weight refit trigger message
     time_stamp = message.get("time_stamp", None)
-    cid_list = message.get("cid", None)
+    index_map = message.get("index_map", None)
     weight_version = message.get("version", 0)
-    if time_stamp is None or cid_list is None:
+    if time_stamp is None or index_map is None:
         return
     if gradient_server.last_refit_time >= float(time_stamp):
         # Weight already updated
         return
 
+    cid_list = filer_weight_cid_list(
+        gradient_server.block_start_index,
+        gradient_server.block_end_index,
+        gradient_server.hidden_layers,
+        index_map,
+    )
     random.seed(time.time())
     random.shuffle(cid_list)
 
