@@ -141,12 +141,13 @@ def filer_weight_cid_list(start_layer, end_layer, hidden_layers, index_map):
     is_first_shard = start_layer == 0
     is_last_shard = end_layer == hidden_layers
 
-    res = []
+    res = set()
     for key in index_map.keys():
         if is_block_needed(key, is_first_shard, is_last_shard, start_layer, end_layer):
-            res.append(key)
+            value = index_map.get(key)
+            res.add(value)
 
-    return res
+    return list(res)
 
 
 def remove_list_files(file_list):
