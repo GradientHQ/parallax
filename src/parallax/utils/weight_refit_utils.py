@@ -2,6 +2,7 @@ import base64
 import glob
 import hashlib
 import os
+import shutil
 
 import torch
 from safetensors import safe_open
@@ -150,11 +151,11 @@ def filer_weight_cid_list(start_layer, end_layer, hidden_layers, index_map):
     return list(res)
 
 
-def remove_list_files(file_list):
-    for file_path in file_list:
-        if os.path.exists(file_path):
+def remove_list_dirs(dir_list):
+    for dir_path in dir_list:
+        if os.path.isdir(dir_path):
             try:
-                os.remove(file_path)
+                shutil.rmtree(dir_path)
             except OSError:
                 pass
         else:
@@ -164,9 +165,9 @@ def remove_list_files(file_list):
 def release_disk_storage():
     """Remove lattica storage files before get blocks"""
     storage_dir = "/tmp"
-    storage_files = glob.glob(storage_dir + "/*.storage")
-    key_files = glob.glob(storage_dir + "/*.key")
-    dht_files = glob.glob(storage_dir + "/*.dht")
-    remove_list_files(storage_files)
-    remove_list_files(key_files)
-    remove_list_files(dht_files)
+    storage_dirs = glob.glob(storage_dir + "/*.storage")
+    key_dirs = glob.glob(storage_dir + "/*.key")
+    dht_dirs = glob.glob(storage_dir + "/*.dht")
+    remove_list_dirs(storage_dirs)
+    remove_list_dirs(key_dirs)
+    remove_list_dirs(dht_dirs)
