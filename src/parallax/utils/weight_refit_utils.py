@@ -147,3 +147,25 @@ def filer_weight_cid_list(start_layer, end_layer, hidden_layers, index_map):
             res.append(key)
 
     return res
+
+
+def remove_list_files(file_list):
+    for file_path in file_list:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        else:
+            continue
+
+
+def release_disk_storage():
+    """Remove lattica storage files before get blocks"""
+    storage_dir = "/tmp"
+    storage_files = glob.glob(storage_dir + "/*.storage")
+    key_files = glob.glob(storage_dir + "/*.key")
+    dht_files = glob.glob(storage_dir + "/*.dht")
+    remove_list_files(storage_files)
+    remove_list_files(key_files)
+    remove_list_files(dht_files)
