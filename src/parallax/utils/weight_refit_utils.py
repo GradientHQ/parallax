@@ -41,6 +41,7 @@ def concat_weight_partition(refit_weight_path, original_tensors):
     """
     # Concatenate if needed and save the final tensors
     sorted_keys = sorted(original_tensors.keys())
+    tensors = {}
     prev_key = None
     concate_list = []
     file_idx = 0
