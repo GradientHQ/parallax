@@ -90,7 +90,7 @@ class DataTransferHandler:
             logger.info(
                 f"Finish download cid={cid}, get_block={interval_get_block}s, peer_id={peer_id}"
             )
-            new_cid = self.endpoint_lattica.put_block(raw_data)
+            new_cid = self.scheduler_manage.lattica.put_block(raw_data)
             return new_cid
 
         release_disk_storage()

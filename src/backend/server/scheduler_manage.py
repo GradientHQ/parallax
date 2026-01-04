@@ -1,3 +1,4 @@
+import os
 import threading
 import time
 from typing import List
@@ -45,6 +46,7 @@ class SchedulerManage:
         self.use_hfcache = use_hfcache
         self.enable_weight_refit = enable_weight_refit
         self.refit_data = {}
+        self.block_path = "/tmp/endpoint"
         self.model_name = None
         self.init_nodes_num = None
         self.scheduler = None
@@ -236,6 +238,14 @@ class SchedulerManage:
         if len(self.initial_peers) > 0:
             logger.info(f"Using initial peers: {self.initial_peers}")
             self.lattica.with_bootstraps(self.initial_peers)
+
+        if self.enable_weight_refit:
+            folder = os.path.exists(self.block_path)
+            if not folder:
+                os.makedirs(self.block_path)
+            self.lattica.with_storage_path(self.block_path)
+            self.lattica.with_dht_db_path(self.block_path)
+            self.lattica.with_key_path(self.block_path)
 
         self.lattica.build()
         logger.debug("Lattica node built")
