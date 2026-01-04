@@ -127,7 +127,7 @@ class DataTransferHandler:
                 new_cid_list = self._get_full_weight_blocks(refit_data)
                 # replace cid_list and feed to scheduler
                 refit_data["cid"] = new_cid_list
-                self.scheduler.refit_request = refit_data
-                self.scheduler.refit_set = set()
+                self.scheduler_manage.scheduler.refit_request = refit_data
+                self.scheduler_manage.scheduler.refit_set = set()
                 self.scheduler_manage.refit_data = {}
             time.sleep(1)
