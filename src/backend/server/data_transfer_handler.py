@@ -93,12 +93,15 @@ class DataTransferHandler:
             new_cid = self.scheduler_manage.lattica.put_block(raw_data)
             return new_cid
 
-        release_disk_storage()
+        release_disk_storage(["/tmp/endpoint", "/tmp/scheduler"])
 
         cid_list = message.get("cid", None)
         random.seed(time.time())
         random.shuffle(cid_list)
         new_cid_list = []
+
+        # sleep 30s for lattica direct connection
+        time.sleep(30)
 
         while True:
             if len(cid_list) == 0:

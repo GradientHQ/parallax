@@ -251,7 +251,7 @@ def check_and_run_weight_refit(gradient_server, message):
         return True, tensors
 
     # step0. Release lattica disk storage
-    release_disk_storage()
+    release_disk_storage(["/tmp"])
 
     # step1. Check weight refit trigger message
     time_stamp = message.get("time_stamp", None)

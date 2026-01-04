@@ -152,12 +152,15 @@ def remove_list_dirs(dir_list):
             continue
 
 
-def release_disk_storage():
+def release_disk_storage(base_dirs):
     """Remove lattica storage files before get blocks"""
-    storage_dir = "/tmp"
-    storage_dirs = glob.glob(storage_dir + "/*.storage")
-    key_dirs = glob.glob(storage_dir + "/*.key")
-    dht_dirs = glob.glob(storage_dir + "/*.dht")
+    storage_dirs = []
+    key_dirs = []
+    dht_dirs = []
+    for cache_dir in base_dirs:
+        storage_dirs.extend(glob.glob(cache_dir + "/*.storage"))
+        key_dirs.extend(glob.glob(cache_dir + "/*.key"))
+        dht_dirs.extend(glob.glob(cache_dir + "/*.dht"))
     remove_list_dirs(storage_dirs)
     remove_list_dirs(key_dirs)
     remove_list_dirs(dht_dirs)
