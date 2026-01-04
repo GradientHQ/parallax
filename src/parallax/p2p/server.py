@@ -256,7 +256,7 @@ def check_and_run_weight_refit(gradient_server, message):
 
     # step1. Check weight refit trigger message
     time_stamp = message.get("time_stamp", None)
-    cid_list = message.get("cid_list", None)
+    cid_list = message.get("cid", None)
     weight_version = message.get("version", 0)
     if time_stamp is None or cid_list is None:
         return
