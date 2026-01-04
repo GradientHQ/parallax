@@ -32,6 +32,7 @@ from parallax.utils.utils import get_zmq_socket
 from parallax.utils.weight_refit_utils import (
     calculate_cid_manual,
     concat_weight_partition,
+    parse_safetensors_from_memory,
     release_disk_storage,
 )
 from parallax_utils.logging_config import get_logger, set_log_level
@@ -247,8 +248,7 @@ def check_and_run_weight_refit(gradient_server, message):
             f"Finish download cid={cid}, get_block={interval_get_block}s, peer_id={peer_id}"
         )
         # convert raw data to dict
-        raw_data = raw_data.decode("utf-8")
-        tensors = json.loads(json.loads(raw_data, encoding="utf-8"))
+        tensors = parse_safetensors_from_memory(raw_data)
         return True, tensors
 
     # step0. Release lattica disk storage

@@ -1,8 +1,11 @@
 import base64
 import glob
 import hashlib
+import json
 import os
 import shutil
+import struct
+from typing import Dict
 
 import torch
 from safetensors.torch import save_file
@@ -158,3 +161,53 @@ def release_disk_storage():
     remove_list_dirs(storage_dirs)
     remove_list_dirs(key_dirs)
     remove_list_dirs(dht_dirs)
+
+
+def parse_safetensors_from_memory(raw_data: bytes) -> Dict[str, torch.Tensor]:
+    """
+    Convert binary in memory to safetensors
+    """
+    header_size = struct.unpack("<Q", raw_data[:8])[0]
+
+    header_data = raw_data[8 : 8 + header_size]
+    header = json.loads(header_data.decode("utf-8"))
+
+    header.pop("__metadata__", None)
+
+    tensors = {}
+    buffer_start = 8 + header_size
+    buffer = raw_data[buffer_start:]
+
+    for name, info in header.items():
+        if name == "__metadata__":
+            continue
+
+        dtype = info["dtype"]
+        shape = info["shape"]
+        begin, end = info["data_offsets"]
+
+        dtype_map = {
+            "F16": (torch.float16, 2),
+            "F32": (torch.float32, 4),
+            "F64": (torch.float64, 8),
+            "I8": (torch.int8, 1),
+            "I16": (torch.int16, 2),
+            "I32": (torch.int32, 4),
+            "I64": (torch.int64, 8),
+            "U8": (torch.uint8, 1),
+            "BOOL": (torch.bool, 1),
+        }
+        torch_dtype, item_size = dtype_map[dtype]
+
+        num_elements = 1
+        for dim in shape:
+            num_elements *= dim
+        total_bytes = num_elements * item_size
+
+        tensor_data = buffer[begin : begin + total_bytes]
+        tensor = torch.frombuffer(tensor_data, dtype=torch_dtype).clone()
+        tensor = tensor.reshape(shape)
+
+        tensors[name] = tensor
+
+    return tensors
