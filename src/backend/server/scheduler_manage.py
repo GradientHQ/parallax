@@ -46,7 +46,7 @@ class SchedulerManage:
         self.use_hfcache = use_hfcache
         self.enable_weight_refit = enable_weight_refit
         self.refit_data = {}
-        self.block_path = "/tmp/endpoint"
+        self.block_path = "/tmp/scheduler"
         self.model_name = None
         self.init_nodes_num = None
         self.scheduler = None
