@@ -188,6 +188,7 @@ def parse_safetensors_from_memory(raw_data: bytes) -> Dict[str, torch.Tensor]:
 
         dtype_map = {
             "F16": (torch.float16, 2),
+            "BF16": (torch.bfloat16, 2),
             "F32": (torch.float32, 4),
             "F64": (torch.float64, 8),
             "I8": (torch.int8, 1),
