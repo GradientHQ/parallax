@@ -5,7 +5,6 @@ import os
 import shutil
 
 import torch
-from safetensors import safe_open
 from safetensors.torch import save_file
 
 # CID constants
@@ -30,25 +29,13 @@ def inplace_insert_value_with_idx(tensor_list, value, idx):
     tensor_list[idx] = value
 
 
-def concat_weight_partition(refit_weight_path):
+def concat_weight_partition(refit_weight_path, original_tensors):
     """
     Concat partial weight into one safetensor.
     Partitioned weight should be named in the following format:
     {original_name}_part{i}
     e.g. model.embed_tokens.weight_part0
     """
-    weight_files = glob.glob(refit_weight_path + "/*.safetensors")
-    assert weight_files, f"Weight safetensors files not found in path: {refit_weight_path}"
-
-    tensors = {}
-    original_tensors = {}
-    for wf in weight_files:
-        with safe_open(wf, framework="pt", device="cpu") as f:
-            for k in f.keys():
-                original_tensors[k] = f.get_tensor(k)
-    for wf in weight_files:
-        os.remove(wf)
-
     # Concatenate if needed and save the final tensors
     sorted_keys = sorted(original_tensors.keys())
     prev_key = None
