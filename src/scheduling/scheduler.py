@@ -64,8 +64,6 @@ class Scheduler:
         self.model_info = model_info
         self.num_layers = model_info.num_layers
         self.routing_strategy: Literal["rr", "dp"] = routing_strategy
-        self.enable_weight_refit = enable_weight_refit
-        self.refit_request = {}
         self.node_manager = NodeManager(initial_nodes=nodes)
 
         allocator_class = (
@@ -119,6 +117,7 @@ class Scheduler:
         )
 
         # Weight refit
+        self.enable_weight_refit = enable_weight_refit
         self.refit_request = {}
         self.refit_set = set()
         self.last_refit_time = 0.0

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 import time
 import uuid
 
@@ -9,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.server.data_transfer_handler import DataTransferHandler
 from backend.server.request_handler import RequestHandler
 from backend.server.scheduler_manage import SchedulerManage
 from backend.server.server_args import parse_args
@@ -240,6 +242,14 @@ if __name__ == "__main__":
     is_local_network = args.is_local_network
     if model_name is not None and init_nodes_num is not None:
         scheduler_manage.run(model_name, init_nodes_num, is_local_network)
+
+    if args.enable_weight_refit:
+        data_transfer_handler = DataTransferHandler()
+        data_transfer_handler.set_scheduler_manage(scheduler_manage)
+        threading.Thread(
+            target=data_transfer_handler.run,
+            daemon=True,
+        ).start()
 
     host = args.host
     port = args.port

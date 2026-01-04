@@ -41,6 +41,8 @@ PUBLIC_RELAY_SERVERS = [
     "/dns4/relay-lattica-eu.gradient.network/tcp/18080/p2p/12D3KooWRAuR7rMNA7Yd4S1vgKS6akiJfQoRNNexTtzWxYPiWfG5",
 ]
 
+ENDPOINT_PROTOCOL_VERSION = "/gradient.network.parallax.protocal_version_0"
+
 
 def check_python_version():
     """Check if Python version is 3.11 or higher."""

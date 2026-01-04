@@ -44,6 +44,7 @@ class SchedulerManage:
         self.http_port = http_port
         self.use_hfcache = use_hfcache
         self.enable_weight_refit = enable_weight_refit
+        self.refit_data = {}
         self.model_name = None
         self.init_nodes_num = None
         self.scheduler = None
@@ -122,8 +123,7 @@ class SchedulerManage:
         """
         if self.scheduler is None:
             return False
-        self.scheduler.refit_request = request_data
-        self.scheduler.refit_set = set()
+        self.refit_data = request_data
         return True
 
     def get_last_refit_time(self):
