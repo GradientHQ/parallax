@@ -151,6 +151,9 @@ class MLXExecutor(BaseExecutor):
         time.sleep(5)
 
         sliding_window = self.config.get("sliding_window", None)
+        use_sliding_window = self.config.get("use_sliding_window", None)
+        if use_sliding_window is False:
+            sliding_window = None
 
         # Validate and adjust block size for Metal backend
         supported_block_sizes = [8, 16, 32, 64]
