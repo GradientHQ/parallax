@@ -132,8 +132,12 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                 output_list = []
                 for i in range(batch):
                     prefix_len = int(prefix_lens[i])
-                    q_i = queries_rotated[i : i + 1]  # (1, num_attention_heads, target_len, head_dim)
-                    k_new_i = keys_rotated[i : i + 1]  # (1, num_key_value_heads, target_len, head_dim)
+                    q_i = queries_rotated[
+                        i : i + 1
+                    ]  # (1, num_attention_heads, target_len, head_dim)
+                    k_new_i = keys_rotated[
+                        i : i + 1
+                    ]  # (1, num_key_value_heads, target_len, head_dim)
                     v_new_i = values_new[i : i + 1].transpose(
                         0, 2, 1, 3
                     )  # (1, num_key_value_heads, target_len, head_dim)
@@ -204,20 +208,25 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                         # - Can attend to all prefix tokens (col < prefix_len)
                         # - For new tokens, apply sliding window: can attend to positions >= (actual_row_pos - window_size)
                         # Create window mask: (target_len, full_len)
-                        row_positions = mx.arange(target_len, dtype=mx.int32)[:, None] + prefix_len  # (target_len, 1)
-                        col_positions = mx.arange(full_len, dtype=mx.int32)[None, :]  # (1, full_len)
-                        
+                        row_positions = (
+                            mx.arange(target_len, dtype=mx.int32)[:, None] + prefix_len
+                        )  # (target_len, 1)
+                        col_positions = mx.arange(full_len, dtype=mx.int32)[
+                            None, :
+                        ]  # (1, full_len)
+
                         # All prefix tokens are accessible
                         prefix_mask = col_positions < prefix_len
-                        
+
                         # For new tokens, apply sliding window
                         # TODO: check if this is correct
                         window_start = mx.maximum(
-                            prefix_len,
-                            row_positions - window_size
+                            prefix_len, row_positions - window_size
                         )  # (target_len, 1)
-                        in_window = (col_positions >= window_start) & (col_positions <= row_positions)
-                        
+                        in_window = (col_positions >= window_start) & (
+                            col_positions <= row_positions
+                        )
+
                         # Combine: accessible if in prefix OR in window
                         window_mask = prefix_mask | in_window
                         window_mask = mx.where(window_mask, 0.0, float("-inf"))

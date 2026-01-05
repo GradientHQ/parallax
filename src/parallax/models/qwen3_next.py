@@ -131,8 +131,12 @@ class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
                 output_list = []
                 for i in range(batch):
                     prefix_len = int(prefix_lens[i])
-                    q_i = queries_rotated[i : i + 1]  # (1, num_attention_heads, target_len, head_dim)
-                    k_new_i = keys_rotated[i : i + 1]  # (1, num_key_value_heads, target_len, head_dim)
+                    q_i = queries_rotated[
+                        i : i + 1
+                    ]  # (1, num_attention_heads, target_len, head_dim)
+                    k_new_i = keys_rotated[
+                        i : i + 1
+                    ]  # (1, num_key_value_heads, target_len, head_dim)
                     v_new_i = values_new[i : i + 1].transpose(
                         0, 2, 1, 3
                     )  # (1, num_key_value_heads, target_len, head_dim)

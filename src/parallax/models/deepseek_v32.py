@@ -302,14 +302,18 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
                         topk_i = topk_indices[i]  # (target_len, index_topk)
                         k_seq = target_len
                         sparse_mask = mx.zeros((target_len, k_seq), dtype=mx.bool_)
-                        sparse_mask = mx.put_along_axis(sparse_mask, topk_i, mx.array(True), axis=-1)
+                        sparse_mask = mx.put_along_axis(
+                            sparse_mask, topk_i, mx.array(True), axis=-1
+                        )
                         all_minus_one = (topk_i == -1).all(axis=-1, keepdims=True)
                         sparse_mask = mx.where(all_minus_one, True, sparse_mask)
                         # Expand sparse_mask to include prefix: (target_len, prefix_len + target_len)
                         # For prefix positions, allow all (True), for new positions, use sparse_mask
                         prefix_sparse_mask = mx.ones((target_len, prefix_len), dtype=mx.bool_)
                         full_sparse_mask = mx.concatenate([prefix_sparse_mask, sparse_mask], axis=1)
-                        full_sparse_mask = full_sparse_mask[None, None, :, :]  # (1, 1, target_len, full_len)
+                        full_sparse_mask = full_sparse_mask[
+                            None, None, :, :
+                        ]  # (1, 1, target_len, full_len)
                         # Combine causal mask with sparse mask
                         causal_mask = mx.where(full_sparse_mask, causal_mask, float("-inf"))
 
@@ -330,7 +334,9 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
                 if topk_indices is not None:
                     k_seq = target_len
                     sparse_mask = mx.zeros((batch, target_len, k_seq), dtype=mx.bool_)
-                    sparse_mask = mx.put_along_axis(sparse_mask, topk_indices, mx.array(True), axis=-1)
+                    sparse_mask = mx.put_along_axis(
+                        sparse_mask, topk_indices, mx.array(True), axis=-1
+                    )
                     all_minus_one = (topk_indices == -1).all(axis=-1, keepdims=True)
                     sparse_mask = mx.where(all_minus_one, True, sparse_mask)
                     sparse_mask = sparse_mask[:, None, :, :]
