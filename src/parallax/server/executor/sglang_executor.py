@@ -88,6 +88,8 @@ class SGLExecutor(BaseExecutor):
         shared_state: Optional[dict] = None,
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
+        # Pipe communication
+        conn: Optional[Any] = None,
     ):
 
         self.enable_lora = True if lora_paths is not None else enable_lora
@@ -172,6 +174,7 @@ class SGLExecutor(BaseExecutor):
             dp_size=dp_size,
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
+            conn=conn,
         )
         self.cur_batch = None
         self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
@@ -194,7 +197,8 @@ class SGLExecutor(BaseExecutor):
     def check_and_refit_weight(self, refit_weight_path: str):
         if refit_weight_path == "":
             return
-        refit_sgl_model(self.model_runner, refit_weight_path)
+        tensors = self.conn.recv()
+        refit_sgl_model(self.model_runner, tensors)
 
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"

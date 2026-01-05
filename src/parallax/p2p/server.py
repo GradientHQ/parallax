@@ -16,7 +16,7 @@ import random
 import shutil
 import threading
 import time
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import dijkstar
 import httpx
@@ -298,13 +298,9 @@ def check_and_run_weight_refit(gradient_server, message):
 
         # step3. concat weight
         # workaround: create sub-process to avoid GIL issues for lattica
-        logger.info(f"Start sub-process to concat weight partitions in {weight_dir}")
-        process = multiprocessing.Process(
-            target=concat_weight_partition,
-            args=(weight_dir, tensors),
-        )
-        process.start()
-        process.join()
+        new_tensors = concat_weight_partition(tensors)
+        gradient_server.conn.send(new_tensors)
+        logger.info(f"New tensors sent to executor")
 
         # step4. send ipc message to update weight
         gradient_server.connection_handler.ipc_weight_refit(weight_dir, weight_version)
@@ -349,6 +345,7 @@ class GradientServer:
         max_sequence_length: Optional[int] = None,
         param_mem_ratio: float = 0.65,
         kvcache_mem_ratio: float = 0.25,
+        conn: Any = None,
     ):
         self.recv_from_peer_addr = recv_from_peer_addr
         self.send_to_peer_addr = send_to_peer_addr
@@ -385,6 +382,7 @@ class GradientServer:
         self.rtt_update_interval = 60
         self.status = ServerState.JOINING
         self.manual_layer_assignment = block_end_index is not None and block_start_index is not None
+        self.conn = conn
 
         self.scheduler_stub = None
         self.scheduler_peer_id = None
@@ -976,6 +974,7 @@ def _run_p2p_server_process(
     kvcache_mem_ratio: float = 0.25,
     shared_state: Optional[dict] = None,
     log_level: str = "INFO",
+    conn: Any = None,
 ):
     """Run P2P server in subprocess"""
     # Set log level in subprocess (spawn mode doesn't inherit log configuration)
@@ -1006,6 +1005,7 @@ def _run_p2p_server_process(
             max_sequence_length=max_sequence_length,
             param_mem_ratio=param_mem_ratio,
             kvcache_mem_ratio=kvcache_mem_ratio,
+            conn=conn,
         )
         # Attach shared state to server for syncing layer allocation
         if shared_state is not None:
@@ -1055,6 +1055,7 @@ def launch_p2p_server_process(
     kvcache_mem_ratio: float = 0.25,
     shared_state: Optional[dict] = None,
     log_level: str = "INFO",
+    conn: Optional[Any] = None,
 ) -> multiprocessing.Process:
     """Launch P2P server as a subprocess and return the process object
 
@@ -1089,6 +1090,7 @@ def launch_p2p_server_process(
             kvcache_mem_ratio,
             shared_state,
             log_level,
+            conn,
         ),
     )
     process.start()

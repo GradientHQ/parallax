@@ -379,9 +379,10 @@ def initialize_sgl_model_runner(
 
 def refit_sgl_model(
     model_runner: ParallaxModelRunner,
-    refit_weight_path: str,
+    tensors: dict,
 ):
     """Runtime weight refit from disk"""
-    logger.info(f"Begin refit weight from path: {refit_weight_path}")
+    logger.info(f"Executor begins weight refit")
+    refit_tensors = [(x, tensors.get(x)) for x in tensors.keys()]
 
-    model_runner.update_weights_from_disk(model_path=refit_weight_path, load_format="auto")
+    model_runner.update_weights_from_tensor(named_tensors=refit_tensors, load_format="direct")

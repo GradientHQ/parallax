@@ -8,7 +8,6 @@ import struct
 from typing import Dict
 
 import torch
-from safetensors.torch import save_file
 
 # CID constants
 CIDV1 = 0x01
@@ -32,7 +31,7 @@ def inplace_insert_value_with_idx(tensor_list, value, idx):
     tensor_list[idx] = value
 
 
-def concat_weight_partition(refit_weight_path, original_tensors):
+def concat_weight_partition(original_tensors):
     """
     Concat partial weight into one safetensor.
     Partitioned weight should be named in the following format:
@@ -42,9 +41,9 @@ def concat_weight_partition(refit_weight_path, original_tensors):
     # Concatenate if needed and save the final tensors
     sorted_keys = sorted(original_tensors.keys())
     tensors = {}
+    res_tensors = {}
     prev_key = None
     concate_list = []
-    file_idx = 0
     max_size = 1024 * 1024 * 1024  # max size 1GB
     param_size = 0
     for key in sorted_keys:
@@ -53,9 +52,7 @@ def concat_weight_partition(refit_weight_path, original_tensors):
             tensors[key] = val
             param_size += val.numel() * val.element_size()
             if param_size > max_size:
-                save_file_name = refit_weight_path + "/model_" + str(file_idx) + ".safetensors"
-                save_file(tensors, save_file_name)
-                file_idx += 1
+                res_tensors.update(tensors)
                 param_size = 0
                 tensors = {}
             continue
@@ -78,9 +75,7 @@ def concat_weight_partition(refit_weight_path, original_tensors):
                 tensors[final_key] = concate_result
                 param_size += val.numel() * val.element_size()
                 if param_size > max_size:
-                    save_file_name = refit_weight_path + "/model_" + str(file_idx) + ".safetensors"
-                    save_file(tensors, save_file_name)
-                    file_idx += 1
+                    res_tensors.update(tensors)
                     param_size = 0
                     tensors = {}
 
@@ -96,8 +91,8 @@ def concat_weight_partition(refit_weight_path, original_tensors):
         final_key = ".".join(cur_name_list)
         tensors[final_key] = concate_result
 
-    save_file_name = refit_weight_path + "/model_" + str(file_idx) + ".safetensors"
-    save_file(tensors, save_file_name)
+    res_tensors.update(tensors)
+    return res_tensors
 
 
 def is_block_needed(key, is_first_shard, is_last_shard, start_layer, end_layer) -> bool:
