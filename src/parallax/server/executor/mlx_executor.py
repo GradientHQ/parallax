@@ -466,9 +466,9 @@ class MLXExecutor(BaseExecutor):
             assert req.is_prefill, f"Request {req.request_id} is not a prefill request."
 
             # Allocate Paged KV blocks with prefix cache support
-            # For first peer, pass input_ids for prefix matching
+            # All peers can perform prefix cache matching if input_ids are available
             token_ids = None
-            if self.is_first_peer and self.enable_prefix_cache:
+            if self.enable_prefix_cache and req.input_ids is not None:
                 token_ids = req.input_ids
 
             success, matched_tokens = self.cache_manager.allocate_request(
