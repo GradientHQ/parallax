@@ -385,4 +385,4 @@ def refit_sgl_model(
     logger.info(f"Executor begins weight refit")
     for x in tensors.keys():
         refit_tensors = [(x, tensors.get(x))]
-        model_runner.update_weights_from_tensor(named_tensors=refit_tensors, load_format="direct")
+        model_runner.update_weights_from_tensor(named_tensors=refit_tensors, load_format=None)
