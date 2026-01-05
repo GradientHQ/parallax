@@ -267,10 +267,10 @@ def check_and_run_weight_refit(gradient_server, message):
     random.seed(time.time())
     random.shuffle(cid_list)
 
-    # add sleep 30s for direct connection first
+    # add sleep 10s for direct connection first
     logger.info(f"Start dealing weight refit message: {message}.")
     logger.info(f"Wait for lattica direct connection.")
-    time.sleep(30)
+    time.sleep(10)
 
     # step2. download weight
     weight_dir = os.path.join("/tmp", str(time_stamp))
