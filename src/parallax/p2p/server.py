@@ -247,6 +247,7 @@ def check_and_run_weight_refit(gradient_server, message):
         logger.info(
             f"Finish download cid={cid}, get_block={interval_get_block}s, peer_id={peer_id}"
         )
+        # convert raw data to dict
         tensors = parse_safetensors_from_memory(raw_data)
         return True, tensors
 
