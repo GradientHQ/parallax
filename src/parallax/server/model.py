@@ -7,7 +7,7 @@ from typing import Any, List, Optional, Type
 import mlx.core as mx
 from mlx import nn
 from mlx_lm.models.base import BaseModelArgs
-
+from mlx.nn.layers.distributed import shard_linear
 from parallax.server.sampling.sampler import Sampler, SamplingBatchInfo
 from parallax_utils.logging_config import get_logger
 
@@ -32,12 +32,16 @@ class ShardedModel(nn.Module):
         *,
         has_norm_in: bool = False,
         dtype: Optional[mx.Dtype] = None,
+        tp_rank: Optional[int] = 0,
+        tp_size: Optional[int] = 1,
     ):
         super().__init__()
         self.config = config
         self.model_id = model_id
         self.start_layer = start_layer
         self.end_layer = end_layer
+        self.tp_rank = tp_rank
+        self.tp_size = tp_size
         self.block_class = block_class
         self.has_norm_in = has_norm_in
         self.dtype = dtype if dtype is not None else mx.float16
@@ -68,6 +72,40 @@ class ShardedModel(nn.Module):
         else:
             self.norm = None
             self.lm_head = None
+    
+    def shard_layers(self):
+        if self.tp_size > 1:
+            logger.info(f"Sharding layers for tp_rank={self.tp_rank}, tp_size={self.tp_size}")
+            group = mx.distributed.init(strict=True, backend="jaccl")
+            N = group.size()
+            logger.info(f"Group size: {N}")
+            for layer in self.layers:
+                # Shard the self attention
+                layer.self_attn.q_proj = shard_linear(
+                    layer.self_attn.q_proj, "all-to-sharded", group=group
+                )
+                layer.self_attn.k_proj = shard_linear(
+                    layer.self_attn.k_proj, "all-to-sharded", group=group
+                )
+                layer.self_attn.v_proj = shard_linear(
+                    layer.self_attn.v_proj, "all-to-sharded", group=group
+                )
+                layer.self_attn.o_proj = shard_linear(
+                    layer.self_attn.o_proj, "sharded-to-all", group=group
+                )
+                layer.self_attn.n_heads //= N
+                layer.self_attn.n_kv_heads //= N
+
+                # Shard the MLP
+                layer.mlp.gate_proj = shard_linear(
+                    layer.mlp.gate_proj, "all-to-sharded", group=group
+                )
+                layer.mlp.down_proj = shard_linear(
+                    layer.mlp.down_proj, "sharded-to-all", group=group
+                )
+                layer.mlp.up_proj = shard_linear(
+                    layer.mlp.up_proj, "all-to-sharded", group=group
+                )
 
     def logits_to_tokens(
         self,

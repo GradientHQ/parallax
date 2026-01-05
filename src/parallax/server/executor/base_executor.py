@@ -547,7 +547,7 @@ class BaseExecutor:
                         )
 
                         # 8. Dispatch to the appropriate destination
-                        if self.tp_rank == 0:
+                        if self.tp_rank >= 0:
                             if self.is_last_peer and self.is_first_peer:
                                 # Single node: handle locally
                                 self.handle_input_requests(next_batch)

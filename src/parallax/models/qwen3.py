@@ -254,8 +254,12 @@ class ParallaxQwen3Block(MLXQwen3Block):
             slot_mapping=slot_mapping,
             **kwargs,
         )
+        mx.eval(r)
+        logger.warning(f"layer {self.layer_idx} attention output: {r}")
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
+        mx.eval(r)
+        logger.warning(f"layer {self.layer_idx} mlp output: {r}")
         out = h + r
         return out
 

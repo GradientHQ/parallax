@@ -3,9 +3,12 @@ MLX-LM backend implementation of high level executor
 """
 
 import time
+import os
+import pickle
 from typing import Any, Dict, List, Optional, Tuple
 
 import mlx.core as mx
+import numpy as np
 
 from parallax.server.cache_manager import CacheManager
 from parallax.server.executor.base_executor import BaseExecutor
@@ -89,12 +92,21 @@ class MLXExecutor(BaseExecutor):
         enable_weight_refit: Optional[bool] = False,
     ):
         logger.debug(
-            f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer})"
+            f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer}), tp_rank={tp_rank}, tp_size={tp_size}"
         )
+
+        if tp_size > 1:
+            os.environ["MLX_METAL_FAST_SYNCH"] = "1"
+            os.environ["MLX_IBV_DEVICES"] = "ibv_devices.json"
+            os.environ["MLX_JACCL_COORDINATOR"] = "192.168.50.182:32323"
+            os.environ["MLX_RANK"] = str(tp_rank)
+
         self.shard_loader = MLXModelLoader(
             model_repo,
             start_layer=start_layer,
             end_layer=end_layer,
+            tp_rank=tp_rank,
+            tp_size=tp_size,
             use_hfcache=use_hfcache,
         )
         t0 = time.time()
@@ -170,7 +182,7 @@ class MLXExecutor(BaseExecutor):
         )
         self.cache_manager = CacheManager(
             num_layers=self.num_shard_layers,
-            num_kv_heads=num_key_value_heads,
+            num_kv_heads=num_key_value_heads // tp_size,
             head_dim=head_dim,
             dtype=self.dtype,
             block_size=kv_block_size,
@@ -232,10 +244,54 @@ class MLXExecutor(BaseExecutor):
             f"CacheManager ready; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}"
         )
 
+    def _tensor_parallel_broadcast_byobj(self, broadcast_obj):
+        """Wrapper for broadcast pyobject in TP group using send/recv with explicit sync"""
+        if self.tp_size <= 1:
+            return broadcast_obj
+
+        if self.tp_rank == 0:
+            # Rank 0 准备数据
+            data = pickle.dumps(broadcast_obj)
+            data_len = len(data)
+            
+            # 1. 使用 all_sum 广播长度（比 send/recv 长度更稳定）
+            data_len_arr = mx.array([data_len], dtype=mx.int32)
+            data_len_arr = mx.distributed.all_sum(data_len_arr)
+            mx.eval(data_len_arr)
+
+            # 2. 发送序列化数据内容
+            data_arr = mx.array(np.frombuffer(data, dtype=np.uint8))
+            data_arr = mx.distributed.all_sum(data_arr)
+            mx.eval(data_arr)
+            
+        else:
+            # Rank 1+ 接收数据
+            # 1. 接收长度
+            data_len_arr = mx.zeros((1,), dtype=mx.int32)
+            data_len_arr = mx.distributed.all_sum(data_len_arr) # 参与 all_sum 接收长度
+            mx.eval(data_len_arr)
+            data_len = int(data_len_arr[0])
+            
+            # 2. 接收数据内容
+            data_arr = mx.zeros((data_len,), dtype=mx.uint8)
+            data_arr = mx.distributed.all_sum(data_arr)
+            mx.eval(data_arr)
+            data = np.array(data_arr).tobytes()
+
+        data = pickle.loads(data)
+        if len(data) > 0:
+            logger.warning(f"Rank {self.tp_rank} loaded data: {data}")
+        return data
+
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
-        if not requests:
+        if self.tp_size > 1:
+            requests = self._tensor_parallel_broadcast_byobj(requests)
+
+        if len(requests) == 0:
             return
+
+        logger.debug(f"Handling {len(requests)} requests.")
         if self.is_first_peer:
             # First peer can receive InitialRequests from the client RPC,
             # or IntermediateRequests from the last peer.
@@ -354,6 +410,8 @@ class MLXExecutor(BaseExecutor):
             prefix_lens=prepared_inputs.get("prefix_lens"),  # For RoPE offset in prefix cache
         )
 
+        mx.eval(hidden_states)
+
         logger.debug(
             f"Processing batch with {len(prepared_inputs['requests'])} requests, "
             f"request status: {prepared_inputs['requests'][0].status}, "
@@ -428,7 +486,6 @@ class MLXExecutor(BaseExecutor):
 
             # Return dict with token_ids and optional probs
             return {"hidden_states": token_ids, "probs": token_probs}
-
         # Intermediate peer: return hidden states without probs
         return {"hidden_states": hidden_states, "probs": None}
 

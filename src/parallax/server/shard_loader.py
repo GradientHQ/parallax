@@ -42,6 +42,8 @@ class MLXModelLoader:
         *,
         start_layer: Optional[int] = None,
         end_layer: Optional[int] = None,
+        tp_rank: Optional[int] = 0,
+        tp_size: Optional[int] = 1,
         use_hfcache: bool = False,
     ):
         """
@@ -54,11 +56,15 @@ class MLXModelLoader:
                                          Defaults to the beginning of the model.
             end_layer (Optional[int]): The ending layer index for the shard (exclusive).
                                        Defaults to the end of the model.
+            tp_rank (Optional[int]): Tensor parallel rank. Defaults to 0.
+            tp_size (Optional[int]): Tensor parallel size. Defaults to 1.
             use_hfcache (bool): If True, use local Hugging Face cache only (no network download).
         """
         self.model_path_str = model_path_or_hf_repo
         self.start_layer = start_layer
         self.end_layer = end_layer
+        self.tp_rank = tp_rank
+        self.tp_size = tp_size
         self.use_hfcache = use_hfcache
         self.register_block_class()
 
@@ -208,7 +214,7 @@ class MLXModelLoader:
         return base_model
 
     def load(
-        self, lazy: bool = False, strict: bool = True, use_selective_download: bool = True
+        self, lazy: bool = False, strict: bool = False, use_selective_download: bool = True
     ) -> Tuple[nn.Module, Dict[str, Any], Any]:
         """
         Loads the specified model shard by loading only the necessary weights
@@ -292,6 +298,8 @@ class MLXModelLoader:
             end_layer=current_end_layer,
             block_class=block_class,
             dtype=dtype,
+            tp_rank=self.tp_rank,
+            tp_size=self.tp_size,
         )
 
         weight_files = glob.glob(str(model_path / "model*.safetensors"))
@@ -421,9 +429,11 @@ class MLXModelLoader:
             )
 
         model_shard.load_weights(list(shard_weights.items()), strict=strict)
+        model_shard.shard_layers()
 
-        if not lazy:
-            mx.eval(model_shard.parameters())
+        mx.eval(model_shard.parameters())
+        # Synchronize processes to avoid timeout
+        mx.eval(mx.distributed.all_sum(mx.array(1.0), stream=mx.cpu))
         model_shard.eval()
         logger.info(
             "Successfully loaded model shard (layers [%d-%d)), memory usage: %.3f GB",
