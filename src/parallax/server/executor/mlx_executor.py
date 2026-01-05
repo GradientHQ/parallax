@@ -250,37 +250,35 @@ class MLXExecutor(BaseExecutor):
             return broadcast_obj
 
         if self.tp_rank == 0:
-            # Rank 0 准备数据
+            # Rank 0 prepares data
             data = pickle.dumps(broadcast_obj)
             data_len = len(data)
             
-            # 1. 使用 all_sum 广播长度（比 send/recv 长度更稳定）
+            # Broadcast length using all_sum
             data_len_arr = mx.array([data_len], dtype=mx.int32)
             data_len_arr = mx.distributed.all_sum(data_len_arr)
             mx.eval(data_len_arr)
 
-            # 2. 发送序列化数据内容
+            # Send serialized data content
             data_arr = mx.array(np.frombuffer(data, dtype=np.uint8))
             data_arr = mx.distributed.all_sum(data_arr)
             mx.eval(data_arr)
             
         else:
-            # Rank 1+ 接收数据
-            # 1. 接收长度
+            # Rank 1+ receives data
+            # Receive length
             data_len_arr = mx.zeros((1,), dtype=mx.int32)
-            data_len_arr = mx.distributed.all_sum(data_len_arr) # 参与 all_sum 接收长度
+            data_len_arr = mx.distributed.all_sum(data_len_arr)
             mx.eval(data_len_arr)
             data_len = int(data_len_arr[0])
             
-            # 2. 接收数据内容
+            # Receive data content
             data_arr = mx.zeros((data_len,), dtype=mx.uint8)
             data_arr = mx.distributed.all_sum(data_arr)
             mx.eval(data_arr)
             data = np.array(data_arr).tobytes()
 
         data = pickle.loads(data)
-        if len(data) > 0:
-            logger.warning(f"Rank {self.tp_rank} loaded data: {data}")
         return data
 
     def handle_input_requests(self, requests: List[Request]):
