@@ -28,10 +28,12 @@ from parallax.p2p.proto import forward_pb2
 from parallax.p2p.utils import AsyncWorker
 from parallax.server.server_info import detect_node_hardware
 from parallax.utils.shared_state import SharedState
-from parallax.utils.utils import (
+from parallax.utils.utils import get_zmq_socket
+from parallax.utils.weight_refit_utils import (
     calculate_cid_manual,
     concat_weight_partition,
-    get_zmq_socket,
+    parse_safetensors_from_memory,
+    release_disk_storage,
 )
 from parallax_utils.logging_config import get_logger, set_log_level
 
@@ -227,7 +229,7 @@ def check_and_run_weight_refit(gradient_server, message):
                 cur_time = time.time()
                 if cur_time - time_begin_get_block > time_out:
                     logger.warning(f"Failed to get_block after 10 minutes! cid={cid}")
-                    return False
+                    return False, {}
                 peer_id, raw_data = gradient_server.lattica.get_block(cid, timeout_secs=30)
                 cid_manual = calculate_cid_manual(raw_data)
                 if cid_manual != cid:
@@ -241,25 +243,17 @@ def check_and_run_weight_refit(gradient_server, message):
                 time.sleep(1)
         if raw_data is None:
             raise RuntimeError(f"Failed to get block cid={cid}")
-        file_name = cid + ".safetensors"
-        file_name = os.path.join(weight_dir, file_name)
-        with open(file_name, "wb") as f:
-            f.write(raw_data)
-        file_size_bytes = os.path.getsize(file_name)
-        file_size_kb = file_size_bytes / 1024
-        file_size_mb = file_size_kb / 1024
-        time_end_write_file = time.time()
         interval_get_block = time_end_get_block - time_begin_get_block
-        interval_write_file = time_end_write_file - time_end_get_block
         logger.info(
-            f"Finish download cid={cid}, file_size={file_size_mb}MB, get_block={interval_get_block}s, write_file={interval_write_file}s, peer_id={peer_id}"
+            f"Finish download cid={cid}, get_block={interval_get_block}s, peer_id={peer_id}"
         )
-        return True
+        # convert raw data to dict
+        tensors = parse_safetensors_from_memory(raw_data)
+        return True, tensors
 
-    # add sleep 60s for direct connection first
-    logger.info(f"Start dealing weight refit message: {message}.")
-    logger.info(f"Wait for lattica direct connection.")
-    time.sleep(60)
+    # step0. Release lattica disk storage
+    release_disk_storage()
+
     # step1. Check weight refit trigger message
     time_stamp = message.get("time_stamp", None)
     cid_list = message.get("cid", None)
@@ -273,20 +267,28 @@ def check_and_run_weight_refit(gradient_server, message):
     random.seed(time.time())
     random.shuffle(cid_list)
 
-    # step2. save weight to disk
+    # add sleep 30s for direct connection first
+    logger.info(f"Start dealing weight refit message: {message}.")
+    logger.info(f"Wait for lattica direct connection.")
+    time.sleep(30)
+
+    # step2. download weight
     weight_dir = os.path.join("/tmp", str(time_stamp))
     folder = os.path.exists(weight_dir)
     if not folder:
         os.makedirs(weight_dir)
         download_res = True
+        tensors = {}
         while True:
             if len(cid_list) == 0:
                 break
             else:
                 cid = cid_list.pop()
                 logger.info(f"Start downloading refit weight {cid}")
-                res = _download_weight_thread(weight_dir, cid)
-                if not res:
+                res, tensors_loaded = _download_weight_thread(weight_dir, cid)
+                if res:
+                    tensors.update(tensors_loaded)
+                else:
                     download_res = False
                     break
 
@@ -299,7 +301,7 @@ def check_and_run_weight_refit(gradient_server, message):
         logger.info(f"Start sub-process to concat weight partitions in {weight_dir}")
         process = multiprocessing.Process(
             target=concat_weight_partition,
-            args=(weight_dir,),
+            args=(weight_dir, tensors),
         )
         process.start()
         process.join()
@@ -408,7 +410,7 @@ class GradientServer:
             )
 
     def check_and_release_disk_weight(self):
-        # only save 2 history versions of weight
+        """Only save 2 history versions of weight"""
         while len(self.refit_timestamp_history) > 2:
             time_stamp = self.refit_timestamp_history.pop(0)
             weight_dir = os.path.join("/tmp", str(int(time_stamp)))
