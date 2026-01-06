@@ -12,6 +12,7 @@ from mlx_lm.models.gpt_oss import TransformerBlock as MLXGPTOSSBlock
 
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
 from parallax.server.cache.base import BaseCache
+from mlx.nn.layers.distributed import shard_inplace, shard_linear
 
 
 class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
@@ -164,6 +165,42 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
         return out
+
+    def shard(self, group: mx.distributed.Group):
+        group = group or mx.distributed.init(strict=True, backend="jaccl")
+        N = group.size()
+        r = group.rank()
+        # Shard the self attention
+        self.self_attn.q_proj = shard_linear(
+            self.self_attn.q_proj, "all-to-sharded", group=group
+        )
+        self.self_attn.k_proj = shard_linear(
+            self.self_attn.k_proj, "all-to-sharded", group=group
+        )
+        self.self_attn.v_proj = shard_linear(
+            self.self_attn.v_proj, "all-to-sharded", group=group
+        )
+        self.self_attn.o_proj = shard_linear(
+            self.self_attn.o_proj, "sharded-to-all", group=group
+        )
+        self.self_attn.sinks = self.self_attn.sinks[self.self_attn.num_attention_heads // N * r : self.self_attn.num_attention_heads // N * (r + 1)]
+        self.self_attn.num_attention_heads //= N
+        self.self_attn.num_key_value_heads //= N
+
+        # Shard the MLP
+        shard_inplace(
+            self.mlp.experts.gate_proj, "all-to-sharded", group=group
+        )
+        shard_inplace(
+            self.mlp.experts.up_proj, "all-to-sharded", group=group
+        )
+        shard_inplace(
+            self.mlp.experts.down_proj, "sharded-to-all", group=group
+        )
+        if r > 0:
+            # set the bias to 0 for the down proj on the non-zero ranks so that bias only be added once.
+            self.mlp.experts.down_proj.bias = mx.zeros_like(self.mlp.experts.down_proj.bias)
+
 
     @classmethod
     def get_architecture(cls):

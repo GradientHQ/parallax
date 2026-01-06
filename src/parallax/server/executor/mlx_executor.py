@@ -241,7 +241,7 @@ class MLXExecutor(BaseExecutor):
         # )
 
         logger.debug(
-            f"CacheManager ready; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}"
+            f"mlx_executor initialized; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}, total memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
         )
 
     def _tensor_parallel_broadcast_byobj(self, broadcast_obj):

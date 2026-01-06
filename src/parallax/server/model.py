@@ -77,35 +77,12 @@ class ShardedModel(nn.Module):
         if self.tp_size > 1:
             logger.info(f"Sharding layers for tp_rank={self.tp_rank}, tp_size={self.tp_size}")
             group = mx.distributed.init(strict=True, backend="jaccl")
-            N = group.size()
-            logger.info(f"Group size: {N}")
             for layer in self.layers:
-                # Shard the self attention
-                layer.self_attn.q_proj = shard_linear(
-                    layer.self_attn.q_proj, "all-to-sharded", group=group
-                )
-                layer.self_attn.k_proj = shard_linear(
-                    layer.self_attn.k_proj, "all-to-sharded", group=group
-                )
-                layer.self_attn.v_proj = shard_linear(
-                    layer.self_attn.v_proj, "all-to-sharded", group=group
-                )
-                layer.self_attn.o_proj = shard_linear(
-                    layer.self_attn.o_proj, "sharded-to-all", group=group
-                )
-                layer.self_attn.n_heads //= N
-                layer.self_attn.n_kv_heads //= N
-
-                # Shard the MLP
-                layer.mlp.gate_proj = shard_linear(
-                    layer.mlp.gate_proj, "all-to-sharded", group=group
-                )
-                layer.mlp.down_proj = shard_linear(
-                    layer.mlp.down_proj, "sharded-to-all", group=group
-                )
-                layer.mlp.up_proj = shard_linear(
-                    layer.mlp.up_proj, "all-to-sharded", group=group
-                )
+                if hasattr(layer, "shard"):
+                    layer.shard(group)
+                else:
+                    logger.error(f"Model {layer.__class__.__name__} does not have a shard method, does not support tensor parallelism")
+                    exit(1)
 
     def logits_to_tokens(
         self,

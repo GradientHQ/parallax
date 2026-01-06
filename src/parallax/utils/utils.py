@@ -467,3 +467,14 @@ def concat_weight_partition(refit_weight_path):
 
     save_file_name = refit_weight_path + "/model_" + str(file_idx) + ".safetensors"
     save_file(tensors, save_file_name)
+
+
+def get_reachable_ip():
+    """Get reachable IPs from the local network interfaces en0 or en1"""
+    addrs = psutil.net_if_addrs()
+    for interface in ["en0", "en1"]:
+        if interface in addrs:
+            for addr in addrs[interface]:
+                if addr.family == socket.AF_INET:
+                    return addr.address
+    return None
