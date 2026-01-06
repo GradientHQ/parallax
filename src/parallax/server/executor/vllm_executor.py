@@ -82,6 +82,8 @@ class VLLMExecutor(BaseExecutor):
         shared_state: Optional[dict] = None,
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
+        # Pipe communication
+        conn: Optional[Any] = None,
     ):
         model_runner_params = {
             "model_repo": model_repo,
@@ -134,6 +136,7 @@ class VLLMExecutor(BaseExecutor):
             tp_size=tp_size,
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
+            conn=conn,
         )
 
     def handle_input_requests(self, requests: List[Request]):

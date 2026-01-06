@@ -87,6 +87,8 @@ class BaseExecutor:
         shared_state: Optional[dict] = None,
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
+        # Pipe communication
+        conn: Optional[Any] = None,
     ):
         # Backend
         if device is not None:
@@ -109,6 +111,9 @@ class BaseExecutor:
         # Runtime weight refit for RL
         self.enable_weight_refit = enable_weight_refit
         self.weight_version = 0
+
+        # Pipe communication
+        self.conn = conn
 
         self.is_first_peer = start_layer == 0
         self.is_last_peer = end_layer == self.config.get("num_hidden_layers")

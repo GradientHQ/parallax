@@ -3,7 +3,7 @@ Creates executor from factory for different backends.
 """
 
 import argparse
-from typing import Optional
+from typing import Any, Optional
 
 from parallax.utils.utils import get_current_device
 from parallax_utils.logging_config import get_logger, set_log_level
@@ -11,7 +11,7 @@ from parallax_utils.logging_config import get_logger, set_log_level
 logger = get_logger(__name__)
 
 
-def create_executor_config(args: argparse.Namespace, shared_state=None):
+def create_executor_config(args: argparse.Namespace, shared_state=None, conn=None):
     """Create executor configuration from command line arguments."""
 
     config = {
@@ -41,6 +41,7 @@ def create_executor_config(args: argparse.Namespace, shared_state=None):
         "dp_size": getattr(args, "dp_size", 1),
         "nccl_port": args.nccl_port,
         "shared_state": shared_state,
+        "conn": conn,
         "use_hfcache": args.use_hfcache,
         "enable_lora": args.enable_lora,
         "max_lora_rank": args.max_lora_rank,
@@ -59,13 +60,14 @@ def create_executor_config(args: argparse.Namespace, shared_state=None):
 def create_from_args(
     args,
     shared_state: Optional[dict] = None,
+    conn: Optional[Any] = None,
     device: Optional[str] = None,
 ):
     """
     Creat executor for different backend.
     Lazy import here since CUDA modules cannot be import withough hardware support.
     """
-    config = create_executor_config(args, shared_state)
+    config = create_executor_config(args, shared_state, conn)
     if device is None:
         device = get_current_device()
     if device is not None and device.startswith("cuda"):
@@ -88,12 +90,12 @@ def create_from_args(
     return executor
 
 
-def run_executor_process(args, shared_state=None):
+def run_executor_process(args, shared_state=None, conn=None):
     """Run executor as a subprocess"""
     set_log_level(args.log_level)
     executor = None
     try:
-        executor = create_from_args(args, shared_state)
+        executor = create_from_args(args, shared_state, conn)
         executor.run_loop()
     except KeyboardInterrupt:
         logger.debug("Executor received interrupt signal, shutting down...")
