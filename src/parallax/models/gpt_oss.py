@@ -14,6 +14,10 @@ from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_c
 from parallax.server.cache.base import BaseCache
 from mlx.nn.layers.distributed import shard_inplace, shard_linear
 
+import time
+from parallax_utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
     """A custom attention module for Parallax, extending the Qwen3 Attention class.
@@ -150,7 +154,7 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
             window_size = self.get_window_size()
         else:
             window_size = None
-
+        start_time = time.time()
         r = self.self_attn(
             self.input_layernorm(x),
             mask=mask,
@@ -161,9 +165,14 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
             window_size=window_size,
             **kwargs,
         )
+        mx.eval(r)
+        logger.warning(f"self attention done, time: {(time.time() - start_time) * 1000:.3f} ms")
+        start_time = time.time()
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
+        mx.eval(out)
+        logger.warning(f"mlp done, time: {(time.time() - start_time) * 1000:.3f} ms")
         return out
 
     def shard(self, group: mx.distributed.Group):

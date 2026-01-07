@@ -497,26 +497,26 @@ async def benchmark(
     if backend != "openai-chat" and test_mm_content is not None:
         # multi-modal benchmark is only available on OpenAI Chat backend.
         raise ValueError("Multi-modal content is only supported on 'openai-chat' backend.")
-    test_input = RequestFuncInput(
-        model=model_id,
-        model_name=model_name,
-        prompt=test_prompt,
-        api_url=api_url,
-        prompt_len=test_prompt_len,
-        output_len=test_output_len,
-        logprobs=logprobs,
-        best_of=best_of,
-        multi_modal_content=test_mm_content,
-        ignore_eos=ignore_eos,
-    )
-    test_output = await request_func(request_func_input=test_input)
-    if not test_output.success:
-        raise ValueError(
-            "Initial test run failed - Please make sure benchmark arguments "
-            f"are correctly specified. Error: {test_output.error}"
-        )
-    else:
-        print("Initial test run completed. Starting main benchmark run...")
+    # test_input = RequestFuncInput(
+    #     model=model_id,
+    #     model_name=model_name,
+    #     prompt=test_prompt,
+    #     api_url=api_url,
+    #     prompt_len=test_prompt_len,
+    #     output_len=test_output_len,
+    #     logprobs=logprobs,
+    #     best_of=best_of,
+    #     multi_modal_content=test_mm_content,
+    #     ignore_eos=ignore_eos,
+    # )
+    # test_output = await request_func(request_func_input=test_input)
+    # if not test_output.success:
+    #     raise ValueError(
+    #         "Initial test run failed - Please make sure benchmark arguments "
+    #         f"are correctly specified. Error: {test_output.error}"
+    #     )
+    # else:
+    #     print("Initial test run completed. Starting main benchmark run...")
 
     if profile:
         print("Starting profiler...")

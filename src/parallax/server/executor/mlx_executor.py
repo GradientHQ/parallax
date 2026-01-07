@@ -395,8 +395,6 @@ class MLXExecutor(BaseExecutor):
         # Note: Paged Attention writes KV cache in-place within the model (via reshape_and_cache).
         # The returned 'hidden_states' is what we need.
         # The returned cache tuple (_, _) is ignored/unused here.
-        logger.debug(f"prefix_cache is {'on' if self.enable_prefix_cache else 'off'}")
-        logger.debug(f"prefix_lens: {prepared_inputs.get('prefix_lens')}")
         hidden_states = self.model_shard(
             h_or_tokens=prepared_inputs["h_or_tokens"],
             cache=prepared_inputs["cache"],
@@ -411,7 +409,7 @@ class MLXExecutor(BaseExecutor):
         mx.eval(hidden_states)
 
         logger.debug(
-            f"Processing batch with {len(prepared_inputs['requests'])} requests, "
+            f"Processed batch of {len(prepared_inputs['requests'])} requests, "
             f"request status: {prepared_inputs['requests'][0].status}, "
             f"hidden_states shape: {hidden_states.shape}"
         )
