@@ -5,10 +5,15 @@ import numpy as np
 
 from parallax.metal.paged_attention.kernel import reshape_and_cache
 from parallax.server.cache_manager import CacheManager
+from parallax.utils.utils import is_metal_available
 
 
 class TestPagedKVIntegration(unittest.TestCase):
     def setUp(self):
+        # Skip entire test class if Metal is not available
+        if not is_metal_available():
+            self.skipTest("Metal backend not available (requires macOS with Metal support)")
+
         self.num_layers = 1
         self.num_kv_heads = 4
         self.head_dim = 16
@@ -26,6 +31,7 @@ class TestPagedKVIntegration(unittest.TestCase):
             dtype=self.dtype,
             block_size=self.block_size,
             cache_memory_fraction=0.5,
+            sliding_window=16,
         )
 
         # Ensure we have enough blocks for testing

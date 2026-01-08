@@ -13,6 +13,7 @@ packages = [
   { include = "parallax", from = "src" },
   { include = "scheduling", from = "src" },
   { include = "parallax_utils", from = "src" },
+  { include = "parallax_extensions", from = "src" },
 ]
 
 dependencies = [
@@ -32,7 +33,7 @@ dependencies = [
   "pydantic",
   "protobuf==6.31.1",
   "dijkstar==2.6.0",
-  "lattica==1.0.17",
+  "lattica==1.0.19",
   "orjson",
 ]
 
@@ -44,7 +45,7 @@ parallax = "parallax.cli:main"
 mac = [
   "torch==2.8.0",
   "mlx-lm==0.30.0",
-  "mlx==0.30.0",
+  "mlx==0.30.1",
 ]
 
 gpu = [

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.managers.schedule_batch import ScheduleBatch
+from sglang.srt.mem_cache.radix_cache import RadixCache as PageRadixCache
 from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
 from sglang.srt.utils import broadcast_pyobj
 from sglang.srt.utils.common import SUPPORTED_LORA_TARGET_MODULES
@@ -46,7 +47,7 @@ class SGLExecutor(BaseExecutor):
         max_sequence_length: Optional[int] = None,
         max_tokens_in_kv_pool: Optional[int] = None,
         # Controlling perfill / decode ratio
-        max_num_tokens_per_batch: int = 1024,
+        max_num_tokens_per_batch: int = 16384,
         prefill_priority: int = 0,
         micro_batch_ratio: int = 2,
         scheduler_wait_ms: int = 500,
@@ -87,6 +88,8 @@ class SGLExecutor(BaseExecutor):
         shared_state: Optional[dict] = None,
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
+        # Pipe communication
+        conn: Optional[Any] = None,
     ):
 
         self.enable_lora = True if lora_paths is not None else enable_lora
@@ -171,16 +174,31 @@ class SGLExecutor(BaseExecutor):
             dp_size=dp_size,
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
+            conn=conn,
         )
         self.cur_batch = None
         self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
         self.tp_group = self.model_runner.tp_group
         self.tp_cpu_group = self.tp_group.cpu_group
 
+        # create a page tree cache for sglang prefill
+        if enable_prefix_cache:
+            self.page_tree_cache = PageRadixCache(
+                self.model_runner.req_to_token_pool,
+                self.model_runner.token_to_kv_pool_allocator,
+                self.model_runner.page_size,
+            )
+            logger.info(
+                f"Sglang Page tree cache created with page size {self.model_runner.page_size}"
+            )
+        else:
+            self.page_tree_cache = None
+
     def check_and_refit_weight(self, refit_weight_path: str):
         if refit_weight_path == "":
             return
-        refit_sgl_model(self.model_runner, refit_weight_path)
+        tensors = self.conn.recv()
+        refit_sgl_model(self.model_runner, tensors)
 
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
@@ -565,6 +583,7 @@ class SGLExecutor(BaseExecutor):
         schedule_batch, forward_batch = form_sgl_batch_prefill(
             batched_requests,
             self.model_runner,
+            self.page_tree_cache,
         )
         self.cur_batch = schedule_batch
 

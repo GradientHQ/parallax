@@ -41,7 +41,7 @@ class Scheduler:
     def __init__(
         self,
         max_batch_size: int = 16,
-        max_num_tokens_per_batch: int = 4096,
+        max_num_tokens_per_batch: int = 16384,
         scheduler_wait_ms: int = 200,
         micro_batch_ratio: int = 2,
         is_first_peer: bool = False,
@@ -158,9 +158,6 @@ class Scheduler:
             except Exception:
                 pass
         else:
-            logger.warning(
-                f"Attempted to evict non-existent request {request_id}. It might have been already evicted."
-            )
             return
 
     def cancel_request(self, request_id: str):
@@ -248,7 +245,12 @@ class Scheduler:
             if self.cache_manager is not None:
                 if not self.cache_manager.has_request(req.request_id):
                     # TODO: Handle chunked prefill, and support preemption.
-                    if not self.cache_manager.allocate_request(req.request_id, req.total_length):
+                    # Pass input_ids for prefix cache matching
+                    token_ids = getattr(req, "input_ids", None)
+                    success, matched_tokens = self.cache_manager.allocate_request(
+                        req.request_id, req.total_length, token_ids=token_ids
+                    )
+                    if not success:
                         logger.warning(
                             f"Request {rid} can't be admit to running batch due to KV cache size."
                         )
@@ -256,6 +258,10 @@ class Scheduler:
                         self._wait_queue.appendleft(req)
                         # Stop admitting since we are out of memory
                         break
+                    if matched_tokens > 0:
+                        logger.debug(
+                            f"Request {rid} matched {matched_tokens} tokens from prefix cache"
+                        )
 
             # Add request to running requests
             self._running_requests[rid] = req
