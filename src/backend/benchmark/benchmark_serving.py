@@ -435,7 +435,7 @@ def calculate_metrics(
         total_output=sum(actual_output_lens),
         request_throughput=completed / dur_s,
         request_goodput=good_completed / dur_s,
-        output_throughput=sum(actual_output_lens) / dur_s,
+        output_throughput=np.mean([1.0 / x for x in tpots]),
         total_token_throughput=(total_input + sum(actual_output_lens)) / dur_s,
         mean_ttft_ms=np.mean(ttfts or 0)
         * 1000,  # ttfts is empty if streaming is not supported by backend

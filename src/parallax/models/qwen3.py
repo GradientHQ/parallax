@@ -266,14 +266,14 @@ class ParallaxQwen3Block(MLXQwen3Block):
             slot_mapping=slot_mapping,
             **kwargs,
         )
-        mx.eval(r)
-        logger.warning(f"self attention done, time: {(time.time() - start_time) * 1000:.3f} ms")
-        start_time = time.time()
+        # mx.eval(r)
+        # logger.warning(f"self attention done, time: {(time.time() - start_time) * 1000:.3f} ms")
+        # start_time = time.time()
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
-        mx.eval(out)
-        logger.warning(f"mlp done, time: {(time.time() - start_time) * 1000:.3f} ms")
+        # mx.eval(out)
+        # logger.warning(f"mlp done, time: {(time.time() - start_time) * 1000:.3f} ms")
         # self.test_mlp(out)
         return out
     
@@ -297,15 +297,15 @@ class ParallaxQwen3Block(MLXQwen3Block):
         self.self_attn.n_kv_heads //= N
 
         # Shard the MLP
-        # self.mlp.gate_proj = shard_linear(
-        #     self.mlp.gate_proj, "all-to-sharded", group=group
-        # )
-        # self.mlp.up_proj = shard_linear(
-        #     self.mlp.up_proj, "all-to-sharded", group=group
-        # )
-        # self.mlp.down_proj = shard_linear(
-        #     self.mlp.down_proj, "sharded-to-all", group=group
-        # )
+        self.mlp.gate_proj = shard_linear(
+            self.mlp.gate_proj, "all-to-sharded", group=group
+        )
+        self.mlp.up_proj = shard_linear(
+            self.mlp.up_proj, "all-to-sharded", group=group
+        )
+        self.mlp.down_proj = shard_linear(
+            self.mlp.down_proj, "sharded-to-all", group=group
+        )
 
     @classmethod
     def get_architecture(cls):

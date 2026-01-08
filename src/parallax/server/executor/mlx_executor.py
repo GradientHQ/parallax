@@ -98,8 +98,14 @@ class MLXExecutor(BaseExecutor):
         if tp_size > 1:
             os.environ["MLX_METAL_FAST_SYNCH"] = "1"
             os.environ["MLX_IBV_DEVICES"] = "ibv_devices.json"
-            os.environ["MLX_JACCL_COORDINATOR"] = "192.168.50.182:32323"
+            os.environ["MLX_JACCL_COORDINATOR"] = "192.168.0.1:32323"
             os.environ["MLX_RANK"] = str(tp_rank)
+        try:
+            wired_limit = mx.metal.device_info()["max_recommended_working_set_size"]
+            pre_wired_limit = mx.set_wired_limit(wired_limit)
+            logger.warning(f"Using mlx with metal backend, wired_limit={wired_limit / 1024**3:.3f} GB, pre_wired_limit={pre_wired_limit / 1024**3:.3f} GB")
+        except Exception:
+            logger.warning(f"Using mlx without metal backend.")
 
         self.shard_loader = MLXModelLoader(
             model_repo,
@@ -159,9 +165,6 @@ class MLXExecutor(BaseExecutor):
         index_n_heads = self.config.get("index_n_heads", None)
 
         layer_types = get_layer_types(self.config, start_layer, end_layer)
-        logger.debug(f"layer_types: {layer_types}")
-        time.sleep(5)
-
         sliding_window = self.config.get("sliding_window", None)
 
         # Validate and adjust block size for Metal backend
@@ -224,11 +227,6 @@ class MLXExecutor(BaseExecutor):
             enable_weight_refit=enable_weight_refit,
         )
 
-        try:
-            mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
-        except Exception:
-            logger.warning(f"Using mlx without metal backend.")
-
         # Prefix Cache Manager
         self.enable_prefix_cache = enable_prefix_cache
         # self.prefix_cache = RadixCache(
@@ -239,7 +237,7 @@ class MLXExecutor(BaseExecutor):
         #     dtype=self.dtype,
         #     page_size=1,
         # )
-
+        self.generation_stream = mx.new_stream(mx.default_device())
         logger.debug(
             f"mlx_executor initialized; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}, total memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
         )
@@ -279,12 +277,13 @@ class MLXExecutor(BaseExecutor):
             data = np.array(data_arr).tobytes()
 
         data = pickle.loads(data)
+
         return data
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
-        if self.tp_size > 1:
-            requests = self._tensor_parallel_broadcast_byobj(requests)
+        # if self.tp_size > 1:
+            # requests = self._tensor_parallel_broadcast_byobj(requests)
 
         if len(requests) == 0:
             return
@@ -395,18 +394,23 @@ class MLXExecutor(BaseExecutor):
         # Note: Paged Attention writes KV cache in-place within the model (via reshape_and_cache).
         # The returned 'hidden_states' is what we need.
         # The returned cache tuple (_, _) is ignored/unused here.
-        hidden_states = self.model_shard(
-            h_or_tokens=prepared_inputs["h_or_tokens"],
-            cache=prepared_inputs["cache"],
-            mask=prepared_inputs.get("mask"),
-            block_tables=prepared_inputs.get("block_tables"),
-            context_lengths=prepared_inputs.get("context_lengths"),
-            slot_mapping=prepared_inputs.get("slot_mapping"),
-            state_slot_mapping=prepared_inputs.get("state_slot_mapping"),
-            prefix_lens=prepared_inputs.get("prefix_lens"),  # For RoPE offset in prefix cache
-        )
-
-        mx.eval(hidden_states)
+        mx.eval(prepared_inputs)
+        mx.synchronize()
+        with mx.stream(self.generation_stream):
+            start_time = time.time()
+            hidden_states = self.model_shard(
+                h_or_tokens=prepared_inputs["h_or_tokens"],
+                cache=prepared_inputs["cache"],
+                mask=prepared_inputs.get("mask"),
+                block_tables=prepared_inputs.get("block_tables"),
+                context_lengths=prepared_inputs.get("context_lengths"),
+                slot_mapping=prepared_inputs.get("slot_mapping"),
+                state_slot_mapping=prepared_inputs.get("state_slot_mapping"),
+                prefix_lens=prepared_inputs.get("prefix_lens"),  # For RoPE offset in prefix cache
+            )
+            mx.eval(hidden_states)
+            mx.synchronize()
+            logger.warning(f"model forward pass done, time: {(time.time() - start_time) * 1000:.3f} ms")
 
         logger.debug(
             f"Processed batch of {len(prepared_inputs['requests'])} requests, "

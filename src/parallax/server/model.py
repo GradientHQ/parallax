@@ -146,7 +146,6 @@ class ShardedModel(nn.Module):
             context_lengths: (batch,) for PagedAttention.
             slot_mapping: (total_tokens,) for PagedAttention.
         """
-        start_time = time.time()
         h = h_or_tokens
         target_len = h.shape[1]
 
@@ -159,9 +158,7 @@ class ShardedModel(nn.Module):
 
         if target_len > 1 and mask is None:
             raise ValueError("ShardedModel: mask cannot be None for prefill.")
-        mx.eval(h)
-        logger.warning(f"embed tokens done, time: {(time.time() - start_time) * 1000:.3f} ms")
-        start_time = time.time()
+
         for _, layer_module in enumerate(self.layers):
             h = layer_module(
                 h,
@@ -172,15 +169,10 @@ class ShardedModel(nn.Module):
                 slot_mapping=slot_mapping,
                 **kwargs,
             )
-        mx.eval(h)
-        logger.warning(f"layers forward pass done, time: {(time.time() - start_time) * 1000:.3f} ms")
-        start_time = time.time()
         if self.is_last_shard:
             if self.norm is None or self.lm_head is None:
                 raise ValueError("ShardedModel: norm or lm_head is None for the last shard.")
             h = self.norm(h)
             h = self.lm_head(h)
-        mx.eval(h)
-        logger.warning(f"norm and lm head done, time: {(time.time() - start_time) * 1000:.3f} ms")
 
         return h
