@@ -226,7 +226,7 @@ class CacheManager:
     def _calculate_num_blocks(self, cache_memory_fraction: float, dtype: mx.Dtype) -> int:
         device_info = mx.metal.device_info()
         total_mem = device_info["max_recommended_working_set_size"]
-        current_mem = mx.metal.get_active_memory()
+        current_mem = mx.get_active_memory()
         free_mem = total_mem - current_mem
         available_for_cache = free_mem * cache_memory_fraction
 
