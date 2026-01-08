@@ -64,7 +64,7 @@ class BaseExecutor:
         max_batch_size: Optional[int] = 8,
         max_sequence_length: Optional[int] = None,
         # Controlling perfill / decode ratio
-        max_num_tokens_per_batch: int = 1024,
+        max_num_tokens_per_batch: int = 16384,
         prefill_priority: int = 0,
         micro_batch_ratio: int = 2,
         scheduler_wait_ms: int = 500,

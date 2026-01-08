@@ -45,7 +45,7 @@ class MLXExecutor(BaseExecutor):
         max_sequence_length: Optional[int] = None,
         max_tokens_in_kv_pool: Optional[int] = None,
         # Controlling perfill / decode ratio
-        max_num_tokens_per_batch: int = 1024,
+        max_num_tokens_per_batch: int = 16384,
         prefill_priority: int = 0,
         micro_batch_ratio: int = 2,
         scheduler_wait_ms: int = 500,
@@ -53,7 +53,7 @@ class MLXExecutor(BaseExecutor):
         # Metrics Configs
         layer_latency_update_every: int = 4096,
         # KV Cache Configs
-        kv_block_size: int = 64,
+        kv_block_size: int = 32,
         kv_cache_memory_fraction: float = 0.8,
         enable_prefix_cache: Optional[bool] = False,
         # Communication Configs
