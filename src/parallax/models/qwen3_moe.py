@@ -61,20 +61,12 @@ class ParallaxQwen3MoeAttention(MLXQwen3MoeAttention):
 
         key_cache_global, value_cache_global = cache.get_cache()
 
-        queries_rotated_list = []
-        keys_rotated_list = []
-
-        for i in range(batch):
-            current_pos = int(context_lengths[i]) - 1 if target_len == 1 else 0
-            q_slice = queries_new[i : i + 1]
-            k_slice = keys_new[i : i + 1]
-            q_rot = self.rope(q_slice, offset=current_pos)
-            k_rot = self.rope(k_slice, offset=current_pos)
-            queries_rotated_list.append(q_rot)
-            keys_rotated_list.append(k_rot)
-
-        queries_rotated = mx.concatenate(queries_rotated_list, axis=0)
-        keys_rotated = mx.concatenate(keys_rotated_list, axis=0)
+        if target_len == 1:
+            current_pos = context_lengths - 1
+        else:
+            current_pos = 0
+        queries_rotated = self.rope(queries_new, offset=current_pos)
+        keys_rotated = self.rope(keys_new, offset=current_pos)
 
         block_size = key_cache_global.shape[3]
 
