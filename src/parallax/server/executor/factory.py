@@ -37,6 +37,7 @@ def create_executor_config(args: argparse.Namespace, shared_state=None):
         "moe_runner_backend": args.moe_runner_backend,
         "tp_rank": args.tp_rank,
         "tp_size": args.tp_size,
+        "distributed_backend": args.distributed_backend,
         "dp_rank": getattr(args, "dp_rank", 0),
         "dp_size": getattr(args, "dp_size", 1),
         "nccl_port": args.nccl_port,

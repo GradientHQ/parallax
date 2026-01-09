@@ -264,8 +264,6 @@ class BaseExecutor:
                 except Exception as e:
                     logger.exception(f"Error receiving http request: {e}")
                     self._notify_http_request_error(raw_request, e)
-
-        recv_reqs = self._tensor_parallel_broadcast_byobj(recv_reqs)
     
         if len(recv_reqs) > 0:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
@@ -447,7 +445,7 @@ class BaseExecutor:
 
     def run_loop(self):
         """The main loop of the executor."""
-        logger.debug(
+        logger.warning(
             f"Executor for layers [{self.start_layer}, {self.end_layer}) starting run loop..."
         )
         self._should_stop = False
@@ -518,7 +516,7 @@ class BaseExecutor:
             if not batch_to_process:
                 continue
             logger.debug(f"Formed batch with {len(batch_to_process)} requests.")
-            logger.warning(f"Recv requests time: {recv_requests_time:.3f} ms, Handle input requests time: {handle_input_requests_time:.3f} ms, Admit requests time: {admit_requests_time:.3f} ms, Timed out requests time: {timed_out_requests_time:.3f} ms, Form batch time: {form_batch_time:.3f} ms")
+            logger.debug(f"Recv requests time: {recv_requests_time:.3f} ms, Handle input requests time: {handle_input_requests_time:.3f} ms, Admit requests time: {admit_requests_time:.3f} ms, Timed out requests time: {timed_out_requests_time:.3f} ms, Form batch time: {form_batch_time:.3f} ms")
 
             # 6. Process the batch
             try:

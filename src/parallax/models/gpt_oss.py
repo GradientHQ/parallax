@@ -175,8 +175,8 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
         logger.warning(f"mlp done, time: {(time.time() - start_time) * 1000:.3f} ms")
         return out
 
-    def shard(self, group: mx.distributed.Group):
-        group = group or mx.distributed.init(strict=True, backend="jaccl")
+    def shard(self):
+        group = mx.distributed.init()
         N = group.size()
         r = group.rank()
         # Shard the self attention

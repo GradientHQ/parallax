@@ -76,10 +76,9 @@ class ShardedModel(nn.Module):
     def shard_layers(self):
         if self.tp_size > 1:
             logger.info(f"Sharding layers for tp_rank={self.tp_rank}, tp_size={self.tp_size}")
-            group = mx.distributed.init(strict=True, backend="jaccl")
             for layer in self.layers:
                 if hasattr(layer, "shard"):
-                    layer.shard(group)
+                    layer.shard()
                 else:
                     logger.error(f"Model {layer.__class__.__name__} does not have a shard method, does not support tensor parallelism")
                     exit(1)

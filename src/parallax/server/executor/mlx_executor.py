@@ -81,6 +81,7 @@ class MLXExecutor(BaseExecutor):
         # Tensor Parallel Configs
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
+        distributed_backend: Optional[str] = "ring",
         nccl_port: Optional[int] = 4000,
         # Data Parallel Configs (not used in MLX, but accepted for compatibility)
         enable_dp_attention: Optional[bool] = False,
@@ -96,10 +97,18 @@ class MLXExecutor(BaseExecutor):
         )
 
         if tp_size > 1:
+            if distributed_backend == "jaccl":
+                os.environ["MLX_IBV_DEVICES"] = "ibv_devices.json"
+                os.environ["MLX_JACCL_COORDINATOR"] = "192.168.0.1:32323"
+            elif distributed_backend == "ring":
+                os.environ["MLX_HOSTFILE"] = "hostfile.json"
+            else:
+                raise ValueError(f"Unsupported distributed backend: {distributed_backend}")
+            
             os.environ["MLX_METAL_FAST_SYNCH"] = "1"
-            os.environ["MLX_IBV_DEVICES"] = "ibv_devices.json"
-            os.environ["MLX_JACCL_COORDINATOR"] = "192.168.0.1:32323"
             os.environ["MLX_RANK"] = str(tp_rank)
+            mx.distributed.init(strict=True, backend=distributed_backend)
+
         try:
             wired_limit = mx.metal.device_info()["max_recommended_working_set_size"]
             pre_wired_limit = mx.set_wired_limit(wired_limit)
@@ -238,6 +247,7 @@ class MLXExecutor(BaseExecutor):
         #     page_size=1,
         # )
         self.generation_stream = mx.new_stream(mx.default_device())
+        self.step_time = []
         logger.debug(
             f"mlx_executor initialized; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}, total memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
         )
@@ -255,25 +265,21 @@ class MLXExecutor(BaseExecutor):
             # Broadcast length using all_sum
             data_len_arr = mx.array([data_len], dtype=mx.int32)
             data_len_arr = mx.distributed.all_sum(data_len_arr)
-            mx.eval(data_len_arr)
 
             # Send serialized data content
             data_arr = mx.array(np.frombuffer(data, dtype=np.uint8))
             data_arr = mx.distributed.all_sum(data_arr)
-            mx.eval(data_arr)
             
         else:
             # Rank 1+ receives data
             # Receive length
             data_len_arr = mx.zeros((1,), dtype=mx.int32)
             data_len_arr = mx.distributed.all_sum(data_len_arr)
-            mx.eval(data_len_arr)
             data_len = int(data_len_arr[0])
             
             # Receive data content
             data_arr = mx.zeros((data_len,), dtype=mx.uint8)
             data_arr = mx.distributed.all_sum(data_arr)
-            mx.eval(data_arr)
             data = np.array(data_arr).tobytes()
 
         data = pickle.loads(data)
@@ -282,8 +288,8 @@ class MLXExecutor(BaseExecutor):
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
-        # if self.tp_size > 1:
-            # requests = self._tensor_parallel_broadcast_byobj(requests)
+        if self.tp_size > 1:
+            requests = self._tensor_parallel_broadcast_byobj(requests)
 
         if len(requests) == 0:
             return
@@ -328,6 +334,12 @@ class MLXExecutor(BaseExecutor):
                             f"Released resources for finished request {req.request_id}, "
                             f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
                         )
+                        logger.warning(
+                            "Released request %s, step time: \n%s",
+                            original_req.request_id,
+                            '\n'.join([f"{x:.3f} ms" for x in self.step_time])
+                        )
+                        self.step_time = []
                         if not self.is_last_peer and not req.abort:
                             self.finished_batch.append(req)
                     else:
@@ -410,7 +422,8 @@ class MLXExecutor(BaseExecutor):
             )
             mx.eval(hidden_states)
             mx.synchronize()
-            logger.warning(f"model forward pass done, time: {(time.time() - start_time) * 1000:.3f} ms")
+            logger.debug(f"model forward pass done, time: {(time.time() - start_time) * 1000:.3f} ms")
+            self.step_time.append((time.time() - start_time) * 1000)
 
         logger.debug(
             f"Processed batch of {len(prepared_inputs['requests'])} requests, "

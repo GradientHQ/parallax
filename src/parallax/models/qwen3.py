@@ -277,8 +277,8 @@ class ParallaxQwen3Block(MLXQwen3Block):
         # self.test_mlp(out)
         return out
     
-    def shard(self, group: mx.distributed.Group):
-        group = group or mx.distributed.init(strict=True, backend="jaccl")
+    def shard(self):
+        group = mx.distributed.init()
         N = group.size()
         # Shard the self attention
         self.self_attn.q_proj = shard_linear(
