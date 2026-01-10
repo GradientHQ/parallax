@@ -257,33 +257,25 @@ class MLXExecutor(BaseExecutor):
         if self.tp_size <= 1:
             return broadcast_obj
 
+        data_len = 0
+        data = None
         if self.tp_rank == 0:
             # Rank 0 prepares data
             data = pickle.dumps(broadcast_obj)
             data_len = len(data)
             
-            # Broadcast length using all_sum
-            data_len_arr = mx.array([data_len], dtype=mx.int32)
-            data_len_arr = mx.distributed.all_sum(data_len_arr)
+        # Broadcast length using all_sum
+        data_len_arr = mx.array([data_len], dtype=mx.int32)
+        data_len_arr = mx.distributed.all_sum(data_len_arr)
+        data_len = int(data_len_arr[0])
 
-            # Send serialized data content
+        if data is not None:
             data_arr = mx.array(np.frombuffer(data, dtype=np.uint8))
-            data_arr = mx.distributed.all_sum(data_arr)
-            
         else:
-            # Rank 1+ receives data
-            # Receive length
-            data_len_arr = mx.zeros((1,), dtype=mx.int32)
-            data_len_arr = mx.distributed.all_sum(data_len_arr)
-            data_len = int(data_len_arr[0])
-            
-            # Receive data content
             data_arr = mx.zeros((data_len,), dtype=mx.uint8)
-            data_arr = mx.distributed.all_sum(data_arr)
-            data = np.array(data_arr).tobytes()
 
-        data = pickle.loads(data)
-
+        data_arr = mx.distributed.all_sum(data_arr)
+        data = pickle.loads(np.array(data_arr).tobytes())
         return data
 
     def handle_input_requests(self, requests: List[Request]):
