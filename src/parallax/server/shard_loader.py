@@ -41,8 +41,6 @@ class MLXModelLoader:
         *,
         start_layer: Optional[int] = None,
         end_layer: Optional[int] = None,
-        tp_rank: Optional[int] = 0,
-        tp_size: Optional[int] = 1,
         use_hfcache: bool = False,
     ):
         """
@@ -55,15 +53,11 @@ class MLXModelLoader:
                                          Defaults to the beginning of the model.
             end_layer (Optional[int]): The ending layer index for the shard (exclusive).
                                        Defaults to the end of the model.
-            tp_rank (Optional[int]): Tensor parallel rank. Defaults to 0.
-            tp_size (Optional[int]): Tensor parallel size. Defaults to 1.
             use_hfcache (bool): If True, use local Hugging Face cache only (no network download).
         """
         self.model_path_str = model_path_or_hf_repo
         self.start_layer = start_layer
         self.end_layer = end_layer
-        self.tp_rank = tp_rank
-        self.tp_size = tp_size
         self.use_hfcache = use_hfcache
         self.register_block_class()
 
@@ -297,8 +291,6 @@ class MLXModelLoader:
             end_layer=current_end_layer,
             block_class=block_class,
             dtype=dtype,
-            tp_rank=self.tp_rank,
-            tp_size=self.tp_size,
         )
 
         weight_files = glob.glob(str(model_path / "model*.safetensors"))

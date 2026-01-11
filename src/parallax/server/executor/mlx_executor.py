@@ -78,10 +78,6 @@ class MLXExecutor(BaseExecutor):
         lora_eviction_policy: Optional[str] = "lru",
         lora_backend: Optional[str] = "triton",
         max_lora_chunk_size: Optional[int] = 128,
-        # Tensor Parallel Configs
-        tp_rank: Optional[int] = 0,
-        tp_size: Optional[int] = 1,
-        distributed_backend: Optional[str] = "ring",
         nccl_port: Optional[int] = 4000,
         # Data Parallel Configs (not used in MLX, but accepted for compatibility)
         enable_dp_attention: Optional[bool] = False,
@@ -92,22 +88,13 @@ class MLXExecutor(BaseExecutor):
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
     ):
+        group = mx.distributed.init()
+        tp_size = group.size()
+        tp_rank = group.rank()
+
         logger.debug(
             f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer}), tp_rank={tp_rank}, tp_size={tp_size}"
         )
-
-        if tp_size > 1:
-            if distributed_backend == "jaccl":
-                os.environ["MLX_IBV_DEVICES"] = "ibv_devices.json"
-                os.environ["MLX_JACCL_COORDINATOR"] = "192.168.0.1:32323"
-            elif distributed_backend == "ring":
-                os.environ["MLX_HOSTFILE"] = "hostfile.json"
-            else:
-                raise ValueError(f"Unsupported distributed backend: {distributed_backend}")
-            
-            os.environ["MLX_METAL_FAST_SYNCH"] = "1"
-            os.environ["MLX_RANK"] = str(tp_rank)
-            mx.distributed.init(strict=True, backend=distributed_backend)
 
         try:
             mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
@@ -118,8 +105,6 @@ class MLXExecutor(BaseExecutor):
             model_repo,
             start_layer=start_layer,
             end_layer=end_layer,
-            tp_rank=tp_rank,
-            tp_size=tp_size,
             use_hfcache=use_hfcache,
         )
         t0 = time.time()

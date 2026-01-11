@@ -31,16 +31,12 @@ class ShardedModel(nn.Module):
         *,
         has_norm_in: bool = False,
         dtype: Optional[mx.Dtype] = None,
-        tp_rank: Optional[int] = 0,
-        tp_size: Optional[int] = 1,
     ):
         super().__init__()
         self.config = config
         self.model_id = model_id
         self.start_layer = start_layer
         self.end_layer = end_layer
-        self.tp_rank = tp_rank
-        self.tp_size = tp_size
         self.block_class = block_class
         self.has_norm_in = has_norm_in
         self.dtype = dtype if dtype is not None else mx.float16
@@ -73,8 +69,9 @@ class ShardedModel(nn.Module):
             self.lm_head = None
     
     def shard_layers(self):
-        if self.tp_size > 1:
-            logger.info(f"Sharding layers for tp_rank={self.tp_rank}, tp_size={self.tp_size}")
+        group = mx.distributed.init()
+        tp_size = group.size()
+        if tp_size > 1:
             for layer in self.layers:
                 if hasattr(layer, "shard"):
                     layer.shard()
