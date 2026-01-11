@@ -14,11 +14,6 @@ from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_c
 from parallax.server.cache.base import BaseCache
 from mlx.nn.layers.distributed import shard_inplace, shard_linear
 
-import time
-from parallax_utils.logging_config import get_logger
-
-logger = get_logger(__name__)
-
 class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
     """A custom attention module for Parallax, extending the Qwen3 Attention class.
 
@@ -35,6 +30,7 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
         window_size: Optional[int] = None,
+        prefix_lens: Optional[mx.array] = None,
         **kwargs,
     ) -> mx.array:
         """
@@ -56,19 +52,14 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
 
         key_cache_global, value_cache_global = cache.get_cache()
 
-        queries_rotated_list = []
-        keys_rotated_list = []
-        for i in range(batch):
-            current_pos = int(context_lengths[i]) - 1 if target_len == 1 else 0
-            q_slice = queries_new[i : i + 1]
-            k_slice = keys_new[i : i + 1]
-            q_rot = self.rope(q_slice, offset=current_pos)
-            k_rot = self.rope(k_slice, offset=current_pos)
-            queries_rotated_list.append(q_rot)
-            keys_rotated_list.append(k_rot)
-
-        queries_rotated = mx.concatenate(queries_rotated_list, axis=0)
-        keys_rotated = mx.concatenate(keys_rotated_list, axis=0)
+        if target_len == 1:
+            current_pos = context_lengths - 1
+        elif prefix_lens is not None:
+            current_pos = prefix_lens
+        else:
+            current_pos = 0
+        queries_rotated = self.rope(queries_new, offset=current_pos)
+        keys_rotated = self.rope(keys_new, offset=current_pos)
 
         # Update Paged Cache
         block_size = key_cache_global.shape[3]
@@ -154,7 +145,6 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
             window_size = self.get_window_size()
         else:
             window_size = None
-        start_time = time.time()
         r = self.self_attn(
             self.input_layernorm(x),
             mask=mask,
@@ -165,14 +155,9 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
             window_size=window_size,
             **kwargs,
         )
-        mx.eval(r)
-        logger.warning(f"self attention done, time: {(time.time() - start_time) * 1000:.3f} ms")
-        start_time = time.time()
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
-        mx.eval(out)
-        logger.warning(f"mlp done, time: {(time.time() - start_time) * 1000:.3f} ms")
         return out
 
     def shard(self):
