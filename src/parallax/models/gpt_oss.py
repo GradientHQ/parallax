@@ -168,15 +168,12 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
         self.self_attn.k_proj = shard_linear(self.self_attn.k_proj, "all-to-sharded", group=group)
         self.self_attn.v_proj = shard_linear(self.self_attn.v_proj, "all-to-sharded", group=group)
         self.self_attn.o_proj = shard_linear(self.self_attn.o_proj, "sharded-to-all", group=group)
+        num_attention_heads = self.self_attn.num_attention_heads // N
         self.self_attn.sinks = self.self_attn.sinks[
-            self.self_attn.num_attention_heads
-            // N
-            * r : self.self_attn.num_attention_heads
-            // N
-            * (r + 1)
+            num_attention_heads * r : num_attention_heads * (r + 1)
         ]
-        self.self_attn.num_attention_heads //= N
-        self.self_attn.num_key_value_heads //= N
+        self.self_attn.num_attention_heads = num_attention_heads
+        self.self_attn.num_key_value_heads = self.self_attn.num_key_value_heads // N
 
         # Shard the MLP
         shard_inplace(self.mlp.experts.gate_proj, "all-to-sharded", group=group)
