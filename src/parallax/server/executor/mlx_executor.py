@@ -110,9 +110,7 @@ class MLXExecutor(BaseExecutor):
             mx.distributed.init(strict=True, backend=distributed_backend)
 
         try:
-            wired_limit = mx.metal.device_info()["max_recommended_working_set_size"]
-            pre_wired_limit = mx.set_wired_limit(wired_limit)
-            logger.warning(f"Using mlx with metal backend, wired_limit={wired_limit / 1024**3:.3f} GB, pre_wired_limit={pre_wired_limit / 1024**3:.3f} GB")
+            mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
         except Exception:
             logger.warning(f"Using mlx without metal backend.")
 
@@ -246,8 +244,6 @@ class MLXExecutor(BaseExecutor):
         #     dtype=self.dtype,
         #     page_size=1,
         # )
-        self.generation_stream = mx.new_stream(mx.default_device())
-        self.step_time = []
         logger.debug(
             f"mlx_executor initialized; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}, total memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
         )
@@ -286,7 +282,6 @@ class MLXExecutor(BaseExecutor):
         if len(requests) == 0:
             return
 
-        logger.debug(f"Handling {len(requests)} requests.")
         if self.is_first_peer:
             # First peer can receive InitialRequests from the client RPC,
             # or IntermediateRequests from the last peer.
@@ -326,12 +321,6 @@ class MLXExecutor(BaseExecutor):
                             f"Released resources for finished request {req.request_id}, "
                             f"memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
                         )
-                        logger.warning(
-                            "Released request %s, step time: \n%s",
-                            original_req.request_id,
-                            '\n'.join([f"{x:.3f} ms" for x in self.step_time])
-                        )
-                        self.step_time = []
                         if not self.is_last_peer and not req.abort:
                             self.finished_batch.append(req)
                     else:
@@ -398,24 +387,19 @@ class MLXExecutor(BaseExecutor):
         # Note: Paged Attention writes KV cache in-place within the model (via reshape_and_cache).
         # The returned 'hidden_states' is what we need.
         # The returned cache tuple (_, _) is ignored/unused here.
-        mx.eval(prepared_inputs)
-        mx.synchronize()
-        with mx.stream(self.generation_stream):
-            start_time = time.time()
-            hidden_states = self.model_shard(
-                h_or_tokens=prepared_inputs["h_or_tokens"],
-                cache=prepared_inputs["cache"],
-                mask=prepared_inputs.get("mask"),
-                block_tables=prepared_inputs.get("block_tables"),
-                context_lengths=prepared_inputs.get("context_lengths"),
-                slot_mapping=prepared_inputs.get("slot_mapping"),
-                state_slot_mapping=prepared_inputs.get("state_slot_mapping"),
-                prefix_lens=prepared_inputs.get("prefix_lens"),  # For RoPE offset in prefix cache
-            )
-            mx.eval(hidden_states)
-            mx.synchronize()
-            logger.debug(f"model forward pass done, time: {(time.time() - start_time) * 1000:.3f} ms")
-            self.step_time.append((time.time() - start_time) * 1000)
+        start_time = time.time()
+        hidden_states = self.model_shard(
+            h_or_tokens=prepared_inputs["h_or_tokens"],
+            cache=prepared_inputs["cache"],
+            mask=prepared_inputs.get("mask"),
+            block_tables=prepared_inputs.get("block_tables"),
+            context_lengths=prepared_inputs.get("context_lengths"),
+            slot_mapping=prepared_inputs.get("slot_mapping"),
+            state_slot_mapping=prepared_inputs.get("state_slot_mapping"),
+            prefix_lens=prepared_inputs.get("prefix_lens"),  # For RoPE offset in prefix cache
+        )
+        mx.eval(hidden_states)
+        logger.debug(f"model forward pass done, time: {(time.time() - start_time) * 1000:.3f} ms")
 
         logger.debug(
             f"Processed batch of {len(prepared_inputs['requests'])} requests, "

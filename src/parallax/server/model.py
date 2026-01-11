@@ -12,7 +12,6 @@ from parallax.server.sampling.sampler import Sampler, SamplingBatchInfo
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
-import time
 
 class ShardedModel(nn.Module):
     """A general class for MLX sharded model, adapted for Parallax KV cache.
@@ -168,6 +167,7 @@ class ShardedModel(nn.Module):
                 slot_mapping=slot_mapping,
                 **kwargs,
             )
+
         if self.is_last_shard:
             if self.norm is None or self.lm_head is None:
                 raise ValueError("ShardedModel: norm or lm_head is None for the last shard.")

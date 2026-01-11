@@ -243,27 +243,29 @@ class BaseExecutor:
 
     def recv_requests_from_http(self) -> List[Request]:
         """Receives requests from http frontend"""
-        recv_reqs = []
-        if self.tp_rank == 0:
-            while True:
-                try:
-                    raw_request = self.recv_from_ipc_socket.recv_pyobj(zmq.NOBLOCK)
+        if self.tp_rank != 0:
+            return []
 
-                    # Check if this is an abort request
-                    if isinstance(raw_request, dict) and raw_request.get("type") == "abort":
-                        logger.debug(
-                            f"Received abort request from HTTP for request ID: {raw_request.get('rid')}"
-                        )
-                        self.scheduler.cancel_request(raw_request.get("rid"))
-                    else:
-                        # Normal request processing - do tokenization and form InitialRequest
-                        req = self._handle_raw_request(raw_request)
-                        recv_reqs.append(req)
-                except zmq.ZMQError:
-                    break
-                except Exception as e:
-                    logger.exception(f"Error receiving http request: {e}")
-                    self._notify_http_request_error(raw_request, e)
+        recv_reqs = []
+        while True:
+            try:
+                raw_request = self.recv_from_ipc_socket.recv_pyobj(zmq.NOBLOCK)
+
+                # Check if this is an abort request
+                if isinstance(raw_request, dict) and raw_request.get("type") == "abort":
+                    logger.debug(
+                        f"Received abort request from HTTP for request ID: {raw_request.get('rid')}"
+                    )
+                    self.scheduler.cancel_request(raw_request.get("rid"))
+                else:
+                    # Normal request processing - do tokenization and form InitialRequest
+                    req = self._handle_raw_request(raw_request)
+                    recv_reqs.append(req)
+            except zmq.ZMQError:
+                break
+            except Exception as e:
+                logger.exception(f"Error receiving http request: {e}")
+                self._notify_http_request_error(raw_request, e)
     
         if len(recv_reqs) > 0:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
@@ -445,16 +447,15 @@ class BaseExecutor:
 
     def run_loop(self):
         """The main loop of the executor."""
-        logger.warning(
+        logger.debug(
             f"Executor for layers [{self.start_layer}, {self.end_layer}) starting run loop..."
         )
         self._should_stop = False
         while not self._should_stop:
-            start_time = time.time()
             received_requests = []
 
             # Receive requests from http frontend
-            if self.is_first_peer and self.scheduler.num_queued_requests + self.scheduler.num_running_requests == 0:
+            if self.is_first_peer:
                 received_requests = self.recv_requests_from_http()
 
             # Receive requests from peer
@@ -463,11 +464,7 @@ class BaseExecutor:
             if self.enable_weight_refit:
                 self.check_and_refit_weight(refit_weight_path)
 
-            recv_requests_time = time.time() - start_time
-            start_time = time.time()
             self.handle_input_requests(received_requests)
-            handle_input_requests_time = time.time() - start_time
-            start_time = time.time()
             # Send abort signals to P2P server to broadcast to all nodes
             if len(self.finished_batch) > 0 and self.tp_rank == 0:
                 self.send_to_peer_socket.send_multipart(
@@ -489,8 +486,6 @@ class BaseExecutor:
 
             # 5. Admit requests into running set up to capacity, then form batch
             self.scheduler.admit_requests()
-            admit_requests_time = time.time() - start_time
-            start_time = time.time()
             # 5.1 Check for request timeouts and abort timed out requests
             try:
                 timed_out_reqs = self.scheduler.get_timed_out_requests()
@@ -508,15 +503,10 @@ class BaseExecutor:
             except Exception:
                 # Non-fatal; continue serving
                 pass
-            timed_out_requests_time = time.time() - start_time
-            start_time = time.time()
             batch_to_process = self.scheduler.form_batch()
-            form_batch_time = time.time() - start_time
-            start_time = time.time()
             if not batch_to_process:
                 continue
             logger.debug(f"Formed batch with {len(batch_to_process)} requests.")
-            logger.debug(f"Recv requests time: {recv_requests_time:.3f} ms, Handle input requests time: {handle_input_requests_time:.3f} ms, Admit requests time: {admit_requests_time:.3f} ms, Timed out requests time: {timed_out_requests_time:.3f} ms, Form batch time: {form_batch_time:.3f} ms")
 
             # 6. Process the batch
             try:

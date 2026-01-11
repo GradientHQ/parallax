@@ -429,13 +429,11 @@ class MLXModelLoader:
         model_shard.load_weights(list(shard_weights.items()), strict=strict)
         model_shard.shard_layers()
 
-        # Explicitly clear the temporary dictionary to release references to lazy arrays
         shard_weights.clear()
-        # del shard_weights
 
         mx.eval(model_shard.parameters())
         # Synchronize processes to avoid timeout
-        mx.eval(mx.distributed.all_sum(mx.array(1.0), stream=mx.cpu))
+        mx.eval(mx.distributed.all_sum(mx.array(1.0)))
         model_shard.eval()
         logger.info(
             "Successfully loaded model shard (layers [%d-%d)), memory usage: %.3f GB",
