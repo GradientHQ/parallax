@@ -54,8 +54,6 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
 
         if target_len == 1:
             current_pos = context_lengths - 1
-        elif prefix_lens is not None:
-            current_pos = prefix_lens
         else:
             current_pos = 0
         queries_rotated = self.rope(queries_new, offset=current_pos)

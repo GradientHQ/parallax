@@ -64,23 +64,14 @@ class ParallaxDeepSeekV3Attention(MLXDeepseekV3Attention):
         k_nope, values = mx.split(kv, [self.qk_nope_head_dim], axis=-1)
         k_nope = k_nope.transpose(0, 2, 1, 3)
 
-        # q_pe = self.rope(q_pe, offset=offset)
-        # k_pe = self.rope(k_pe, offset=offset)
         key_cache_global, value_cache_global = cache.get_cache()
 
-        q_pe_list = []
-        k_pe_list = []
-        for i in range(batch):
-            current_pos = int(context_lengths[i]) - 1 if target_len == 1 else 0
-            q_slice = q_pe[i : i + 1]
-            k_slice = k_pe[i : i + 1]
-            q_rot = self.rope(q_slice, offset=current_pos)
-            k_rot = self.rope(k_slice, offset=current_pos)
-            q_pe_list.append(q_rot)
-            k_pe_list.append(k_rot)
-
-        q_pe = mx.concatenate(q_pe_list, axis=0)
-        k_pe = mx.concatenate(k_pe_list, axis=0)
+        if target_len == 1:
+            current_pos = context_lengths - 1
+        else:
+            current_pos = 0
+        q_pe = self.rope(q_pe, offset=current_pos)
+        k_pe = self.rope(k_pe, offset=current_pos)
 
         k_pe = mx.repeat(k_pe, self.num_heads, axis=1)
         queries = mx.concatenate([q_nope, q_pe], axis=-1)

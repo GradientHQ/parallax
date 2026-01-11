@@ -48,7 +48,7 @@ class MLXExecutor(BaseExecutor):
         max_sequence_length: Optional[int] = None,
         max_tokens_in_kv_pool: Optional[int] = None,
         # Controlling perfill / decode ratio
-        max_num_tokens_per_batch: int = 1024,
+        max_num_tokens_per_batch: int = 16384,
         prefill_priority: int = 0,
         micro_batch_ratio: int = 2,
         scheduler_wait_ms: int = 500,
@@ -56,7 +56,7 @@ class MLXExecutor(BaseExecutor):
         # Metrics Configs
         layer_latency_update_every: int = 4096,
         # KV Cache Configs
-        kv_block_size: int = 64,
+        kv_block_size: int = 32,
         kv_cache_memory_fraction: float = 0.8,
         enable_prefix_cache: Optional[bool] = False,
         # Communication Configs
@@ -90,6 +90,8 @@ class MLXExecutor(BaseExecutor):
         shared_state: Optional[dict] = None,
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
+        # Pipe communication
+        conn: Optional[Any] = None,
     ):
         group = mx.distributed.init()
         tp_size = group.size()
@@ -161,6 +163,9 @@ class MLXExecutor(BaseExecutor):
 
         layer_types = get_layer_types(self.config, start_layer, end_layer)
         sliding_window = self.config.get("sliding_window", None)
+        use_sliding_window = self.config.get("use_sliding_window", None)
+        if use_sliding_window is False:
+            sliding_window = None
 
         # Validate and adjust block size for Metal backend
         supported_block_sizes = [8, 16, 32, 64]
@@ -220,6 +225,7 @@ class MLXExecutor(BaseExecutor):
             tp_size=tp_size,
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
+            conn=conn,
         )
 
         # Prefix Cache Manager
@@ -363,11 +369,6 @@ class MLXExecutor(BaseExecutor):
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
-
-    def check_and_refit_weight(self, refit_weight_path: str):
-        if refit_weight_path == "":
-            return
-        self.shard_loader.update_weight_from_disk(self.model_shard, refit_weight_path)
 
     def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """Process a batch of requests in MLX."""

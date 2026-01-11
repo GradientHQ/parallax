@@ -41,7 +41,7 @@ class Scheduler:
     def __init__(
         self,
         max_batch_size: int = 16,
-        max_num_tokens_per_batch: int = 4096,
+        max_num_tokens_per_batch: int = 16384,
         scheduler_wait_ms: int = 200,
         micro_batch_ratio: int = 2,
         is_first_peer: bool = False,
@@ -158,9 +158,6 @@ class Scheduler:
             except Exception:
                 pass
         else:
-            logger.warning(
-                f"Attempted to evict non-existent request {request_id}. It might have been already evicted."
-            )
             return
 
     def cancel_request(self, request_id: str):

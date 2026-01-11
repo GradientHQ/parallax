@@ -16,7 +16,7 @@ import random
 import shutil
 import threading
 import time
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import dijkstar
 import httpx
@@ -28,10 +28,13 @@ from parallax.p2p.proto import forward_pb2
 from parallax.p2p.utils import AsyncWorker
 from parallax.server.server_info import detect_node_hardware
 from parallax.utils.shared_state import SharedState
-from parallax.utils.utils import (
+from parallax.utils.utils import get_zmq_socket
+from parallax.utils.weight_refit_utils import (
     calculate_cid_manual,
     concat_weight_partition,
-    get_zmq_socket,
+    filer_weight_cid_list,
+    parse_safetensors_from_memory,
+    release_disk_storage,
 )
 from parallax_utils.logging_config import get_logger, set_log_level
 
@@ -227,7 +230,7 @@ def check_and_run_weight_refit(gradient_server, message):
                 cur_time = time.time()
                 if cur_time - time_begin_get_block > time_out:
                     logger.warning(f"Failed to get_block after 10 minutes! cid={cid}")
-                    return False
+                    return False, {}
                 peer_id, raw_data = gradient_server.lattica.get_block(cid, timeout_secs=30)
                 cid_manual = calculate_cid_manual(raw_data)
                 if cid_manual != cid:
@@ -241,52 +244,59 @@ def check_and_run_weight_refit(gradient_server, message):
                 time.sleep(1)
         if raw_data is None:
             raise RuntimeError(f"Failed to get block cid={cid}")
-        file_name = cid + ".safetensors"
-        file_name = os.path.join(weight_dir, file_name)
-        with open(file_name, "wb") as f:
-            f.write(raw_data)
-        file_size_bytes = os.path.getsize(file_name)
-        file_size_kb = file_size_bytes / 1024
-        file_size_mb = file_size_kb / 1024
-        time_end_write_file = time.time()
         interval_get_block = time_end_get_block - time_begin_get_block
-        interval_write_file = time_end_write_file - time_end_get_block
         logger.info(
-            f"Finish download cid={cid}, file_size={file_size_mb}MB, get_block={interval_get_block}s, write_file={interval_write_file}s, peer_id={peer_id}"
+            f"Finish download cid={cid}, get_block={interval_get_block}s, peer_id={peer_id}"
         )
-        return True
+        # convert raw data to dict
+        tensors = parse_safetensors_from_memory(raw_data)
+        return True, tensors
 
-    # add sleep 60s for direct connection first
-    logger.info(f"Start dealing weight refit message: {message}.")
-    logger.info(f"Wait for lattica direct connection.")
-    time.sleep(60)
+    # step0. Release lattica disk storage
+    release_disk_storage()
+
     # step1. Check weight refit trigger message
     time_stamp = message.get("time_stamp", None)
-    cid_list = message.get("cid", None)
+    index_map = message.get("index_map", None)
     weight_version = message.get("version", 0)
-    if time_stamp is None or cid_list is None:
+    if time_stamp is None or index_map is None:
         return
     if gradient_server.last_refit_time >= float(time_stamp):
         # Weight already updated
         return
 
+    cid_list = filer_weight_cid_list(
+        gradient_server.block_start_index,
+        gradient_server.block_end_index,
+        gradient_server.block_end_index,
+        index_map,
+    )
     random.seed(time.time())
     random.shuffle(cid_list)
 
-    # step2. save weight to disk
+    # add sleep 10s for direct connection first
+    logger.debug(f"Received weight refit message: {message}.")
+    logger.info(f"Start dealing weight refit version: {weight_version}.")
+    logger.info(f"Wait 10s for lattica direct connection.")
+    time.sleep(10)
+
+    # step2. download weight
     weight_dir = os.path.join("/tmp", str(time_stamp))
     folder = os.path.exists(weight_dir)
     if not folder:
         os.makedirs(weight_dir)
         download_res = True
+        tensors = {}
         while True:
             if len(cid_list) == 0:
                 break
             else:
                 cid = cid_list.pop()
                 logger.info(f"Start downloading refit weight {cid}")
-                res = _download_weight_thread(weight_dir, cid)
-                if not res:
+                res, tensors_loaded = _download_weight_thread(weight_dir, cid)
+                if res:
+                    tensors.update(tensors_loaded)
+                else:
                     download_res = False
                     break
 
@@ -296,13 +306,9 @@ def check_and_run_weight_refit(gradient_server, message):
 
         # step3. concat weight
         # workaround: create sub-process to avoid GIL issues for lattica
-        logger.info(f"Start sub-process to concat weight partitions in {weight_dir}")
-        process = multiprocessing.Process(
-            target=concat_weight_partition,
-            args=(weight_dir,),
-        )
-        process.start()
-        process.join()
+        new_tensors = concat_weight_partition(tensors)
+        gradient_server.conn.send(new_tensors)
+        logger.info(f"New tensors sent to executor")
 
         # step4. send ipc message to update weight
         gradient_server.connection_handler.ipc_weight_refit(weight_dir, weight_version)
@@ -347,6 +353,7 @@ class GradientServer:
         max_sequence_length: Optional[int] = None,
         param_mem_ratio: float = 0.65,
         kvcache_mem_ratio: float = 0.25,
+        conn: Any = None,
     ):
         self.recv_from_peer_addr = recv_from_peer_addr
         self.send_to_peer_addr = send_to_peer_addr
@@ -383,6 +390,7 @@ class GradientServer:
         self.rtt_update_interval = 60
         self.status = ServerState.JOINING
         self.manual_layer_assignment = block_end_index is not None and block_start_index is not None
+        self.conn = conn
 
         self.scheduler_stub = None
         self.scheduler_peer_id = None
@@ -408,7 +416,7 @@ class GradientServer:
             )
 
     def check_and_release_disk_weight(self):
-        # only save 2 history versions of weight
+        """Only save 2 history versions of weight"""
         while len(self.refit_timestamp_history) > 2:
             time_stamp = self.refit_timestamp_history.pop(0)
             weight_dir = os.path.join("/tmp", str(int(time_stamp)))
@@ -974,6 +982,7 @@ def _run_p2p_server_process(
     kvcache_mem_ratio: float = 0.25,
     shared_state: Optional[dict] = None,
     log_level: str = "INFO",
+    conn: Any = None,
 ):
     """Run P2P server in subprocess"""
     # Set log level in subprocess (spawn mode doesn't inherit log configuration)
@@ -1004,6 +1013,7 @@ def _run_p2p_server_process(
             max_sequence_length=max_sequence_length,
             param_mem_ratio=param_mem_ratio,
             kvcache_mem_ratio=kvcache_mem_ratio,
+            conn=conn,
         )
         # Attach shared state to server for syncing layer allocation
         if shared_state is not None:
@@ -1053,6 +1063,7 @@ def launch_p2p_server_process(
     kvcache_mem_ratio: float = 0.25,
     shared_state: Optional[dict] = None,
     log_level: str = "INFO",
+    conn: Optional[Any] = None,
 ) -> multiprocessing.Process:
     """Launch P2P server as a subprocess and return the process object
 
@@ -1087,6 +1098,7 @@ def launch_p2p_server_process(
             kvcache_mem_ratio,
             shared_state,
             log_level,
+            conn,
         ),
     )
     process.start()

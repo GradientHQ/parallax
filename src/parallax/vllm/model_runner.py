@@ -334,7 +334,7 @@ def initialize_vllm_model_runner(
     kv_cache_memory_fraction: float,
     attention_backend: str,
     kv_block_size: int,
-    max_num_tokens_per_batch: int = 1024,
+    max_num_tokens_per_batch: int = 16384,
     dtype: str = "float16",
     **kwargs,
 ) -> Tuple[ParallaxVLLMModelRunner, Dict, Any]:

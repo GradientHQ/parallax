@@ -259,7 +259,7 @@ def initialize_sgl_model_runner(
     attention_backend: str,
     kv_block_size: int,
     moe_runner_backend: str,
-    max_num_tokens_per_batch: int = 1024,
+    max_num_tokens_per_batch: int = 16384,
     enable_lora: Optional[bool] = False,
     max_lora_rank: Optional[int] = None,
     lora_target_modules: Optional[List[str]] = None,
@@ -379,9 +379,11 @@ def initialize_sgl_model_runner(
 
 def refit_sgl_model(
     model_runner: ParallaxModelRunner,
-    refit_weight_path: str,
+    tensors: dict,
 ):
     """Runtime weight refit from disk"""
-    logger.info(f"Begin refit weight from path: {refit_weight_path}")
-
-    model_runner.update_weights_from_disk(model_path=refit_weight_path, load_format="auto")
+    logger.info(f"Executor begins weight refit from host memory")
+    for x in tensors.keys():
+        refit_tensors = [(x, tensors.get(x))]
+        model_runner.update_weights_from_tensor(named_tensors=refit_tensors, load_format=None)
+    logger.info(f"Finish weight refit")
