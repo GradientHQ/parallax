@@ -147,13 +147,12 @@ def main():
     sampling_info = SamplingBatchInfo.from_reqs([request])
     
     next_token_id = model.logits_to_tokens(logits, context_lengths, sampling_info)
-    mx.eval(next_token_id)
+    
+    token_id = int(next_token_id[0])
+    request.commit_new_token(token_id)
     
     prefill_time = time.perf_counter() - prefill_start
     print_rank(f"Token 1 (Prefill) time: {prefill_time * 1000:.2f} ms")
-    
-    next_token_id = int(next_token_id[0])
-    request.commit_new_token(next_token_id)
 
     # 5. Decode Loop
     total_decode_time = 0
@@ -165,26 +164,22 @@ def main():
             print_rank("\nOOM during decoding")
             break
         
-        input_ids = mx.array([[next_token_id]])
         block_table = mx.array([cache_manager.get_block_table(request.request_id)], dtype=mx.int32)
         context_lengths = mx.array([cache_manager.get_context_length(request.request_id)], dtype=mx.int32)
-        
         logits = model(
-            input_ids,
+            mx.expand_dims(next_token_id, axis=0),
             cache=cache_manager.get_caches(),
             mask=None,
             block_tables=block_table,
             context_lengths=context_lengths,
-            slot_mapping=None
         )
         
         next_token_id = model.logits_to_tokens(logits, mx.array([1]), sampling_info)
-        mx.eval(next_token_id)
         
-        next_token_id = int(next_token_id[0])
-        if next_token_id in eos_token_ids:
+        token_id = int(next_token_id[0])
+        if token_id in eos_token_ids:
             break
-        request.commit_new_token(next_token_id)
+        request.commit_new_token(token_id)
         
         decode_step_time = time.perf_counter() - decode_step_start
         total_decode_time += decode_step_time

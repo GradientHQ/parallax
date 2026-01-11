@@ -58,9 +58,8 @@ def reshape_and_cache(
             slot_mapping = slot_mapping.astype(mx.int64)
 
     op = _ext_reshape_and_cache(key, value, key_cache, value_cache, slot_mapping)
-    mx.eval(op)
-
-    return key_cache, value_cache
+    mx.async_eval(op)
+    return
 
 
 def paged_attention_v1(
