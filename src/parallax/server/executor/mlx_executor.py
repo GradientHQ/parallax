@@ -78,6 +78,9 @@ class MLXExecutor(BaseExecutor):
         lora_eviction_policy: Optional[str] = "lru",
         lora_backend: Optional[str] = "triton",
         max_lora_chunk_size: Optional[int] = 128,
+        # Tensor Parallel Configs
+        tp_rank: Optional[int] = 0,
+        tp_size: Optional[int] = 1,
         nccl_port: Optional[int] = 4000,
         # Data Parallel Configs (not used in MLX, but accepted for compatibility)
         enable_dp_attention: Optional[bool] = False,
