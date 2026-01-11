@@ -7,11 +7,12 @@ from typing import Any, List, Optional, Type
 import mlx.core as mx
 from mlx import nn
 from mlx_lm.models.base import BaseModelArgs
-from mlx.nn.layers.distributed import shard_linear
+
 from parallax.server.sampling.sampler import Sampler, SamplingBatchInfo
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
 
 class ShardedModel(nn.Module):
     """A general class for MLX sharded model, adapted for Parallax KV cache.
@@ -67,7 +68,7 @@ class ShardedModel(nn.Module):
         else:
             self.norm = None
             self.lm_head = None
-    
+
     def shard_layers(self):
         group = mx.distributed.init()
         tp_size = group.size()
@@ -76,7 +77,9 @@ class ShardedModel(nn.Module):
                 if hasattr(layer, "shard"):
                     layer.shard()
                 else:
-                    logger.error(f"Model {layer.__class__.__name__} does not have a shard method, does not support tensor parallelism")
+                    logger.error(
+                        f"Model {layer.__class__.__name__} does not have a shard method, does not support tensor parallelism"
+                    )
                     exit(1)
 
     def logits_to_tokens(

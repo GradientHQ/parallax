@@ -271,7 +271,7 @@ class BaseExecutor:
             except Exception as e:
                 logger.exception(f"Error receiving http request: {e}")
                 self._notify_http_request_error(raw_request, e)
-    
+
         if len(recv_reqs) > 0:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
         return recv_reqs

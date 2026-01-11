@@ -2,9 +2,8 @@
 MLX-LM backend implementation of high level executor
 """
 
-import time
-import os
 import pickle
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import mlx.core as mx
@@ -253,7 +252,7 @@ class MLXExecutor(BaseExecutor):
             # Rank 0 prepares data
             data = pickle.dumps(broadcast_obj)
             data_len = len(data)
-            
+
         # Broadcast length using all_sum
         data_len_arr = mx.array([data_len], dtype=mx.int32)
         data_len_arr = mx.distributed.all_sum(data_len_arr)

@@ -460,9 +460,7 @@ class MLXModelLoader:
                 ):
                     is_needed = True
                     remapped_key = key.replace("model.", "", 1)
-                    if model_shard.is_last_shard and self.config.get(
-                        "tie_word_embeddings", False
-                    ):
+                    if model_shard.is_last_shard and self.config.get("tie_word_embeddings", False):
                         shard_weights["lm_head.weight"] = f[key]
                 elif model_shard.is_last_shard:
                     if "model.norm" in key:

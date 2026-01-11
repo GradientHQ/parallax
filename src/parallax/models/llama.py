@@ -9,6 +9,7 @@ exposes the same block interface as Qwen implementations, so that
 from typing import Optional
 
 import mlx.core as mx
+from mlx.nn.layers.distributed import shard_linear
 from mlx_lm.models.base import scaled_dot_product_attention
 from mlx_lm.models.llama import Attention as MLXLlamaAttention
 from mlx_lm.models.llama import ModelArgs
@@ -16,8 +17,6 @@ from mlx_lm.models.llama import TransformerBlock as MLXLlamaBlock
 
 from parallax.server.cache.base import BaseCache
 from parallax_extensions.ops import paged_attention_v1, reshape_and_cache
-from mlx.nn.layers.distributed import shard_linear
-
 
 
 class ParallaxLlamaAttention(MLXLlamaAttention):
@@ -143,36 +142,22 @@ class ParallaxLlamaBlock(MLXLlamaBlock):
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
         return out
-    
+
     def shard(self):
         group = mx.distributed.init()
         N = group.size()
         # Shard the self attention
-        self.self_attn.q_proj = shard_linear(
-            self.self_attn.q_proj, "all-to-sharded", group=group
-        )
-        self.self_attn.k_proj = shard_linear(
-            self.self_attn.k_proj, "all-to-sharded", group=group
-        )
-        self.self_attn.v_proj = shard_linear(
-            self.self_attn.v_proj, "all-to-sharded", group=group
-        )
-        self.self_attn.o_proj = shard_linear(
-            self.self_attn.o_proj, "sharded-to-all", group=group
-        )
+        self.self_attn.q_proj = shard_linear(self.self_attn.q_proj, "all-to-sharded", group=group)
+        self.self_attn.k_proj = shard_linear(self.self_attn.k_proj, "all-to-sharded", group=group)
+        self.self_attn.v_proj = shard_linear(self.self_attn.v_proj, "all-to-sharded", group=group)
+        self.self_attn.o_proj = shard_linear(self.self_attn.o_proj, "sharded-to-all", group=group)
         self.self_attn.n_heads //= N
         self.self_attn.n_kv_heads //= N
 
         # Shard the MLP
-        self.mlp.gate_proj = shard_linear(
-            self.mlp.gate_proj, "all-to-sharded", group=group
-        )
-        self.mlp.up_proj = shard_linear(
-            self.mlp.up_proj, "all-to-sharded", group=group
-        )
-        self.mlp.down_proj = shard_linear(
-            self.mlp.down_proj, "sharded-to-all", group=group
-        )
+        self.mlp.gate_proj = shard_linear(self.mlp.gate_proj, "all-to-sharded", group=group)
+        self.mlp.up_proj = shard_linear(self.mlp.up_proj, "all-to-sharded", group=group)
+        self.mlp.down_proj = shard_linear(self.mlp.down_proj, "sharded-to-all", group=group)
 
     @classmethod
     def get_architecture(cls):
