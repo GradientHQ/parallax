@@ -40,8 +40,6 @@ def main():
     
     loader = MLXModelLoader(
         args.model,
-        tp_rank=tp_rank,
-        tp_size=tp_size
     )
     model, config, tokenizer = loader.load()
     
