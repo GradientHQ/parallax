@@ -484,6 +484,7 @@ async def benchmark(
     ignore_eos: bool,
     goodput_config_dict: Dict[str, float],
     max_concurrency: Optional[int],
+    skip_test: bool = False,
     time_serving: Optional[float] = None,
     report_interval: float = 30.0,
 ):
@@ -492,31 +493,32 @@ async def benchmark(
     else:
         raise ValueError(f"Unknown backend: {backend}")
 
-    print("Starting initial single prompt test run...")
-    test_prompt, test_prompt_len, test_output_len, test_mm_content = input_requests[0]
-    if backend != "openai-chat" and test_mm_content is not None:
-        # multi-modal benchmark is only available on OpenAI Chat backend.
-        raise ValueError("Multi-modal content is only supported on 'openai-chat' backend.")
-    # test_input = RequestFuncInput(
-    #     model=model_id,
-    #     model_name=model_name,
-    #     prompt=test_prompt,
-    #     api_url=api_url,
-    #     prompt_len=test_prompt_len,
-    #     output_len=test_output_len,
-    #     logprobs=logprobs,
-    #     best_of=best_of,
-    #     multi_modal_content=test_mm_content,
-    #     ignore_eos=ignore_eos,
-    # )
-    # test_output = await request_func(request_func_input=test_input)
-    # if not test_output.success:
-    #     raise ValueError(
-    #         "Initial test run failed - Please make sure benchmark arguments "
-    #         f"are correctly specified. Error: {test_output.error}"
-    #     )
-    # else:
-    #     print("Initial test run completed. Starting main benchmark run...")
+    if not skip_test:
+        print("Starting initial single prompt test run...")
+        test_prompt, test_prompt_len, test_output_len, test_mm_content = input_requests[0]
+        if backend != "openai-chat" and test_mm_content is not None:
+            # multi-modal benchmark is only available on OpenAI Chat backend.
+            raise ValueError("Multi-modal content is only supported on 'openai-chat' backend.")
+        test_input = RequestFuncInput(
+            model=model_id,
+            model_name=model_name,
+            prompt=test_prompt,
+            api_url=api_url,
+            prompt_len=test_prompt_len,
+            output_len=test_output_len,
+            logprobs=logprobs,
+            best_of=best_of,
+            multi_modal_content=test_mm_content,
+            ignore_eos=ignore_eos,
+        )
+        test_output = await request_func(request_func_input=test_input)
+        if not test_output.success:
+            raise ValueError(
+                "Initial test run failed - Please make sure benchmark arguments "
+                f"are correctly specified. Error: {test_output.error}"
+            )
+        else:
+            print("Initial test run completed. Starting main benchmark run...")
 
     if profile:
         print("Starting profiler...")
@@ -1011,6 +1013,7 @@ def main(args: argparse.Namespace):
             ignore_eos=args.ignore_eos,
             goodput_config_dict=goodput_config_dict,
             max_concurrency=args.max_concurrency,
+            skip_test=args.skip_test,
             time_serving=args.time_serving,
             report_interval=args.report_interval,
         )
@@ -1191,6 +1194,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Use Torch Profiler. The endpoint must be launched with "
         "VLLM_TORCH_PROFILER_DIR to enable profiler.",
+    )
+    parser.add_argument(
+        "--skip-test",
+        action="store_true",
+        help="Skip the initial single prompt test run.",
     )
     parser.add_argument(
         "--save-result",
