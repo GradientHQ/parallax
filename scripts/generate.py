@@ -1,3 +1,28 @@
+"""
+Simple offline inference script
+
+Example command:
+
+single node:
+    python scripts/generate.py
+
+tensor parallel:
+    https://ml-explore.github.io/mlx/build/html/usage/distributed.html#enabling-rdma
+
+    mlx.distributed_config --verbose \
+    --hosts macmini1,macmini2 \                                                                                                                           --over thunderbolt --backend jaccl \
+    --over thunderbolt --backend jaccl \ 
+    --auto-setup --output hosts.json
+     
+    mlx.launch \
+    --backend jaccl \
+    --env MLX_METAL_FAST_SYNCH=1 \
+    --hostfile hosts.json \
+    scripts/generate.py
+"""
+
+
+
 import argparse
 import time
 
