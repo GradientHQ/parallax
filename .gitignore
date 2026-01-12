@@ -11,3 +11,4 @@ build/
 *.key
 .cache
 .vscode/
+hosts.json
