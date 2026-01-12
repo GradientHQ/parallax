@@ -158,7 +158,7 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
         return out
-    
+
     def shard(self):
         group = mx.distributed.init()
         N = group.size()

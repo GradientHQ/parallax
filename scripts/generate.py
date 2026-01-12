@@ -11,17 +11,15 @@ tensor parallel:
 
     mlx.distributed_config --verbose \
     --hosts macmini1,macmini2 \                                                                                                                           --over thunderbolt --backend jaccl \
-    --over thunderbolt --backend jaccl \ 
+    --over thunderbolt --backend jaccl \
     --auto-setup --output hosts.json
-     
+
     mlx.launch \
     --backend jaccl \
     --env MLX_METAL_FAST_SYNCH=1 \
     --hostfile hosts.json \
     scripts/generate.py
 """
-
-
 
 import argparse
 import time
