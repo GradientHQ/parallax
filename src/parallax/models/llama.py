@@ -145,18 +145,40 @@ class ParallaxLlamaAttention(MLXLlamaAttention):
                         # Gather prefix tokens from paged cache
                         prefix_k_list = []
                         prefix_v_list = []
+                        
+                        # Check cache shape to determine cache type
+                        # KVCache: (1, num_blocks, n_kv_heads, block_size, head_dim)
+                        # KVCachePacked: (num_blocks, num_kv_heads, head_dim // x, block_size, x)
+                        is_packed_cache = key_cache_global.ndim == 5 and key_cache_global.shape[0] != 1
+                        
                         for pos in range(prefix_len):
                             block_idx = pos // block_size
                             offset_in_block = pos % block_size
                             physical_block = int(block_table_i[block_idx])
-                            # key_cache_global[0]: (num_blocks, n_kv_heads, block_size, head_dim)
-                            # value_cache_global[0]: (num_blocks, n_kv_heads, block_size, head_dim_v)
-                            k_token = key_cache_global[
-                                0, physical_block, :, offset_in_block, :
-                            ]  # (n_kv_heads, head_dim)
-                            v_token = value_cache_global[
-                                0, physical_block, :, offset_in_block, :
-                            ]  # (n_kv_heads, head_dim_v)
+                            
+                            if is_packed_cache:
+                                # KVCachePacked format
+                                # key_cache: (num_blocks, num_kv_heads, head_dim // x, block_size, x)
+                                # value_cache: (num_blocks, num_kv_heads, head_dim_v, block_size)
+                                k_token = key_cache_global[
+                                    physical_block, :, :, offset_in_block, :
+                                ]  # (n_kv_heads, head_dim // x, x)
+                                # Reshape to (n_kv_heads, head_dim)
+                                k_token = k_token.reshape(self.n_kv_heads, -1)
+                                v_token = value_cache_global[
+                                    physical_block, :, :, offset_in_block
+                                ]  # (n_kv_heads, head_dim_v)
+                            else:
+                                # Standard KVCache format
+                                # key_cache: (1, num_blocks, n_kv_heads, block_size, head_dim)
+                                # value_cache: (1, num_blocks, n_kv_heads, block_size, head_dim_v)
+                                k_token = key_cache_global[
+                                    0, physical_block, :, offset_in_block, :
+                                ]  # (n_kv_heads, head_dim)
+                                v_token = value_cache_global[
+                                    0, physical_block, :, offset_in_block, :
+                                ]  # (n_kv_heads, head_dim_v)
+                            
                             prefix_k_list.append(k_token)
                             prefix_v_list.append(v_token)
 

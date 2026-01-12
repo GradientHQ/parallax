@@ -87,9 +87,9 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
         queries_rotated = mx.concatenate(queries_rotated_list, axis=0)
         keys_rotated = mx.concatenate(keys_rotated_list, axis=0)
 
-        # Update Paged Cache
         block_size = key_cache_global.shape[3]
 
+        # Update Paged Cache before attention computation
         reshape_and_cache(
             keys_rotated.transpose(0, 2, 1, 3),
             values_new,
@@ -127,8 +127,8 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
 
             if has_prefix_cache:
                 # Read cached prefix KV from paged cache and concatenate with new KV
-                # key_cache_global: (num_layers, num_blocks, num_key_value_heads, head_dim, block_size)
-                # value_cache_global: (num_layers, num_blocks, num_key_value_heads, block_size, head_dim)
+                # key_cache_global: (1, num_blocks, num_key_value_heads, block_size, head_dim)
+                # value_cache_global: (1, num_blocks, num_key_value_heads, block_size, head_dim_v)
                 output_list = []
                 for i in range(batch):
                     prefix_len = int(prefix_lens[i])
@@ -141,6 +141,9 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                     v_new_i = values_new[i : i + 1].transpose(
                         0, 2, 1, 3
                     )  # (1, num_key_value_heads, target_len, head_dim)
+                    
+                    logger.debug(f"Request {i}: prefix_len={prefix_len}, target_len={target_len}")
+                    logger.debug(f"  k_new_i.shape={k_new_i.shape}, v_new_i.shape={v_new_i.shape}")
 
                     if prefix_len > 0:
                         # Read prefix KV from cache using block_table
@@ -153,8 +156,7 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                             block_idx = pos // block_size
                             offset_in_block = pos % block_size
                             physical_block = int(block_table_i[block_idx])
-                            # key_cache_global[0]: (num_blocks, num_key_value_heads, block_size, head_dim)
-                            # value_cache_global[0]: (num_blocks, num_key_value_heads, block_size, head_dim_v)
+                            # After indexing [0]: (num_blocks, num_key_value_heads, block_size, head_dim)
                             k_token = key_cache_global[
                                 0, physical_block, :, offset_in_block, :
                             ]  # (num_key_value_heads, head_dim)
@@ -163,6 +165,8 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                             ]  # (num_key_value_heads, head_dim_v)
                             prefix_k_list.append(k_token)
                             prefix_v_list.append(v_token)
+                        
+                        logger.debug(f"  Read {len(prefix_k_list)} prefix tokens from cache")
 
                         # Stack prefix KV: (prefix_len, num_key_value_heads, head_dim)
                         prefix_k = mx.stack(
@@ -187,9 +191,11 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                         v_full = mx.concatenate(
                             [prefix_v, v_new_i], axis=2
                         )  # (1, num_key_value_heads, prefix_len + target_len, head_dim)
+                        logger.debug(f"  Concatenated: prefix_k.shape={prefix_k.shape}, k_new_i.shape={k_new_i.shape}, k_full.shape={k_full.shape}")
                     else:
                         k_full = k_new_i
                         v_full = v_new_i
+                        logger.debug(f"  No prefix cache, using only new KV: k_full.shape={k_full.shape}")
 
                     # Compute attention for this request
                     # Need to create proper causal mask for the full sequence
@@ -205,32 +211,24 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                     # Apply window_size mask if needed
                     if window_size is not None:
                         # For prefix_cache case with window_size:
-                        # - Can attend to all prefix tokens (col < prefix_len)
-                        # - For new tokens, apply sliding window: can attend to positions >= (actual_row_pos - window_size)
-                        # Create window mask: (target_len, full_len)
+                        # Sliding window means: position i can only attend to positions in [max(0, i - window_size + 1), i]
+                        # But for prefix tokens, they can all attend to each other (no window restriction)
+                        # For new tokens, apply sliding window on the full sequence (including prefix)
                         row_positions = (
                             mx.arange(target_len, dtype=mx.int32)[:, None] + prefix_len
-                        )  # (target_len, 1)
+                        )  # (target_len, 1) - absolute positions of new tokens
                         col_positions = mx.arange(full_len, dtype=mx.int32)[
                             None, :
-                        ]  # (1, full_len)
-
-                        # All prefix tokens are accessible
-                        prefix_mask = col_positions < prefix_len
-
-                        # For new tokens, apply sliding window
-                        # TODO: check if this is correct
-                        window_start = mx.maximum(
-                            prefix_len, row_positions - window_size
-                        )  # (target_len, 1)
+                        ]  # (1, full_len) - all positions
+                        
+                        # Apply sliding window: can attend to positions >= (row_pos - window_size + 1)
+                        window_start = mx.maximum(0, row_positions - window_size + 1)  # (target_len, 1)
                         in_window = (col_positions >= window_start) & (
                             col_positions <= row_positions
                         )
-
-                        # Combine: accessible if in prefix OR in window
-                        window_mask = prefix_mask | in_window
-                        window_mask = mx.where(window_mask, 0.0, float("-inf"))
-                        window_mask = window_mask[None, None, :, :]
+                        
+                        window_mask = mx.where(in_window, 0.0, float("-inf"))
+                        window_mask = window_mask[None, None, :, :].astype(q_i.dtype)
                         causal_mask = causal_mask + window_mask
 
                     out_i = scaled_dot_product_attention(

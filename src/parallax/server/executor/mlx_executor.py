@@ -654,11 +654,6 @@ class MLXExecutor(BaseExecutor):
                 # Add the new token to the request's token_ids
                 self.cache_manager.update_request_tokens(req.request_id, [req.output_ids[-1]])
 
-            # Allocate slot for new token
-            # Note: append_slot will automatically insert full blocks to prefix cache
-            success = self.cache_manager.append_slot(req.request_id)
-            if not success:
-                raise RuntimeError(f"OOM during decode for {req.request_id}")
 
             block_table = self.cache_manager.get_block_table(req.request_id)
             block_tables_list.append(block_table)
