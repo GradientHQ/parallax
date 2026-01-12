@@ -44,7 +44,7 @@ class VLLMExecutor(BaseExecutor):
         max_sequence_length: Optional[int] = None,
         max_tokens_in_kv_pool: Optional[int] = None,
         # Controlling perfill / decode ratio
-        max_num_tokens_per_batch: int = 1024,
+        max_num_tokens_per_batch: int = 16384,
         prefill_priority: int = 0,
         micro_batch_ratio: int = 2,
         scheduler_wait_ms: int = 500,
@@ -82,6 +82,8 @@ class VLLMExecutor(BaseExecutor):
         shared_state: Optional[dict] = None,
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
+        # Pipe communication
+        conn: Optional[Any] = None,
     ):
         model_runner_params = {
             "model_repo": model_repo,
@@ -134,6 +136,7 @@ class VLLMExecutor(BaseExecutor):
             tp_size=tp_size,
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
+            conn=conn,
         )
 
     def handle_input_requests(self, requests: List[Request]):

@@ -104,6 +104,10 @@ if __name__ == "__main__":
         logger.debug(f"executor_input_addr: {args.executor_input_ipc}")
         logger.debug(f"executor_output_addr: {args.executor_output_ipc}")
         logger.debug(f"nccl_port: {args.nccl_port}")
+
+        # Pipe for subprocess communication
+        conn1, conn2 = multiprocessing.Pipe()
+
         if args.scheduler_addr is None:
             if args.log_level != "DEBUG":
                 display_parallax_join(args.model_path)
@@ -136,8 +140,9 @@ if __name__ == "__main__":
                 max_sequence_length=args.max_sequence_length,
                 param_mem_ratio=args.param_mem_ratio,
                 kvcache_mem_ratio=args.kvcache_mem_ratio,
-                shared_state=shared_state.dict,  # Pass dict to subprocess
+                shared_state=shared_state.dict,
                 log_level=args.log_level,
+                conn=conn1,
             )
 
             # Launch all executor processes (including tp_rank=0)
@@ -149,6 +154,7 @@ if __name__ == "__main__":
                     args=(
                         args_copy,
                         shared_state.dict,  # Pass dict to subprocess
+                        conn2,  # Pipe connector
                     ),
                 )
                 proc.start()
@@ -187,6 +193,7 @@ if __name__ == "__main__":
                 kvcache_mem_ratio=args.kvcache_mem_ratio,
                 shared_state=shared_state.dict,  # Pass dict to subprocess
                 log_level=args.log_level,
+                conn=conn1,
             )
 
             # Wait for layer allocation from scheduler (via shared state)
@@ -235,6 +242,7 @@ if __name__ == "__main__":
                             args=(
                                 args_copy,
                                 shared_state.dict,  # Pass dict to subprocess
+                                conn2,  # Pipe connector
                             ),
                         )
                         proc.start()

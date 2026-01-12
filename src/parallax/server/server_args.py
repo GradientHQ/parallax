@@ -102,7 +102,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--kv-block-size", type=int, default=64, help="Block size for KV cache management"
+        "--kv-block-size", type=int, default=32, help="Block size for KV cache management"
     )
 
     parser.add_argument(
@@ -120,7 +120,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-num-tokens-per-batch",
         type=int,
-        default=1024,
+        default=16384,
         help="Maximum number of tokens in a batch",
     )
 
@@ -133,7 +133,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--micro-batch-ratio", type=int, default=2, help="Micro batch ratio for scheduling"
+        "--micro-batch-ratio", type=int, default=1, help="Micro batch ratio for scheduling"
     )
 
     parser.add_argument(
@@ -247,6 +247,7 @@ def parse_args() -> argparse.Namespace:
 
     # Tensor parallel configuration
     parser.add_argument("--tp-size", type=int, default=1, help="Tensor parallel size")
+
     parser.add_argument("--dp-size", type=int, default=1, help="Data parallel size")
 
     parser.add_argument(

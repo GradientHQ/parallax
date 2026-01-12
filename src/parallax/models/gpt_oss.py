@@ -9,6 +9,7 @@ from parallax_utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 import mlx.core as mx
+from mlx.nn.layers.distributed import shard_inplace, shard_linear
 from mlx_lm.models.base import create_causal_mask, scaled_dot_product_attention
 from mlx_lm.models.gpt_oss import AttentionBlock as MLXGPTOSSAttention
 from mlx_lm.models.gpt_oss import ModelArgs
@@ -320,6 +321,30 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
         return out
+
+    def shard(self):
+        group = mx.distributed.init()
+        N = group.size()
+        r = group.rank()
+        # Shard the self attention
+        self.self_attn.q_proj = shard_linear(self.self_attn.q_proj, "all-to-sharded", group=group)
+        self.self_attn.k_proj = shard_linear(self.self_attn.k_proj, "all-to-sharded", group=group)
+        self.self_attn.v_proj = shard_linear(self.self_attn.v_proj, "all-to-sharded", group=group)
+        self.self_attn.o_proj = shard_linear(self.self_attn.o_proj, "sharded-to-all", group=group)
+        num_attention_heads = self.self_attn.num_attention_heads // N
+        self.self_attn.sinks = self.self_attn.sinks[
+            num_attention_heads * r : num_attention_heads * (r + 1)
+        ]
+        self.self_attn.num_attention_heads = num_attention_heads
+        self.self_attn.num_key_value_heads = self.self_attn.num_key_value_heads // N
+
+        # Shard the MLP
+        shard_inplace(self.mlp.experts.gate_proj, "all-to-sharded", group=group)
+        shard_inplace(self.mlp.experts.up_proj, "all-to-sharded", group=group)
+        shard_inplace(self.mlp.experts.down_proj, "sharded-to-all", group=group)
+        if r > 0:
+            # set the bias to 0 for the down proj on the non-zero ranks so that bias only be added once.
+            self.mlp.experts.down_proj.bias = mx.zeros_like(self.mlp.experts.down_proj.bias)
 
     @classmethod
     def get_architecture(cls):

@@ -94,7 +94,7 @@ class TestPagedAttention:
         k_new = mx.random.uniform(shape=(BATCH_SIZE, NUM_KV_HEADS, 1, HEAD_DIM)).astype(dtype)
         v_new = mx.random.uniform(shape=(BATCH_SIZE, NUM_KV_HEADS, 1, HEAD_DIM)).astype(dtype)
 
-        new_k_cache, new_v_cache = reshape_and_cache(
+        reshape_and_cache(
             k_new,
             v_new,
             key_cache,
@@ -103,22 +103,21 @@ class TestPagedAttention:
             context_lengths,
             BLOCK_SIZE,
         )
-        mx.eval(new_k_cache, new_v_cache)
 
         # Verify Data in Cache
         # Req 0 (len 20) -> Block 1, Offset 3
-        cached_k_0 = new_k_cache[0, 1, :, 3, :]
+        cached_k_0 = key_cache[0, 1, :, 3, :]
         input_k_0 = k_new[0].squeeze(1)
         assert mx.allclose(cached_k_0, input_k_0, atol=atol).item(), "Cache update failed for Req 0"
 
         # Req 1 (len 5) -> Block 2, Offset 4
-        cached_k_1 = new_k_cache[0, 2, :, 4, :]
+        cached_k_1 = key_cache[0, 2, :, 4, :]
         input_k_1 = k_new[1].squeeze(1)
         assert mx.allclose(
             cached_k_1, input_k_1, atol=atol
         ).item(), "Cache update failed for Req 1 (Key)"
 
-        cached_v_1 = new_v_cache[0, 2, :, 4, :]
+        cached_v_1 = value_cache[0, 2, :, 4, :]
         input_v_1 = v_new[1].squeeze(1)
         assert mx.allclose(
             cached_v_1, input_v_1, atol=atol
@@ -129,8 +128,8 @@ class TestPagedAttention:
 
         output = paged_attention(
             q,
-            new_k_cache,
-            new_v_cache,
+            key_cache,
+            value_cache,
             block_tables,
             context_lengths,
             BLOCK_SIZE,

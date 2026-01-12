@@ -16,7 +16,7 @@ import random
 import shutil
 import threading
 import time
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import dijkstar
 import httpx
@@ -32,6 +32,7 @@ from parallax.utils.utils import get_zmq_socket
 from parallax.utils.weight_refit_utils import (
     calculate_cid_manual,
     concat_weight_partition,
+    filer_weight_cid_list,
     parse_safetensors_from_memory,
     release_disk_storage,
 )
@@ -256,21 +257,28 @@ def check_and_run_weight_refit(gradient_server, message):
 
     # step1. Check weight refit trigger message
     time_stamp = message.get("time_stamp", None)
-    cid_list = message.get("cid", None)
+    index_map = message.get("index_map", None)
     weight_version = message.get("version", 0)
-    if time_stamp is None or cid_list is None:
+    if time_stamp is None or index_map is None:
         return
     if gradient_server.last_refit_time >= float(time_stamp):
         # Weight already updated
         return
 
+    cid_list = filer_weight_cid_list(
+        gradient_server.block_start_index,
+        gradient_server.block_end_index,
+        gradient_server.block_end_index,
+        index_map,
+    )
     random.seed(time.time())
     random.shuffle(cid_list)
 
-    # add sleep 30s for direct connection first
-    logger.info(f"Start dealing weight refit message: {message}.")
-    logger.info(f"Wait for lattica direct connection.")
-    time.sleep(30)
+    # add sleep 10s for direct connection first
+    logger.debug(f"Received weight refit message: {message}.")
+    logger.info(f"Start dealing weight refit version: {weight_version}.")
+    logger.info(f"Wait 10s for lattica direct connection.")
+    time.sleep(10)
 
     # step2. download weight
     weight_dir = os.path.join("/tmp", str(time_stamp))
@@ -298,13 +306,9 @@ def check_and_run_weight_refit(gradient_server, message):
 
         # step3. concat weight
         # workaround: create sub-process to avoid GIL issues for lattica
-        logger.info(f"Start sub-process to concat weight partitions in {weight_dir}")
-        process = multiprocessing.Process(
-            target=concat_weight_partition,
-            args=(weight_dir, tensors),
-        )
-        process.start()
-        process.join()
+        new_tensors = concat_weight_partition(tensors)
+        gradient_server.conn.send(new_tensors)
+        logger.info(f"New tensors sent to executor")
 
         # step4. send ipc message to update weight
         gradient_server.connection_handler.ipc_weight_refit(weight_dir, weight_version)
@@ -349,6 +353,7 @@ class GradientServer:
         max_sequence_length: Optional[int] = None,
         param_mem_ratio: float = 0.65,
         kvcache_mem_ratio: float = 0.25,
+        conn: Any = None,
     ):
         self.recv_from_peer_addr = recv_from_peer_addr
         self.send_to_peer_addr = send_to_peer_addr
@@ -385,6 +390,7 @@ class GradientServer:
         self.rtt_update_interval = 60
         self.status = ServerState.JOINING
         self.manual_layer_assignment = block_end_index is not None and block_start_index is not None
+        self.conn = conn
 
         self.scheduler_stub = None
         self.scheduler_peer_id = None
@@ -976,6 +982,7 @@ def _run_p2p_server_process(
     kvcache_mem_ratio: float = 0.25,
     shared_state: Optional[dict] = None,
     log_level: str = "INFO",
+    conn: Any = None,
 ):
     """Run P2P server in subprocess"""
     # Set log level in subprocess (spawn mode doesn't inherit log configuration)
@@ -1006,6 +1013,7 @@ def _run_p2p_server_process(
             max_sequence_length=max_sequence_length,
             param_mem_ratio=param_mem_ratio,
             kvcache_mem_ratio=kvcache_mem_ratio,
+            conn=conn,
         )
         # Attach shared state to server for syncing layer allocation
         if shared_state is not None:
@@ -1055,6 +1063,7 @@ def launch_p2p_server_process(
     kvcache_mem_ratio: float = 0.25,
     shared_state: Optional[dict] = None,
     log_level: str = "INFO",
+    conn: Optional[Any] = None,
 ) -> multiprocessing.Process:
     """Launch P2P server as a subprocess and return the process object
 
@@ -1089,6 +1098,7 @@ def launch_p2p_server_process(
             kvcache_mem_ratio,
             shared_state,
             log_level,
+            conn,
         ),
     )
     process.start()

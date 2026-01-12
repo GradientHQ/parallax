@@ -190,8 +190,8 @@ def reshape_and_cache(
         verbose=False,
     )
 
-    mx.eval(outputs)
-    return key_cache, value_cache
+    mx.async_eval(outputs)
+    return
 
 
 def paged_attention(

@@ -68,8 +68,6 @@ class ParallaxDeepSeekV2Attention(MLXDeepseekV2Attention):
         k_nope, values = mx.split(kv, [self.qk_nope_head_dim], axis=-1)
         k_nope = k_nope.transpose(0, 2, 1, 3)
 
-        # q_pe = self.rope(q_pe, offset=offset)
-        # k_pe = self.rope(k_pe, offset=offset)
         key_cache_global, value_cache_global = cache.get_cache()
         q_pe_list = []
         k_pe_list = []
