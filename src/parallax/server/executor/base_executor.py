@@ -557,9 +557,7 @@ class BaseExecutor:
                             self.send_to_peer_socket.send_multipart(
                                 [
                                     b"forward",
-                                    request_to_proto(
-                                        next_batch, self.device
-                                    ).SerializeToString(),
+                                    request_to_proto(next_batch, self.device).SerializeToString(),
                                 ]
                             )
                             logger.debug(
