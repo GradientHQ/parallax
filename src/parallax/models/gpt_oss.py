@@ -31,7 +31,6 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
         window_size: Optional[int] = None,
-        prefix_lens: Optional[mx.array] = None,
         **kwargs,
     ) -> mx.array:
         """
@@ -144,6 +143,7 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
             window_size = self.get_window_size()
         else:
             window_size = None
+
         r = self.self_attn(
             self.input_layernorm(x),
             mask=mask,
