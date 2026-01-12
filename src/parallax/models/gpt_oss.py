@@ -142,7 +142,7 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                     v_new_i = values_new[i : i + 1].transpose(
                         0, 2, 1, 3
                     )  # (1, num_key_value_heads, target_len, head_dim)
-                    
+
                     logger.debug(f"Request {i}: prefix_len={prefix_len}, target_len={target_len}")
                     logger.debug(f"  k_new_i.shape={k_new_i.shape}, v_new_i.shape={v_new_i.shape}")
 
@@ -166,7 +166,7 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                             ]  # (num_key_value_heads, head_dim_v)
                             prefix_k_list.append(k_token)
                             prefix_v_list.append(v_token)
-                        
+
                         logger.debug(f"  Read {len(prefix_k_list)} prefix tokens from cache")
 
                         # Stack prefix KV: (prefix_len, num_key_value_heads, head_dim)
@@ -192,11 +192,15 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                         v_full = mx.concatenate(
                             [prefix_v, v_new_i], axis=2
                         )  # (1, num_key_value_heads, prefix_len + target_len, head_dim)
-                        logger.debug(f"  Concatenated: prefix_k.shape={prefix_k.shape}, k_new_i.shape={k_new_i.shape}, k_full.shape={k_full.shape}")
+                        logger.debug(
+                            f"  Concatenated: prefix_k.shape={prefix_k.shape}, k_new_i.shape={k_new_i.shape}, k_full.shape={k_full.shape}"
+                        )
                     else:
                         k_full = k_new_i
                         v_full = v_new_i
-                        logger.debug(f"  No prefix cache, using only new KV: k_full.shape={k_full.shape}")
+                        logger.debug(
+                            f"  No prefix cache, using only new KV: k_full.shape={k_full.shape}"
+                        )
 
                     # Compute attention for this request
                     # Need to create proper causal mask for the full sequence
@@ -221,13 +225,15 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                         col_positions = mx.arange(full_len, dtype=mx.int32)[
                             None, :
                         ]  # (1, full_len) - all positions
-                        
+
                         # Apply sliding window: can attend to positions >= (row_pos - window_size + 1)
-                        window_start = mx.maximum(0, row_positions - window_size + 1)  # (target_len, 1)
+                        window_start = mx.maximum(
+                            0, row_positions - window_size + 1
+                        )  # (target_len, 1)
                         in_window = (col_positions >= window_start) & (
                             col_positions <= row_positions
                         )
-                        
+
                         window_mask = mx.where(in_window, 0.0, float("-inf"))
                         window_mask = window_mask[None, None, :, :].astype(q_i.dtype)
                         causal_mask = causal_mask + window_mask

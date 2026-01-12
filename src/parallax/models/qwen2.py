@@ -140,17 +140,19 @@ class ParallaxQwen2Attention(MLXQwen2Attention):
                         # Gather prefix tokens from paged cache
                         prefix_k_list = []
                         prefix_v_list = []
-                        
+
                         # Check cache shape to determine cache type
                         # KVCache: (1, num_blocks, n_kv_heads, block_size, head_dim)
                         # KVCachePacked: (num_blocks, num_kv_heads, head_dim // x, block_size, x)
-                        is_packed_cache = key_cache_global.ndim == 5 and key_cache_global.shape[0] != 1
-                        
+                        is_packed_cache = (
+                            key_cache_global.ndim == 5 and key_cache_global.shape[0] != 1
+                        )
+
                         for pos in range(prefix_len):
                             block_idx = pos // block_size
                             offset_in_block = pos % block_size
                             physical_block = int(block_table_i[block_idx])
-                            
+
                             if is_packed_cache:
                                 # KVCachePacked format
                                 # key_cache: (num_blocks, num_kv_heads, head_dim // x, block_size, x)
@@ -173,7 +175,7 @@ class ParallaxQwen2Attention(MLXQwen2Attention):
                                 v_token = value_cache_global[
                                     0, physical_block, :, offset_in_block, :
                                 ]  # (n_kv_heads, head_dim_v)
-                            
+
                             prefix_k_list.append(k_token)
                             prefix_v_list.append(v_token)
 
