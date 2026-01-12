@@ -10,7 +10,7 @@ tensor parallel:
     https://ml-explore.github.io/mlx/build/html/usage/distributed.html#enabling-rdma
 
     mlx.distributed_config --verbose \
-    --hosts macmini1,macmini2 \                                                                                                                           --over thunderbolt --backend jaccl \
+    --hosts macmini1,macmini2 \
     --over thunderbolt --backend jaccl \
     --auto-setup --output hosts.json
 
