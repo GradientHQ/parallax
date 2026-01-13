@@ -965,13 +965,18 @@ async def weight_refit(raw_request: Request) -> JSONResponse:
     results = await registry.broadcast_raw(
         path="/weight/refit/timestamp", headers=None, body=None, method="get"
     )
-    min_timestamp = 0.0
+    min_timestamp = None
     for r in results:
         if r.get("ok") == True:
             body_out = r.get("response", None)
             if body_out is not None:
                 ep_timestamp = body_out.get("latest_timestamp", 0.0)
-                min_timestamp = min(min_timestamp, ep_timestamp)
+                if min_timestamp is None:
+                    min_timestamp = ep_timestamp
+                else:
+                    min_timestamp = min(min_timestamp, ep_timestamp)
+    if min_timestamp is None:
+        min_timestamp = 0.0
     return JSONResponse(
         status_code=200,
         content={
