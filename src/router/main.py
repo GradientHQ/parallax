@@ -511,7 +511,7 @@ class EndpointRegistry:
             try:
                 logger.info(f"Broadcasting raw to {url}")
                 if method == "get":
-                    resp = await client.get(url, headers=headers, content=body)
+                    resp = await client.get(url)
                 else:
                     resp = await client.post(url, headers=headers, content=body)
                 content_type = resp.headers.get("content-type", "")
@@ -962,10 +962,8 @@ async def weight_refit(raw_request: Request) -> JSONResponse:
     Example:
       curl -sS -X GET http://127.0.0.1:3001/weight/refit/timestamp
     """
-    headers = _filter_forward_headers(dict(raw_request.headers))
-    body = await raw_request.body()
     results = await registry.broadcast_raw(
-        path="/weight/refit/timestamp", headers=headers, body=body, method="get"
+        path="/weight/refit/timestamp", headers=None, body=None, method="get"
     )
     min_timestamp = 0.0
     for r in results:
