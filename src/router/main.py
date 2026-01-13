@@ -498,6 +498,7 @@ class EndpointRegistry:
         path: str,
         headers: Dict[str, str],
         body: bytes,
+        method: str,
     ) -> List[Dict[str, Any]]:
         endpoints = await self._snapshot_endpoints()
         if not endpoints:
@@ -509,7 +510,10 @@ class EndpointRegistry:
             url = _join_url(ep.base_url, path)
             try:
                 logger.info(f"Broadcasting raw to {url}")
-                resp = await client.post(url, headers=headers, content=body)
+                if method == "get":
+                    resp = await client.get(url, headers=headers, content=body)
+                else:
+                    resp = await client.post(url, headers=headers, content=body)
                 content_type = resp.headers.get("content-type", "")
                 if "application/json" in content_type.lower():
                     body_out: Any = resp.json()
@@ -930,7 +934,9 @@ async def weight_refit(raw_request: Request) -> JSONResponse:
     """
     headers = _filter_forward_headers(dict(raw_request.headers))
     body = await raw_request.body()
-    results = await registry.broadcast_raw(path="/weight/refit", headers=headers, body=body)
+    results = await registry.broadcast_raw(
+        path="/weight/refit", headers=headers, body=body, method="post"
+    )
     ok = any(r.get("ok") is True for r in results)
     if ok:
         return JSONResponse(
@@ -959,7 +965,7 @@ async def weight_refit(raw_request: Request) -> JSONResponse:
     headers = _filter_forward_headers(dict(raw_request.headers))
     body = await raw_request.body()
     results = await registry.broadcast_raw(
-        path="/weight/refit/timestamp", headers=headers, body=body
+        path="/weight/refit/timestamp", headers=headers, body=body, method="get"
     )
     min_timestamp = 0.0
     for r in results:
