@@ -64,7 +64,7 @@ class BaseExecutor:
         max_batch_size: Optional[int] = 8,
         max_sequence_length: Optional[int] = None,
         # Controlling perfill / decode ratio
-        max_num_tokens_per_batch: int = 1024,
+        max_num_tokens_per_batch: int = 16384,
         prefill_priority: int = 0,
         micro_batch_ratio: int = 2,
         scheduler_wait_ms: int = 500,
@@ -271,6 +271,7 @@ class BaseExecutor:
             except Exception as e:
                 logger.exception(f"Error receiving http request: {e}")
                 self._notify_http_request_error(raw_request, e)
+
         if len(recv_reqs) > 0:
             logger.debug(f"Received {len(recv_reqs)} HTTP requests")
         return recv_reqs
@@ -390,51 +391,48 @@ class BaseExecutor:
                 - 'probs': list of probabilities (last peer) or None (intermediate peer)
             context_lengths: Context lengths for each request
         """
-        if self.tp_rank == 0:
-            # Extract hidden_states and probs from output (always a dict now)
-            assert isinstance(
-                batch_output, dict
-            ), f"Expected dict from process_batch, got {type(batch_output)}"
-            hidden_states = batch_output["hidden_states"]
-            token_probs = batch_output["probs"]
+        # Extract hidden_states and probs from output (always a dict now)
+        assert isinstance(
+            batch_output, dict
+        ), f"Expected dict from process_batch, got {type(batch_output)}"
+        hidden_states = batch_output["hidden_states"]
+        token_probs = batch_output["probs"]
 
-            batched_requests = []
-            pre_length = 0
-            for i, src_request in enumerate(requests):
-                if self.is_last_peer:
-                    # Last peer gets a 1D array of token IDs
-                    hidden_state_for_req = hidden_states[i : i + 1]
-                else:
-                    # Other peers get a 3D array of hidden states
-                    if src_request.is_prefill:
-                        true_length = int(context_lengths[i])
-                        if hidden_states.ndim == 3:
-                            hidden_state_for_req = hidden_states[i, :true_length, :]
-                        else:
-                            hidden_state_for_req = hidden_states[
-                                pre_length : pre_length + true_length, :
-                            ]
-                        pre_length += true_length
+        batched_requests = []
+        pre_length = 0
+        for i, src_request in enumerate(requests):
+            if self.is_last_peer:
+                # Last peer gets a 1D array of token IDs
+                hidden_state_for_req = hidden_states[i : i + 1]
+            else:
+                # Other peers get a 3D array of hidden states
+                if src_request.is_prefill:
+                    true_length = int(context_lengths[i])
+                    if hidden_states.ndim == 3:
+                        hidden_state_for_req = hidden_states[i, :true_length, :]
                     else:
-                        if hidden_states.ndim == 3:
-                            hidden_state_for_req = hidden_states[i, :, :]
-                        else:
-                            hidden_state_for_req = hidden_states[pre_length : pre_length + 1, :]
-                        pre_length += 1
+                        hidden_state_for_req = hidden_states[
+                            pre_length : pre_length + true_length, :
+                        ]
+                    pre_length += true_length
+                else:
+                    if hidden_states.ndim == 3:
+                        hidden_state_for_req = hidden_states[i, :, :]
+                    else:
+                        hidden_state_for_req = hidden_states[pre_length : pre_length + 1, :]
+                    pre_length += 1
 
-                # Get prob for this request if available
-                token_prob = (
-                    token_probs[i]
-                    if (self.is_last_peer and token_probs and i < len(token_probs))
-                    else None
-                )
+            # Get prob for this request if available
+            token_prob = (
+                token_probs[i]
+                if (self.is_last_peer and token_probs and i < len(token_probs))
+                else None
+            )
 
-                next_req = self._prepare_next_single_request(
-                    src_request, hidden_state_for_req, token_prob
-                )
-                batched_requests.append(next_req)
-        else:
-            batched_requests = None
+            next_req = self._prepare_next_single_request(
+                src_request, hidden_state_for_req, token_prob
+            )
+            batched_requests.append(next_req)
 
         return batched_requests
 
@@ -469,7 +467,6 @@ class BaseExecutor:
                 self.check_and_refit_weight(refit_weight_path)
 
             self.handle_input_requests(received_requests)
-
             # Send abort signals to P2P server to broadcast to all nodes
             if len(self.finished_batch) > 0 and self.tp_rank == 0:
                 self.send_to_peer_socket.send_multipart(
@@ -552,24 +549,21 @@ class BaseExecutor:
                         )
 
                         # 8. Dispatch to the appropriate destination
-                        if self.tp_rank == 0:
-                            if self.is_last_peer and self.is_first_peer:
-                                # Single node: handle locally
-                                self.handle_input_requests(next_batch)
-                            else:
-                                # Send output to next peer
-                                self.send_to_peer_socket.send_multipart(
-                                    [
-                                        b"forward",
-                                        request_to_proto(
-                                            next_batch, self.device
-                                        ).SerializeToString(),
-                                    ]
-                                )
-                                logger.debug(
-                                    f"Processed batch of type {batch_type} with {len(next_batch)} requests "
-                                    f"in {(time.time() - start_time) * 1000:.3f} ms"
-                                )
+                        if self.is_last_peer and self.is_first_peer:
+                            # Single node: handle locally
+                            self.handle_input_requests(next_batch)
+                        elif self.tp_rank == 0:
+                            # Send output to next peer
+                            self.send_to_peer_socket.send_multipart(
+                                [
+                                    b"forward",
+                                    request_to_proto(next_batch, self.device).SerializeToString(),
+                                ]
+                            )
+                            logger.debug(
+                                f"Processed batch of type {batch_type} with {len(next_batch)} requests "
+                                f"in {(time.time() - start_time) * 1000:.3f} ms"
+                            )
 
             except Exception as e:
                 logger.exception(f"Error processing batch: {e}")

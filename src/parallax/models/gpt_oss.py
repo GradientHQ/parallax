@@ -5,6 +5,7 @@ hidden_dimefines the Qwen3 model.
 from typing import Any, List, Optional
 
 import mlx.core as mx
+from mlx.nn.layers.distributed import shard_inplace, shard_linear
 from mlx_lm.models.base import create_causal_mask, scaled_dot_product_attention
 from mlx_lm.models.gpt_oss import AttentionBlock as MLXGPTOSSAttention
 from mlx_lm.models.gpt_oss import ModelArgs
@@ -51,19 +52,12 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
 
         key_cache_global, value_cache_global = cache.get_cache()
 
-        queries_rotated_list = []
-        keys_rotated_list = []
-        for i in range(batch):
-            current_pos = int(context_lengths[i]) - 1 if target_len == 1 else 0
-            q_slice = queries_new[i : i + 1]
-            k_slice = keys_new[i : i + 1]
-            q_rot = self.rope(q_slice, offset=current_pos)
-            k_rot = self.rope(k_slice, offset=current_pos)
-            queries_rotated_list.append(q_rot)
-            keys_rotated_list.append(k_rot)
-
-        queries_rotated = mx.concatenate(queries_rotated_list, axis=0)
-        keys_rotated = mx.concatenate(keys_rotated_list, axis=0)
+        if target_len == 1:
+            current_pos = context_lengths - 1
+        else:
+            current_pos = 0
+        queries_rotated = self.rope(queries_new, offset=current_pos)
+        keys_rotated = self.rope(keys_new, offset=current_pos)
 
         # Update Paged Cache
         block_size = key_cache_global.shape[3]
@@ -164,6 +158,30 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
         return out
+
+    def shard(self):
+        group = mx.distributed.init()
+        N = group.size()
+        r = group.rank()
+        # Shard the self attention
+        self.self_attn.q_proj = shard_linear(self.self_attn.q_proj, "all-to-sharded", group=group)
+        self.self_attn.k_proj = shard_linear(self.self_attn.k_proj, "all-to-sharded", group=group)
+        self.self_attn.v_proj = shard_linear(self.self_attn.v_proj, "all-to-sharded", group=group)
+        self.self_attn.o_proj = shard_linear(self.self_attn.o_proj, "sharded-to-all", group=group)
+        num_attention_heads = self.self_attn.num_attention_heads // N
+        self.self_attn.sinks = self.self_attn.sinks[
+            num_attention_heads * r : num_attention_heads * (r + 1)
+        ]
+        self.self_attn.num_attention_heads = num_attention_heads
+        self.self_attn.num_key_value_heads = self.self_attn.num_key_value_heads // N
+
+        # Shard the MLP
+        shard_inplace(self.mlp.experts.gate_proj, "all-to-sharded", group=group)
+        shard_inplace(self.mlp.experts.up_proj, "all-to-sharded", group=group)
+        shard_inplace(self.mlp.experts.down_proj, "sharded-to-all", group=group)
+        if r > 0:
+            # set the bias to 0 for the down proj on the non-zero ranks so that bias only be added once.
+            self.mlp.experts.down_proj.bias = mx.zeros_like(self.mlp.experts.down_proj.bias)
 
     @classmethod
     def get_architecture(cls):

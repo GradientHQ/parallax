@@ -259,7 +259,7 @@ def initialize_sgl_model_runner(
     attention_backend: str,
     kv_block_size: int,
     moe_runner_backend: str,
-    max_num_tokens_per_batch: int = 1024,
+    max_num_tokens_per_batch: int = 16384,
     enable_lora: Optional[bool] = False,
     max_lora_rank: Optional[int] = None,
     lora_target_modules: Optional[List[str]] = None,

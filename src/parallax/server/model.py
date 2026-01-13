@@ -69,6 +69,19 @@ class ShardedModel(nn.Module):
             self.norm = None
             self.lm_head = None
 
+    def shard_layers(self):
+        group = mx.distributed.init()
+        tp_size = group.size()
+        if tp_size > 1:
+            for layer in self.layers:
+                if hasattr(layer, "shard"):
+                    layer.shard()
+                else:
+                    logger.error(
+                        f"Model {layer.__class__.__name__} does not have a shard method, does not support tensor parallelism"
+                    )
+                    exit(1)
+
     def logits_to_tokens(
         self,
         logits: mx.array,

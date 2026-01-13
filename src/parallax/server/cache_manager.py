@@ -99,7 +99,7 @@ class CacheManager:
         if self.needs_blocks:
             logger.info(
                 f"Allocated Paged KV Cache for {self.layer_types.count('attention')} layers: "
-                f"{self.num_gpu_blocks} blocks, {self.block_size} block_size"
+                f"{self.num_gpu_blocks} blocks, {self.block_size} block_size, max_tokens: {self.num_gpu_blocks * self.block_size}"
             )
         if self.needs_slots:
             logger.info(
@@ -226,7 +226,7 @@ class CacheManager:
     def _calculate_num_blocks(self, cache_memory_fraction: float, dtype: mx.Dtype) -> int:
         device_info = mx.metal.device_info()
         total_mem = device_info["max_recommended_working_set_size"]
-        current_mem = mx.metal.get_active_memory()
+        current_mem = mx.get_active_memory()
         free_mem = total_mem - current_mem
         available_for_cache = free_mem * cache_memory_fraction
 
