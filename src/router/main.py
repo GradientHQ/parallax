@@ -796,6 +796,7 @@ async def health() -> JSONResponse:
                 "/endpoints",
                 "/v1/chat/completions",
                 "/weight/refit",
+                "/weight/refit/timestamp",
             ],
         }
     )
@@ -930,13 +931,47 @@ async def weight_refit(raw_request: Request) -> JSONResponse:
     headers = _filter_forward_headers(dict(raw_request.headers))
     body = await raw_request.body()
     results = await registry.broadcast_raw(path="/weight/refit", headers=headers, body=body)
-    ok = all(r.get("ok") is True for r in results)
+    ok = any(r.get("ok") is True for r in results)
+    if ok:
+        return JSONResponse(
+            content={
+                "type": "weight_refit",
+                "data": None,
+            },
+            status_code=200,
+        )
+    else:
+        return JSONResponse(
+            content={
+                "type": "weight_refit",
+                "data": "Sever not ready",
+            },
+            status_code=500,
+        )
+
+
+@app.get("/weight/refit/timestamp")
+async def weight_refit(raw_request: Request) -> JSONResponse:
+    """
+    Example:
+      curl -sS -X GET http://127.0.0.1:3001/weight/refit/timestamp
+    """
+    headers = _filter_forward_headers(dict(raw_request.headers))
+    body = await raw_request.body()
+    results = await registry.broadcast_raw(
+        path="/weight/refit/timestamp", headers=headers, body=body
+    )
+    min_timestamp = 0.0
+    for r in results:
+        if r.get("ok") == True:
+            body_out = r.get("response", None)
+            if body_out is not None:
+                ep_timestamp = body_out.get("latest_timestamp", 0.0)
+                min_timestamp = min(min_timestamp, ep_timestamp)
     return JSONResponse(
-        status_code=200 if ok else 207,
+        status_code=200,
         content={
-            "ok": ok,
-            "broadcast_count": len(results),
-            "results": results,
+            "latest_timestamp": min_timestamp,
         },
     )
 
