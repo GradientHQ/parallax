@@ -32,7 +32,7 @@ from parallax.utils.utils import get_zmq_socket
 from parallax.utils.weight_refit_utils import (
     calculate_cid_manual,
     concat_weight_partition,
-    filer_weight_cid_list,
+    filter_weight_cid_list,
     parse_safetensors_from_memory,
     release_disk_storage,
 )
@@ -265,7 +265,7 @@ def check_and_run_weight_refit(gradient_server, message):
         # Weight already updated
         return
 
-    cid_list = filer_weight_cid_list(
+    cid_list = filter_weight_cid_list(
         gradient_server.block_start_index,
         gradient_server.block_end_index,
         gradient_server.block_end_index,

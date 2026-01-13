@@ -240,7 +240,7 @@ class Node:
         if self.max_concurrent_requests is None:
             return derived_max
         else:
-            return min(self.max_concurrent_requests, derived_max)
+            return max(self.max_concurrent_requests, derived_max)
 
     @property
     def num_current_layers(self) -> int:

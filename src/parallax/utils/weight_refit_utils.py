@@ -115,7 +115,7 @@ def is_block_needed(key, is_first_shard, is_last_shard, start_layer, end_layer) 
     return False
 
 
-def filer_weight_cid_list(start_layer, end_layer, hidden_layers, index_map):
+def filter_weight_cid_list(start_layer, end_layer, hidden_layers, index_map):
     """
     Filters block cids that worker node needs to download.
     Arguments:
