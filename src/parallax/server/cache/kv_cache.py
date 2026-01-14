@@ -36,6 +36,59 @@ class KVCache(BaseCache):
     def get_cache(self) -> Tuple[mx.array, mx.array]:
         return self.key_cache, self.value_cache
 
+    def is_packed(self) -> bool:
+        """KVCache uses standard (non-packed) format."""
+        return False
+
+    def read_prefix_kv(
+        self,
+        block_table: mx.array,
+        prefix_len: int,
+        num_kv_heads: int,
+    ) -> Tuple[mx.array, mx.array]:
+        """
+        Read prefix KV from standard KVCache.
+
+        Args:
+            block_table: (max_blocks,) - Block table for the request
+            prefix_len: Number of prefix tokens to read
+            num_kv_heads: Number of KV heads
+
+        Returns:
+            prefix_k: (num_kv_heads, prefix_len, head_dim) - Prefix keys
+            prefix_v: (num_kv_heads, prefix_len, head_dim_v) - Prefix values
+        """
+        prefix_k_list = []
+        prefix_v_list = []
+
+        for pos in range(prefix_len):
+            block_idx = pos // self.block_size
+            offset_in_block = pos % self.block_size
+            physical_block = int(block_table[block_idx])
+
+            # Standard KVCache format
+            # key_cache: (1, num_blocks, n_kv_heads, block_size, head_dim)
+            # value_cache: (1, num_blocks, n_kv_heads, block_size, head_dim_v)
+            k_token = self.key_cache[
+                0, physical_block, :, offset_in_block, :
+            ]  # (n_kv_heads, head_dim)
+            v_token = self.value_cache[
+                0, physical_block, :, offset_in_block, :
+            ]  # (n_kv_heads, head_dim_v)
+
+            prefix_k_list.append(k_token)
+            prefix_v_list.append(v_token)
+
+        # Stack prefix KV: (prefix_len, n_kv_heads, head_dim)
+        prefix_k = mx.stack(prefix_k_list, axis=0)  # (prefix_len, n_kv_heads, head_dim)
+        prefix_v = mx.stack(prefix_v_list, axis=0)  # (prefix_len, n_kv_heads, head_dim_v)
+
+        # Transpose to (n_kv_heads, prefix_len, head_dim)
+        prefix_k = prefix_k.transpose(1, 0, 2)  # (n_kv_heads, prefix_len, head_dim)
+        prefix_v = prefix_v.transpose(1, 0, 2)  # (n_kv_heads, prefix_len, head_dim_v)
+
+        return prefix_k, prefix_v
+
 
 def get_packing_factor(dtype: mx.Dtype) -> int:
     """
@@ -98,3 +151,58 @@ class KVCachePacked(BaseCache):
 
     def get_cache(self) -> Tuple[mx.array, mx.array]:
         return self.key_cache, self.value_cache
+
+    def is_packed(self) -> bool:
+        """KVCachePacked uses packed format."""
+        return True
+
+    def read_prefix_kv(
+        self,
+        block_table: mx.array,
+        prefix_len: int,
+        num_kv_heads: int,
+    ) -> Tuple[mx.array, mx.array]:
+        """
+        Read prefix KV from packed KVCachePacked.
+
+        Args:
+            block_table: (max_blocks,) - Block table for the request
+            prefix_len: Number of prefix tokens to read
+            num_kv_heads: Number of KV heads
+
+        Returns:
+            prefix_k: (num_kv_heads, prefix_len, head_dim) - Prefix keys
+            prefix_v: (num_kv_heads, prefix_len, head_dim_v) - Prefix values
+        """
+        prefix_k_list = []
+        prefix_v_list = []
+
+        for pos in range(prefix_len):
+            block_idx = pos // self.block_size
+            offset_in_block = pos % self.block_size
+            physical_block = int(block_table[block_idx])
+
+            # KVCachePacked format
+            # key_cache: (num_blocks, num_kv_heads, head_dim // x, block_size, x)
+            # value_cache: (num_blocks, num_kv_heads, head_dim_v, block_size)
+            k_token = self.key_cache[
+                physical_block, :, :, offset_in_block, :
+            ]  # (n_kv_heads, head_dim // x, x)
+            # Reshape to (n_kv_heads, head_dim)
+            k_token = k_token.reshape(num_kv_heads, -1)
+            v_token = self.value_cache[
+                physical_block, :, :, offset_in_block
+            ]  # (n_kv_heads, head_dim_v)
+
+            prefix_k_list.append(k_token)
+            prefix_v_list.append(v_token)
+
+        # Stack prefix KV: (prefix_len, n_kv_heads, head_dim)
+        prefix_k = mx.stack(prefix_k_list, axis=0)  # (prefix_len, n_kv_heads, head_dim)
+        prefix_v = mx.stack(prefix_v_list, axis=0)  # (prefix_len, n_kv_heads, head_dim_v)
+
+        # Transpose to (n_kv_heads, prefix_len, head_dim)
+        prefix_k = prefix_k.transpose(1, 0, 2)  # (n_kv_heads, prefix_len, head_dim)
+        prefix_v = prefix_v.transpose(1, 0, 2)  # (n_kv_heads, prefix_len, head_dim_v)
+
+        return prefix_k, prefix_v
