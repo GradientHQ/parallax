@@ -132,7 +132,6 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
                     self.sm_scale,
                     self.num_key_value_heads,
                     mask=mask,
-                    use_batch_processing=True,
                     sinks=self.sinks,
                     window_size=window_size,
                 )

@@ -141,7 +141,6 @@ class ParallaxDeepSeekV3Attention(MLXDeepseekV3Attention):
                     self.scale,
                     self.num_heads,  # In deepseek_v3, num_heads equals n_kv_heads after MQA processing
                     mask=mask,
-                    use_batch_processing=True,
                 )
             else:
                 # No prefix cache, use standard self-attention on local data only

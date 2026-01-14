@@ -124,7 +124,6 @@ class ParallaxMiniMaxAttention(MLXMiniMaxAttention):
                     self.scale,
                     self.num_key_value_heads,
                     mask=mask,
-                    use_batch_processing=True,
                 )
             else:
                 # No prefix cache, use standard self-attention on local data only

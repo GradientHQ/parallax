@@ -127,7 +127,6 @@ class ParallaxQwen3Attention(MLXQwen3Attention):
                     self.scale,
                     self.n_kv_heads,
                     mask=mask,
-                    use_batch_processing=True,
                 )
             else:
                 # No prefix cache, use standard self-attention on local data only

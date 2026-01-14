@@ -139,7 +139,6 @@ class ParallaxDeepSeekV2Attention(MLXDeepseekV2Attention):
                     self.scale,
                     self.num_heads,  # num_kv_heads (in DeepSeekV2, num_heads == num_kv_heads after repeat)
                     mask=mask,
-                    use_batch_processing=True,
                 )
             else:
                 # No prefix cache, use standard self-attention on local data only
