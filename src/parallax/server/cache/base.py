@@ -14,7 +14,6 @@ class BaseCache(ABC):
     @abstractmethod
     def is_packed(self) -> bool:
         """Check if this cache uses packed format."""
-        pass
 
     @abstractmethod
     def read_prefix_kv(

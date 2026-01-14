@@ -67,8 +67,12 @@ class KVCache(BaseCache):
         # Extract all tokens at once using array indexing
         # key_cache: (1, num_blocks, n_kv_heads, block_size, head_dim)
         # value_cache: (1, num_blocks, n_kv_heads, block_size, head_dim_v)
-        prefix_k = self.key_cache[0, physical_blocks, :, offsets, :]  # (prefix_len, n_kv_heads, head_dim)
-        prefix_v = self.value_cache[0, physical_blocks, :, offsets, :]  # (prefix_len, n_kv_heads, head_dim_v)
+        prefix_k = self.key_cache[
+            0, physical_blocks, :, offsets, :
+        ]  # (prefix_len, n_kv_heads, head_dim)
+        prefix_v = self.value_cache[
+            0, physical_blocks, :, offsets, :
+        ]  # (prefix_len, n_kv_heads, head_dim_v)
 
         # Transpose to (n_kv_heads, prefix_len, head_dim)
         prefix_k = prefix_k.transpose(1, 0, 2)  # (n_kv_heads, prefix_len, head_dim)
@@ -171,10 +175,16 @@ class KVCachePacked(BaseCache):
         # KVCachePacked format
         # key_cache: (num_blocks, num_kv_heads, head_dim // x, block_size, x)
         # value_cache: (num_blocks, num_kv_heads, head_dim_v, block_size)
-        prefix_k = self.key_cache[physical_blocks, :, :, offsets, :]  # (prefix_len, n_kv_heads, head_dim // x, x)
+        prefix_k = self.key_cache[
+            physical_blocks, :, :, offsets, :
+        ]  # (prefix_len, n_kv_heads, head_dim // x, x)
         # Reshape to (prefix_len, n_kv_heads, head_dim)
-        prefix_k = prefix_k.reshape(prefix_len, num_kv_heads, -1)  # (prefix_len, n_kv_heads, head_dim)
-        prefix_v = self.value_cache[physical_blocks, :, :, offsets]  # (prefix_len, n_kv_heads, head_dim_v)
+        prefix_k = prefix_k.reshape(
+            prefix_len, num_kv_heads, -1
+        )  # (prefix_len, n_kv_heads, head_dim)
+        prefix_v = self.value_cache[
+            physical_blocks, :, :, offsets
+        ]  # (prefix_len, n_kv_heads, head_dim_v)
 
         # Transpose to (n_kv_heads, prefix_len, head_dim)
         prefix_k = prefix_k.transpose(1, 0, 2)  # (n_kv_heads, prefix_len, head_dim)
