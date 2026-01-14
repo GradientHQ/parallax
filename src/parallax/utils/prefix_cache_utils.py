@@ -20,6 +20,8 @@ def compute_attention_with_prefix_cache(
     num_kv_heads: int,
     mask: Optional[mx.array] = None,
     use_batch_processing: bool = False,
+    sinks: Optional[mx.array] = None,
+    window_size: Optional[int] = None,
 ) -> mx.array:
     """
     Compute attention with prefix cache support.
@@ -59,6 +61,8 @@ def compute_attention_with_prefix_cache(
             target_len,
             scale,
             num_kv_heads,
+            sinks=sinks,
+            window_size=window_size,
         )
     else:
         return _compute_attention_with_prefix_cache_per_request(
@@ -72,6 +76,7 @@ def compute_attention_with_prefix_cache(
             scale,
             num_kv_heads,
             mask,
+            sinks=sinks,
         )
 
 
@@ -85,6 +90,8 @@ def _compute_attention_with_prefix_cache_batch(
     target_len: int,
     scale: float,
     num_kv_heads: int,
+    sinks: Optional[mx.array] = None,
+    window_size: Optional[int] = None,
 ) -> mx.array:
     """Batch processing version (used by qwen3)."""
     batch = queries.shape[0]
@@ -151,10 +158,33 @@ def _compute_attention_with_prefix_cache_batch(
     )
     causal_mask = causal_mask + causal_mask_new  # (batch, target_len, full_len)
 
+    # Mask 3: Apply window_size mask if needed
+    if window_size is not None:
+        # For prefix_cache case with window_size:
+        # Sliding window means: position i can only attend to positions in [max(0, i - window_size + 1), i]
+        # But for prefix tokens, they can all attend to each other (no window restriction)
+        # For new tokens, apply sliding window on the full sequence (including prefix)
+        row_positions = (
+            mx.arange(target_len, dtype=mx.int32)[None, :, None] + prefix_lens_expanded
+        )  # (batch, target_len, 1) - absolute positions of new tokens
+        col_positions = mx.arange(full_len, dtype=mx.int32)[
+            None, None, :
+        ]  # (1, 1, full_len) - all positions
+
+        # Apply sliding window: can attend to positions >= (row_pos - window_size + 1)
+        window_start = mx.maximum(0, row_positions - window_size + 1)  # (batch, target_len, 1)
+        in_window = (col_positions >= window_start) & (col_positions <= row_positions)
+
+        window_mask = mx.where(in_window, 0.0, float("-inf"))
+        causal_mask = causal_mask + window_mask  # (batch, target_len, full_len)
+
     # Reshape mask: (batch, 1, target_len, full_len)
     causal_mask = causal_mask[:, None, :, :].astype(queries.dtype)
 
     # Batch compute attention
+    attention_kwargs = {}
+    if sinks is not None:
+        attention_kwargs["sinks"] = sinks
     output = scaled_dot_product_attention(
         queries,  # (batch, n_heads, target_len, head_dim)
         k_full,  # (batch, n_kv_heads, full_len, head_dim)
@@ -162,6 +192,7 @@ def _compute_attention_with_prefix_cache_batch(
         scale=scale,
         mask=causal_mask,
         cache=None,
+        **attention_kwargs,
     )
     output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
     return output
@@ -178,6 +209,7 @@ def _compute_attention_with_prefix_cache_per_request(
     scale: float,
     num_kv_heads: int,
     mask: Optional[mx.array] = None,
+    sinks: Optional[mx.array] = None,
 ) -> mx.array:
     """Per-request processing version (used by most models)."""
     batch = queries.shape[0]
@@ -219,6 +251,9 @@ def _compute_attention_with_prefix_cache_per_request(
             q_i.dtype
         )  # (1, 1, target_len, full_len)
 
+        attention_kwargs = {}
+        if sinks is not None:
+            attention_kwargs["sinks"] = sinks
         out_i = scaled_dot_product_attention(
             q_i,
             k_full,
@@ -226,6 +261,7 @@ def _compute_attention_with_prefix_cache_per_request(
             scale=scale,
             mask=causal_mask,
             cache=None,
+            **attention_kwargs,
         )
         output_list.append(out_i)
 
