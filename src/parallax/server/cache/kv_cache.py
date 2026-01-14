@@ -58,30 +58,17 @@ class KVCache(BaseCache):
             prefix_k: (num_kv_heads, prefix_len, head_dim) - Prefix keys
             prefix_v: (num_kv_heads, prefix_len, head_dim_v) - Prefix values
         """
-        prefix_k_list = []
-        prefix_v_list = []
+        # Calculate all block indices and offsets using array operations
+        positions = mx.arange(prefix_len)
+        block_indices = positions // self.block_size  # (prefix_len,)
+        offsets = positions % self.block_size  # (prefix_len,)
+        physical_blocks = block_table[block_indices]  # (prefix_len,)
 
-        for pos in range(prefix_len):
-            block_idx = pos // self.block_size
-            offset_in_block = pos % self.block_size
-            physical_block = int(block_table[block_idx])
-
-            # Standard KVCache format
-            # key_cache: (1, num_blocks, n_kv_heads, block_size, head_dim)
-            # value_cache: (1, num_blocks, n_kv_heads, block_size, head_dim_v)
-            k_token = self.key_cache[
-                0, physical_block, :, offset_in_block, :
-            ]  # (n_kv_heads, head_dim)
-            v_token = self.value_cache[
-                0, physical_block, :, offset_in_block, :
-            ]  # (n_kv_heads, head_dim_v)
-
-            prefix_k_list.append(k_token)
-            prefix_v_list.append(v_token)
-
-        # Stack prefix KV: (prefix_len, n_kv_heads, head_dim)
-        prefix_k = mx.stack(prefix_k_list, axis=0)  # (prefix_len, n_kv_heads, head_dim)
-        prefix_v = mx.stack(prefix_v_list, axis=0)  # (prefix_len, n_kv_heads, head_dim_v)
+        # Extract all tokens at once using array indexing
+        # key_cache: (1, num_blocks, n_kv_heads, block_size, head_dim)
+        # value_cache: (1, num_blocks, n_kv_heads, block_size, head_dim_v)
+        prefix_k = self.key_cache[0, physical_blocks, :, offsets, :]  # (prefix_len, n_kv_heads, head_dim)
+        prefix_v = self.value_cache[0, physical_blocks, :, offsets, :]  # (prefix_len, n_kv_heads, head_dim_v)
 
         # Transpose to (n_kv_heads, prefix_len, head_dim)
         prefix_k = prefix_k.transpose(1, 0, 2)  # (n_kv_heads, prefix_len, head_dim)
@@ -174,32 +161,20 @@ class KVCachePacked(BaseCache):
             prefix_k: (num_kv_heads, prefix_len, head_dim) - Prefix keys
             prefix_v: (num_kv_heads, prefix_len, head_dim_v) - Prefix values
         """
-        prefix_k_list = []
-        prefix_v_list = []
+        # Calculate all block indices and offsets using array operations
+        positions = mx.arange(prefix_len)
+        block_indices = positions // self.block_size  # (prefix_len,)
+        offsets = positions % self.block_size  # (prefix_len,)
+        physical_blocks = block_table[block_indices]  # (prefix_len,)
 
-        for pos in range(prefix_len):
-            block_idx = pos // self.block_size
-            offset_in_block = pos % self.block_size
-            physical_block = int(block_table[block_idx])
-
-            # KVCachePacked format
-            # key_cache: (num_blocks, num_kv_heads, head_dim // x, block_size, x)
-            # value_cache: (num_blocks, num_kv_heads, head_dim_v, block_size)
-            k_token = self.key_cache[
-                physical_block, :, :, offset_in_block, :
-            ]  # (n_kv_heads, head_dim // x, x)
-            # Reshape to (n_kv_heads, head_dim)
-            k_token = k_token.reshape(num_kv_heads, -1)
-            v_token = self.value_cache[
-                physical_block, :, :, offset_in_block
-            ]  # (n_kv_heads, head_dim_v)
-
-            prefix_k_list.append(k_token)
-            prefix_v_list.append(v_token)
-
-        # Stack prefix KV: (prefix_len, n_kv_heads, head_dim)
-        prefix_k = mx.stack(prefix_k_list, axis=0)  # (prefix_len, n_kv_heads, head_dim)
-        prefix_v = mx.stack(prefix_v_list, axis=0)  # (prefix_len, n_kv_heads, head_dim_v)
+        # Extract all tokens at once using array indexing
+        # KVCachePacked format
+        # key_cache: (num_blocks, num_kv_heads, head_dim // x, block_size, x)
+        # value_cache: (num_blocks, num_kv_heads, head_dim_v, block_size)
+        prefix_k = self.key_cache[physical_blocks, :, :, offsets, :]  # (prefix_len, n_kv_heads, head_dim // x, x)
+        # Reshape to (prefix_len, n_kv_heads, head_dim)
+        prefix_k = prefix_k.reshape(prefix_len, num_kv_heads, -1)  # (prefix_len, n_kv_heads, head_dim)
+        prefix_v = self.value_cache[physical_blocks, :, :, offsets]  # (prefix_len, n_kv_heads, head_dim_v)
 
         # Transpose to (n_kv_heads, prefix_len, head_dim)
         prefix_k = prefix_k.transpose(1, 0, 2)  # (n_kv_heads, prefix_len, head_dim)

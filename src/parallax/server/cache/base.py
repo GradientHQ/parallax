@@ -11,12 +11,10 @@ class BaseCache(ABC):
     def get_cache(self) -> Any:
         pass
 
+    @abstractmethod
     def is_packed(self) -> bool:
         """Check if this cache uses packed format."""
-        key_cache, _ = self.get_cache()
-        # KVCache: (1, num_blocks, n_kv_heads, block_size, head_dim)
-        # KVCachePacked: (num_blocks, num_kv_heads, head_dim // x, block_size, x)
-        return key_cache.ndim == 5 and key_cache.shape[0] != 1
+        pass
 
     @abstractmethod
     def read_prefix_kv(
