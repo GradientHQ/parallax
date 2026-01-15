@@ -24,6 +24,3 @@ curl --location \
      --header 'Content-Type: application/json' \
      --data "$DATA" \
      "$URL"
-
-
-
