@@ -635,7 +635,7 @@ class BaseExecutor:
             logger.warning(
                 f"Input token length {input_token_num} exceeds max_sequence_length {max_req_len}. Truncating input to 4k tokens (keeping last 4k)."
             )
-            prompt = prompt[-1024 * 4 :]  # 保留最后 4k 个 token
+            prompt = prompt[-1024 * 4 :]
             input_token_num = len(prompt)
 
         max_new_tokens = raw_request.get("max_tokens")
