@@ -2,6 +2,7 @@
 MLX-LM backend implementation of high level executor
 """
 
+import logging
 import pickle
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -391,29 +392,31 @@ class MLXExecutor(BaseExecutor):
             prefix_lens=prepared_inputs.get("prefix_lens"),  # For RoPE offset in prefix cache
         )
         mx.eval(hidden_states)
-        forward_time = (time.time() - start_time) * 1000
 
-        if is_prefill_batch:
-            # Log prefill time and prefix cache hit info
-            total_tokens = sum(
-                prepared_inputs.get(
-                    "actual_processed_lengths",
-                    [req.total_length for req in prepared_inputs["requests"]],
-                )[i]
-                for i, req in enumerate(prepared_inputs["requests"])
-                if req.is_prefill
-            )
-            matched_tokens = sum(
-                prepared_inputs.get("prefix_lens", [0] * len(prepared_inputs["requests"]))[i]
-                for i, req in enumerate(prepared_inputs["requests"])
-                if req.is_prefill
-            )
-            logger.info(
-                f"[PREFILL] time: {forward_time:.3f} ms, "
-                f"tokens: {total_tokens}, prefix_cached: {matched_tokens}"
-            )
-        else:
-            logger.debug(f"model forward pass done, time: {forward_time:.3f} ms")
+        if logger.isEnabledFor(logging.DEBUG):
+            forward_time = (time.time() - start_time) * 1000
+
+            if is_prefill_batch:
+                # Log prefill time and prefix cache hit info
+                total_tokens = sum(
+                    prepared_inputs.get(
+                        "actual_processed_lengths",
+                        [req.total_length for req in prepared_inputs["requests"]],
+                    )[i]
+                    for i, req in enumerate(prepared_inputs["requests"])
+                    if req.is_prefill
+                )
+                matched_tokens = sum(
+                    prepared_inputs.get("prefix_lens", [0] * len(prepared_inputs["requests"]))[i]
+                    for i, req in enumerate(prepared_inputs["requests"])
+                    if req.is_prefill
+                )
+                logger.info(
+                    f"[PREFILL] time: {forward_time:.3f} ms, "
+                    f"tokens: {total_tokens}, prefix_cached: {matched_tokens}"
+                )
+            else:
+                logger.debug(f"model forward pass done, time: {forward_time:.3f} ms")
 
         logger.debug(
             f"Processed batch of {len(prepared_inputs['requests'])} requests, "
