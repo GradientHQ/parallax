@@ -629,14 +629,13 @@ class BaseExecutor:
             prompt = convert_chat(raw_request["messages"], raw_request.get("role_mapping"))
             prompt = self.tokenizer.encode(prompt)
 
-        max_req_len = self.max_sequence_length if self.max_sequence_length is not None else 2048
+        max_req_len = self.max_sequence_length if self.max_sequence_length is not None else 1024 * 6
         input_token_num = len(prompt)
-        if input_token_num >= max_req_len:
+        if input_token_num >= 1024 * 4:
             logger.warning(
-                f"Input token length {input_token_num} exceeds max_sequence_length {max_req_len}. Truncating input."
+                f"Input token length {input_token_num} exceeds max_sequence_length {max_req_len}. Truncating input to 4k tokens (keeping last 4k)."
             )
-            now_prompt_len = max(5, max_req_len - 10)
-            del prompt[now_prompt_len:]
+            prompt = prompt[-1024 * 4 :]  # 保留最后 4k 个 token
             input_token_num = len(prompt)
 
         max_new_tokens = raw_request.get("max_tokens")

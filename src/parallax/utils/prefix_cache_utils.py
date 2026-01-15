@@ -42,39 +42,12 @@ def compute_attention_with_prefix_cache(
         scale: Attention scale factor
         num_kv_heads: Number of KV heads
         mask: Optional attention mask (used when no prefix cache)
+        sinks: Optional sink tokens for attention
+        window_size: Optional sliding window size for attention
 
     Returns:
         output: (batch, target_len, n_heads * head_dim) - Output hidden states
     """
-    return _compute_attention_with_prefix_cache_batch(
-        queries,
-        keys_new,
-        values_new,
-        cache,
-        block_tables,
-        prefix_lens,
-        target_len,
-        scale,
-        num_kv_heads,
-        sinks=sinks,
-        window_size=window_size,
-    )
-
-
-def _compute_attention_with_prefix_cache_batch(
-    queries: mx.array,
-    keys_new: mx.array,
-    values_new: mx.array,
-    cache: BaseCache,
-    block_tables: mx.array,
-    prefix_lens: mx.array,
-    target_len: int,
-    scale: float,
-    num_kv_heads: int,
-    sinks: Optional[mx.array] = None,
-    window_size: Optional[int] = None,
-) -> mx.array:
-    """Batch processing version for prefix cache attention."""
     batch = queries.shape[0]
     max_prefix_len = int(mx.max(prefix_lens))
 
@@ -96,7 +69,9 @@ def _compute_attention_with_prefix_cache_batch(
         for i in range(batch):
             prefix_len = int(prefix_lens[i])
             if prefix_len > 0:
-                block_table_i = block_tables[i]  # (max_blocks,)
+                block_table_i = block_tables[i : i + 1].reshape(
+                    -1
+                )  # (max_blocks,) - use slice to avoid copy
                 prefix_k, prefix_v = cache.read_prefix_kv(block_table_i, prefix_len, num_kv_heads)
                 # prefix_k: (n_kv_heads, prefix_len, head_dim)
                 # prefix_v: (n_kv_heads, prefix_len, head_dim)
