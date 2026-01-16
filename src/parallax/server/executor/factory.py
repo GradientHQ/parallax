@@ -3,7 +3,7 @@ Creates executor from factory for different backends.
 """
 
 import argparse
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from parallax.utils.utils import get_current_device
 from parallax_utils.logging_config import get_logger, set_log_level
@@ -60,7 +60,7 @@ def create_executor_config(args: argparse.Namespace, shared_state=None, conn=Non
 def create_from_args(
     args,
     shared_state: Optional[dict] = None,
-    conn: Optional[Any] = None,
+    conn: Optional[List[Any]] = None,
     device: Optional[str] = None,
 ):
     """

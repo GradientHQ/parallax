@@ -83,7 +83,7 @@ class VLLMExecutor(BaseExecutor):
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
         # Pipe communication
-        conn: Optional[Any] = None,
+        conn: Optional[List[Any]] = [],
     ):
         model_runner_params = {
             "model_repo": model_repo,

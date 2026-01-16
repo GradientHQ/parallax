@@ -90,7 +90,7 @@ class MLXExecutor(BaseExecutor):
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
         # Pipe communication
-        conn: Optional[Any] = None,
+        conn: Optional[List[Any]] = [],
     ):
         group = mx.distributed.init()
         tp_size = group.size()
@@ -241,7 +241,7 @@ class MLXExecutor(BaseExecutor):
             f"mlx_executor initialized; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}, total memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
         )
 
-    def _tensor_parallel_broadcast_byobj(self, broadcast_obj):
+    def _tensor_parallel_broadcast_pyobj(self, broadcast_obj):
         """Wrapper for broadcast pyobject in TP group using send/recv with explicit sync"""
         if self.tp_size <= 1:
             return broadcast_obj
@@ -270,7 +270,7 @@ class MLXExecutor(BaseExecutor):
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
         if self.tp_size > 1:
-            requests = self._tensor_parallel_broadcast_byobj(requests)
+            requests = self._tensor_parallel_broadcast_pyobj(requests)
 
         if len(requests) == 0:
             return

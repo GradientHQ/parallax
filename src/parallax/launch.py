@@ -106,7 +106,7 @@ if __name__ == "__main__":
         logger.debug(f"nccl_port: {args.nccl_port}")
 
         # Pipe for subprocess communication
-        conn1, conn2 = multiprocessing.Pipe()
+        conn_main, conn_refit = multiprocessing.Pipe()
 
         if args.scheduler_addr is None:
             if args.log_level != "DEBUG":
@@ -142,9 +142,16 @@ if __name__ == "__main__":
                 kvcache_mem_ratio=args.kvcache_mem_ratio,
                 shared_state=shared_state.dict,
                 log_level=args.log_level,
-                conn=conn1,
+                conn=conn_main,
             )
 
+            # Build connectors for tp communication
+            conn_tp_0 = [conn_refit]
+            conn_tp_i = []
+            for i in range(1, args.tp_size):
+                conn1, conn2 = multiprocessing.Pipe()
+                conn_tp_0.append(conn1)
+                conn_tp_i.append(conn2)
             # Launch all executor processes (including tp_rank=0)
             for tp_rank in range(args.tp_size):
                 args_copy = argparse.Namespace(**vars(args))
@@ -154,7 +161,7 @@ if __name__ == "__main__":
                     args=(
                         args_copy,
                         shared_state.dict,  # Pass dict to subprocess
-                        conn2,  # Pipe connector
+                        conn_tp_0 if tp_rank == 0 else [conn_tp_i[tp_rank - 1]],
                     ),
                 )
                 proc.start()
@@ -193,7 +200,7 @@ if __name__ == "__main__":
                 kvcache_mem_ratio=args.kvcache_mem_ratio,
                 shared_state=shared_state.dict,  # Pass dict to subprocess
                 log_level=args.log_level,
-                conn=conn1,
+                conn=conn_main,
             )
 
             # Wait for layer allocation from scheduler (via shared state)
@@ -232,6 +239,13 @@ if __name__ == "__main__":
                     if args.start_layer == 0:
                         http_server_process = launch_http_server(args)
 
+                    # Build connectors for tp communication
+                    conn_tp_0 = [conn_refit]
+                    conn_tp_i = []
+                    for i in range(1, args.tp_size):
+                        conn1, conn2 = multiprocessing.Pipe()
+                        conn_tp_0.append(conn1)
+                        conn_tp_i.append(conn2)
                     # Launch all executor processes (including tp_rank=0)
                     executor_subprocs = []
                     for tp_rank in range(args.tp_size):
@@ -242,7 +256,7 @@ if __name__ == "__main__":
                             args=(
                                 args_copy,
                                 shared_state.dict,  # Pass dict to subprocess
-                                conn2,  # Pipe connector
+                                conn_tp_0 if tp_rank == 0 else [conn_tp_i[tp_rank - 1]],
                             ),
                         )
                         proc.start()

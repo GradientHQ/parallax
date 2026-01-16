@@ -10,7 +10,6 @@ from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.managers.schedule_batch import ScheduleBatch
 from sglang.srt.mem_cache.radix_cache import RadixCache as PageRadixCache
 from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
-from sglang.srt.utils import broadcast_pyobj
 from sglang.srt.utils.common import SUPPORTED_LORA_TARGET_MODULES
 
 from parallax.server.executor.base_executor import BaseExecutor
@@ -89,7 +88,7 @@ class SGLExecutor(BaseExecutor):
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
         # Pipe communication
-        conn: Optional[Any] = None,
+        conn: Optional[List[Any]] = [],
     ):
 
         self.enable_lora = True if lora_paths is not None else enable_lora
@@ -289,7 +288,7 @@ class SGLExecutor(BaseExecutor):
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
         if self.tp_size > 1:
-            requests = self._tensor_parallel_broadcast_byobj(requests)
+            requests = self._tensor_parallel_broadcast_pyobj(requests)
             for req in requests:
                 if hasattr(req, "hidden_states") and req.hidden_states is not None:
                     if hasattr(req.hidden_states, "to"):  # PyTorch tensor
@@ -504,15 +503,17 @@ class SGLExecutor(BaseExecutor):
         next_token_id = int(hidden_states[0])
         return next_token_id, hidden_states
 
-    def _tensor_parallel_broadcast_byobj(self, broadcast_obj):
+    def _tensor_parallel_broadcast_pyobj(self, broadcast_obj):
         """Wrapper for broadcast pyobject in TP group"""
+        if self.tp_rank == 0:
+            for i in range(1, self.tp_size):
+                conn = self.conn[i]
+                conn.send(broadcast_obj)
+            broadcast_result = broadcast_obj
+        else:
+            conn = self.conn[0]
+            broadcast_result = conn.recv()
 
-        broadcast_result = broadcast_pyobj(
-            broadcast_obj,
-            self.tp_group.rank,
-            self.tp_cpu_group,
-            src=self.tp_group.ranks[0],
-        )
         return broadcast_result
 
     def _prepare_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
