@@ -49,7 +49,7 @@ mac = [
 ]
 
 gpu = [
-  "sglang[all]==0.5.5",
+  "sglang[all]==0.5.6",
   "mlx-lm==0.28.4",
   "mlx[cpu]==0.30.0",
 ]

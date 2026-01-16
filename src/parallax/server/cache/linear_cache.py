@@ -87,3 +87,19 @@ class LinearCache(BaseCache):
 
             if self.linear_state_cache is not None and linear_states is not None:
                 self.linear_state_cache[0, slot_idx] = linear_states[i]
+
+    def is_packed(self) -> bool:
+        """LinearCache doesn't use packed format."""
+        return False
+
+    def read_prefix_kv(
+        self,
+        block_table: mx.array,
+        prefix_len: int,
+        num_kv_heads: int,
+    ) -> Tuple[mx.array, mx.array]:
+        """
+        LinearCache doesn't support prefix KV reading.
+        This method should not be called for LinearCache.
+        """
+        raise NotImplementedError("LinearCache does not support prefix KV reading")

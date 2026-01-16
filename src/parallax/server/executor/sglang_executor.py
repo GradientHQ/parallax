@@ -288,8 +288,6 @@ class SGLExecutor(BaseExecutor):
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
-        if self.tp_rank == 0 and not requests:
-            return
         if self.tp_size > 1:
             requests = self._tensor_parallel_broadcast_byobj(requests)
             for req in requests:

@@ -2,6 +2,7 @@
 MLX-LM backend implementation of high level executor
 """
 
+import logging
 import pickle
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -375,6 +376,10 @@ class MLXExecutor(BaseExecutor):
         # Note: Paged Attention writes KV cache in-place within the model (via reshape_and_cache).
         # The returned 'hidden_states' is what we need.
         # The returned cache tuple (_, _) is ignored/unused here.
+
+        # Check if this is a prefill batch
+        is_prefill_batch = any(req.is_prefill for req in prepared_inputs["requests"])
+
         start_time = time.time()
         hidden_states = self.model_shard(
             h_or_tokens=prepared_inputs["h_or_tokens"],
@@ -387,7 +392,31 @@ class MLXExecutor(BaseExecutor):
             prefix_lens=prepared_inputs.get("prefix_lens"),  # For RoPE offset in prefix cache
         )
         mx.eval(hidden_states)
-        logger.debug(f"model forward pass done, time: {(time.time() - start_time) * 1000:.3f} ms")
+
+        if logger.isEnabledFor(logging.DEBUG):
+            forward_time = (time.time() - start_time) * 1000
+
+            if is_prefill_batch:
+                # Log prefill time and prefix cache hit info
+                total_tokens = sum(
+                    prepared_inputs.get(
+                        "actual_processed_lengths",
+                        [req.total_length for req in prepared_inputs["requests"]],
+                    )[i]
+                    for i, req in enumerate(prepared_inputs["requests"])
+                    if req.is_prefill
+                )
+                matched_tokens = sum(
+                    prepared_inputs.get("prefix_lens", [0] * len(prepared_inputs["requests"]))[i]
+                    for i, req in enumerate(prepared_inputs["requests"])
+                    if req.is_prefill
+                )
+                logger.info(
+                    f"[PREFILL] time: {forward_time:.3f} ms, "
+                    f"tokens: {total_tokens}, prefix_cached: {matched_tokens}"
+                )
+            else:
+                logger.debug(f"model forward pass done, time: {forward_time:.3f} ms")
 
         logger.debug(
             f"Processed batch of {len(prepared_inputs['requests'])} requests, "
@@ -500,9 +529,9 @@ class MLXExecutor(BaseExecutor):
             assert req.is_prefill, f"Request {req.request_id} is not a prefill request."
 
             # Allocate Paged KV blocks with prefix cache support
-            # For first peer, pass input_ids for prefix matching
+            # All peers can perform prefix cache matching if input_ids are available
             token_ids = None
-            if self.is_first_peer and self.enable_prefix_cache:
+            if self.enable_prefix_cache and req.input_ids is not None:
                 token_ids = req.input_ids
 
             success, matched_tokens = self.cache_manager.allocate_request(

@@ -4,6 +4,10 @@ hidden_dimefines the Qwen3 model.
 
 from typing import Any, List, Optional
 
+from parallax_utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 import mlx.core as mx
 import mlx.nn as nn
 from mlx_lm.models.base import scaled_dot_product_attention
@@ -14,10 +18,16 @@ from mlx_lm.models.qwen3_next import Qwen3NextDecoderLayer as MLXQwen3NextBlock
 from mlx_lm.models.qwen3_next import Qwen3NextGatedDeltaNet as MLXQwen3NextGatedDeltaNet
 
 from parallax.server.cache.base import BaseCache
+from parallax.utils.prefix_cache_utils import compute_attention_with_prefix_cache
 from parallax_extensions.ops import paged_attention_v1, reshape_and_cache
 
 
 class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
+    """A custom attention module for Parallax, extending the Qwen3Next Attention class.
+
+    We apply explicit KV cache handling and passing in `offset` directly from Request.
+    This version returns the new K and V states for external caching.
+    """
 
     def __call__(
         self,
@@ -27,8 +37,24 @@ class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
+        prefix_lens: Optional[mx.array] = None,
         **kwargs,
     ) -> mx.array:
+        """
+        Attention forward pass with explicit KV cache handling.
+
+        Args:
+            x: (batch, target_len, hidden_dim) - Input hidden states for the current query segment.
+            mask: (batch, n_q_heads, target_len, source_len)
+            cache: BaseCache object containing the layer cache.
+            block_tables: (batch, max_blocks) - PagedKV block tables.
+            context_lengths: (batch,) - PagedKV sequence lengths.
+            slot_mapping: (batch * target_len,) - Flattened slot mapping.
+            prefix_lens: (batch,) - Number of prefix tokens already cached (for RoPE offset).
+
+        Returns:
+            output: (batch, target_len, hidden_dim) - Output hidden states.
+        """
         batch, target_len, _ = x.shape
 
         queries_new = self.q_proj(x)
@@ -49,6 +75,8 @@ class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
 
         if target_len == 1:
             current_pos = context_lengths - 1
+        elif prefix_lens is not None:
+            current_pos = prefix_lens
         else:
             current_pos = 0
         queries_rotated = self.rope(queries_new, offset=current_pos)
@@ -66,6 +94,7 @@ class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
             slot_mapping=slot_mapping,
         )
         if target_len == 1:
+            # Decode Phase: Use Paged Attention Kernel
             output = paged_attention_v1(
                 queries_rotated,
                 key_cache_global,
@@ -78,15 +107,42 @@ class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
             )
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
         else:
-            output = scaled_dot_product_attention(
-                queries_rotated,
-                keys_rotated,
-                values_new.transpose(0, 2, 1, 3),
-                scale=self.scale,
-                mask=mask,
-                cache=None,
-            )
-            output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
+            # Prefill Phase: Need to attend to both cached prefix and new tokens
+            # Check if any request has prefix cache
+            has_prefix_cache = prefix_lens is not None and bool(mx.any(prefix_lens > 0))
+
+            if has_prefix_cache:
+                # Use shared prefix cache handling with batch processing
+                k_new = keys_rotated  # (batch, num_key_value_heads, target_len, head_dim)
+                v_new = values_new.transpose(
+                    0, 2, 1, 3
+                )  # (batch, num_key_value_heads, target_len, head_dim)
+                output = compute_attention_with_prefix_cache(
+                    queries_rotated,  # (batch, num_attention_heads, target_len, head_dim)
+                    k_new,
+                    v_new,
+                    cache,
+                    block_tables,
+                    prefix_lens,
+                    target_len,
+                    self.scale,
+                    self.num_key_value_heads,
+                    mask=mask,
+                )
+            else:
+                # No prefix cache, use standard self-attention on local data only
+                if mask is not None:
+                    mask = mx.array(mask, dtype=queries_rotated.dtype)
+
+                output = scaled_dot_product_attention(
+                    queries_rotated,
+                    keys_rotated,
+                    values_new.transpose(0, 2, 1, 3),
+                    scale=self.scale,
+                    mask=mask,
+                    cache=None,
+                )
+                output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
 
         return self.o_proj(output * mx.sigmoid(gate))
 
