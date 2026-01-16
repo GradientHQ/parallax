@@ -184,6 +184,7 @@ def apply_glm4_moe_monkey_patch():
     """Apply monkey patches to GLM4 Moe for PP support and weight loading."""
     import sglang.srt.models.glm4_moe as glm4_moe_module
 
+    @torch.no_grad()
     def pp_forward(
         self,
         input_ids: torch.Tensor,
