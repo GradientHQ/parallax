@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.managers.schedule_batch import ScheduleBatch
+from sglang.srt.mem_cache.cache_init_params import CacheInitParams
 from sglang.srt.mem_cache.radix_cache import RadixCache as PageRadixCache
 from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
 from sglang.srt.utils.common import SUPPORTED_LORA_TARGET_MODULES
@@ -182,11 +183,13 @@ class SGLExecutor(BaseExecutor):
 
         # create a page tree cache for sglang prefill
         if enable_prefix_cache:
-            self.page_tree_cache = PageRadixCache(
-                self.model_runner.req_to_token_pool,
-                self.model_runner.token_to_kv_pool_allocator,
-                self.model_runner.page_size,
+            cache_params = CacheInitParams(
+                disable=False,
+                req_to_token_pool=self.model_runner.req_to_token_pool,
+                token_to_kv_pool_allocator=self.model_runner.token_to_kv_pool_allocator,
+                page_size=self.model_runner.page_size,
             )
+            self.page_tree_cache = PageRadixCache(cache_params)
             logger.info(
                 f"Sglang Page tree cache created with page size {self.model_runner.page_size}"
             )
