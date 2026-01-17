@@ -88,7 +88,7 @@ class BaseExecutor:
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
         # Pipe communication
-        conn: Optional[Any] = None,
+        conn: Optional[List[Any]] = [],
     ):
         # Backend
         if device is not None:
