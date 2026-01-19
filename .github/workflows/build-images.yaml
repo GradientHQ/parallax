@@ -1,10 +1,9 @@
 name: Build Images
 
 on:
-  schedule:
-    - cron: '0 0 * * *'
-  workflow_dispatch:
-
+  # schedule:           # 注释掉定时任务以停止自动构建
+  #   - cron: '0 0 * * *'
+  workflow_dispatch:    # 保留手动触发开关
 
 env:
   IMAGE_NAME: parallax
@@ -28,7 +27,6 @@ jobs:
       with:
         driver: remote
         endpoint: tcp://buildkit-buildkit-service.arc-systems:1234
-
 
     - name: Log in to Docker Hub
       uses: docker/login-action@v3
