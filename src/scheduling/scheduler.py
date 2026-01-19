@@ -630,7 +630,7 @@ class Scheduler:
             self._process_joins()
             self._process_leaves()
             now = time.time()
-            if now - last_hb_check >= max(0.5, poll_interval) and not self.enable_weight_refit:
+            if now - last_hb_check >= max(0.5, poll_interval):
                 self.checking_node_heartbeat()
                 last_hb_check = now
             self._wake_event.wait(timeout=poll_interval)
