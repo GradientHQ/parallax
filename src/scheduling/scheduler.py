@@ -36,6 +36,7 @@ class Scheduler:
         nodes: List[Node],
         min_nodes_bootstrapping: int = 1,
         enable_weight_refit: bool = False,
+        weight_refit_mode: str = "disk",
         strategy: Literal["greedy", "dp"] = "dp",
         routing_strategy: Literal["rr", "dp"] = "rr",
         *,
@@ -65,6 +66,7 @@ class Scheduler:
         self.num_layers = model_info.num_layers
         self.routing_strategy: Literal["rr", "dp"] = routing_strategy
         self.enable_weight_refit = enable_weight_refit
+        self.weight_refit_mode = weight_refit_mode
         self.refit_request = {}
         self.node_manager = NodeManager(initial_nodes=nodes)
 

@@ -87,6 +87,7 @@ class BaseExecutor:
         shared_state: Optional[dict] = None,
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
+        weight_refit_mode: Optional[str] = "disk",
         # Pipe communication
         conn: Optional[List[Any]] = [],
     ):
@@ -110,6 +111,7 @@ class BaseExecutor:
 
         # Runtime weight refit for RL
         self.enable_weight_refit = enable_weight_refit
+        self.weight_refit_mode = weight_refit_mode
         self.weight_version = 0
 
         # Pipe communication

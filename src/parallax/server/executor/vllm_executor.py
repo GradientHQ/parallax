@@ -82,6 +82,7 @@ class VLLMExecutor(BaseExecutor):
         shared_state: Optional[dict] = None,
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
+        weight_refit_mode: Optional[str] = "disk",
         # Pipe communication
         conn: Optional[List[Any]] = [],
     ):
@@ -136,6 +137,7 @@ class VLLMExecutor(BaseExecutor):
             tp_size=tp_size,
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
+            weight_refit_mode=weight_refit_mode,
             conn=conn,
         )
 
