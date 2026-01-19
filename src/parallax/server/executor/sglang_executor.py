@@ -199,8 +199,9 @@ class SGLExecutor(BaseExecutor):
     def check_and_refit_weight(self, refit_weight_path: str):
         if refit_weight_path == "":
             return
-        tensors = self.conn.recv()
-        refit_sgl_model(self.model_runner, tensors)
+        # tensors = self.conn.recv()
+        # refit_sgl_model(self.model_runner, tensors=tensors)
+        refit_sgl_model(self.model_runner, refit_weight_path=refit_weight_path)
 
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
