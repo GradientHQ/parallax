@@ -188,12 +188,15 @@ class RequestRoutingStrategy(ABC):
     """
 
     @abstractmethod
-    def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
+    def find_optimal_path(
+        self, nodes: List[Node], num_layers: int, last_refit_time: Optional[float] = None
+    ) -> Tuple[List[str], float]:
         """Return the chosen node-id path and its estimated latency.
 
         Args:
             nodes: Current nodes with live allocation/load/RTT state.
             num_layers: Total decoder layers in the model.
+            last_refit_time: Last refit time for weight refit
 
         Returns:
             (node_ids, latency_ms). If no valid route exists, returns ([], inf).
@@ -215,7 +218,9 @@ class DynamicProgrammingRouting(RequestRoutingStrategy):
       minimum-latency node sequence and total latency.
     """
 
-    def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
+    def find_optimal_path(
+        self, nodes: List[Node], num_layers: int, last_refit_time: Optional[float] = None
+    ) -> Tuple[List[str], float]:
         """Compute a minimum-latency node-id path using shard-level DP.
 
         The DP treats each node's allocated range `[start_layer, end_layer)` as a
@@ -384,7 +389,9 @@ class RandomizedOverDynamicPipelinesRouting(RequestRoutingStrategy):
             index.setdefault(n.start_layer, []).append(n)
         return index
 
-    def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
+    def find_optimal_path(
+        self, nodes: List[Node], num_layers: int, last_refit_time: Optional[float] = None
+    ) -> Tuple[List[str], float]:
         """Randomly choose among cached complete pipelines, skipping overloaded ones.
 
         Selection procedure:
@@ -544,7 +551,9 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
         """
         return self._node_manager.get_registered_pipelines()
 
-    def find_optimal_path(self, nodes: List[Node], num_layers: int) -> Tuple[List[str], float]:
+    def find_optimal_path(
+        self, nodes: List[Node], num_layers: int, last_refit_time: Optional[float] = None
+    ) -> Tuple[List[str], float]:
         """Return the next viable *registered* pipeline in round-robin order.
 
         Returns ([], inf) if nothing is registered or if all registered pipelines
@@ -573,6 +582,13 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
                 if not id_to_node[nid].is_active:
                     # If node is not active, skip the pipeline
                     logger.warning(f"Pipeline {candidate} is not active, skipping")
+                    latency = float("inf")
+                if (
+                    last_refit_time is not None
+                    and id_to_node[nid].last_refit_time < last_refit_time
+                ):
+                    # If node holds an older version of weight, skip the pipeline
+                    logger.warning(f"Pipeline {candidate} holds an old version of weight, skipping")
                     latency = float("inf")
 
             if latency != float("inf"):

@@ -254,11 +254,15 @@ class Scheduler:
     def update_last_refit_time(self):
         min_refit_time = None
         for node in self.node_manager.nodes:
+            cur_node_refit_time = node.last_refit_time
+            if cur_node_refit_time < self.last_refit_time:
+                continue
             if min_refit_time is None:
-                min_refit_time = node.last_refit_time
+                min_refit_time = cur_node_refit_time
             else:
-                min_refit_time = min(min_refit_time, node.last_refit_time)
-        self.last_refit_time = min_refit_time
+                min_refit_time = min(min_refit_time, cur_node_refit_time)
+        if min_refit_time is not None:
+            self.last_refit_time = min_refit_time
         return self.last_refit_time
 
     def update_node_info(
@@ -426,7 +430,7 @@ class Scheduler:
         if req is None:
             return None
         path, latency = self.request_router.find_optimal_path(
-            self.node_manager.active_nodes, self.num_layers
+            self.node_manager.active_nodes, self.num_layers, self.last_refit_time
         )
         req.routing_table = path
         # Update simple load counters
