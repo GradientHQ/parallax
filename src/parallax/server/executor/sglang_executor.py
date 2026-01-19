@@ -207,6 +207,8 @@ class SGLExecutor(BaseExecutor):
             refit_sgl_model(self.model_runner, tensors=tensors)
         elif self.weight_refit_mode == "disk":
             refit_sgl_model(self.model_runner, refit_weight_path=refit_weight_path)
+        else:
+            logger.warning(f"Unrecognized weight refit mode={self.weight_refit_mode}")
 
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
