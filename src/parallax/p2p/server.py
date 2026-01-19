@@ -307,16 +307,18 @@ def check_and_run_weight_refit(gradient_server, message):
         # step3. concat weight
         # workaround: create sub-process to avoid GIL issues for lattica
         logger.info(f"Start sub-process to concat weight partitions in {weight_dir}")
-        if gradient_server.weight_refit_mode == "disk":
+        if gradient_server.weight_refit_mode == "host":
             new_tensors = concat_weight_partition(tensors)
             gradient_server.conn.send(new_tensors)
-        else:
+        elif gradient_server.weight_refit_mode == "disk":
             process = multiprocessing.Process(
                 target=concat_weight_partition,
                 args=(tensors, weight_dir),
             )
             process.start()
             process.join()
+        else:
+            logger.warning(f"Unrecognized weight refit mode: {gradient_server.weight_refit_mode}")
 
         # step4. send ipc message to update weight
         gradient_server.connection_handler.ipc_weight_refit(weight_dir, weight_version)
