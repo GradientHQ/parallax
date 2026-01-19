@@ -104,7 +104,7 @@ class RPCConnectionHandler(ConnectionHandler):
             layer_allocation = self.get_layer_allocation(node.node_id)
             refit_request = {}
             if self.scheduler.refit_request:
-                if node.node_id not in self.scheduler.refit_set:
+                if node.node_id not in self.scheduler.refit_set and node.is_active:
                     refit_request = self.scheduler.refit_request
                     self.scheduler.refit_set.add(node.node_id)
             return layer_allocation, refit_request
