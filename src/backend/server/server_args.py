@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--weight-refit-mode",
         type=str,
-        default="host",
+        default="disk",
         help="Refit mode to choose where. Choices 'host' or 'disk'",
     )
 
