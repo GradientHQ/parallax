@@ -1,9 +1,9 @@
 name: Build Spark Image
 
 on:
-  schedule:
-    - cron: '0 3 * * *'
-  workflow_dispatch:
+  # schedule:           # 注释掉或删除此部分以停止自动触发
+  #   - cron: '0 3 * * *'
+  workflow_dispatch:    # 仅保留手动触发
 
 env:
   IMAGE_NAME: parallax
