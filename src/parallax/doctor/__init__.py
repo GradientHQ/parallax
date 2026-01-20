@@ -3,7 +3,7 @@ Parallax Doctor - Environment diagnostic module.
 
 This module provides diagnostic checks for validating the Parallax environment
 before running the application. It checks Python version, hardware availability,
-dependencies, and WSL path issues as specified in issue #307.
+dependencies, and WSL path issues.
 
 Usage:
     parallax doctor      # Run all diagnostic checks
