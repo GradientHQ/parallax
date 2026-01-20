@@ -1,7 +1,7 @@
 """
 Environment diagnostic checks for Parallax.
 
-This module implements the environment validation checks specified in issue #307:
+This module implements the environment validation checks for:
     - Python version compatibility
     - CUDA/Metal availability
     - Dependencies validation
@@ -20,7 +20,6 @@ from typing import Callable, List, Optional, Tuple
 
 
 class CheckStatus(Enum):
-    """Status of a diagnostic check."""
 
     PASS = "pass"
     WARN = "warn"
@@ -63,7 +62,6 @@ def _colorize(text: str, color: str) -> str:
 
 
 def _status_icon(status: CheckStatus) -> str:
-    """Get status icon with color."""
     icons = {
         CheckStatus.PASS: _colorize("✓", Colors.GREEN),
         CheckStatus.WARN: _colorize("⚠", Colors.YELLOW),
@@ -74,15 +72,8 @@ def _status_icon(status: CheckStatus) -> str:
 
 
 def check_python_version() -> CheckResult:
-    """Check if Python version is compatible.
 
-    Parallax requires Python >=3.11 and <3.14.
-
-    Returns:
-        CheckResult with PASS if version is compatible, FAIL otherwise.
-    """
     version = sys.version_info
-    # Use index access to support both real version_info and test mocks (plain tuples)
     major, minor, micro = version[0], version[1], version[2]
     version_str = f"{major}.{minor}.{micro}"
 
@@ -109,12 +100,6 @@ def check_python_version() -> CheckResult:
 
 
 def check_cuda_availability() -> CheckResult:
-    """Check if CUDA is available for GPU acceleration.
-
-    Returns:
-        CheckResult with PASS if CUDA is available, WARN if not, SKIP if
-        PyTorch is not installed.
-    """
     try:
         import torch
 
@@ -152,12 +137,7 @@ def check_cuda_availability() -> CheckResult:
 
 
 def check_metal_availability() -> CheckResult:
-    """Check if Metal (Apple Silicon MLX) is available.
 
-    Returns:
-        CheckResult with PASS if Metal is available, SKIP if not on macOS
-        or not Apple Silicon, WARN if MLX is not installed.
-    """
     if platform.system() != "Darwin":
         return CheckResult(
             name="Metal",
@@ -221,19 +201,12 @@ CORE_DEPENDENCIES = [
 
 
 def check_dependencies() -> CheckResult:
-    """Check if required dependencies are installed.
 
-    Validates core dependencies from pyproject.toml.
-
-    Returns:
-        CheckResult with PASS if all installed, FAIL if any missing.
-    """
     missing = []
     installed_count = 0
 
     for dep in CORE_DEPENDENCIES:
         try:
-            # Handle package names with hyphens (pip uses hyphens, importlib uses underscores)
             pkg_name = dep.replace("-", "_")
             try:
                 importlib.metadata.version(dep)
@@ -290,14 +263,12 @@ def check_wsl_paths() -> CheckResult:
     cwd = os.getcwd()
     issues = []
 
-    # Check if running from Windows filesystem via WSL
     if cwd.startswith("/mnt/"):
         issues.append(
             "Running from Windows filesystem (/mnt/...) may cause performance issues. "
             "Consider cloning to Linux filesystem (e.g., ~/parallax)."
         )
 
-    # Check for spaces in path
     if " " in cwd:
         issues.append(f"Path contains spaces which may cause issues: '{cwd}'")
 
