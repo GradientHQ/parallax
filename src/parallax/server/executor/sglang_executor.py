@@ -199,14 +199,20 @@ class SGLExecutor(BaseExecutor):
             self.page_tree_cache = None
 
     def check_and_refit_weight(self, refit_weight_path: str):
-        if refit_weight_path == "":
+        if self.tp_size > 1:
+            weight_path = self._tensor_parallel_broadcast_pyobj([refit_weight_path])[0]
+        else:
+            weight_path = refit_weight_path
+
+        if weight_path == "":
             return
-        if self.weight_refit_mode == "host":
+
+        if self.weight_refit_mode == "cpu":
             conn = self.conn[0]
             tensors = conn.recv()
             refit_sgl_model(self.model_runner, tensors=tensors)
         elif self.weight_refit_mode == "disk":
-            refit_sgl_model(self.model_runner, refit_weight_path=refit_weight_path)
+            refit_sgl_model(self.model_runner, refit_weight_path=weight_path)
         else:
             logger.warning(f"Unrecognized weight refit mode={self.weight_refit_mode}")
 

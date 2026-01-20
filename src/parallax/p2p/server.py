@@ -307,7 +307,7 @@ def check_and_run_weight_refit(gradient_server, message):
         # step3. concat weight
         # workaround: create sub-process to avoid GIL issues for lattica
         logger.info(f"Start sub-process to concat weight partitions in {weight_dir}")
-        if gradient_server.weight_refit_mode == "host":
+        if gradient_server.weight_refit_mode == "cpu":
             new_tensors = concat_weight_partition(tensors)
             gradient_server.conn.send(new_tensors)
         elif gradient_server.weight_refit_mode == "disk":

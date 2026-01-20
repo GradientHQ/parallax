@@ -111,8 +111,11 @@ class BaseExecutor:
 
         # Runtime weight refit for RL
         self.enable_weight_refit = enable_weight_refit
-        self.weight_refit_mode = weight_refit_mode
         self.weight_version = 0
+        self.weight_refit_mode = weight_refit_mode
+        if self.enable_weight_refit and self.tp_size > 1 and self.weight_refit_mode == "cpu":
+            self.weight_refit_mode = "disk"
+            logger.warning(f"Force weight update from disk for TP > 1")
 
         # Pipe communication
         self.conn = conn

@@ -155,7 +155,7 @@ def parse_args() -> argparse.Namespace:
         "--weight-refit-mode",
         type=str,
         default="disk",
-        help="Refit mode to choose where. Choices 'host' or 'disk'",
+        help="Refit mode to choose where. Choices 'cpu' or 'disk'",
     )
 
     # GPU/SGLang specialized configuration
@@ -345,8 +345,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("request_timeout_s must be positive")
 
     # Validate weight-refit args
-    if args.enable_weight_refit and args.weight_refit_mode not in ["host", "disk"]:
-        raise ValueError("Unrecognized refit mode. Choose 'host' or 'disk'")
+    if args.enable_weight_refit and args.weight_refit_mode not in ["cpu", "disk"]:
+        raise ValueError("Unrecognized refit mode. Choose 'cpu' or 'disk'")
 
     # Validate supported dtypes
     dtype_list = [
