@@ -200,7 +200,7 @@ class SGLExecutor(BaseExecutor):
 
     def check_and_refit_weight(self, refit_weight_path: str):
         if self.tp_size > 1:
-            weight_path = self._tensor_parallel_broadcast_pyobj([refit_weight_path])[0]
+            weight_path = self._tensor_parallel_broadcast_pyobj(refit_weight_path)
         else:
             weight_path = refit_weight_path
 
