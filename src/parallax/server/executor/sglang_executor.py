@@ -88,6 +88,7 @@ class SGLExecutor(BaseExecutor):
         shared_state: Optional[dict] = None,
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
+        weight_refit_mode: Optional[str] = "disk",
         # Pipe communication
         conn: Optional[List[Any]] = [],
     ):
@@ -174,6 +175,7 @@ class SGLExecutor(BaseExecutor):
             dp_size=dp_size,
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
+            weight_refit_mode=weight_refit_mode,
             conn=conn,
         )
         self.cur_batch = None
@@ -197,10 +199,22 @@ class SGLExecutor(BaseExecutor):
             self.page_tree_cache = None
 
     def check_and_refit_weight(self, refit_weight_path: str):
-        if refit_weight_path == "":
+        if self.tp_size > 1:
+            weight_path = self._tensor_parallel_broadcast_pyobj(refit_weight_path)
+        else:
+            weight_path = refit_weight_path
+
+        if weight_path == "":
             return
-        tensors = self.conn.recv()
-        refit_sgl_model(self.model_runner, tensors)
+
+        if self.weight_refit_mode == "cpu":
+            conn = self.conn[0]
+            tensors = conn.recv()
+            refit_sgl_model(self.model_runner, tensors=tensors)
+        elif self.weight_refit_mode == "disk":
+            refit_sgl_model(self.model_runner, refit_weight_path=weight_path)
+        else:
+            logger.warning(f"Unrecognized weight refit mode={self.weight_refit_mode}")
 
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"

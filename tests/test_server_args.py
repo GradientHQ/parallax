@@ -26,6 +26,7 @@ class TestValidateArgs:
             kv_block_size=16,
             micro_batch_ratio=2,
             scheduler_wait_ms=500,
+            enable_weight_refit=False,
         )
 
         # Should not raise any exception
@@ -43,6 +44,7 @@ class TestValidateArgs:
             kv_block_size=16,
             micro_batch_ratio=2,
             scheduler_wait_ms=500,
+            enable_weight_refit=False,
         )
 
         with pytest.raises(ValueError, match="start_layer must be non-negative"):
@@ -60,6 +62,7 @@ class TestValidateArgs:
             kv_block_size=16,
             micro_batch_ratio=2,
             scheduler_wait_ms=500,
+            enable_weight_refit=False,
         )
 
         with pytest.raises(ValueError, match="end_layer must be greater than start_layer"):
@@ -106,6 +109,7 @@ class TestCreateExecutorConfig:
             lora_backend="triton",
             max_lora_chunk_size=128,
             enable_weight_refit=False,
+            weight_refit_mode="cpu",
         )
         args = argparse.Namespace(
             model_path="mlx-community/Qwen3-0.6B-bf16",
@@ -138,6 +142,7 @@ class TestCreateExecutorConfig:
             lora_backend="triton",
             max_lora_chunk_size=128,
             enable_weight_refit=False,
+            weight_refit_mode="cpu",
         )
 
         config = create_executor_config(args)

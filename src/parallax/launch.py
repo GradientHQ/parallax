@@ -48,6 +48,7 @@ def _update_args_from_shared_state(args, shared_state: SharedState):
     args.tp_size = model_info["tp_size"] or args.tp_size
     # Update weight refit switch
     args.enable_weight_refit = model_info["enable_weight_refit"] or args.enable_weight_refit
+    args.weight_refit_mode = model_info["weight_refit_mode"] or args.weight_refit_mode
 
 
 def _stop_executor_processes(executor_subprocs):

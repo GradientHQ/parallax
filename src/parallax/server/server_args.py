@@ -151,6 +151,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--enable-weight-refit", action="store_true", help="Enable runtime weight refit"
     )
+    parser.add_argument(
+        "--weight-refit-mode",
+        type=str,
+        default="disk",
+        help="Refit mode to choose where. Choices 'cpu' or 'disk'",
+    )
 
     # GPU/SGLang specialized configuration
     parser.add_argument(
@@ -337,6 +343,10 @@ def validate_args(args: argparse.Namespace) -> None:
 
     if getattr(args, "request_timeout_s", None) is not None and args.request_timeout_s <= 0:
         raise ValueError("request_timeout_s must be positive")
+
+    # Validate weight-refit args
+    if args.enable_weight_refit and args.weight_refit_mode not in ["cpu", "disk"]:
+        raise ValueError("Unrecognized refit mode. Choose 'cpu' or 'disk'")
 
     # Validate supported dtypes
     dtype_list = [

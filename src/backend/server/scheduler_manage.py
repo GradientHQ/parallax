@@ -34,6 +34,7 @@ class SchedulerManage:
         http_port: int = 3001,
         use_hfcache: bool = False,
         enable_weight_refit: bool = False,
+        weight_refit_mode: str = "disk",
     ):
         """Initialize the manager with networking bootstrap parameters."""
         self.initial_peers = initial_peers
@@ -44,6 +45,7 @@ class SchedulerManage:
         self.http_port = http_port
         self.use_hfcache = use_hfcache
         self.enable_weight_refit = enable_weight_refit
+        self.weight_refit_mode = weight_refit_mode
         self.model_name = None
         self.init_nodes_num = None
         self.scheduler = None
@@ -185,6 +187,7 @@ class SchedulerManage:
             [],
             min_nodes_bootstrapping=init_nodes_num,
             enable_weight_refit=self.enable_weight_refit,
+            weight_refit_mode=self.weight_refit_mode,
         )
 
         # Run the scheduler's event/dispatch loops in background so the process

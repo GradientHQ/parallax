@@ -87,6 +87,7 @@ class BaseExecutor:
         shared_state: Optional[dict] = None,
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
+        weight_refit_mode: Optional[str] = "disk",
         # Pipe communication
         conn: Optional[List[Any]] = [],
     ):
@@ -108,10 +109,6 @@ class BaseExecutor:
         else:
             self.shared_state = None
 
-        # Runtime weight refit for RL
-        self.enable_weight_refit = enable_weight_refit
-        self.weight_version = 0
-
         # Pipe communication
         self.conn = conn
 
@@ -121,6 +118,14 @@ class BaseExecutor:
         self.tp_rank = tp_rank
         self.dp_size = dp_size
         self.dp_rank = dp_rank
+
+        # Runtime weight refit for RL
+        self.enable_weight_refit = enable_weight_refit
+        self.weight_version = 0
+        self.weight_refit_mode = weight_refit_mode
+        if self.enable_weight_refit and self.tp_size > 1 and self.weight_refit_mode == "cpu":
+            self.weight_refit_mode = "disk"
+            logger.warning(f"Force weight update from disk for TP > 1")
 
         # Metrics throttling for per-layer latency updates
         self.layer_latency_update_every = int(max(1, layer_latency_update_every))
