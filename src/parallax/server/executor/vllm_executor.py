@@ -78,6 +78,10 @@ class VLLMExecutor(BaseExecutor):
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
         nccl_port: Optional[int] = 4000,
+        # Data Parallel Configs (not used in vLLM, but accepted for compatibility)
+        enable_dp_attention: Optional[bool] = False,
+        dp_rank: Optional[int] = 0,
+        dp_size: Optional[int] = 1,
         # Optional shared state for layer reallocation detection (when running in subprocess)
         shared_state: Optional[dict] = None,
         # Weight Refit
