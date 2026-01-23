@@ -233,7 +233,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
 
         return kv_cache_config
 
-    def initialize_kv_cache_manager(self, max_model_len: int) -> KVCacheManager:
+    def initialize_kv_cache_manager(self, max_model_len: int, block_size: int) -> KVCacheManager:
         logger.debug("Initializing vLLM KVCacheManager...")
 
         if self.kv_cache_config is None:
@@ -247,6 +247,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             log_stats=True,
             enable_kv_cache_events=False,
             dcp_world_size=1,
+            hash_block_size=block_size,
         )
 
         self.kv_cache_manager = kv_cache_manager
@@ -559,7 +560,9 @@ def initialize_vllm_model_runner(
         logger.info("GPUModelRunner KV cache initialized successfully")
 
         logger.info("Initializing KV Cache Manager...")
-        model_runner.initialize_kv_cache_manager(max_model_len=model_config.max_model_len)
+        model_runner.initialize_kv_cache_manager(
+            max_model_len=model_config.max_model_len, block_size=kv_block_size
+        )
         logger.info("KV Cache Manager initialized successfully")
 
         # Warm up the model and capture CUDA graphs if enabled
