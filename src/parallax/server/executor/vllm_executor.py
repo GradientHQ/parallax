@@ -97,6 +97,7 @@ class VLLMExecutor(BaseExecutor):
             "kv_cache_memory_fraction": kv_cache_memory_fraction,
             "attention_backend": attention_backend,
             "kv_block_size": kv_block_size,
+            "max_sequence_length": max_sequence_length,
             "max_num_tokens_per_batch": max_num_tokens_per_batch,
             "dtype": dtype,
             "moe_runner_backend": moe_runner_backend,

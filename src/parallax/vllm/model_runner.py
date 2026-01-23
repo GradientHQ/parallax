@@ -334,8 +334,13 @@ def initialize_vllm_model_runner(
     kv_cache_memory_fraction: float,
     attention_backend: str,
     kv_block_size: int,
+    max_sequence_length: int,
     max_num_tokens_per_batch: int = 16384,
     dtype: str = "float16",
+    moe_runner_backend: str = "auto",
+    tp_rank: int = 0,
+    tp_size: int = 1,
+    nccl_port: int = None,
     **kwargs,
 ) -> Tuple[ParallaxVLLMModelRunner, Dict, Any]:
     from parallax.utils.selective_download import get_model_path_with_selective_download
@@ -471,7 +476,9 @@ def initialize_vllm_model_runner(
 
     parallel_config = ParallelConfig(
         pipeline_parallel_size=virtual_pp_size,
-        tensor_parallel_size=1,
+        tensor_parallel_size=tp_size,
+        node_rank=tp_rank,
+        rank=tp_rank,
         distributed_executor_backend=None,
     )
 
@@ -483,6 +490,8 @@ def initialize_vllm_model_runner(
         max_num_batched_tokens=max_batched_tokens,
         max_num_seqs=256,
         max_model_len=model_config.max_model_len,
+        is_encoder_decoder=False,
+        enable_chunked_prefill=False,
     )
 
     vllm_config = VllmConfig(
