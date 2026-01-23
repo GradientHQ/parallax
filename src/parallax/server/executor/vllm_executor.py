@@ -262,6 +262,7 @@ class VLLMExecutor(BaseExecutor):
             # else:
             #     token_ids = torch.tensor(sampled_token_ids, dtype=torch.int64)
             # vLLM doesn't support probs yet
+            print("[ty]shape=", sampled_token_ids.shape)
             return {"hidden_states": sampled_token_ids, "probs": None}
         else:
             # Intermediate peer: return hidden states for next peer
