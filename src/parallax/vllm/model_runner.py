@@ -19,9 +19,6 @@ from vllm.v1.core.kv_cache_manager import KVCacheManager
 from vllm.v1.core.kv_cache_utils import (
     generate_scheduler_kv_cache_config,
     get_kv_cache_configs,
-    get_request_block_hasher,
-    init_none_hash,
-    sha256_cbor,
 )
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheGroupSpec, KVCacheTensor
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
@@ -139,7 +136,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         self.pp_size = 1
 
         self.request_block_hasher: Optional[Callable[[Any], List[Any]]] = None
-        self.enable_prefix_caching: bool = True
+        self.enable_prefix_caching: bool = False
 
         super().__init__(vllm_config=vllm_config, device=torch.device(device))
         self.kv_cache_config = kv_cache_config
@@ -251,32 +248,6 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         )
 
         self.kv_cache_manager = kv_cache_manager
-        cache_config = self.vllm_config.cache_config
-        enable_prefix = cache_config.enable_prefix_caching
-        if enable_prefix is None:
-            enable_prefix = True
-
-        self.enable_prefix_caching = False
-
-        self.request_block_hasher = None
-        if enable_prefix and kv_cache_manager.block_size is not None:
-            # Use sha256_cbor from vllm.v1.core.kv_cache_utils for hashing
-            # This is the standard hash function in vLLM 0.11+
-            hash_fn = sha256_cbor
-            init_none_hash(hash_fn)
-            logger.debug("Initialized prefix cache hashing with sha256_cbor")
-
-            block_size = kv_cache_manager.block_size
-            if block_size is None and self.kv_cache_config.kv_cache_groups:
-                block_size = self.kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
-            if block_size is not None:
-                self.request_block_hasher = get_request_block_hasher(block_size, hash_fn)
-                logger.info("Initialized prefix cache block hasher with block_size=%d", block_size)
-
-        logger.debug(
-            f"KVCacheManager initialized: block_size={kv_cache_manager.block_size}, "
-            f"usage={kv_cache_manager.usage:.2%}"
-        )
 
         return kv_cache_manager
 
