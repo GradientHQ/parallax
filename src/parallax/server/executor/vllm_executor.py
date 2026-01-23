@@ -250,19 +250,6 @@ class VLLMExecutor(BaseExecutor):
 
         # Return appropriate output based on peer position
         if return_decoded_tokens:
-            # sampled_token_ids = output.sampled_token_ids
-            # if isinstance(sampled_token_ids, list) and len(sampled_token_ids) > 0:
-            #     # Convert to tensor: pad sequences to same length
-            #     max_len = max(len(seq) for seq in sampled_token_ids)
-            #     padded_tokens = []
-            #     for seq in sampled_token_ids:
-            #         padded_seq = seq + [-1] * (max_len - len(seq))  # Pad with -1
-            #         padded_tokens.append(padded_seq)
-            #     token_ids = torch.tensor(padded_tokens, dtype=torch.int64)
-            # else:
-            #     token_ids = torch.tensor(sampled_token_ids, dtype=torch.int64)
-            # vLLM doesn't support probs yet
-            print("[ty]shape=", sampled_token_ids.shape)
             return {"hidden_states": sampled_token_ids, "probs": None}
         else:
             # Intermediate peer: return hidden states for next peer
