@@ -298,7 +298,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         super().execute_model(scheduler_output, intermediate_tensors)
 
         if return_decoded_tokens:
-            self.execute_model_state.hidden_states, None
+            return self.execute_model_state.hidden_states, None
         else:
             return None, super().sample_tokens().sampled_token_ids_cpu
 
