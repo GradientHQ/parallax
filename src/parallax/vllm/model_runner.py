@@ -301,7 +301,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         if return_decoded_tokens:
             sampled_token_ids = super().sample_tokens(grammar_output=None).sampled_token_ids_cpu
 
-        return self.execute_model_state.hidden_states, sampled_token_ids
+        return self.execute_model_state, sampled_token_ids
 
 
 def initialize_vllm_model_runner(

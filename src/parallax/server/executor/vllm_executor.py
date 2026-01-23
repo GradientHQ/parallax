@@ -242,7 +242,7 @@ class VLLMExecutor(BaseExecutor):
         # Import IntermediateTensors for type checking
 
         # Execute model with vLLM
-        hidden_states, sampled_token_ids = self.model_runner.execute_model(
+        execute_model_state, sampled_token_ids = self.model_runner.execute_model(
             scheduler_output=scheduler_output,
             intermediate_tensors=intermediate_tensors,
             return_decoded_tokens=return_decoded_tokens,
@@ -266,7 +266,7 @@ class VLLMExecutor(BaseExecutor):
             return {"hidden_states": sampled_token_ids, "probs": None}
         else:
             # Intermediate peer: return hidden states for next peer
-            return {"hidden_states": hidden_states, "probs": None}
+            return {"hidden_states": execute_model_state.hidden_states, "probs": None}
 
     def _release_request(self, rid: str):
         """Release per-request resources in vLLM."""
