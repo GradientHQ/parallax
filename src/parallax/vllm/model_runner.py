@@ -6,7 +6,6 @@ import torch
 from mlx_lm.utils import load_config
 from vllm.config import (
     CacheConfig,
-    CompilationConfig,
     DeviceConfig,
     LoadConfig,
     ModelConfig,
@@ -84,8 +83,6 @@ def _create_kv_cache_config_from_specs(
     attn_layers: List[str],
     kv_cache_memory_fraction: float,
 ) -> KVCacheConfig:
-    import torch
-
     free_memory, total_memory = torch.cuda.mem_get_info(0)
     available_memory = int(free_memory * kv_cache_memory_fraction)
 
@@ -510,10 +507,6 @@ def initialize_vllm_model_runner(
         instance_id="",
     )
 
-    # Set the global vLLM config to avoid "Current vLLM config is not set" warning
-    set_current_vllm_config(vllm_config)
-    logger.debug("Set current vLLM config globally")
-
     model_runner = ParallaxVLLMModelRunner(
         vllm_config=vllm_config,
         kv_cache_config=None,
@@ -560,21 +553,22 @@ def initialize_vllm_model_runner(
 
     model_runner.kv_cache_config = kv_cache_config
 
-    logger.info("Initializing GPUModelRunner KV cache...")
-    model_runner.initialize_kv_cache(kv_cache_config)
-    logger.info("GPUModelRunner KV cache initialized successfully")
+    with set_current_vllm_config(vllm_config):
+        logger.info("Initializing GPUModelRunner KV cache...")
+        model_runner.initialize_kv_cache(kv_cache_config)
+        logger.info("GPUModelRunner KV cache initialized successfully")
 
-    logger.info("Initializing KV Cache Manager...")
-    model_runner.initialize_kv_cache_manager(max_model_len=model_config.max_model_len)
-    logger.info("KV Cache Manager initialized successfully")
+        logger.info("Initializing KV Cache Manager...")
+        model_runner.initialize_kv_cache_manager(max_model_len=model_config.max_model_len)
+        logger.info("KV Cache Manager initialized successfully")
 
-    # Warm up the model and capture CUDA graphs if enabled
-    # This prevents the first request from triggering compilation/graph capture
-    logger.info("Warming up model and capturing CUDA graphs...")
-    try:
-        model_runner.capture_model()
-        logger.info("Model warmup and CUDA graph capture completed successfully")
-    except Exception as e:
-        logger.warning(f"Failed to capture CUDA graph during initialization: {e}")
+        # Warm up the model and capture CUDA graphs if enabled
+        # This prevents the first request from triggering compilation/graph capture
+        logger.info("Warming up model and capturing CUDA graphs...")
+        try:
+            model_runner.capture_model()
+            logger.info("Model warmup and CUDA graph capture completed successfully")
+        except Exception as e:
+            logger.warning(f"Failed to capture CUDA graph during initialization: {e}")
 
     return model_runner, config, tokenizer
