@@ -279,7 +279,9 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         finally:
             vllm.distributed.utils.get_pp_indices = original_get_pp_indices
 
-    def execute_model(self, scheduler_output, intermediate_tensors=None):
+    def execute_model(
+        self, scheduler_output, intermediate_tensors=None, return_decoded_tokens=False
+    ):
         """
         Execute the model with the given scheduler output and intermediate tensors.
         If this is not the first peer, and the intermediate_tensors buffer is not initialized,
@@ -293,7 +295,12 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             )
             logger.debug("Successfully initialized intermediate_tensors buffer")
 
-        return super().execute_model(scheduler_output, intermediate_tensors)
+        super().execute_model(scheduler_output, intermediate_tensors)
+
+        if return_decoded_tokens:
+            self.execute_model_state.hidden_states, None
+        else:
+            return None, super().sample_tokens().sampled_token_ids_cpu
 
 
 def initialize_vllm_model_runner(

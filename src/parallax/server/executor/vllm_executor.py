@@ -242,30 +242,30 @@ class VLLMExecutor(BaseExecutor):
         # Import IntermediateTensors for type checking
 
         # Execute model with vLLM
-        output = self.model_runner.execute_model(
+        hidden_states, sampled_token_ids = self.model_runner.execute_model(
             scheduler_output=scheduler_output,
             intermediate_tensors=intermediate_tensors,
+            return_decoded_tokens=return_decoded_tokens,
         )
 
         # Return appropriate output based on peer position
         if return_decoded_tokens:
-            sampled_token_ids = output.sampled_token_ids
-            if isinstance(sampled_token_ids, list) and len(sampled_token_ids) > 0:
-                # Convert to tensor: pad sequences to same length
-                max_len = max(len(seq) for seq in sampled_token_ids)
-                padded_tokens = []
-                for seq in sampled_token_ids:
-                    padded_seq = seq + [-1] * (max_len - len(seq))  # Pad with -1
-                    padded_tokens.append(padded_seq)
-                token_ids = torch.tensor(padded_tokens, dtype=torch.int64)
-            else:
-                token_ids = torch.tensor(sampled_token_ids, dtype=torch.int64)
+            # sampled_token_ids = output.sampled_token_ids
+            # if isinstance(sampled_token_ids, list) and len(sampled_token_ids) > 0:
+            #     # Convert to tensor: pad sequences to same length
+            #     max_len = max(len(seq) for seq in sampled_token_ids)
+            #     padded_tokens = []
+            #     for seq in sampled_token_ids:
+            #         padded_seq = seq + [-1] * (max_len - len(seq))  # Pad with -1
+            #         padded_tokens.append(padded_seq)
+            #     token_ids = torch.tensor(padded_tokens, dtype=torch.int64)
+            # else:
+            #     token_ids = torch.tensor(sampled_token_ids, dtype=torch.int64)
             # vLLM doesn't support probs yet
-            return {"hidden_states": token_ids, "probs": None}
+            return {"hidden_states": sampled_token_ids, "probs": None}
         else:
             # Intermediate peer: return hidden states for next peer
-            final_hidden_states = output.tensors["hidden_states"] + output.tensors["residual"]
-            return {"hidden_states": final_hidden_states, "probs": None}
+            return {"hidden_states": hidden_states, "probs": None}
 
     def _release_request(self, rid: str):
         """Release per-request resources in vLLM."""
