@@ -403,10 +403,11 @@ class SGLExecutor(BaseExecutor):
         requests = prepared_inputs.get("requests", [])
 
         # Execute model with SGLang
-        logits_output, _ = self.model_runner.forward(
+        out = self.model_runner.forward(
             forward_batch=forward_batch,
             pp_proxy_tensors=pp_proxy_tensors,
         )
+        logits_output = out.logits_output
 
         # Merge prefill batch into running batch
         if self.cur_batch:

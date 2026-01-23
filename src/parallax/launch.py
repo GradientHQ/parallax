@@ -35,15 +35,20 @@ from parallax_utils.version_check import check_latest_release
 logger = get_logger("parallax.launch")
 
 
-def _update_args_from_shared_state(args, shared_state: SharedState):
+def _update_args_from_shared_state(args, shared_state: SharedState, force_update: bool):
     """Update args with layer allocation from shared state"""
     model_info = shared_state.get_model_info()
     args.start_layer = model_info["block_start_index"]
     args.end_layer = model_info["block_end_index"]
-    # Update model_path if provided (always update to support model switching)
-    if model_info["model_name"]:
+    if args.model_path is not None and force_update == False:
+        # Use local model path first
+        pass
+    elif model_info["model_name"]:
+        # Update model_path if provided
         args.model_path = model_info["model_name"]
         logger.debug(f"Updated model_path to: {args.model_path}")
+    else:
+        assert False, "Neither scheduler nor worker provides a valid model path!"
     # Update tp_size if provided, otherwise keep current value
     args.tp_size = model_info["tp_size"] or args.tp_size
     # Update weight refit switch
@@ -222,7 +227,7 @@ if __name__ == "__main__":
                 time.sleep(1)
 
             # Get layer allocation from shared state
-            _update_args_from_shared_state(args, shared_state)
+            _update_args_from_shared_state(args, shared_state, force_update=False)
 
             logger.debug(
                 f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}, "
@@ -274,7 +279,7 @@ if __name__ == "__main__":
                         _stop_executor_processes(executor_subprocs)
                         if http_server_process is not None:
                             stop_http_server(http_server_process)
-                        _update_args_from_shared_state(args, shared_state)
+                        _update_args_from_shared_state(args, shared_state, force_update=True)
                         logger.info(
                             f"Reloading executor with layers [{args.start_layer}, {args.end_layer})"
                         )
