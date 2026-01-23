@@ -239,7 +239,6 @@ def form_vllm_batch_prefill(
         num_common_prefix_blocks=num_common_prefix_blocks,
         finished_req_ids=set(),
         free_encoder_mm_hashes=[],
-        structured_output_request_ids=[],
         grammar_bitmask=None,
         kv_connector_metadata=None,
     )
@@ -364,7 +363,6 @@ def form_vllm_batch_decode(
         num_common_prefix_blocks=[0] * getattr(kv_cache_manager, "num_kv_cache_groups", 1),
         finished_req_ids=set(),
         free_encoder_mm_hashes=[],
-        structured_output_request_ids=[],
         grammar_bitmask=None,
         kv_connector_metadata=None,
     )
