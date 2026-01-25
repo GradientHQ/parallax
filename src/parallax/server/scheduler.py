@@ -173,7 +173,6 @@ class Scheduler:
         for req in self._wait_queue:
             if req.request_id == request_id:
                 self._wait_queue.remove(req)
-                req.update_status(RequestStatus.CANCELLED)
                 logger.debug(f"Cancelled request {request_id} from wait queue.")
                 return
 
