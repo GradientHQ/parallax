@@ -168,8 +168,7 @@ class Scheduler:
             logger.debug(f"Cancelled running request {request_id} from scheduler.")
             return
 
-        # Check wait queue
-        # TODO: Hanle efficiently when the wait queue is large.
+        # TODO: Handle efficiently when the wait queue is large.
         for req in self._wait_queue:
             if req.request_id == request_id:
                 self._wait_queue.remove(req)
