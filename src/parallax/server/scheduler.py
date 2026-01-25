@@ -165,9 +165,19 @@ class Scheduler:
         if request_id in self._running_requests:
             req = self._running_requests[request_id]
             req.abort = True
-            logger.debug(f"Cancelled request {request_id} from scheduler.")
-        else:
-            raise ValueError(f"Attempted to cancel non-existent request {request_id}.")
+            logger.debug(f"Cancelled running request {request_id} from scheduler.")
+            return
+
+        # Check wait queue
+        # TODO: Hanle efficiently when the wait queue is large.
+        for req in self._wait_queue:
+            if req.request_id == request_id:
+                self._wait_queue.remove(req)
+                req.update_status(RequestStatus.CANCELLED)
+                logger.debug(f"Cancelled request {request_id} from wait queue.")
+                return
+
+        raise ValueError(f"Attempted to cancel non-existent request {request_id}.")
 
     def check_and_update_request_status(self, request: InitialRequest) -> bool:
         """Checks if a request has met any finishing conditions and updates its status."""
