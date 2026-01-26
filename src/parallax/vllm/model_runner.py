@@ -557,6 +557,7 @@ def initialize_vllm_model_runner(
 
     return model_runner, config, tokenizer
 
+
 def refit_vllm_model(
     model_runner: ParallaxVLLMModelRunner,
     tensors: dict = None,
