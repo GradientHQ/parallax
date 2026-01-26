@@ -143,6 +143,7 @@ class TestCreateExecutorConfig:
             max_lora_chunk_size=128,
             enable_weight_refit=False,
             weight_refit_mode="cpu",
+            gpu_backend="sglang",
         )
 
         config = create_executor_config(args)
