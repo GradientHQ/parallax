@@ -67,13 +67,9 @@ class VLLMExecutor(BaseExecutor):
         moe_runner_backend: Optional[str] = "auto",
         enable_lora: Optional[bool] = False,
         max_lora_rank: Optional[int] = None,
-        lora_target_modules: Optional[List[str]] = None,
-        lora_paths: Optional[List[str]] = None,
         max_loras_per_batch: Optional[int] = None,
         max_loaded_loras: Optional[int] = None,
-        lora_eviction_policy: Optional[str] = "lru",
-        lora_backend: Optional[str] = "triton",
-        max_lora_chunk_size: Optional[int] = 128,
+        fully_sharded_loras: bool = False,
         # Tensor Parallel Configs
         tp_rank: Optional[int] = 0,
         tp_size: Optional[int] = 1,
@@ -107,13 +103,9 @@ class VLLMExecutor(BaseExecutor):
             "using_hfcache": use_hfcache,
             "enable_lora": enable_lora,
             "max_lora_rank": max_lora_rank,
-            "lora_target_modules": lora_target_modules,
-            "lora_paths": lora_paths,
             "max_loras_per_batch": max_loras_per_batch,
             "max_loaded_loras": max_loaded_loras,
-            "lora_eviction_policy": lora_eviction_policy,
-            "lora_backend": lora_backend,
-            "max_lora_chunk_size": max_lora_chunk_size,
+            "fully_sharded_loras": fully_sharded_loras,
         }
         logger.debug(
             f"Initializing vLLM model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
