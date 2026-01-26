@@ -143,20 +143,19 @@ def _build_vllm_request(
     include_outputs: bool,
 ) -> VLLMRequest:
     block_hasher = getattr(model_runner, "request_block_hasher", None)
-    
+
     # Extract LoRA request if provided
     lora_req = None
     if hasattr(req, "lora_path") and req.lora_path:
         from vllm.lora.request import LoRARequest
+
         # Create a simple hash or ID for the LoRA based on path
         # In a real scenario, we might want a more robust ID mapping mechanism
         lora_name = getattr(req, "lora_name", f"lora_{hash(req.lora_path) % 10000}")
         lora_int_id = getattr(req, "lora_int_id", abs(hash(req.lora_path)) % 10000 + 1)
-        
+
         lora_req = LoRARequest(
-            lora_name=lora_name,
-            lora_int_id=lora_int_id,
-            lora_path=req.lora_path
+            lora_name=lora_name, lora_int_id=lora_int_id, lora_path=req.lora_path
         )
         logger.debug(f"Created LoRA request: {lora_name} (id={lora_int_id}) path={req.lora_path}")
 
