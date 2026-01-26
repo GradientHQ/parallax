@@ -148,8 +148,15 @@ class VLLMExecutor(BaseExecutor):
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
-        if not requests:
-            return
+        if self.tp_size > 1:
+            requests = self._tensor_parallel_broadcast_pyobj(requests)
+            for req in requests:
+                if hasattr(req, "hidden_states") and req.hidden_states is not None:
+                    if hasattr(req.hidden_states, "to"):  # PyTorch tensor
+                        req.hidden_states = req.hidden_states.to(self.device)
+        if len(requests) > 0:
+            logger.debug(f"Handling {len(requests)} requests.")
+
         if self.is_first_peer:
             # First peer can receive InitialRequests from the client RPC,
             # or IntermediateRequests from the last peer.
@@ -300,6 +307,19 @@ class VLLMExecutor(BaseExecutor):
         ), "Single node must generate an output_id."
         next_token_id = int(hidden_states[0])
         return next_token_id, hidden_states
+    
+    def _tensor_parallel_broadcast_pyobj(self, broadcast_obj):
+        """Wrapper for broadcast pyobject in TP group"""
+        if self.tp_rank == 0:
+            for i in range(1, self.tp_size):
+                conn = self.conn[i]
+                conn.send(broadcast_obj)
+            broadcast_result = broadcast_obj
+        else:
+            conn = self.conn[0]
+            broadcast_result = conn.recv()
+
+        return broadcast_result
 
     def _prepare_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """
