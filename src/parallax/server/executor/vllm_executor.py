@@ -307,7 +307,7 @@ class VLLMExecutor(BaseExecutor):
         ), "Single node must generate an output_id."
         next_token_id = int(hidden_states[0])
         return next_token_id, hidden_states
-    
+
     def _tensor_parallel_broadcast_pyobj(self, broadcast_obj):
         """Wrapper for broadcast pyobject in TP group"""
         if self.tp_rank == 0:
