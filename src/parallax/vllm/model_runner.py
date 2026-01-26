@@ -22,6 +22,7 @@ from vllm.v1.core.kv_cache_utils import (
 )
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheGroupSpec, KVCacheTensor
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+from vllm.v1.worker.workspace import init_workspace_manager
 
 from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
     apply_weight_loader_filter_patch,
@@ -532,6 +533,10 @@ def initialize_vllm_model_runner(
     kv_cache_config = generate_scheduler_kv_cache_config(kv_cache_configs)
 
     model_runner.kv_cache_config = kv_cache_config
+
+    # Init workspace manager for capturing graph
+    device = torch.cuda.current_device()
+    init_workspace_manager(device)
 
     with set_current_vllm_config(vllm_config):
         logger.info("Initializing GPUModelRunner KV cache...")

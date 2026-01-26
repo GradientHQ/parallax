@@ -265,7 +265,7 @@ def form_vllm_batch_decode(
     req_ids: List[str] = []
     resumed_req_ids: set[str] = set()
     new_token_ids: List[List[int]] = []
-    all_token_ids: dict[str, list[int]]
+    all_token_ids: dict[str, list[int]] = {}
     new_block_ids: List[tuple[List[int], ...] | None] = []
     num_computed_tokens: List[int] = []
     num_output_tokens: List[int] = []
