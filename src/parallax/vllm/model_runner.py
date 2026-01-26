@@ -88,8 +88,9 @@ def _create_kv_cache_config_from_specs(
     kv_cache_group: KVCacheGroupSpec,
     attn_layers: List[str],
     kv_cache_memory_fraction: float,
+    device: torch.device,
 ) -> KVCacheConfig:
-    free_memory, total_memory = torch.cuda.mem_get_info(0)
+    free_memory, total_memory = torch.cuda.mem_get_info(device.index)
     available_memory = int(free_memory * kv_cache_memory_fraction)
 
     logger.info(
@@ -128,7 +129,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         self,
         vllm_config: VllmConfig,
         kv_cache_config: Optional[KVCacheConfig],
-        device: str,
+        device: torch.device,
         start_layer: int,
         end_layer: int,
         num_hidden_layers: int,
@@ -147,7 +148,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         self.request_block_hasher: Optional[Callable[[Any], List[Any]]] = None
         self.enable_prefix_caching: bool = False
 
-        super().__init__(vllm_config=vllm_config, device=torch.device(device))
+        super().__init__(vllm_config=vllm_config, device=device)
         self.kv_cache_config = kv_cache_config
 
         logger.info(
@@ -225,6 +226,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
                 kv_cache_group=kv_cache_group,
                 attn_layers=layer_names,
                 kv_cache_memory_fraction=memory_fraction,
+                device=self.device,
             )
 
         logger.debug(
@@ -369,20 +371,24 @@ def initialize_vllm_model_runner(
     # For single process, always use pp_size=1
     virtual_pp_size = 1
 
+    # Set TP device
+    device = torch.device(f"cuda:{tp_rank}")
+    torch.cuda.set_device(device)
+
     if not parallel_state.model_parallel_is_initialized():
         logger.debug(f"Initializing vLLM distributed environment...")
 
         # Set environment variables for distributed initialization
         if "RANK" not in os.environ:
-            os.environ["RANK"] = tp_rank
+            os.environ["RANK"] = str(tp_rank)
         if "WORLD_SIZE" not in os.environ:
-            os.environ["WORLD_SIZE"] = tp_size
+            os.environ["WORLD_SIZE"] = str(tp_size)
         if "LOCAL_RANK" not in os.environ:
-            os.environ["LOCAL_RANK"] = tp_rank
+            os.environ["LOCAL_RANK"] = str(tp_rank)
         if "MASTER_ADDR" not in os.environ:
             os.environ["MASTER_ADDR"] = "localhost"
         if "MASTER_PORT" not in os.environ:
-            os.environ["MASTER_PORT"] = nccl_port
+            os.environ["MASTER_PORT"] = str(nccl_port)
 
         try:
             parallel_state.init_distributed_environment()
@@ -459,7 +465,7 @@ def initialize_vllm_model_runner(
         distributed_executor_backend=None,
     )
 
-    device_config = DeviceConfig(device="cuda")
+    device_config = DeviceConfig(device=device)
     load_config_for_config = LoadConfig(load_format="auto")
 
     max_batched_tokens = max(max_num_tokens_per_batch, model_config.max_model_len)
@@ -490,7 +496,7 @@ def initialize_vllm_model_runner(
     model_runner = ParallaxVLLMModelRunner(
         vllm_config=vllm_config,
         kv_cache_config=None,
-        device="cuda",
+        device=device,
         start_layer=start_layer,
         end_layer=end_layer,
         num_hidden_layers=num_hidden_layers,
@@ -507,7 +513,7 @@ def initialize_vllm_model_runner(
     if not kv_cache_specs:
         raise RuntimeError("No KV cache specs found in the loaded model")
 
-    free_memory, total_memory = torch.cuda.mem_get_info(0)
+    free_memory, _ = torch.cuda.mem_get_info(device.index)
     available_memory = int(free_memory * kv_cache_memory_fraction)
 
     logger.info(
@@ -527,7 +533,6 @@ def initialize_vllm_model_runner(
     model_runner.kv_cache_config = kv_cache_config
 
     # Init workspace manager for capturing graph
-    device = torch.cuda.current_device()
     init_workspace_manager(device)
 
     with set_current_vllm_config(vllm_config):
