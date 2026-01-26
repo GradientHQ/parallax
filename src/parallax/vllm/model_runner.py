@@ -569,7 +569,10 @@ def refit_vllm_model(
             refit_tensors = [(x, tensors.get(x))]
             model_runner.model.load_weights(weights=refit_tensors)
     elif refit_weight_path is not None:
-        assert False, "vLLM backend does not support update weight from disk."
+        logger.info(f"Executor begins weight refit from disk files")
+        config_overrides = {"load_config": {"download_dir": refit_weight_path}}
+        model_runner.update_config(overrides=config_overrides)
+        model_runner.reload_weights()
     else:
         assert False, "Weight refit needs host tensors or weight path"
     logger.info(f"Finish weight refit")
