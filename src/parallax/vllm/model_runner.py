@@ -374,15 +374,15 @@ def initialize_vllm_model_runner(
 
         # Set environment variables for distributed initialization
         if "RANK" not in os.environ:
-            os.environ["RANK"] = "0"
+            os.environ["RANK"] = tp_rank
         if "WORLD_SIZE" not in os.environ:
-            os.environ["WORLD_SIZE"] = "1"
+            os.environ["WORLD_SIZE"] = tp_size
         if "LOCAL_RANK" not in os.environ:
-            os.environ["LOCAL_RANK"] = "0"
+            os.environ["LOCAL_RANK"] = tp_rank
         if "MASTER_ADDR" not in os.environ:
             os.environ["MASTER_ADDR"] = "localhost"
         if "MASTER_PORT" not in os.environ:
-            os.environ["MASTER_PORT"] = "12355"
+            os.environ["MASTER_PORT"] = nccl_port
 
         try:
             parallel_state.init_distributed_environment()
