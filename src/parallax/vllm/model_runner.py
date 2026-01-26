@@ -14,13 +14,16 @@ from vllm.config import (
     VllmConfig,
     set_current_vllm_config,
 )
+import os
+import torch.distributed
+import vllm.distributed.parallel_state as parallel_state
 from vllm.distributed.parallel_state import GroupCoordinator as VLLMGroupCoordinator
 from vllm.v1.core.kv_cache_manager import KVCacheManager
 from vllm.v1.core.kv_cache_utils import (
     generate_scheduler_kv_cache_config,
     get_kv_cache_configs,
 )
-from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheGroupSpec, KVCacheTensor
+from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheGroupSpec, KVCacheTensor, FullAttentionSpec
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 from vllm.v1.worker.workspace import init_workspace_manager
 
@@ -158,8 +161,6 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             )
             kv_cache_specs = None
 
-        import torch
-
         free_memory, total_memory = torch.cuda.mem_get_info(self.device.index or 0)
 
         memory_fraction = (
@@ -190,8 +191,6 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             num_attention_heads = getattr(hf_config, "num_attention_heads", 8)
             hidden_size = getattr(hf_config, "hidden_size", 1024)
             head_size = hidden_size // num_attention_heads
-
-            from vllm.v1.kv_cache_interface import FullAttentionSpec, KVCacheGroupSpec
 
             model_dtype = self.vllm_config.model_config.dtype
             if isinstance(model_dtype, str):
@@ -240,7 +239,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         kv_cache_manager = KVCacheManager(
             kv_cache_config=self.kv_cache_config,
             max_model_len=max_model_len,
-            enable_caching=True,
+            enable_caching=self.enable_prefix_caching,
             use_eagle=False,
             log_stats=True,
             enable_kv_cache_events=False,
@@ -365,10 +364,6 @@ def initialize_vllm_model_runner(
     # For single process, always use pp_size=1
     virtual_pp_size = 1
 
-    import os
-
-    import vllm.distributed.parallel_state as parallel_state
-
     if not parallel_state.model_parallel_is_initialized():
         logger.debug(f"Initializing vLLM distributed environment...")
 
@@ -398,7 +393,6 @@ def initialize_vllm_model_runner(
             original_pp_group = parallel_state._PP
             if original_pp_group is not None:
                 # Get backend from device_group (torch is already imported at module level)
-                import torch.distributed
 
                 backend = torch.distributed.get_backend(original_pp_group.device_group)
 
@@ -508,8 +502,6 @@ def initialize_vllm_model_runner(
     if not kv_cache_specs:
         raise RuntimeError("No KV cache specs found in the loaded model")
 
-    import torch
-
     free_memory, total_memory = torch.cuda.mem_get_info(0)
     available_memory = int(free_memory * kv_cache_memory_fraction)
 
@@ -517,11 +509,6 @@ def initialize_vllm_model_runner(
         f"Available GPU memory for KV cache: "
         f"{available_memory / (1024**3):.2f} GB "
         f"({kv_cache_memory_fraction:.1%} of {free_memory / (1024**3):.2f} GB)"
-    )
-
-    from vllm.v1.core.kv_cache_utils import (
-        generate_scheduler_kv_cache_config,
-        get_kv_cache_configs,
     )
 
     kv_cache_configs = get_kv_cache_configs(
