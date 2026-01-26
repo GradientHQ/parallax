@@ -263,9 +263,9 @@ def form_vllm_batch_decode(
     kv_cache_manager = model_runner.kv_cache_manager
 
     req_ids: List[str] = []
-    # resumed_from_preemption: List[bool] = []
+    resumed_req_ids: set[str] = set()
     new_token_ids: List[List[int]] = []
-    resumed_req_token_ids: List[List[int] | None] = []
+    all_token_ids: dict[str, list[int]]
     new_block_ids: List[tuple[List[int], ...] | None] = []
     num_computed_tokens: List[int] = []
     num_output_tokens: List[int] = []
@@ -273,7 +273,6 @@ def form_vllm_batch_decode(
 
     for req in batched_requests:
         req_ids.append(req.request_id)
-        # resumed_from_preemption.append(False)
 
         # For GPU workers (non-first peer), IntermediateRequest doesn't have output_ids
         # We need to get it from vLLM's CachedRequestState in model_runner
@@ -301,12 +300,12 @@ def form_vllm_batch_decode(
                 )
 
         if output_ids:
+            all_token_ids[req.request_id] = output_ids
             last_token = output_ids[-1]
             new_token_ids.append([last_token])
         else:
+            all_token_ids[req.request_id] = []
             new_token_ids.append([])
-
-        resumed_req_token_ids.append([])
 
         sampling_params = transform_sampling_params_to_vllm(req.sampling_params)
         vllm_req = _build_vllm_request(req, sampling_params, model_runner, include_outputs=True)
@@ -346,10 +345,12 @@ def form_vllm_batch_decode(
 
     cached_req_data = CachedRequestData(
         req_ids=req_ids,
-        # resumed_from_preemption=resumed_from_preemption,
+        resumed_req_ids=resumed_req_ids,
         new_token_ids=new_token_ids,
+        all_token_ids=all_token_ids,
         new_block_ids=new_block_ids,
         num_computed_tokens=num_computed_tokens,
+        num_output_tokens=num_output_tokens,
     )
 
     scheduler_output = SchedulerOutput(

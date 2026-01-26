@@ -221,7 +221,7 @@ def check_and_run_weight_refit(gradient_server, message):
 
     def _download_weight_thread(cid):
         raw_data = None
-        time_out = 10 * 60  # 10 minutes timeout
+        time_out = 20 * 60  # 20 minutes timeout
         time_begin_get_block = time.time()
         time_end_get_block = None
         peer_id = None
