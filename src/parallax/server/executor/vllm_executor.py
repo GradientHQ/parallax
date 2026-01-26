@@ -22,7 +22,7 @@ from parallax.vllm.batch_info import (
     release_vllm_request,
     resize_intermediate_tensors,
 )
-from parallax.vllm.model_runner import initialize_vllm_model_runner
+from parallax.vllm.model_runner import initialize_vllm_model_runner, refit_vllm_model
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -145,6 +145,24 @@ class VLLMExecutor(BaseExecutor):
             weight_refit_mode=weight_refit_mode,
             conn=conn,
         )
+
+    def check_and_refit_weight(self, refit_weight_path: str):
+        if self.tp_size > 1:
+            weight_path = self._tensor_parallel_broadcast_pyobj(refit_weight_path)
+        else:
+            weight_path = refit_weight_path
+
+        if weight_path == "":
+            return
+
+        if self.weight_refit_mode == "cpu":
+            conn = self.conn[0]
+            tensors = conn.recv()
+            refit_vllm_model(self.model_runner, tensors=tensors)
+        elif self.weight_refit_mode == "disk":
+            refit_vllm_model(self.model_runner, refit_weight_path=weight_path)
+        else:
+            logger.warning(f"Unrecognized weight refit mode={self.weight_refit_mode}")
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
