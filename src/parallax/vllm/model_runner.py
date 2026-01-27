@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -41,6 +42,7 @@ from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
 from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.vllm.monkey_patch import apply_parallax_vllm_monkey_patch
 from parallax_utils.logging_config import get_logger
+from parallax_utils.prepare_adapter import trans_adapter_config
 
 logger = get_logger(__name__)
 
@@ -515,6 +517,9 @@ def initialize_vllm_model_runner(
         lora_req = LoRARequest(lora_name=lora_name, lora_int_id=lora_int_id, lora_path=lora_path)
         logger.debug(f"Created LoRA request: {lora_name} (id={lora_int_id}) path={lora_path}")
 
+        # Workaround: save adapter_config.json locally for lora update
+        trans_adapter_config(lora_path)
+
     vllm_config = VllmConfig(
         model_config=model_config,
         cache_config=cache_config,
@@ -619,6 +624,12 @@ def refit_vllm_model(
         # config_overrides = {"load_config": {"download_dir": refit_weight_path}}
         # model_runner.update_config(overrides=config_overrides)
         # model_runner.reload_weights()
+        adapter_path = os.path.join(os.getcwd(), "adapter_config.json")
+        if os.path.isfile(adapter_path):
+            shutil.copy(adapter_path, refit_weight_path)
+        else:
+            logger.warning(f"Cannot find adapter_config.json locally. Exit lora weight refit.")
+            return
 
         lora_name = f"lora_{hash(refit_weight_path) % 10000}"
         lora_int_id = abs(hash(refit_weight_path)) % 10000 + 1
