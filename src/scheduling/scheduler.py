@@ -426,10 +426,6 @@ class Scheduler:
         if not self._wait_for_bootstrap(poll_interval):
             return
 
-        # Don't start dispatcher until routing is actually possible.
-        if not self.request_router.routing_ready():
-            return
-
         # Start dispatcher only after successful bootstrap
         self._dispatch_thread = threading.Thread(
             target=self._dispatch_loop,
@@ -455,6 +451,8 @@ class Scheduler:
                         all_active = all(n.is_active for n in nodes)
                         if all_active and not self._all_nodes_active_logged:
                             logger.info("All %d nodes are active", len(nodes))
+                            # Emit snapshot at INFO once when all nodes become active.
+                            self.emit_alloc_log_snapshot(reason="All nodes are active")
                             self._all_nodes_active_logged = True
                         elif not all_active:
                             self._all_nodes_active_logged = False
