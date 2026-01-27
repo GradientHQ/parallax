@@ -191,6 +191,7 @@ class Node:
     # todo upload is_active
     is_active: bool = True
     last_heartbeat: float = 0.0
+    recent_fail: float = 0.0
     # Will be updated by node broadcasting
     # otherwise, use roofline performance model to estimate
     avg_layer_latency_ms: Optional[float] = None
@@ -411,6 +412,10 @@ class Node:
     def remove_request(self):
         """Remove a request from this node."""
         self.current_requests -= 1
+
+    def record_fail(self):
+        """Record recent failed request."""
+        self.recent_fail = time.time()
 
     def clear_serving_state(self) -> None:
         """Clear serving/runtime state for this node.

@@ -89,6 +89,7 @@ class VLLMExecutor(BaseExecutor):
     ):
         self.enable_lora = True if lora_paths is not None else enable_lora
         self.lora_paths = lora_paths
+        self.lora_path = None
         self.max_lora_rank = max_lora_rank
         self.max_loras_per_batch = 1 if max_loras_per_batch is None else max_loras_per_batch
         self.max_loaded_loras = max_loaded_loras
@@ -97,7 +98,8 @@ class VLLMExecutor(BaseExecutor):
             self.check_lora_server_args()
 
         # output lora paths
-        if self.lora_paths is not None:
+        if self.lora_paths is not None and len(self.lora_paths) > 0:
+            self.lora_path = self.lora_paths[0]
             logger.info(f"LoRA paths provided: {[str(lora_path) for lora_path in self.lora_paths]}")
 
         model_runner_params = {
@@ -118,7 +120,7 @@ class VLLMExecutor(BaseExecutor):
             "using_hfcache": use_hfcache,
             "enable_lora": self.enable_lora,
             "max_lora_rank": self.max_lora_rank,
-            "lora_path": self.lora_paths[0],
+            "lora_path": self.lora_path,
             "max_loras_per_batch": self.max_loras_per_batch,
             "max_loaded_loras": self.max_loaded_loras,
             "fully_sharded_loras": fully_sharded_loras,
