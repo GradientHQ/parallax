@@ -622,8 +622,12 @@ def refit_vllm_model(
 
         lora_name = f"lora_{hash(refit_weight_path) % 10000}"
         lora_int_id = abs(hash(refit_weight_path)) % 10000 + 1
-        lora_req = LoRARequest(lora_name=lora_name, lora_int_id=lora_int_id, lora_path=lora_path)
-        logger.info(f"Created LoRA request: {lora_name} (id={lora_int_id}) path={lora_path}")
+        lora_req = LoRARequest(
+            lora_name=lora_name, lora_int_id=lora_int_id, lora_path=refit_weight_path
+        )
+        logger.info(
+            f"Created LoRA request: {lora_name} (id={lora_int_id}) path={refit_weight_path}"
+        )
 
         before_loras = model_runner.list_loras()
         logger.info(f"Before lora refit number of lora adapters: {len(before_loras)}")
