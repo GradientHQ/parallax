@@ -642,6 +642,8 @@ def refit_vllm_model(
 
         before_loras = model_runner.list_loras()
         logger.info(f"Before lora refit number of lora adapters: {len(before_loras)}")
+        for lora_id in before_loras:
+            model_runner.remove_lora(lora_id)
         model_runner.add_lora(lora_req)
         after_loras = model_runner.list_loras()
         logger.info(f"After lora refit number of lora adapters: {len(after_loras)}")
