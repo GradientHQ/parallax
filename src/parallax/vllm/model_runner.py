@@ -486,7 +486,7 @@ def initialize_vllm_model_runner(
     if enable_lora:
         max_lora_rank = kwargs.get("max_lora_rank")
         if max_lora_rank is None:
-            max_lora_rank = 16
+            max_lora_rank = 64
             logger.warning(f"max_lora_rank not specified, using default: {max_lora_rank}")
 
         max_loras = kwargs.get("max_loras_per_batch", 1)
