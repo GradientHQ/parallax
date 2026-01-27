@@ -345,6 +345,7 @@ def initialize_vllm_model_runner(
     kv_cache_memory_fraction: float,
     attention_backend: str,
     kv_block_size: int,
+    max_batch_size: int,
     max_sequence_length: int,
     max_num_tokens_per_batch: int = 16384,
     dtype: str = "float16",
@@ -501,9 +502,11 @@ def initialize_vllm_model_runner(
     load_config_for_config = LoadConfig(load_format="auto")
 
     max_batched_tokens = max(max_num_tokens_per_batch, model_config.max_model_len)
+    max_num_seqs = max_batch_size
+
     scheduler_config = SchedulerConfig(
         max_num_batched_tokens=max_batched_tokens,
-        max_num_seqs=256,
+        max_num_seqs=max_num_seqs,
         max_model_len=model_config.max_model_len,
         is_encoder_decoder=False,
         enable_chunked_prefill=False,
