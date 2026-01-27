@@ -309,12 +309,7 @@ def check_and_run_weight_refit(gradient_server, message):
             new_tensors = concat_weight_partition(tensors)
             gradient_server.conn.send(new_tensors)
         elif gradient_server.weight_refit_mode == "disk":
-            process = multiprocessing.Process(
-                target=concat_weight_partition,
-                args=(tensors, weight_dir),
-            )
-            process.start()
-            process.join()
+            concat_weight_partition(tensors, weight_dir)
         else:
             logger.warning(f"Unrecognized weight refit mode: {gradient_server.weight_refit_mode}")
 
