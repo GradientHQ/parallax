@@ -855,8 +855,6 @@ template <typename T, typename CACHE_T, int HEAD_SIZE, int BLOCK_SIZE, int NUM_T
       USE_PARTITIONING ? partition_idx * num_blocks_per_partition : 0;
   const int end_block_idx =
       MIN(start_block_idx + num_blocks_per_partition, num_context_blocks);
-  // Fast-path for sliding window: skip blocks entirely before the window.
-  // Only safe in the non-partitioned v1 kernel.
   if (!USE_PARTITIONING && use_window) {
     const int window_block_start = window_start / BLOCK_SIZE;
     start_block_idx = max(start_block_idx, window_block_start);
@@ -960,11 +958,8 @@ template <typename T, typename CACHE_T, int HEAD_SIZE, int BLOCK_SIZE, int NUM_T
     const int64_t physical_block_number =
         static_cast<int64_t>(block_table[block_idx]);
 
-    // -------------------------------------------------------------------------
-    // Sliding Window: Block-level optimization
     // Skip entire block if it's outside the sliding window
     // Window range is [context_len - 1 - window_size, context_len - 1]
-    // -------------------------------------------------------------------------
     if (use_window) {
       const int block_start_pos = block_idx * BLOCK_SIZE;
       const int block_end_pos =
