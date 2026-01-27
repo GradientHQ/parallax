@@ -42,10 +42,6 @@ from parallax.server.request import (
 )
 from parallax.server.sampling.sampling_params import SamplingParams
 from parallax.server.scheduler import Scheduler
-from parallax.utils.profiler_util import (
-    TorchProfilerController,
-    load_torch_profiler_config_from_env,
-)
 from parallax.utils.shared_state import SharedState
 from parallax.utils.utils import get_current_device, get_device_dtype, get_zmq_socket
 from parallax_utils.logging_config import get_logger
@@ -212,18 +208,6 @@ class BaseExecutor:
             f"tp_rank={self.tp_rank}/{self.tp_size}, "
             f"device={self.device}, "
             f"num_shard_layers={self.num_shard_layers})"
-        )
-
-        # Optional torch profiler (enabled via env var at worker launch time).
-        # This is designed to be low-touch: it starts on the first processed batch,
-        # steps once per (prefill/decode) batch, and auto-stops after configured steps.
-        self._torch_profiler = TorchProfilerController(
-            config=load_torch_profiler_config_from_env(),
-            device=self.device,
-            start_layer=self.start_layer,
-            end_layer=self.end_layer,
-            tp_rank=int(self.tp_rank or 0),
-            tp_size=int(self.tp_size or 1),
         )
 
     @abstractmethod
@@ -533,9 +517,6 @@ class BaseExecutor:
 
             # 6. Process the batch
             try:
-                # Start profiler lazily on first actual work.
-                self._torch_profiler.maybe_start()
-
                 prepared_inputs_dict = self.prepare_batch_inputs(batch_to_process)
 
                 # We will process prefill and decode batches separately for now
@@ -544,26 +525,9 @@ class BaseExecutor:
                         prepared_inputs = prepared_inputs_dict[batch_type]
 
                         start_time = time.time()
-                        micro_bs = getattr(self.scheduler, "micro_batch_size", None)
-                        req_bs = (
-                            len(prepared_inputs.get("requests", []))
-                            if isinstance(prepared_inputs, dict)
-                            else -1
+                        output = self.process_batch(
+                            prepared_inputs, return_decoded_tokens=self.is_last_peer
                         )
-                        label = (
-                            f"parallax::{batch_type}"
-                            f" bs={req_bs}"
-                            f" micro_bs={micro_bs}"
-                            f" layers=[{self.start_layer},{self.end_layer})"
-                            f" tp={self.tp_rank}/{self.tp_size}"
-                        )
-                        with self._torch_profiler.record_function(label):
-                            output = self.process_batch(
-                                prepared_inputs, return_decoded_tokens=self.is_last_peer
-                            )
-
-                        if self._torch_profiler.should_step_for_batch_type(batch_type):
-                            self._torch_profiler.step()
                         # Update metrics with per-layer latency sample (throttled by decode steps)
                         if batch_type == "decode_batch":
                             try:
@@ -622,12 +586,6 @@ class BaseExecutor:
         import time
 
         time.sleep(0.1)  # Give run_loop a moment to exit gracefully
-
-        # Best-effort stop profiler so traces flush.
-        try:
-            self._torch_profiler.stop()
-        except Exception:
-            pass
 
         try:
             all_requests = [req for _, _, _, req in self.scheduler._request_queue] + list(
