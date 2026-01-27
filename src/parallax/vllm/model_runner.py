@@ -19,6 +19,7 @@ from vllm.config import (
     set_current_vllm_config,
 )
 from vllm.distributed.parallel_state import GroupCoordinator as VLLMGroupCoordinator
+from vllm.lora.request import LoRARequest
 from vllm.v1.core.kv_cache_manager import KVCacheManager
 from vllm.v1.core.kv_cache_utils import (
     generate_scheduler_kv_cache_config,
@@ -481,6 +482,7 @@ def initialize_vllm_model_runner(
     # LoRA Config construction
     enable_lora = kwargs.get("enable_lora", False)
     lora_config = None
+    lora_req = None
     if enable_lora:
         max_lora_rank = kwargs.get("max_lora_rank")
         if max_lora_rank is None:
@@ -494,6 +496,8 @@ def initialize_vllm_model_runner(
         max_cpu_loras = kwargs.get("max_loaded_loras")
         fully_sharded_loras = kwargs.get("fully_sharded_loras", False)
 
+        lora_paths = kwargs.get("lora_paths")
+
         lora_config = LoRAConfig(
             max_lora_rank=max_lora_rank,
             max_loras=max_loras,
@@ -502,6 +506,14 @@ def initialize_vllm_model_runner(
             lora_dtype=dtype,
         )
         logger.info(f"LoRA config: {lora_config}")
+
+        # Create a simple hash or ID for the LoRA based on path
+        # In a real scenario, we might want a more robust ID mapping mechanism
+        lora_name = f"lora_{hash(lora_paths) % 10000}"
+        lora_int_id = abs(hash(lora_paths)) % 10000 + 1
+
+        lora_req = LoRARequest(lora_name=lora_name, lora_int_id=lora_int_id, lora_path=lora_paths)
+        logger.debug(f"Created LoRA request: {lora_name} (id={lora_int_id}) path={lora_paths}")
 
     vllm_config = VllmConfig(
         model_config=model_config,
@@ -583,6 +595,9 @@ def initialize_vllm_model_runner(
             logger.info("Model warmup and CUDA graph capture completed successfully")
         except Exception as e:
             logger.warning(f"Failed to capture CUDA graph during initialization: {e}")
+
+        if enable_lora:
+            model_runner.add_lora(lora_req)
 
     return model_runner, config, tokenizer
 

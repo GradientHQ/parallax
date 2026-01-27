@@ -67,6 +67,7 @@ class VLLMExecutor(BaseExecutor):
         moe_runner_backend: Optional[str] = "auto",
         enable_lora: Optional[bool] = False,
         max_lora_rank: Optional[int] = None,
+        lora_paths: Optional[List[str]] = None,
         max_loras_per_batch: Optional[int] = None,
         max_loaded_loras: Optional[int] = None,
         fully_sharded_loras: bool = False,
@@ -86,6 +87,19 @@ class VLLMExecutor(BaseExecutor):
         # Pipe communication
         conn: Optional[List[Any]] = [],
     ):
+        self.enable_lora = True if lora_paths is not None else enable_lora
+        self.lora_paths = lora_paths
+        self.max_lora_rank = max_lora_rank
+        self.max_loras_per_batch = 1 if max_loras_per_batch is None else max_loras_per_batch
+        self.max_loaded_loras = max_loaded_loras
+
+        if self.lora_paths is not None and len(self.lora_paths) > 0:
+            self.check_lora_server_args()
+
+        # output lora paths
+        if self.lora_paths is not None:
+            logger.info(f"LoRA paths provided: {[str(lora_path) for lora_path in self.lora_paths]}")
+
         model_runner_params = {
             "model_repo": model_repo,
             "start_layer": start_layer,
@@ -101,10 +115,11 @@ class VLLMExecutor(BaseExecutor):
             "tp_size": tp_size,
             "nccl_port": nccl_port,
             "using_hfcache": use_hfcache,
-            "enable_lora": enable_lora,
-            "max_lora_rank": max_lora_rank,
-            "max_loras_per_batch": max_loras_per_batch,
-            "max_loaded_loras": max_loaded_loras,
+            "enable_lora": self.enable_lora,
+            "max_lora_rank": self.max_lora_rank,
+            "lora_paths": self.lora_paths,
+            "max_loras_per_batch": self.max_loras_per_batch,
+            "max_loaded_loras": self.max_loaded_loras,
             "fully_sharded_loras": fully_sharded_loras,
         }
         logger.debug(
@@ -155,6 +170,19 @@ class VLLMExecutor(BaseExecutor):
             refit_vllm_model(self.model_runner, refit_weight_path=weight_path)
         else:
             logger.warning(f"Unrecognized weight refit mode={self.weight_refit_mode}")
+
+    def check_lora_server_args(self):
+        assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
+
+        # Enable LoRA if any LoRA paths are provided for backward compatibility.
+        if self.lora_paths:
+            if self.enable_lora is None:
+                self.enable_lora = True
+                logger.warning("--enable-lora is set to True because --lora-paths is provided.")
+            elif self.enable_lora is False:
+                logger.warning(
+                    "--enable-lora is set to False, any provided lora_paths will be ignored."
+                )
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
