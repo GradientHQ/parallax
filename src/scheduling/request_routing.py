@@ -717,13 +717,13 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
         lines: List[str] = [p_header, p_sep]
 
         per_pipeline_min, total_capacity, cur_capacity = self.node_manager.report_pipeline_capacity(
-            ready=True
+            ready_only=True
         )
         if per_pipeline_min is None:
             lines.append("Capacity: (no registered pipelines)")
         else:
             lines.append(
-                f"Capacity: total={total_capacity} cur={cur_capacity} per_pipeline={per_pipeline_min}"
+                f"Capacity: total={total_capacity} current capacity={cur_capacity} per_pipeline={per_pipeline_min}"
             )
 
         if not pipelines:

@@ -358,24 +358,29 @@ class Scheduler:
         while self._arrival_ts and now - self._arrival_ts[0] > horizon:
             self._arrival_ts.popleft()
 
-    def dispatch_next_request(self) -> Optional[Tuple[str, List[str], float]]:
-        """Route the next request in the wait pool; returns (request_id, path, latency)."""
+    def dispatch_next_request(
+        self, *, timeout: Optional[float] = None
+    ) -> Optional[Tuple[str, List[str], float]]:
+        """Route the next request in the wait pool; returns (request_id, path, latency).
+
+        If `timeout` is provided, blocks up to `timeout` seconds waiting for a request.
+        """
         # Don't dequeue requests until routing is actually possible.
         if not self.request_router.routing_ready():
             return None
         try:
-            req = self._request_queue.get_nowait()
+            req = (
+                self._request_queue.get(timeout=timeout)
+                if timeout is not None
+                else self._request_queue.get_nowait()
+            )
         except queue.Empty:
-            req = None
-        if req is None:
             return None
         path, latency = self.request_router.find_optimal_path(self.last_refit_time)
         req.routing_table = path
         # Update simple load counters
         for node_id in path:
-            n = self.node_manager.get(node_id)
-            if n is not None:
-                self.node_manager.add_request(node_id)
+            self.node_manager.add_request(node_id)
         logger.debug(
             "Dispatched request %s via path %s (est_lat=%.2fms)", req.request_id, path, latency
         )
@@ -422,7 +427,7 @@ class Scheduler:
             return
 
         # Don't start dispatcher until routing is actually possible.
-        if not self._routing_ready():
+        if not self.request_router.routing_ready():
             return
 
         # Start dispatcher only after successful bootstrap
@@ -490,20 +495,12 @@ class Scheduler:
     def _dispatch_loop(self, poll_interval: float) -> None:
         """Continuously dispatch incoming requests while running."""
         while not self._stop_event.is_set():
-            try:
-                req = self._request_queue.get(timeout=poll_interval)
-                if req is None:
-                    continue
-                path, path_rtt = self.request_router.find_optimal_path()
-                logger.debug(f"Path RTT: {path_rtt}")
-                req.routing_table = path
-                for node_id in path:
-                    self.node_manager.add_request(node_id)
-                logger.debug(
-                    "Dispatched request %s via path %s", getattr(req, "request_id", "?"), path
-                )
-            except queue.Empty:
+            if not self.request_router.routing_ready():
+                time.sleep(max(0.0, poll_interval))
                 continue
+
+            # Block (briefly) waiting for the next request, then dispatch it.
+            _ = self.dispatch_next_request(timeout=poll_interval)
 
     def _wait_for_bootstrap(self, poll_interval: float) -> bool:
         """Wait until enough nodes then run bootstrap. Returns False if stopped."""
