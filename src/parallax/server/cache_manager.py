@@ -151,8 +151,6 @@ class CacheManager:
                     index_n_heads=self.index_n_heads,
                 )
             else:
-                # KVCachePacked for parallax_extensions ops (supports sliding window & attention sink)
-                # New kernel is 35-79% faster than original
                 return KVCachePacked(
                     num_blocks=self.num_gpu_blocks,
                     block_size=self.block_size,
