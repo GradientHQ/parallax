@@ -496,7 +496,7 @@ def initialize_vllm_model_runner(
         max_cpu_loras = kwargs.get("max_loaded_loras")
         fully_sharded_loras = kwargs.get("fully_sharded_loras", False)
 
-        lora_paths = kwargs.get("lora_paths")
+        lora_path = kwargs.get("lora_path")
 
         lora_config = LoRAConfig(
             max_lora_rank=max_lora_rank,
@@ -509,11 +509,11 @@ def initialize_vllm_model_runner(
 
         # Create a simple hash or ID for the LoRA based on path
         # In a real scenario, we might want a more robust ID mapping mechanism
-        lora_name = f"lora_{hash(lora_paths) % 10000}"
-        lora_int_id = abs(hash(lora_paths)) % 10000 + 1
+        lora_name = f"lora_{hash(lora_path) % 10000}"
+        lora_int_id = abs(hash(lora_path)) % 10000 + 1
 
-        lora_req = LoRARequest(lora_name=lora_name, lora_int_id=lora_int_id, lora_path=lora_paths)
-        logger.debug(f"Created LoRA request: {lora_name} (id={lora_int_id}) path={lora_paths}")
+        lora_req = LoRARequest(lora_name=lora_name, lora_int_id=lora_int_id, lora_path=lora_path)
+        logger.debug(f"Created LoRA request: {lora_name} (id={lora_int_id}) path={lora_path}")
 
     vllm_config = VllmConfig(
         model_config=model_config,
