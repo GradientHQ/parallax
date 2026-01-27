@@ -15,13 +15,20 @@ mx::array paged_attention_v1(
     const int64_t block_size,
     const int64_t max_seq_len,
     const float scale,
+    const int window_size,          // Sliding window size (0 = no window)
+    const mx::array& sinks,         // Attention sink biases [num_heads]
+    const int has_sink,             // 1 = use sinks, 0 = ignore sinks
     mx::StreamOrDevice s /* = {} */ // Stream on which to schedule the operation
 );
 
 class PagedAttentionV1 : public mx::Primitive {
   public:
-    explicit PagedAttentionV1(mx::Stream stream, int64_t num_kv_heads, int64_t block_size, int64_t max_seq_len, float scale)
-        : mx::Primitive(stream), num_kv_heads_(num_kv_heads), block_size_(block_size), max_seq_len_(max_seq_len), scale_(scale){};
+    explicit PagedAttentionV1(mx::Stream stream, int64_t num_kv_heads, int64_t block_size,
+                              int64_t max_seq_len, float scale, int window_size,
+                              int has_sink)
+        : mx::Primitive(stream), num_kv_heads_(num_kv_heads), block_size_(block_size),
+          max_seq_len_(max_seq_len), scale_(scale), window_size_(window_size),
+          has_sink_(has_sink) {};
 
     void eval_cpu(
         const std::vector<mx::array>& inputs,
@@ -43,6 +50,8 @@ class PagedAttentionV1 : public mx::Primitive {
     int64_t block_size_;
     int64_t max_seq_len_;
     float scale_;
+    int window_size_;
+    int has_sink_;
 };
 
 } // namespace parallax_ext

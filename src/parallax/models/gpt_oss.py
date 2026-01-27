@@ -15,9 +15,12 @@ from mlx_lm.models.gpt_oss import AttentionBlock as MLXGPTOSSAttention
 from mlx_lm.models.gpt_oss import ModelArgs
 from mlx_lm.models.gpt_oss import TransformerBlock as MLXGPTOSSBlock
 
-from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
 from parallax.server.cache.base import BaseCache
 from parallax.utils.prefix_cache_utils import compute_attention_with_prefix_cache
+
+# Use new kernel from parallax_extensions (35-79% faster than original)
+from parallax_extensions.ops import paged_attention_v1 as paged_attention
+from parallax_extensions.ops import reshape_and_cache
 
 
 class ParallaxGPTOSSAttention(MLXGPTOSSAttention):

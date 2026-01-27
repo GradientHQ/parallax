@@ -93,6 +93,11 @@ inline void from_float(thread float2 &dst, float2 src) { dst = src; }
 inline void from_float(thread float4 &dst, float4 src) { dst = src; }
 inline void from_float(thread Float8_ &dst, Float8_ src) { dst = src; }
 
+inline void to_float(thread float &dst, float src) { dst = src; }
+inline void to_float(thread float2 &dst, float2 src) { dst = src; }
+inline void to_float(thread float4 &dst, float4 src) { dst = src; }
+inline void to_float(thread Float8_ &dst, Float8_ src) { dst = src; }
+
 // BF16 vector data types.
 // #if defined(__HAVE_BFLOAT__)
 
@@ -413,6 +418,29 @@ inline void from_float(thread Bfloat8_ &dst, Float8_ src) {
   dst.y = y;
 }
 
+inline void to_float(thread float2 &dst, Bfloat2_ src) {
+  dst.x = static_cast<float>(src.x);
+  dst.y = static_cast<float>(src.y);
+}
+inline void to_float(thread float &dst, bfloat16_t src) {
+  dst = static_cast<float>(src);
+}
+inline void to_float(thread float4 &dst, Bfloat4_ src) {
+  float2 x;
+  float2 y;
+  to_float(x, src.x);
+  to_float(y, src.y);
+  dst = float4(x.x, x.y, y.x, y.y);
+}
+inline void to_float(thread Float8_ &dst, Bfloat8_ src) {
+  float4 x;
+  float4 y;
+  to_float(x, src.x);
+  to_float(y, src.y);
+  dst.x = x;
+  dst.y = y;
+}
+
 // #endif
 
 // FP16 vector data types.
@@ -528,6 +556,16 @@ inline void from_float(thread Half8_ &dst, Float8_ src) {
   from_float(y, src.y);
   dst.x = x;
   dst.y = y;
+}
+
+inline void to_float(thread float &dst, half src) {
+  dst = static_cast<float>(src);
+}
+inline void to_float(thread float2 &dst, half2 src) { dst = float2(src); }
+inline void to_float(thread float4 &dst, half4 src) { dst = float4(src); }
+inline void to_float(thread Float8_ &dst, Half8_ src) {
+  dst.x = float4(src.x);
+  dst.y = float4(src.y);
 }
 
 // ========================================== FP8 (uchar) vector data types.
@@ -785,6 +823,9 @@ template <typename T, typename CACHE_T, int HEAD_SIZE, int BLOCK_SIZE, int NUM_T
     const constant int &q_stride [[buffer(15)]],
     const constant int &kv_block_stride [[buffer(16)]],
     const constant int &kv_head_stride [[buffer(17)]],
+    const constant int &window_size [[buffer(18)]], // Sliding window size (0 = no window)
+    device const float *sinks [[buffer(19)]],      // Attention sink biases [num_heads]
+    const constant int &has_sink [[buffer(20)]],   // 1 = use sinks, 0 = ignore
     threadgroup char *shared_mem [[threadgroup(0)]],
     uint3 threadgroup_position_in_grid [[threadgroup_position_in_grid]],
     uint3 threadgroups_per_grid [[threadgroups_per_grid]],
@@ -797,6 +838,9 @@ template <typename T, typename CACHE_T, int HEAD_SIZE, int BLOCK_SIZE, int NUM_T
   const int thread_idx = thread_position_in_threadgroup.x;
   constexpr bool USE_PARTITIONING = PARTITION_SIZE > 0;
   const uint32_t context_len = context_lens[seq_idx];
+  const bool use_window = window_size > 0;
+  const int window_start =
+      use_window ? max(int(context_len) - 1 - window_size, 0) : 0;
   if (USE_PARTITIONING && partition_idx * PARTITION_SIZE >= context_len) {
     // No work to do. Terminate the thread block.
     return;
@@ -807,10 +851,16 @@ template <typename T, typename CACHE_T, int HEAD_SIZE, int BLOCK_SIZE, int NUM_T
       USE_PARTITIONING ? PARTITION_SIZE / BLOCK_SIZE : num_context_blocks;
 
   // [start_block_idx, end_block_idx) is the range of blocks to process.
-  const int start_block_idx =
+  int start_block_idx =
       USE_PARTITIONING ? partition_idx * num_blocks_per_partition : 0;
   const int end_block_idx =
       MIN(start_block_idx + num_blocks_per_partition, num_context_blocks);
+  // Fast-path for sliding window: skip blocks entirely before the window.
+  // Only safe in the non-partitioned v1 kernel.
+  if (!USE_PARTITIONING && use_window) {
+    const int window_block_start = window_start / BLOCK_SIZE;
+    start_block_idx = max(start_block_idx, window_block_start);
+  }
   const int num_blocks = end_block_idx - start_block_idx;
 
   // [start_token_idx, end_token_idx) is the range of tokens to process.
@@ -876,7 +926,25 @@ template <typename T, typename CACHE_T, int HEAD_SIZE, int BLOCK_SIZE, int NUM_T
   // x == THREAD_GROUP_SIZE * VEC_SIZE
   // Each thread group fetches x elements from the key at a time.
   constexpr int x = 16 / sizeof(CACHE_T);
+
+  // Initialize softmax with attention sink token
+  // Sink token has K=0, V=0, so Q*K_sink = 0
+  // Sink score is the pre-learned bias from sinks array
   float qk_max = -FLT_MAX;
+  float sink_score = 0.f;
+  const bool use_sink = has_sink != 0;
+  if (use_sink) {
+    sink_score = sinks[head_idx];
+    qk_max = sink_score;
+  }
+
+  // Initialize logits array to -INFINITY
+  // All positions start masked; valid positions will be overwritten with QK scores
+#pragma unroll
+  for (int i = thread_idx; i < num_tokens; i += NUM_THREADS) {
+    logits[i] = -INFINITY;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
 
   // Iterate over the key blocks.
   // Each warp fetches a block of keys for each iteration.
@@ -892,6 +960,22 @@ template <typename T, typename CACHE_T, int HEAD_SIZE, int BLOCK_SIZE, int NUM_T
     const int64_t physical_block_number =
         static_cast<int64_t>(block_table[block_idx]);
 
+    // -------------------------------------------------------------------------
+    // Sliding Window: Block-level optimization
+    // Skip entire block if it's outside the sliding window
+    // Window range is [context_len - 1 - window_size, context_len - 1]
+    // -------------------------------------------------------------------------
+    if (use_window) {
+      const int block_start_pos = block_idx * BLOCK_SIZE;
+      const int block_end_pos =
+          MIN(block_start_pos + BLOCK_SIZE, int(context_len));
+
+      if (block_end_pos <= window_start) {
+        // Entire block is outside the window, skip it
+        continue;
+      }
+    }
+
     // Load a key to registers.
     // Each thread in a thread group has a different part of the key.
     // For example, if the thread group size is 4, then the first thread in the
@@ -901,6 +985,7 @@ template <typename T, typename CACHE_T, int HEAD_SIZE, int BLOCK_SIZE, int NUM_T
       const int physical_block_offset =
           (thread_group_idx + i * NUM_SIMD_LANES) % BLOCK_SIZE;
       const int token_idx = block_idx * BLOCK_SIZE + physical_block_offset;
+
       K_vec k_vecs[NUM_VECS_PER_THREAD];
 
 #pragma unroll
@@ -944,11 +1029,19 @@ template <typename T, typename CACHE_T, int HEAD_SIZE, int BLOCK_SIZE, int NUM_T
 
       if (thread_group_offset == 0) {
         // Store the partial reductions to shared memory.
-        // NOTE: It is required to zero out the masked logits.
-        const bool mask = token_idx >= context_len;
-        logits[token_idx - start_token_idx] = mask ? 0.f : qk;
-        // Update the max value.
-        qk_max = mask ? qk_max : max(qk_max, qk);
+        // NOTE: Window-masked logits must be -INFINITY so exp() -> 0.
+        // Padding (token_idx >= context_len) should be 0 to avoid -inf * 0 in V.
+        const bool in_context = token_idx < context_len;
+        const bool in_window = !use_window || token_idx >= window_start;
+        const bool valid = in_context && in_window;
+        if (valid) {
+          logits[token_idx - start_token_idx] = qk;
+          qk_max = max(qk_max, qk);
+        } else if (in_context) {
+          logits[token_idx - start_token_idx] = -INFINITY;
+        } else {
+          logits[token_idx - start_token_idx] = 0.f;
+        }
       }
     }
   }
@@ -976,6 +1069,13 @@ template <typename T, typename CACHE_T, int HEAD_SIZE, int BLOCK_SIZE, int NUM_T
 
   // Get the sum of the exp values.
   float exp_sum = 0.f;
+
+  // Add sink contribution once so it isn't multiplied by NUM_THREADS.
+  if (use_sink && thread_idx == 0) {
+    exp_sum += exp(sink_score - qk_max);
+  }
+
+  // Add contributions from regular tokens
   for (int i = thread_idx; i < num_tokens; i += NUM_THREADS) {
     float val = exp(logits[i] - qk_max);
     logits[i] = val;
@@ -1008,6 +1108,7 @@ template <typename T, typename CACHE_T, int HEAD_SIZE, int BLOCK_SIZE, int NUM_T
   using V_vec = typename Vec<T, V_VEC_SIZE>::Type;
   using L_vec = typename Vec<T, V_VEC_SIZE>::Type;
   using Float_L_vec = typename FloatVec<L_vec>::Type;
+  using Float_V_vec = typename FloatVec<V_vec>::Type;
   using V_quant_vec = typename Vec<CACHE_T, V_VEC_SIZE>::Type;
 
   constexpr int NUM_V_VECS_PER_ROW = BLOCK_SIZE / V_VEC_SIZE;
@@ -1032,10 +1133,9 @@ template <typename T, typename CACHE_T, int HEAD_SIZE, int BLOCK_SIZE, int NUM_T
         static_cast<int64_t>(block_table[block_idx]);
     const int physical_block_offset = (lane % NUM_V_VECS_PER_ROW) * V_VEC_SIZE;
     const int token_idx = block_idx * BLOCK_SIZE + physical_block_offset;
-    L_vec logits_vec;
+
     Float_L_vec logits_float_vec = *reinterpret_cast<threadgroup Float_L_vec *>(
         logits + token_idx - start_token_idx);
-    from_float(logits_vec, logits_float_vec);
 
     const device CACHE_T *v_ptr = v_cache + physical_block_number * kv_block_stride +
                                   kv_head_idx * kv_head_stride;
@@ -1068,7 +1168,9 @@ template <typename T, typename CACHE_T, int HEAD_SIZE, int BLOCK_SIZE, int NUM_T
                 token_idx + j < context_len ? v_vec_ptr[j] : zero_value;
           }
         }
-        accs[i] += dot(logits_vec, v_vec);
+        Float_V_vec v_float_vec;
+        to_float(v_float_vec, v_vec);
+        accs[i] += dot(logits_float_vec, v_float_vec);
       }
     }
   }
@@ -1275,6 +1377,9 @@ template <typename T, int HEAD_SIZE, int NUM_THREADS, int NUM_SIMD_LANES,
       const constant int &q_stride [[buffer(15)]],                             \
       const constant int &kv_block_stride [[buffer(16)]],                      \
       const constant int &kv_head_stride [[buffer(17)]],                       \
+      const constant int &window_size [[buffer(18)]],                           \
+      device const float *sinks [[buffer(19)]],                                \
+      const constant int &has_sink [[buffer(20)]],                             \
       threadgroup char *shared_mem [[threadgroup(0)]],                         \
       uint3 threadgroup_position_in_grid [[threadgroup_position_in_grid]],     \
       uint3 threadgroups_per_grid [[threadgroups_per_grid]],                   \
@@ -1365,11 +1470,17 @@ template <typename T, int HEAD_SIZE, int NUM_THREADS, int NUM_SIMD_LANES,
   instantiate_paged_attention_heads(type, cache_type, 64, num_threads,         \
                                     num_simd_lanes, partition_size);
 
-// TODO: tune num_threads = 256
 // NOTE: partition_size = 0
-#define instantiate_paged_attention_v1(type, cache_type, num_simd_lanes)       \
-  instantiate_paged_attention_block_size(type, cache_type, 256,                \
+#define instantiate_paged_attention_v1_threads(                                \
+    type, cache_type, num_simd_lanes, num_threads)                             \
+  instantiate_paged_attention_block_size(type, cache_type, num_threads,        \
                                          num_simd_lanes, 0);
+#define instantiate_paged_attention_v1(type, cache_type, num_simd_lanes)       \
+  instantiate_paged_attention_v1_threads(type, cache_type, num_simd_lanes, 64); \
+  instantiate_paged_attention_v1_threads(type, cache_type, num_simd_lanes,     \
+                                         128);                                 \
+  instantiate_paged_attention_v1_threads(type, cache_type, num_simd_lanes,     \
+                                         256);
 
 // TODO: tune num_threads = 256
 // NOTE: partition_size = 512
