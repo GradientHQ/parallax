@@ -116,8 +116,9 @@ class TestPagedKVIntegration(unittest.TestCase):
             slot_mapping=slot_mapping_tensor,
         )
 
-        # Force eval to ensure writing is done
+        # Force sync to ensure writing is done (kernel is async and has no output handle)
         mx.eval(key_cache, value_cache)
+        mx.synchronize()
 
         # 5. Verify Cache Content
 
