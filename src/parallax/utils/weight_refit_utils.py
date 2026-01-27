@@ -8,6 +8,7 @@ import struct
 from typing import Dict
 
 import torch
+import torch.multiprocessing
 from safetensors.torch import save_file
 
 # CID constants
@@ -42,6 +43,9 @@ def concat_weight_partition(original_tensors, save_directory=None):
     If save_directory is None, use direct mode to update weight from tensor in host memory.
     Otherwise save tensors to disk and update weights from disk.
     """
+    # Set sharing strategy to avoid too many open files error
+    torch.multiprocessing.set_sharing_strategy("file_system")
+
     sorted_keys = sorted(original_tensors.keys())
     tensors = {}
     res_tensors = {}
