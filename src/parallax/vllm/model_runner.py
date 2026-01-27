@@ -597,6 +597,7 @@ def initialize_vllm_model_runner(
             logger.warning(f"Failed to capture CUDA graph during initialization: {e}")
 
         if enable_lora:
+            logger.info(f"Initializing lora adapters...")
             model_runner.add_lora(lora_req)
 
     return model_runner, config, tokenizer
@@ -615,9 +616,20 @@ def refit_vllm_model(
             model_runner.model.load_weights(weights=refit_tensors)
     elif refit_weight_path is not None:
         logger.info(f"Executor begins weight refit from disk files")
-        config_overrides = {"load_config": {"download_dir": refit_weight_path}}
-        model_runner.update_config(overrides=config_overrides)
-        model_runner.reload_weights()
+        # config_overrides = {"load_config": {"download_dir": refit_weight_path}}
+        # model_runner.update_config(overrides=config_overrides)
+        # model_runner.reload_weights()
+
+        lora_name = f"lora_{hash(refit_weight_path) % 10000}"
+        lora_int_id = abs(hash(refit_weight_path)) % 10000 + 1
+        lora_req = LoRARequest(lora_name=lora_name, lora_int_id=lora_int_id, lora_path=lora_path)
+        logger.info(f"Created LoRA request: {lora_name} (id={lora_int_id}) path={lora_path}")
+
+        before_loras = model_runner.list_loras()
+        logger.info(f"Before lora refit number of lora adapters: {len(before_loras)}")
+        model_runner.add_lora(lora_req)
+        after_loras = model_runner.list_loras()
+        logger.info(f"After lora refit number of lora adapters: {len(after_loras)}")
     else:
         assert False, "Weight refit needs host tensors or weight path"
     logger.info(f"Finish weight refit")
