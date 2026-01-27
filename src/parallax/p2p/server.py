@@ -277,8 +277,6 @@ def check_and_run_weight_refit(gradient_server, message):
     # add sleep 10s for direct connection first
     logger.debug(f"Received weight refit message: {message}.")
     logger.info(f"Start dealing weight refit version: {weight_version}.")
-    logger.info(f"Wait 10s for lattica direct connection.")
-    time.sleep(10)
 
     # step2. download weight
     weight_dir = os.path.join("/tmp", str(time_stamp))
