@@ -35,6 +35,7 @@ class Scheduler:
         nodes: List[Node],
         min_nodes_bootstrapping: int = 1,
         enable_weight_refit: bool = False,
+        weight_refit_mode: str = "disk",
         strategy: Literal["greedy", "dp"] = "dp",
         routing_strategy: Literal["rr", "dp"] = "rr",
         *,
@@ -64,6 +65,7 @@ class Scheduler:
         self.num_layers = model_info.num_layers
         self.routing_strategy: Literal["rr", "dp"] = routing_strategy
         self.enable_weight_refit = enable_weight_refit
+        self.weight_refit_mode = weight_refit_mode
         self.refit_request = {}
         self.node_manager = NodeManager(initial_nodes=nodes)
 
@@ -188,11 +190,15 @@ class Scheduler:
     def update_last_refit_time(self):
         min_refit_time = None
         for node in self.node_manager.nodes:
+            cur_node_refit_time = node.last_refit_time
+            if cur_node_refit_time < self.last_refit_time:
+                continue
             if min_refit_time is None:
-                min_refit_time = node.last_refit_time
+                min_refit_time = cur_node_refit_time
             else:
-                min_refit_time = min(min_refit_time, node.last_refit_time)
-        self.last_refit_time = min_refit_time
+                min_refit_time = min(min_refit_time, cur_node_refit_time)
+        if min_refit_time is not None:
+            self.last_refit_time = min_refit_time
         return self.last_refit_time
 
     def update_node_info(
@@ -363,7 +369,7 @@ class Scheduler:
             req = None
         if req is None:
             return None
-        path, latency = self.request_router.find_optimal_path()
+        path, latency = self.request_router.find_optimal_path(self.last_refit_time)
         req.routing_table = path
         # Update simple load counters
         for node_id in path:
@@ -475,7 +481,7 @@ class Scheduler:
             self._process_joins()
             self._process_leaves()
             now = time.time()
-            if now - last_hb_check >= max(0.5, poll_interval) and not self.enable_weight_refit:
+            if now - last_hb_check >= max(0.5, poll_interval):
                 self.checking_node_heartbeat()
                 last_hb_check = now
             self._wake_event.wait(timeout=poll_interval)
@@ -488,9 +494,7 @@ class Scheduler:
                 req = self._request_queue.get(timeout=poll_interval)
                 if req is None:
                     continue
-                path, path_rtt = self.request_router.find_optimal_path(
-                    self.node_manager.active_nodes, self.num_layers
-                )
+                path, path_rtt = self.request_router.find_optimal_path()
                 logger.debug(f"Path RTT: {path_rtt}")
                 req.routing_table = path
                 for node_id in path:

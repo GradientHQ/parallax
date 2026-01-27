@@ -151,6 +151,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--enable-weight-refit", action="store_true", help="Enable runtime weight refit"
     )
+    parser.add_argument(
+        "--weight-refit-mode",
+        type=str,
+        default="disk",
+        help="Refit mode to choose where. Choices 'cpu' or 'disk'",
+    )
 
     # GPU/SGLang specialized configuration
     parser.add_argument(
@@ -234,7 +240,7 @@ def parse_args() -> argparse.Namespace:
         "--lora-backend",
         choices=["triton", "csgmv"],
         default="triton",
-        help="Choose the kernel backend for multi-LoRA serving.",
+        help="Choose the kernel backend for multi-LoRA serving. (SGLang only)",
     )
 
     parser.add_argument(
@@ -242,11 +248,18 @@ def parse_args() -> argparse.Namespace:
         choices=[16, 32, 64, 128],
         type=int,
         default=16,
-        help="Maximum chunk size for the ChunkedSGMV LoRA backend. Only used when --lora-backend is 'csgmv'. Choosing a larger value might improve performance.",
+        help="Maximum chunk size for the ChunkedSGMV LoRA backend. Only used when --lora-backend is 'csgmv'. Choosing a larger value might improve performance. (SGLang only)",
+    )
+
+    parser.add_argument(
+        "--fully-sharded-loras",
+        action="store_true",
+        help="By default, only half of the LoRA computation is sharded with tensor parallelism. Enabling this will use the fully sharded layers. At high sequence length, max rank or tensor parallel size, this is likely faster. (vLLM only)",
     )
 
     # Tensor parallel configuration
     parser.add_argument("--tp-size", type=int, default=1, help="Tensor parallel size")
+
     parser.add_argument("--dp-size", type=int, default=1, help="Data parallel size")
 
     parser.add_argument(
@@ -336,6 +349,10 @@ def validate_args(args: argparse.Namespace) -> None:
 
     if getattr(args, "request_timeout_s", None) is not None and args.request_timeout_s <= 0:
         raise ValueError("request_timeout_s must be positive")
+
+    # Validate weight-refit args
+    if args.enable_weight_refit and args.weight_refit_mode not in ["cpu", "disk"]:
+        raise ValueError("Unrecognized refit mode. Choose 'cpu' or 'disk'")
 
     # Validate supported dtypes
     dtype_list = [

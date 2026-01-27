@@ -35,11 +35,14 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]],
         ("gate_up_proj", "up_proj", 1),
     ]
 
+    num_fused_shared_experts = getattr(self, "num_fused_shared_experts", 0)
+    num_experts = self.config.n_routed_experts + num_fused_shared_experts
+
     expert_params_mapping = FusedMoE.make_expert_params_mapping(
         ckpt_gate_proj_name="gate_proj",
         ckpt_down_proj_name="down_proj",
         ckpt_up_proj_name="up_proj",
-        num_experts=self.config.n_routed_experts,
+        num_experts=num_experts,
     )
 
     if is_nextn:
@@ -54,6 +57,13 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]],
     params_dict = dict(self.named_parameters())
     weight_names = []
     for name, loaded_weight in weights:
+        num_fused_shared_experts = getattr(self, "num_fused_shared_experts", 0)
+        if num_fused_shared_experts > 0 and "mlp.shared_experts" in name:
+            name = name.replace(
+                "mlp.shared_experts",
+                f"mlp.experts.{self.config.n_routed_experts}",
+            )
+
         ############################################################################
         ## TODO: remove when sglang code support pipeline parallelism
         ## This is a patch code for sgalng
@@ -174,6 +184,7 @@ def apply_glm4_moe_monkey_patch():
     """Apply monkey patches to GLM4 Moe for PP support and weight loading."""
     import sglang.srt.models.glm4_moe as glm4_moe_module
 
+    @torch.no_grad()
     def pp_forward(
         self,
         input_ids: torch.Tensor,

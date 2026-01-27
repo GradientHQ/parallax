@@ -235,7 +235,7 @@ def join_command(args, passthrough_args: list[str] | None = None):
     if not _flag_present(passthrough_args, ["--max-num-tokens-per-batch"]):
         cmd.extend(["--max-num-tokens-per-batch", "4096"])
     if not _flag_present(passthrough_args, ["--max-sequence-length"]):
-        cmd.extend(["--max-sequence-length", "2048"])
+        cmd.extend(["--max-sequence-length", "7168"])
     if not _flag_present(passthrough_args, ["--max-batch-size"]):
         cmd.extend(["--max-batch-size", "8"])
     if not _flag_present(passthrough_args, ["--kv-block-size"]):

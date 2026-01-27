@@ -219,9 +219,9 @@ def check_and_run_weight_refit(gradient_server, message):
         index_map:  Dict[str],  key(weight_name): value(cid)
     """
 
-    def _download_weight_thread(weight_dir, cid):
+    def _download_weight_thread(cid):
         raw_data = None
-        time_out = 10 * 60  # 10 minutes timeout
+        time_out = 20 * 60  # 20 minutes timeout
         time_begin_get_block = time.time()
         time_end_get_block = None
         peer_id = None
@@ -277,8 +277,6 @@ def check_and_run_weight_refit(gradient_server, message):
     # add sleep 10s for direct connection first
     logger.debug(f"Received weight refit message: {message}.")
     logger.info(f"Start dealing weight refit version: {weight_version}.")
-    logger.info(f"Wait 10s for lattica direct connection.")
-    time.sleep(10)
 
     # step2. download weight
     weight_dir = os.path.join("/tmp", str(time_stamp))
@@ -293,7 +291,7 @@ def check_and_run_weight_refit(gradient_server, message):
             else:
                 cid = cid_list.pop()
                 logger.info(f"Start downloading refit weight {cid}")
-                res, tensors_loaded = _download_weight_thread(weight_dir, cid)
+                res, tensors_loaded = _download_weight_thread(cid)
                 if res:
                     tensors.update(tensors_loaded)
                 else:
@@ -306,9 +304,19 @@ def check_and_run_weight_refit(gradient_server, message):
 
         # step3. concat weight
         # workaround: create sub-process to avoid GIL issues for lattica
-        new_tensors = concat_weight_partition(tensors)
-        gradient_server.conn.send(new_tensors)
-        logger.info(f"New tensors sent to executor")
+        logger.info(f"Start sub-process to concat weight partitions in {weight_dir}")
+        if gradient_server.weight_refit_mode == "cpu":
+            new_tensors = concat_weight_partition(tensors)
+            gradient_server.conn.send(new_tensors)
+        elif gradient_server.weight_refit_mode == "disk":
+            process = multiprocessing.Process(
+                target=concat_weight_partition,
+                args=(tensors, weight_dir),
+            )
+            process.start()
+            process.join()
+        else:
+            logger.warning(f"Unrecognized weight refit mode: {gradient_server.weight_refit_mode}")
 
         # step4. send ipc message to update weight
         gradient_server.connection_handler.ipc_weight_refit(weight_dir, weight_version)
@@ -376,6 +384,7 @@ class GradientServer:
         self.param_mem_ratio = param_mem_ratio
         self.kvcache_mem_ratio = kvcache_mem_ratio
         self.enable_weight_refit = False
+        self.weight_refit_mode = "disk"
         self.last_refit_time = 0.0
         self.refit_finish = True
         self.refit_timestamp_history = []
@@ -411,6 +420,7 @@ class GradientServer:
                 model_name=self.model_name,
                 tp_size=self.tp_size,
                 enable_weight_refit=self.enable_weight_refit,
+                weight_refit_mode=self.weight_refit_mode,
                 status=self.status.value,
                 _layer_allocation_changed=self._layer_allocation_changed,
             )
@@ -526,6 +536,7 @@ class GradientServer:
                 self.model_name = response.get("model_name")
                 self.tp_size = response.get("tp_size")
                 self.enable_weight_refit = response.get("enable_weight_refit")
+                self.weight_refit_mode = response.get("weight_refit_mode")
 
                 # Sync to shared state if available
                 self._sync_to_shared_state()
@@ -1026,6 +1037,7 @@ def _run_p2p_server_process(
                 model_name=server.model_name,
                 tp_size=server.tp_size,
                 enable_weight_refit=False,
+                weight_refit_mode="disk",
                 status=server.status.value,
             )
 

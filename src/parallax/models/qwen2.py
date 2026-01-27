@@ -4,6 +4,10 @@ hidden_dimefines the Qwen3 model.
 
 from typing import Optional
 
+from parallax_utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention
 from mlx_lm.models.qwen2 import Attention as MLXQwen2Attention
@@ -11,6 +15,7 @@ from mlx_lm.models.qwen2 import ModelArgs
 from mlx_lm.models.qwen2 import TransformerBlock as MLXQwen2Block
 
 from parallax.server.cache.base import BaseCache
+from parallax.utils.prefix_cache_utils import compute_attention_with_prefix_cache
 from parallax_extensions.ops import paged_attention_v1, reshape_and_cache
 
 
@@ -29,6 +34,8 @@ class ParallaxQwen2Attention(MLXQwen2Attention):
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
+        prefix_lens: Optional[mx.array] = None,
+        **kwargs,
     ) -> mx.array:
         """
         Attention forward pass with explicit KV cache handling.
@@ -40,6 +47,7 @@ class ParallaxQwen2Attention(MLXQwen2Attention):
             block_tables: (batch, max_blocks) - PagedKV block tables.
             context_lengths: (batch,) - PagedKV sequence lengths.
             slot_mapping: (batch * target_len,) - Flattened slot mapping.
+            prefix_lens: (batch,) - Number of prefix tokens already cached (for RoPE offset).
 
         Returns:
             output: (batch, target_len, hidden_dim) - Output hidden states.
@@ -58,6 +66,8 @@ class ParallaxQwen2Attention(MLXQwen2Attention):
 
         if target_len == 1:
             current_pos = context_lengths - 1
+        elif prefix_lens is not None:
+            current_pos = prefix_lens
         else:
             current_pos = 0
         queries_rotated = self.rope(queries_new, offset=current_pos)
@@ -91,16 +101,42 @@ class ParallaxQwen2Attention(MLXQwen2Attention):
             )
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
         else:
-            # Prefill Phase: Use Standard Self-Attention on local data
-            output = scaled_dot_product_attention(
-                queries_rotated,
-                keys_rotated,
-                values_new.transpose(0, 2, 1, 3),
-                scale=self.scale,
-                mask=mask,
-                cache=None,
-            )
-            output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
+            # Prefill Phase: Need to attend to both cached prefix and new tokens
+            # Check if any request has prefix cache
+            has_prefix_cache = prefix_lens is not None and bool(mx.any(prefix_lens > 0))
+
+            if has_prefix_cache:
+                # Use shared prefix cache handling with batch processing
+                k_new = keys_rotated  # (batch, n_kv_heads, target_len, head_dim)
+                v_new = values_new.transpose(
+                    0, 2, 1, 3
+                )  # (batch, n_kv_heads, target_len, head_dim)
+                output = compute_attention_with_prefix_cache(
+                    queries_rotated,  # (batch, n_heads, target_len, head_dim)
+                    k_new,
+                    v_new,
+                    cache,
+                    block_tables,
+                    prefix_lens,
+                    target_len,
+                    self.scale,
+                    self.n_kv_heads,
+                    mask=mask,
+                )
+            else:
+                # No prefix cache, use standard self-attention on local data only
+                if mask is not None:
+                    mask = mx.array(mask, dtype=queries_rotated.dtype)
+
+                output = scaled_dot_product_attention(
+                    queries_rotated,
+                    keys_rotated,
+                    values_new.transpose(0, 2, 1, 3),
+                    scale=self.scale,
+                    mask=mask,
+                    cache=None,
+                )
+                output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
 
         return self.o_proj(output)
 
@@ -133,6 +169,7 @@ class ParallaxQwen2Block(MLXQwen2Block):
             block_tables=block_tables,
             context_lengths=context_lengths,
             slot_mapping=slot_mapping,
+            **kwargs,
         )
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))

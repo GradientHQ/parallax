@@ -104,7 +104,7 @@ class RPCConnectionHandler(ConnectionHandler):
             layer_allocation = self.get_layer_allocation(node.node_id)
             refit_request = {}
             if self.scheduler.refit_request:
-                if node.node_id not in self.scheduler.refit_set:
+                if node.node_id not in self.scheduler.refit_set and node.is_active:
                     refit_request = self.scheduler.refit_request
                     self.scheduler.refit_set.add(node.node_id)
             return layer_allocation, refit_request
@@ -180,6 +180,7 @@ class RPCConnectionHandler(ConnectionHandler):
                         "end_layer": end_layer,
                         "tp_size": node.hardware.num_gpus,
                         "enable_weight_refit": self.scheduler.enable_weight_refit,
+                        "weight_refit_mode": self.scheduler.weight_refit_mode,
                     }
         return {}
 

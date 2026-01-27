@@ -4,7 +4,12 @@ hidden_dimefines the Qwen3 model.
 
 from typing import Any, List, Optional
 
+from parallax_utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 import mlx.core as mx
+from mlx.nn.layers.distributed import shard_inplace, shard_linear
 from mlx_lm.models.base import create_causal_mask, scaled_dot_product_attention
 from mlx_lm.models.gpt_oss import AttentionBlock as MLXGPTOSSAttention
 from mlx_lm.models.gpt_oss import ModelArgs
@@ -12,6 +17,7 @@ from mlx_lm.models.gpt_oss import TransformerBlock as MLXGPTOSSBlock
 
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
 from parallax.server.cache.base import BaseCache
+from parallax.utils.prefix_cache_utils import compute_attention_with_prefix_cache
 
 
 class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
@@ -30,10 +36,21 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
         window_size: Optional[int] = None,
+        prefix_lens: Optional[mx.array] = None,
         **kwargs,
     ) -> mx.array:
         """
         Attention forward pass with PagedAttention integration.
+
+        Args:
+            x: (batch, target_len, hidden_dim) - Input hidden states for the current query segment.
+            mask: (batch, n_q_heads, target_len, source_len)
+            cache: BaseCache object containing the layer cache.
+            block_tables: (batch, max_blocks) - PagedKV block tables.
+            context_lengths: (batch,) - PagedKV sequence lengths.
+            slot_mapping: (batch * target_len,) - Flattened slot mapping.
+            window_size: Optional window size for sliding window attention.
+            prefix_lens: (batch,) - Number of prefix tokens already cached (for RoPE offset).
         """
         batch, target_len, _ = x.shape
 
@@ -53,14 +70,16 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
 
         if target_len == 1:
             current_pos = context_lengths - 1
+        elif prefix_lens is not None:
+            current_pos = prefix_lens
         else:
             current_pos = 0
         queries_rotated = self.rope(queries_new, offset=current_pos)
         keys_rotated = self.rope(keys_new, offset=current_pos)
 
-        # Update Paged Cache
         block_size = key_cache_global.shape[3]
 
+        # Update Paged Cache before attention computation
         reshape_and_cache(
             keys_rotated.transpose(0, 2, 1, 3),
             values_new,
@@ -74,6 +93,7 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
 
         # Compute Attention
         if target_len == 1:
+            # Decode Phase: Use Paged Attention Kernel
             output = paged_attention(
                 queries_rotated,
                 key_cache_global,
@@ -88,22 +108,56 @@ class ParallaxGPTOSSAttention(MLXGPTOSSAttention):
             )
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
         else:
-            if window_size is not None:
-                mask_prefill = create_causal_mask(target_len, offset=0, window_size=window_size)
-                mask_prefill = (1 - mask_prefill) * -1e9
-                mask = mask + mask_prefill
+            # Prefill Phase: Need to attend to both cached prefix and new tokens
+            # Check if any request has prefix cache
+            has_prefix_cache = prefix_lens is not None and bool(mx.any(prefix_lens > 0))
 
-            mask = mask.astype(queries_rotated.dtype)
-            output = scaled_dot_product_attention(
-                queries_rotated,
-                keys_rotated,
-                values_new.transpose(0, 2, 1, 3),
-                scale=self.sm_scale,
-                mask=mask,
-                cache=None,
-                sinks=self.sinks,
-            )
-            output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
+            logger.debug("Prefill phase: prefix_lens=%s", prefix_lens)
+            logger.debug("Prefill phase: has_prefix_cache=%s", has_prefix_cache)
+
+            if has_prefix_cache:
+                # Use shared prefix cache handling with batch processing
+                k_new = keys_rotated  # (batch, n_kv_heads, target_len, head_dim)
+                v_new = values_new.transpose(
+                    0, 2, 1, 3
+                )  # (batch, n_kv_heads, target_len, head_dim)
+                output = compute_attention_with_prefix_cache(
+                    queries_rotated,  # (batch, n_heads, target_len, head_dim)
+                    k_new,
+                    v_new,
+                    cache,
+                    block_tables,
+                    prefix_lens,
+                    target_len,
+                    self.sm_scale,
+                    self.num_key_value_heads,
+                    mask=mask,
+                    sinks=self.sinks,
+                    window_size=window_size,
+                )
+            else:
+                # No prefix cache, use standard self-attention on local data only
+                if window_size is not None:
+                    mask_prefill = create_causal_mask(target_len, offset=0, window_size=window_size)
+                    mask_prefill = (1 - mask_prefill) * -1e9
+                    if mask is not None:
+                        mask = mask + mask_prefill
+                    else:
+                        mask = mask_prefill
+
+                if mask is not None:
+                    mask = mask.astype(queries_rotated.dtype)
+
+                output = scaled_dot_product_attention(
+                    queries_rotated,
+                    keys_rotated,
+                    values_new.transpose(0, 2, 1, 3),
+                    scale=self.sm_scale,
+                    mask=mask,
+                    cache=None,
+                    sinks=self.sinks,
+                )
+                output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
 
         return self.o_proj(output)
 
@@ -157,6 +211,30 @@ class ParallaxGPTOSSBlock(MLXGPTOSSBlock):
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
         return out
+
+    def shard(self):
+        group = mx.distributed.init()
+        N = group.size()
+        r = group.rank()
+        # Shard the self attention
+        self.self_attn.q_proj = shard_linear(self.self_attn.q_proj, "all-to-sharded", group=group)
+        self.self_attn.k_proj = shard_linear(self.self_attn.k_proj, "all-to-sharded", group=group)
+        self.self_attn.v_proj = shard_linear(self.self_attn.v_proj, "all-to-sharded", group=group)
+        self.self_attn.o_proj = shard_linear(self.self_attn.o_proj, "sharded-to-all", group=group)
+        num_attention_heads = self.self_attn.num_attention_heads // N
+        self.self_attn.sinks = self.self_attn.sinks[
+            num_attention_heads * r : num_attention_heads * (r + 1)
+        ]
+        self.self_attn.num_attention_heads = num_attention_heads
+        self.self_attn.num_key_value_heads = self.self_attn.num_key_value_heads // N
+
+        # Shard the MLP
+        shard_inplace(self.mlp.experts.gate_proj, "all-to-sharded", group=group)
+        shard_inplace(self.mlp.experts.up_proj, "all-to-sharded", group=group)
+        shard_inplace(self.mlp.experts.down_proj, "sharded-to-all", group=group)
+        if r > 0:
+            # set the bias to 0 for the down proj on the non-zero ranks so that bias only be added once.
+            self.mlp.experts.down_proj.bias = mx.zeros_like(self.mlp.experts.down_proj.bias)
 
     @classmethod
     def get_architecture(cls):

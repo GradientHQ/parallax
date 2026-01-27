@@ -2,10 +2,13 @@
 MLX-LM backend implementation of high level executor
 """
 
+import logging
+import pickle
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import mlx.core as mx
+import numpy as np
 
 from parallax.server.cache_manager import CacheManager
 from parallax.server.executor.base_executor import BaseExecutor
@@ -87,12 +90,23 @@ class MLXExecutor(BaseExecutor):
         shared_state: Optional[dict] = None,
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
+        weight_refit_mode: Optional[str] = "disk",
         # Pipe communication
-        conn: Optional[Any] = None,
+        conn: Optional[List[Any]] = [],
     ):
+        group = mx.distributed.init()
+        tp_size = group.size()
+        tp_rank = group.rank()
+
         logger.debug(
-            f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer})"
+            f"Initializing MLX sharded model loader for repo={model_repo}, layers=[{start_layer}, {end_layer}), tp_rank={tp_rank}, tp_size={tp_size}"
         )
+
+        try:
+            mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
+        except Exception:
+            logger.warning(f"Using mlx without metal backend.")
+
         self.shard_loader = MLXModelLoader(
             model_repo,
             start_layer=start_layer,
@@ -149,9 +163,6 @@ class MLXExecutor(BaseExecutor):
         index_n_heads = self.config.get("index_n_heads", None)
 
         layer_types = get_layer_types(self.config, start_layer, end_layer)
-        logger.debug(f"layer_types: {layer_types}")
-        time.sleep(5)
-
         sliding_window = self.config.get("sliding_window", None)
         use_sliding_window = self.config.get("use_sliding_window", None)
         if use_sliding_window is False:
@@ -175,7 +186,7 @@ class MLXExecutor(BaseExecutor):
         )
         self.cache_manager = CacheManager(
             num_layers=self.num_shard_layers,
-            num_kv_heads=num_key_value_heads,
+            num_kv_heads=num_key_value_heads // tp_size,
             head_dim=head_dim,
             dtype=self.dtype,
             block_size=kv_block_size,
@@ -215,13 +226,9 @@ class MLXExecutor(BaseExecutor):
             tp_size=tp_size,
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
+            weight_refit_mode=weight_refit_mode,
             conn=conn,
         )
-
-        try:
-            mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
-        except Exception:
-            logger.warning(f"Using mlx without metal backend.")
 
         # Prefix Cache Manager
         self.enable_prefix_cache = enable_prefix_cache
@@ -233,15 +240,44 @@ class MLXExecutor(BaseExecutor):
         #     dtype=self.dtype,
         #     page_size=1,
         # )
-
         logger.debug(
-            f"CacheManager ready; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}"
+            f"mlx_executor initialized; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}, total memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
         )
+
+    def _tensor_parallel_broadcast_pyobj(self, broadcast_obj):
+        """Wrapper for broadcast pyobject in TP group using send/recv with explicit sync"""
+        if self.tp_size <= 1:
+            return broadcast_obj
+
+        data_len = 0
+        data = None
+        if self.tp_rank == 0:
+            # Rank 0 prepares data
+            data = pickle.dumps(broadcast_obj)
+            data_len = len(data)
+
+        # Broadcast length using all_sum
+        data_len_arr = mx.array([data_len], dtype=mx.int32)
+        data_len_arr = mx.distributed.all_sum(data_len_arr)
+        data_len = int(data_len_arr[0])
+
+        if data is not None:
+            data_arr = mx.array(np.frombuffer(data, dtype=np.uint8))
+        else:
+            data_arr = mx.zeros((data_len,), dtype=mx.uint8)
+
+        data_arr = mx.distributed.all_sum(data_arr)
+        data = pickle.loads(np.array(data_arr).tobytes())
+        return data
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
-        if not requests:
+        if self.tp_size > 1:
+            requests = self._tensor_parallel_broadcast_pyobj(requests)
+
+        if len(requests) == 0:
             return
+
         if self.is_first_peer:
             # First peer can receive InitialRequests from the client RPC,
             # or IntermediateRequests from the last peer.
@@ -342,8 +378,11 @@ class MLXExecutor(BaseExecutor):
         # Note: Paged Attention writes KV cache in-place within the model (via reshape_and_cache).
         # The returned 'hidden_states' is what we need.
         # The returned cache tuple (_, _) is ignored/unused here.
-        logger.debug(f"prefix_cache is {'on' if self.enable_prefix_cache else 'off'}")
-        logger.debug(f"prefix_lens: {prepared_inputs.get('prefix_lens')}")
+
+        # Check if this is a prefill batch
+        is_prefill_batch = any(req.is_prefill for req in prepared_inputs["requests"])
+
+        start_time = time.time()
         hidden_states = self.model_shard(
             h_or_tokens=prepared_inputs["h_or_tokens"],
             cache=prepared_inputs["cache"],
@@ -354,9 +393,35 @@ class MLXExecutor(BaseExecutor):
             state_slot_mapping=prepared_inputs.get("state_slot_mapping"),
             prefix_lens=prepared_inputs.get("prefix_lens"),  # For RoPE offset in prefix cache
         )
+        mx.eval(hidden_states)
+
+        if logger.isEnabledFor(logging.DEBUG):
+            forward_time = (time.time() - start_time) * 1000
+
+            if is_prefill_batch:
+                # Log prefill time and prefix cache hit info
+                total_tokens = sum(
+                    prepared_inputs.get(
+                        "actual_processed_lengths",
+                        [req.total_length for req in prepared_inputs["requests"]],
+                    )[i]
+                    for i, req in enumerate(prepared_inputs["requests"])
+                    if req.is_prefill
+                )
+                matched_tokens = sum(
+                    prepared_inputs.get("prefix_lens", [0] * len(prepared_inputs["requests"]))[i]
+                    for i, req in enumerate(prepared_inputs["requests"])
+                    if req.is_prefill
+                )
+                logger.info(
+                    f"[PREFILL] time: {forward_time:.3f} ms, "
+                    f"tokens: {total_tokens}, prefix_cached: {matched_tokens}"
+                )
+            else:
+                logger.debug(f"model forward pass done, time: {forward_time:.3f} ms")
 
         logger.debug(
-            f"Processing batch with {len(prepared_inputs['requests'])} requests, "
+            f"Processed batch of {len(prepared_inputs['requests'])} requests, "
             f"request status: {prepared_inputs['requests'][0].status}, "
             f"hidden_states shape: {hidden_states.shape}"
         )
@@ -429,7 +494,6 @@ class MLXExecutor(BaseExecutor):
 
             # Return dict with token_ids and optional probs
             return {"hidden_states": token_ids, "probs": token_probs}
-
         # Intermediate peer: return hidden states without probs
         return {"hidden_states": hidden_states, "probs": None}
 
@@ -467,9 +531,9 @@ class MLXExecutor(BaseExecutor):
             assert req.is_prefill, f"Request {req.request_id} is not a prefill request."
 
             # Allocate Paged KV blocks with prefix cache support
-            # For first peer, pass input_ids for prefix matching
+            # All peers can perform prefix cache matching if input_ids are available
             token_ids = None
-            if self.is_first_peer and self.enable_prefix_cache:
+            if self.enable_prefix_cache and req.input_ids is not None:
                 token_ids = req.input_ids
 
             success, matched_tokens = self.cache_manager.allocate_request(
@@ -651,12 +715,6 @@ class MLXExecutor(BaseExecutor):
             if self.enable_prefix_cache and self.is_first_peer:
                 # Add the new token to the request's token_ids
                 self.cache_manager.update_request_tokens(req.request_id, [req.output_ids[-1]])
-
-            # Allocate slot for new token
-            # Note: append_slot will automatically insert full blocks to prefix cache
-            success = self.cache_manager.append_slot(req.request_id)
-            if not success:
-                raise RuntimeError(f"OOM during decode for {req.request_id}")
 
             block_table = self.cache_manager.get_block_table(req.request_id)
             block_tables_list.append(block_table)

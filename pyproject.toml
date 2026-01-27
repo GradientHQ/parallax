@@ -49,13 +49,13 @@ mac = [
 ]
 
 gpu = [
-  "sglang[all]==0.5.5",
+  "sglang[all]==0.5.7",
   "mlx-lm==0.28.4",
   "mlx[cpu]==0.30.0",
 ]
 
 vllm = [
-  "vllm==0.11.0",
+  "vllm==0.14.0",
   "mlx-lm==0.28.4",
   "mlx[cpu]==0.30.0",
 ]

@@ -4,6 +4,10 @@ hidden_dimefines the Qwen3 model.
 
 from typing import Any, List, Optional
 
+from parallax_utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention
 from mlx_lm.models.deepseek_v2 import DeepseekV2Attention as MLXDeepseekV2Attention
@@ -12,6 +16,7 @@ from mlx_lm.models.deepseek_v2 import ModelArgs
 
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
 from parallax.server.cache.base import BaseCache
+from parallax.utils.prefix_cache_utils import compute_attention_with_prefix_cache
 
 
 class ParallaxDeepSeekV2Attention(MLXDeepseekV2Attention):
@@ -29,6 +34,7 @@ class ParallaxDeepSeekV2Attention(MLXDeepseekV2Attention):
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
+        prefix_lens: Optional[mx.array] = None,
         **kwargs,
     ) -> mx.array:
         """
@@ -41,6 +47,7 @@ class ParallaxDeepSeekV2Attention(MLXDeepseekV2Attention):
             block_tables: (batch, max_blocks) - PagedKV block tables.
             context_lengths: (batch,) - PagedKV sequence lengths.
             slot_mapping: (batch * target_len,) - Flattened slot mapping.
+            prefix_lens: (batch,) - Number of prefix tokens already cached (for RoPE offset).
 
         Returns:
             output_h: (batch, target_len, hidden_dim) - Output hidden states.
@@ -64,10 +71,18 @@ class ParallaxDeepSeekV2Attention(MLXDeepseekV2Attention):
 
         key_cache_global, value_cache_global = cache.get_cache()
 
+        # Compute RoPE offsets for all batch items at once
         if target_len == 1:
+            # Decode phase: position is context_length - 1
             current_pos = context_lengths - 1
+        elif prefix_lens is not None:
+            # Prefill phase - start from prefix_len if using prefix cache
+            current_pos = prefix_lens
         else:
+            # Prefill phase - no prefix cache
             current_pos = 0
+
+        # Apply RoPE to all batch items at once
         q_pe = self.rope(q_pe, offset=current_pos)
         k_pe = self.rope(k_pe, offset=current_pos)
 
@@ -91,6 +106,7 @@ class ParallaxDeepSeekV2Attention(MLXDeepseekV2Attention):
         )
 
         if target_len == 1:
+            # Decode Phase: Use Paged Attention Kernel
             output = paged_attention(
                 queries,
                 key_cache_global,
@@ -104,15 +120,37 @@ class ParallaxDeepSeekV2Attention(MLXDeepseekV2Attention):
             )
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
         else:
-            output = scaled_dot_product_attention(
-                queries,
-                keys,
-                values.transpose(0, 2, 1, 3),
-                scale=self.scale,
-                mask=mask,
-                cache=None,
-            )
-            output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
+            # Prefill Phase: Need to attend to both cached prefix and new tokens
+            # Check if any request has prefix cache
+            has_prefix_cache = prefix_lens is not None and bool(mx.any(prefix_lens > 0))
+
+            if has_prefix_cache:
+                # Use shared prefix cache handling with batch processing
+                k_new = keys  # (batch, num_heads, target_len, head_dim)
+                v_new = values.transpose(0, 2, 1, 3)  # (batch, num_heads, target_len, head_dim)
+                output = compute_attention_with_prefix_cache(
+                    queries,  # (batch, num_heads, target_len, head_dim)
+                    k_new,
+                    v_new,
+                    cache,
+                    block_tables,
+                    prefix_lens,
+                    target_len,
+                    self.scale,
+                    self.num_heads,  # num_kv_heads (in DeepSeekV2, num_heads == num_kv_heads after repeat)
+                    mask=mask,
+                )
+            else:
+                # No prefix cache, use standard self-attention on local data only
+                output = scaled_dot_product_attention(
+                    queries,
+                    keys,
+                    values.transpose(0, 2, 1, 3),
+                    scale=self.scale,
+                    mask=mask,
+                    cache=None,
+                )
+                output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
 
         return self.o_proj(output)
 

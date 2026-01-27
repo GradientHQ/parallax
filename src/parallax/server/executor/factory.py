@@ -3,7 +3,7 @@ Creates executor from factory for different backends.
 """
 
 import argparse
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from parallax.utils.utils import get_current_device
 from parallax_utils.logging_config import get_logger, set_log_level
@@ -45,22 +45,36 @@ def create_executor_config(args: argparse.Namespace, shared_state=None, conn=Non
         "use_hfcache": args.use_hfcache,
         "enable_lora": args.enable_lora,
         "max_lora_rank": args.max_lora_rank,
-        "lora_target_modules": args.lora_target_modules,
-        "lora_paths": args.lora_paths,
         "max_loras_per_batch": args.max_loras_per_batch,
         "max_loaded_loras": args.max_loaded_loras,
-        "lora_eviction_policy": args.lora_eviction_policy,
-        "lora_backend": args.lora_backend,
-        "max_lora_chunk_size": args.max_lora_chunk_size,
         "enable_weight_refit": args.enable_weight_refit,
+        "weight_refit_mode": args.weight_refit_mode,
     }
+
+    if args.gpu_backend == "sglang":
+        config.update(
+            {
+                "lora_target_modules": args.lora_target_modules,
+                "lora_paths": args.lora_paths,
+                "lora_eviction_policy": args.lora_eviction_policy,
+                "lora_backend": args.lora_backend,
+                "max_lora_chunk_size": args.max_lora_chunk_size,
+            }
+        )
+    elif args.gpu_backend == "vllm":
+        config.update(
+            {
+                "fully_sharded_loras": getattr(args, "fully_sharded_loras", False),
+            }
+        )
+
     return config
 
 
 def create_from_args(
     args,
     shared_state: Optional[dict] = None,
-    conn: Optional[Any] = None,
+    conn: Optional[List[Any]] = None,
     device: Optional[str] = None,
 ):
     """

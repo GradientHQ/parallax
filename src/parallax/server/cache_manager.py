@@ -99,7 +99,7 @@ class CacheManager:
         if self.needs_blocks:
             logger.info(
                 f"Allocated Paged KV Cache for {self.layer_types.count('attention')} layers: "
-                f"{self.num_gpu_blocks} blocks, {self.block_size} block_size"
+                f"{self.num_gpu_blocks} blocks, {self.block_size} block_size, max_tokens: {self.num_gpu_blocks * self.block_size}"
             )
         if self.needs_slots:
             logger.info(

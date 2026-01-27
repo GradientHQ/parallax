@@ -8,13 +8,19 @@ exposes the same block interface as Qwen implementations, so that
 
 from typing import Optional
 
+from parallax_utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 import mlx.core as mx
+from mlx.nn.layers.distributed import shard_linear
 from mlx_lm.models.base import scaled_dot_product_attention
 from mlx_lm.models.llama import Attention as MLXLlamaAttention
 from mlx_lm.models.llama import ModelArgs
 from mlx_lm.models.llama import TransformerBlock as MLXLlamaBlock
 
 from parallax.server.cache.base import BaseCache
+from parallax.utils.prefix_cache_utils import compute_attention_with_prefix_cache
 from parallax_extensions.ops import paged_attention_v1, reshape_and_cache
 
 
@@ -34,6 +40,8 @@ class ParallaxLlamaAttention(MLXLlamaAttention):
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
         layer_idx: int = 0,
+        prefix_lens: Optional[mx.array] = None,
+        **kwargs,
     ) -> mx.array:
         """
         Attention forward pass with explicit KV cache handling.
@@ -45,6 +53,7 @@ class ParallaxLlamaAttention(MLXLlamaAttention):
             block_tables: (batch, max_blocks) - PagedKV block tables.
             context_lengths: (batch,) - PagedKV sequence lengths.
             slot_mapping: (batch * target_len,) - Flattened slot mapping.
+            prefix_lens: (batch,) - Number of prefix tokens already cached (for RoPE offset).
 
         Returns:
             output: (batch, target_len, hidden_dim) - Output hidden states.
@@ -63,6 +72,8 @@ class ParallaxLlamaAttention(MLXLlamaAttention):
 
         if target_len == 1:
             current_pos = context_lengths - 1
+        elif prefix_lens is not None:
+            current_pos = prefix_lens
         else:
             current_pos = 0
         queries_rotated = self.rope(queries_new, offset=current_pos)
@@ -96,16 +107,39 @@ class ParallaxLlamaAttention(MLXLlamaAttention):
             )
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
         else:
-            # Prefill Phase: Use Standard Self-Attention on local data
-            output = scaled_dot_product_attention(
-                queries_rotated,
-                keys_rotated,
-                values_new.transpose(0, 2, 1, 3),
-                scale=self.scale,
-                mask=mask,
-                cache=None,
-            )
-            output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
+            # Prefill Phase: Need to attend to both cached prefix and new tokens
+            # Check if any request has prefix cache
+            has_prefix_cache = prefix_lens is not None and bool(mx.any(prefix_lens > 0))
+
+            if has_prefix_cache:
+                # Use shared prefix cache handling with batch processing
+                k_new = keys_rotated  # (batch, n_kv_heads, target_len, head_dim)
+                v_new = values_new.transpose(
+                    0, 2, 1, 3
+                )  # (batch, n_kv_heads, target_len, head_dim)
+                output = compute_attention_with_prefix_cache(
+                    queries_rotated,  # (batch, n_heads, target_len, head_dim)
+                    k_new,
+                    v_new,
+                    cache,
+                    block_tables,
+                    prefix_lens,
+                    target_len,
+                    self.scale,
+                    self.n_kv_heads,
+                    mask=mask,
+                )
+            else:
+                # No prefix cache, use standard self-attention on local data only
+                output = scaled_dot_product_attention(
+                    queries_rotated,
+                    keys_rotated,
+                    values_new.transpose(0, 2, 1, 3),
+                    scale=self.scale,
+                    mask=mask,
+                    cache=None,
+                )
+                output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
 
         return self.o_proj(output)
 
@@ -136,11 +170,28 @@ class ParallaxLlamaBlock(MLXLlamaBlock):
             block_tables=block_tables,
             context_lengths=context_lengths,
             slot_mapping=slot_mapping,
+            **kwargs,
         )
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
         return out
+
+    def shard(self):
+        group = mx.distributed.init()
+        N = group.size()
+        # Shard the self attention
+        self.self_attn.q_proj = shard_linear(self.self_attn.q_proj, "all-to-sharded", group=group)
+        self.self_attn.k_proj = shard_linear(self.self_attn.k_proj, "all-to-sharded", group=group)
+        self.self_attn.v_proj = shard_linear(self.self_attn.v_proj, "all-to-sharded", group=group)
+        self.self_attn.o_proj = shard_linear(self.self_attn.o_proj, "sharded-to-all", group=group)
+        self.self_attn.n_heads //= N
+        self.self_attn.n_kv_heads //= N
+
+        # Shard the MLP
+        self.mlp.gate_proj = shard_linear(self.mlp.gate_proj, "all-to-sharded", group=group)
+        self.mlp.up_proj = shard_linear(self.mlp.up_proj, "all-to-sharded", group=group)
+        self.mlp.down_proj = shard_linear(self.mlp.down_proj, "sharded-to-all", group=group)
 
     @classmethod
     def get_architecture(cls):

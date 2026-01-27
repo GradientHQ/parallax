@@ -8,9 +8,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.managers.schedule_batch import ScheduleBatch
+from sglang.srt.mem_cache.cache_init_params import CacheInitParams
 from sglang.srt.mem_cache.radix_cache import RadixCache as PageRadixCache
 from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
-from sglang.srt.utils import broadcast_pyobj
 from sglang.srt.utils.common import SUPPORTED_LORA_TARGET_MODULES
 
 from parallax.server.executor.base_executor import BaseExecutor
@@ -88,8 +88,9 @@ class SGLExecutor(BaseExecutor):
         shared_state: Optional[dict] = None,
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
+        weight_refit_mode: Optional[str] = "disk",
         # Pipe communication
-        conn: Optional[Any] = None,
+        conn: Optional[List[Any]] = [],
     ):
 
         self.enable_lora = True if lora_paths is not None else enable_lora
@@ -174,6 +175,7 @@ class SGLExecutor(BaseExecutor):
             dp_size=dp_size,
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
+            weight_refit_mode=weight_refit_mode,
             conn=conn,
         )
         self.cur_batch = None
@@ -183,11 +185,13 @@ class SGLExecutor(BaseExecutor):
 
         # create a page tree cache for sglang prefill
         if enable_prefix_cache:
-            self.page_tree_cache = PageRadixCache(
-                self.model_runner.req_to_token_pool,
-                self.model_runner.token_to_kv_pool_allocator,
-                self.model_runner.page_size,
+            cache_params = CacheInitParams(
+                disable=False,
+                req_to_token_pool=self.model_runner.req_to_token_pool,
+                token_to_kv_pool_allocator=self.model_runner.token_to_kv_pool_allocator,
+                page_size=self.model_runner.page_size,
             )
+            self.page_tree_cache = PageRadixCache(cache_params)
             logger.info(
                 f"Sglang Page tree cache created with page size {self.model_runner.page_size}"
             )
@@ -195,10 +199,22 @@ class SGLExecutor(BaseExecutor):
             self.page_tree_cache = None
 
     def check_and_refit_weight(self, refit_weight_path: str):
-        if refit_weight_path == "":
+        if self.tp_size > 1:
+            weight_path = self._tensor_parallel_broadcast_pyobj(refit_weight_path)
+        else:
+            weight_path = refit_weight_path
+
+        if weight_path == "":
             return
-        tensors = self.conn.recv()
-        refit_sgl_model(self.model_runner, tensors)
+
+        if self.weight_refit_mode == "cpu":
+            conn = self.conn[0]
+            tensors = conn.recv()
+            refit_sgl_model(self.model_runner, tensors=tensors)
+        elif self.weight_refit_mode == "disk":
+            refit_sgl_model(self.model_runner, refit_weight_path=weight_path)
+        else:
+            logger.warning(f"Unrecognized weight refit mode={self.weight_refit_mode}")
 
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
@@ -288,10 +304,8 @@ class SGLExecutor(BaseExecutor):
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
-        if self.tp_rank == 0 and not requests:
-            return
         if self.tp_size > 1:
-            requests = self._tensor_parallel_broadcast_byobj(requests)
+            requests = self._tensor_parallel_broadcast_pyobj(requests)
             for req in requests:
                 if hasattr(req, "hidden_states") and req.hidden_states is not None:
                     if hasattr(req.hidden_states, "to"):  # PyTorch tensor
@@ -389,10 +403,11 @@ class SGLExecutor(BaseExecutor):
         requests = prepared_inputs.get("requests", [])
 
         # Execute model with SGLang
-        logits_output, _ = self.model_runner.forward(
+        out = self.model_runner.forward(
             forward_batch=forward_batch,
             pp_proxy_tensors=pp_proxy_tensors,
         )
+        logits_output = out.logits_output
 
         # Merge prefill batch into running batch
         if self.cur_batch:
@@ -506,15 +521,17 @@ class SGLExecutor(BaseExecutor):
         next_token_id = int(hidden_states[0])
         return next_token_id, hidden_states
 
-    def _tensor_parallel_broadcast_byobj(self, broadcast_obj):
+    def _tensor_parallel_broadcast_pyobj(self, broadcast_obj):
         """Wrapper for broadcast pyobject in TP group"""
+        if self.tp_rank == 0:
+            for i in range(1, self.tp_size):
+                conn = self.conn[i]
+                conn.send(broadcast_obj)
+            broadcast_result = broadcast_obj
+        else:
+            conn = self.conn[0]
+            broadcast_result = conn.recv()
 
-        broadcast_result = broadcast_pyobj(
-            broadcast_obj,
-            self.tp_group.rank,
-            self.tp_cpu_group,
-            src=self.tp_group.ranks[0],
-        )
         return broadcast_result
 
     def _prepare_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:

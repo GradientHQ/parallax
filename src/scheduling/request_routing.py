@@ -185,10 +185,17 @@ class RequestRoutingStrategy(ABC):
         self.total_layers: int = total_layers
 
     @abstractmethod
-    def find_optimal_path(self) -> Tuple[List[str], float]:
+    def find_optimal_path(
+        self,
+        last_refit_time: Optional[float] = None,
+    ) -> Tuple[List[str], float]:
         """Return the chosen node-id path and its estimated latency.
 
-        Routers should pull the latest node snapshot from `self.node_manager`.
+        Args:
+            last_refit_time: Last refit time for weight refit
+
+        Returns:
+            (node_ids, latency_ms). If no valid route exists, returns ([], inf).
         """
         raise NotImplementedError
 
@@ -256,7 +263,10 @@ class DynamicProgrammingRouting(RequestRoutingStrategy):
       minimum-latency node sequence and total latency.
     """
 
-    def find_optimal_path(self) -> Tuple[List[str], float]:
+    def find_optimal_path(
+        self,
+        last_refit_time: Optional[float] = None,
+    ) -> Tuple[List[str], float]:
         """Compute a minimum-latency node-id path using shard-level DP.
 
         The DP treats each node's allocated range `[start_layer, end_layer)` as a
@@ -339,7 +349,7 @@ class DynamicProgrammingRouting(RequestRoutingStrategy):
         return [nodes[i].node_id for i in path_indices], dp[end_idx]
 
     def scheduler_format_snapshot(self) -> str:
-        assignments = self.node_manager.list_node_allocations(self.num_layers)
+        assignments = self.node_manager.list_node_allocations(self.total_layers)
         header = f"Current allocations ({len(assignments)} nodes)"
         sep = "-" * len(header)
         lines: List[str] = [header, sep]
@@ -471,7 +481,12 @@ class RandomizedOverDynamicPipelinesRouting(RequestRoutingStrategy):
             index.setdefault(n.start_layer, []).append(n)
         return index
 
-    def find_optimal_path(self) -> Tuple[List[str], float]:
+    def find_optimal_path(
+        self,
+        nodes: Optional[List[Node]] = None,
+        num_layers: Optional[int] = None,
+        last_refit_time: Optional[float] = None,
+    ) -> Tuple[List[str], float]:
         """Randomly choose among cached complete pipelines, skipping overloaded ones.
 
         Selection procedure:
@@ -479,8 +494,9 @@ class RandomizedOverDynamicPipelinesRouting(RequestRoutingStrategy):
         - Filter to those that are viable under current load and RTT availability.
         - Randomly choose one viable pipeline and return its latency estimate.
         """
-        nodes = self.node_manager.active_nodes
-        num_layers = self.total_layers
+        # Backwards compatible: allow callers to omit nodes/num_layers.
+        nodes = self.node_manager.active_nodes if nodes is None else nodes
+        num_layers = self.total_layers if num_layers is None else num_layers
         if not nodes or num_layers <= 0:
             return [], float("inf")
 
@@ -741,7 +757,12 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
                 )
         return "\n".join(lines)
 
-    def find_optimal_path(self) -> Tuple[List[str], float]:
+    def find_optimal_path(
+        self,
+        nodes: Optional[List[Node]] = None,
+        num_layers: Optional[int] = None,
+        last_refit_time: Optional[float] = None,
+    ) -> Tuple[List[str], float]:
         """Return the next viable *registered* pipeline in round-robin order.
 
         Returns ([], inf) if nothing is registered or if all registered pipelines
@@ -776,6 +797,17 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
                     raise ValueError(
                         f"To be dispatched node {nid} in pipeline {candidate} not found in node manager!"
                     )
+                if not id_to_node[nid].is_active:
+                    # If node is not active, skip the pipeline
+                    logger.warning(f"Pipeline {candidate} is not active, skipping")
+                    latency = float("inf")
+                if (
+                    last_refit_time is not None
+                    and id_to_node[nid].last_refit_time < last_refit_time
+                ):
+                    # If node holds an older version of weight, skip the pipeline
+                    logger.warning(f"Pipeline {candidate} holds an old version of weight, skipping")
+                    latency = float("inf")
 
             if latency != float("inf"):
                 return list(candidate), float(latency)

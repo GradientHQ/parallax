@@ -143,6 +143,22 @@ def _build_vllm_request(
     include_outputs: bool,
 ) -> VLLMRequest:
     block_hasher = getattr(model_runner, "request_block_hasher", None)
+
+    # Extract LoRA request if provided
+    lora_req = None
+    if hasattr(req, "lora_path") and req.lora_path:
+        from vllm.lora.request import LoRARequest
+
+        # Create a simple hash or ID for the LoRA based on path
+        # In a real scenario, we might want a more robust ID mapping mechanism
+        lora_name = getattr(req, "lora_name", f"lora_{hash(req.lora_path) % 10000}")
+        lora_int_id = getattr(req, "lora_int_id", abs(hash(req.lora_path)) % 10000 + 1)
+
+        lora_req = LoRARequest(
+            lora_name=lora_name, lora_int_id=lora_int_id, lora_path=req.lora_path
+        )
+        logger.debug(f"Created LoRA request: {lora_name} (id={lora_int_id}) path={req.lora_path}")
+
     vllm_req = VLLMRequest(
         request_id=req.request_id,
         prompt_token_ids=getattr(req, "input_ids", None),
@@ -151,6 +167,7 @@ def _build_vllm_request(
         eos_token_id=getattr(req, "eos_token_id", None),
         arrival_time=getattr(req, "arrival_time", 0.0),
         block_hasher=block_hasher,
+        lora_request=lora_req,  # Pass the LoRA request here
     )
     if include_outputs:
         output_ids = getattr(req, "output_ids", None) or []
@@ -220,7 +237,7 @@ def form_vllm_batch_prefill(
             pooling_params=None,
             block_ids=block_ids,
             num_computed_tokens=num_computed_tokens,
-            lora_request=None,
+            lora_request=vllm_req.lora_request,  # Pass lora_request from vllm_req
             prompt_embeds=None,
         )
         new_request_data_list.append(new_req_data)
@@ -239,8 +256,6 @@ def form_vllm_batch_prefill(
         num_common_prefix_blocks=num_common_prefix_blocks,
         finished_req_ids=set(),
         free_encoder_mm_hashes=[],
-        structured_output_request_ids=[],
-        grammar_bitmask=None,
         kv_connector_metadata=None,
     )
 
@@ -265,9 +280,9 @@ def form_vllm_batch_decode(
     kv_cache_manager = model_runner.kv_cache_manager
 
     req_ids: List[str] = []
-    resumed_from_preemption: List[bool] = []
+    resumed_req_ids: set[str] = set()
     new_token_ids: List[List[int]] = []
-    resumed_req_token_ids: List[List[int] | None] = []
+    all_token_ids: dict[str, list[int]] = {}
     new_block_ids: List[tuple[List[int], ...] | None] = []
     num_computed_tokens: List[int] = []
     num_output_tokens: List[int] = []
@@ -275,7 +290,6 @@ def form_vllm_batch_decode(
 
     for req in batched_requests:
         req_ids.append(req.request_id)
-        resumed_from_preemption.append(False)
 
         # For GPU workers (non-first peer), IntermediateRequest doesn't have output_ids
         # We need to get it from vLLM's CachedRequestState in model_runner
@@ -303,12 +317,12 @@ def form_vllm_batch_decode(
                 )
 
         if output_ids:
+            all_token_ids[req.request_id] = output_ids
             last_token = output_ids[-1]
             new_token_ids.append([last_token])
         else:
+            all_token_ids[req.request_id] = []
             new_token_ids.append([])
-
-        resumed_req_token_ids.append([])
 
         sampling_params = transform_sampling_params_to_vllm(req.sampling_params)
         vllm_req = _build_vllm_request(req, sampling_params, model_runner, include_outputs=True)
@@ -348,10 +362,12 @@ def form_vllm_batch_decode(
 
     cached_req_data = CachedRequestData(
         req_ids=req_ids,
-        resumed_from_preemption=resumed_from_preemption,
+        resumed_req_ids=resumed_req_ids,
         new_token_ids=new_token_ids,
+        all_token_ids=all_token_ids,
         new_block_ids=new_block_ids,
         num_computed_tokens=num_computed_tokens,
+        num_output_tokens=num_output_tokens,
     )
 
     scheduler_output = SchedulerOutput(
@@ -364,8 +380,6 @@ def form_vllm_batch_decode(
         num_common_prefix_blocks=[0] * getattr(kv_cache_manager, "num_kv_cache_groups", 1),
         finished_req_ids=set(),
         free_encoder_mm_hashes=[],
-        structured_output_request_ids=[],
-        grammar_bitmask=None,
         kv_connector_metadata=None,
     )
 

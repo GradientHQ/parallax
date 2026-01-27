@@ -35,19 +35,25 @@ from parallax_utils.version_check import check_latest_release
 logger = get_logger("parallax.launch")
 
 
-def _update_args_from_shared_state(args, shared_state: SharedState):
+def _update_args_from_shared_state(args, shared_state: SharedState, force_update: bool):
     """Update args with layer allocation from shared state"""
     model_info = shared_state.get_model_info()
     args.start_layer = model_info["block_start_index"]
     args.end_layer = model_info["block_end_index"]
-    # Update model_path if provided (always update to support model switching)
-    if model_info["model_name"]:
+    if args.model_path is not None and force_update == False:
+        # Use local model path first
+        pass
+    elif model_info["model_name"]:
+        # Update model_path if provided
         args.model_path = model_info["model_name"]
         logger.debug(f"Updated model_path to: {args.model_path}")
+    else:
+        assert False, "Neither scheduler nor worker provides a valid model path!"
     # Update tp_size if provided, otherwise keep current value
     args.tp_size = model_info["tp_size"] or args.tp_size
     # Update weight refit switch
     args.enable_weight_refit = model_info["enable_weight_refit"] or args.enable_weight_refit
+    args.weight_refit_mode = model_info["weight_refit_mode"] or args.weight_refit_mode
 
 
 def _stop_executor_processes(executor_subprocs):
@@ -106,7 +112,7 @@ if __name__ == "__main__":
         logger.debug(f"nccl_port: {args.nccl_port}")
 
         # Pipe for subprocess communication
-        conn1, conn2 = multiprocessing.Pipe()
+        conn_main, conn_refit = multiprocessing.Pipe()
 
         if args.scheduler_addr is None:
             if args.log_level != "DEBUG":
@@ -140,11 +146,18 @@ if __name__ == "__main__":
                 max_sequence_length=args.max_sequence_length,
                 param_mem_ratio=args.param_mem_ratio,
                 kvcache_mem_ratio=args.kvcache_mem_ratio,
-                shared_state=shared_state.dict,  # Pass dict to subprocess
+                shared_state=shared_state.dict,
                 log_level=args.log_level,
-                conn=conn1,
+                conn=conn_main,
             )
 
+            # Build connectors for tp communication
+            conn_tp_0 = [conn_refit]
+            conn_tp_i = []
+            for i in range(1, args.tp_size):
+                conn1, conn2 = multiprocessing.Pipe()
+                conn_tp_0.append(conn1)
+                conn_tp_i.append(conn2)
             # Launch all executor processes (including tp_rank=0)
             for tp_rank in range(args.tp_size):
                 args_copy = argparse.Namespace(**vars(args))
@@ -154,7 +167,7 @@ if __name__ == "__main__":
                     args=(
                         args_copy,
                         shared_state.dict,  # Pass dict to subprocess
-                        conn2,  # Pipe connector
+                        conn_tp_0 if tp_rank == 0 else [conn_tp_i[tp_rank - 1]],
                     ),
                 )
                 proc.start()
@@ -193,7 +206,7 @@ if __name__ == "__main__":
                 kvcache_mem_ratio=args.kvcache_mem_ratio,
                 shared_state=shared_state.dict,  # Pass dict to subprocess
                 log_level=args.log_level,
-                conn=conn1,
+                conn=conn_main,
             )
 
             # Wait for layer allocation from scheduler (via shared state)
@@ -214,7 +227,7 @@ if __name__ == "__main__":
                 time.sleep(1)
 
             # Get layer allocation from shared state
-            _update_args_from_shared_state(args, shared_state)
+            _update_args_from_shared_state(args, shared_state, force_update=False)
 
             logger.debug(
                 f"Start Executor with start_layer: {args.start_layer}, end_layer: {args.end_layer}, "
@@ -232,6 +245,13 @@ if __name__ == "__main__":
                     if args.start_layer == 0:
                         http_server_process = launch_http_server(args)
 
+                    # Build connectors for tp communication
+                    conn_tp_0 = [conn_refit]
+                    conn_tp_i = []
+                    for i in range(1, args.tp_size):
+                        conn1, conn2 = multiprocessing.Pipe()
+                        conn_tp_0.append(conn1)
+                        conn_tp_i.append(conn2)
                     # Launch all executor processes (including tp_rank=0)
                     executor_subprocs = []
                     for tp_rank in range(args.tp_size):
@@ -242,7 +262,7 @@ if __name__ == "__main__":
                             args=(
                                 args_copy,
                                 shared_state.dict,  # Pass dict to subprocess
-                                conn2,  # Pipe connector
+                                conn_tp_0 if tp_rank == 0 else [conn_tp_i[tp_rank - 1]],
                             ),
                         )
                         proc.start()
@@ -259,7 +279,7 @@ if __name__ == "__main__":
                         _stop_executor_processes(executor_subprocs)
                         if http_server_process is not None:
                             stop_http_server(http_server_process)
-                        _update_args_from_shared_state(args, shared_state)
+                        _update_args_from_shared_state(args, shared_state, force_update=True)
                         logger.info(
                             f"Reloading executor with layers [{args.start_layer}, {args.end_layer})"
                         )
