@@ -1,11 +1,12 @@
 import glob
 import json
 import os
+import shutil
 from pathlib import Path
 
 import mlx.core as mx
 import transformers
-from huggingface_hub import snapshot_download
+from huggingface_hub import hf_hub_download, snapshot_download
 
 
 def process_adapter_config(model_id):
@@ -146,6 +147,16 @@ def trans_safetensors(model_path: str):
     save_adapter(weights, tokenizer, config)
 
     print("[INFO] Conversion complete!")
+
+
+def download_adapter_config(repo_id):
+    adapter_config_path = hf_hub_download(repo_id=repo_id, filename="adapter_config.json")
+    output_path = os.path.join(os.getcwd(), "adapter_config.json")
+    if os.path.isfile(adapter_config_path):
+        shutil.copy(adapter_config_path, output_path)
+        return True
+    else:
+        return False
 
 
 if __name__ == "__main__":

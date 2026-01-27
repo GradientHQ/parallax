@@ -42,7 +42,7 @@ from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
 from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.vllm.monkey_patch import apply_parallax_vllm_monkey_patch
 from parallax_utils.logging_config import get_logger
-from parallax_utils.prepare_adapter import trans_adapter_config
+from parallax_utils.prepare_adapter import download_adapter_config
 
 logger = get_logger(__name__)
 
@@ -518,7 +518,7 @@ def initialize_vllm_model_runner(
         logger.debug(f"Created LoRA request: {lora_name} (id={lora_int_id}) path={lora_path}")
 
         # Workaround: save adapter_config.json locally for lora update
-        trans_adapter_config(lora_path)
+        download_adapter_config(lora_path)
 
     vllm_config = VllmConfig(
         model_config=model_config,
