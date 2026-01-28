@@ -218,7 +218,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-loras-per-batch",
         type=int,
-        default=8,
+        default=1,
         help="Maximum number of adapters for a running batch, include base-only request.",
     )
 
