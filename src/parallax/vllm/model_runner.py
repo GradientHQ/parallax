@@ -307,10 +307,10 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             logger.debug("Successfully initialized intermediate_tensors buffer")
 
         captured_logits = [None]
-        
+
         if return_decoded_tokens and self.is_last_peer:
             original_forward = self.model.forward
-            
+
             def forward_with_logits_capture(*args, **kwargs):
                 result = original_forward(*args, **kwargs)
                 if isinstance(result, torch.Tensor):
@@ -320,7 +320,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
                 elif hasattr(result, "logits"):
                     captured_logits[0] = result.logits
                 return result
-            
+
             self.model.forward = forward_with_logits_capture
 
         try:
@@ -332,7 +332,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         sampled_token_ids = None
         sampler_output = None
         logits = captured_logits[0]
-        
+
         if return_decoded_tokens:
             sampler_output = super().sample_tokens(grammar_output=None)
             sampled_token_ids = sampler_output.sampled_token_ids_cpu

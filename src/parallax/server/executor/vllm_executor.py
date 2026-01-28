@@ -290,10 +290,12 @@ class VLLMExecutor(BaseExecutor):
         requests = prepared_inputs.get("requests", [])
 
         # Execute model with vLLM
-        execute_model_state, sampled_token_ids, sampler_output, logits = self.model_runner.execute_model(
-            scheduler_output=scheduler_output,
-            intermediate_tensors=intermediate_tensors,
-            return_decoded_tokens=return_decoded_tokens,
+        execute_model_state, sampled_token_ids, sampler_output, logits = (
+            self.model_runner.execute_model(
+                scheduler_output=scheduler_output,
+                intermediate_tensors=intermediate_tensors,
+                return_decoded_tokens=return_decoded_tokens,
+            )
         )
 
         # Return appropriate output based on peer position
@@ -306,21 +308,27 @@ class VLLMExecutor(BaseExecutor):
 
             token_probs = None
             if needs_probs and logits is not None and isinstance(logits, torch.Tensor):
-                
+
                 if logits.ndim == 3:
                     logits = logits[:, -1, :]
                 elif logits.ndim != 2:
                     logger.warning(f"Unexpected logits shape: {logits.shape}")
                     logits = None
-                
+
                 if logits is not None:
                     probs = torch.softmax(logits, dim=-1)
                     if isinstance(sampled_token_ids, torch.Tensor):
                         sampled_ids = sampled_token_ids
                     else:
-                        sampled_ids = torch.tensor(sampled_token_ids, device=logits.device, dtype=torch.long)
-                    token_probs = probs[torch.arange(len(sampled_ids), device=logits.device), sampled_ids].cpu().float().tolist()
-                
+                        sampled_ids = torch.tensor(
+                            sampled_token_ids, device=logits.device, dtype=torch.long
+                        )
+                    token_probs = (
+                        probs[torch.arange(len(sampled_ids), device=logits.device), sampled_ids]
+                        .cpu()
+                        .float()
+                        .tolist()
+                    )
 
             return {"hidden_states": sampled_token_ids, "probs": token_probs}
         else:
