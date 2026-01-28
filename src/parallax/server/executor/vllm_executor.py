@@ -252,6 +252,8 @@ class VLLMExecutor(BaseExecutor):
                             req_dict["abort"] = True
                         if self.enable_weight_refit:
                             req_dict["weight_version"] = self.weight_version
+                        if original_req.return_probs and req.token_prob is not None:
+                            req_dict["probs"] = req.token_prob
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:
@@ -285,10 +287,10 @@ class VLLMExecutor(BaseExecutor):
         if intermediate_tensors is not None:
             logger.debug(f"vLLM: Using intermediate_tensors for PP (non-first peer)")
 
-        # Import IntermediateTensors for type checking
+        requests = prepared_inputs.get("requests", [])
 
         # Execute model with vLLM
-        execute_model_state, sampled_token_ids = self.model_runner.execute_model(
+        execute_model_state, sampled_token_ids, sampler_output, logits = self.model_runner.execute_model(
             scheduler_output=scheduler_output,
             intermediate_tensors=intermediate_tensors,
             return_decoded_tokens=return_decoded_tokens,
@@ -296,7 +298,31 @@ class VLLMExecutor(BaseExecutor):
 
         # Return appropriate output based on peer position
         if return_decoded_tokens:
-            return {"hidden_states": sampled_token_ids, "probs": None}
+            needs_probs = any(
+                (isinstance(req, InitialRequest) and req.return_probs)
+                or (isinstance(req, IntermediateRequest) and req.return_probs)
+                for req in requests
+            )
+
+            token_probs = None
+            if needs_probs and logits is not None and isinstance(logits, torch.Tensor):
+                
+                if logits.ndim == 3:
+                    logits = logits[:, -1, :]
+                elif logits.ndim != 2:
+                    logger.warning(f"Unexpected logits shape: {logits.shape}")
+                    logits = None
+                
+                if logits is not None:
+                    probs = torch.softmax(logits, dim=-1)
+                    if isinstance(sampled_token_ids, torch.Tensor):
+                        sampled_ids = sampled_token_ids
+                    else:
+                        sampled_ids = torch.tensor(sampled_token_ids, device=logits.device, dtype=torch.long)
+                    token_probs = probs[torch.arange(len(sampled_ids), device=logits.device), sampled_ids].cpu().float().tolist()
+                
+
+            return {"hidden_states": sampled_token_ids, "probs": token_probs}
         else:
             # Intermediate peer: return hidden states for next peer
             return {"hidden_states": execute_model_state.hidden_states, "probs": None}

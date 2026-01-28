@@ -306,13 +306,38 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             )
             logger.debug("Successfully initialized intermediate_tensors buffer")
 
-        super().execute_model(scheduler_output, intermediate_tensors)
+        captured_logits = [None]
+        
+        if return_decoded_tokens and self.is_last_peer:
+            original_forward = self.model.forward
+            
+            def forward_with_logits_capture(*args, **kwargs):
+                result = original_forward(*args, **kwargs)
+                if isinstance(result, torch.Tensor):
+                    captured_logits[0] = result
+                elif isinstance(result, dict) and "logits" in result:
+                    captured_logits[0] = result["logits"]
+                elif hasattr(result, "logits"):
+                    captured_logits[0] = result.logits
+                return result
+            
+            self.model.forward = forward_with_logits_capture
+
+        try:
+            super().execute_model(scheduler_output, intermediate_tensors)
+        finally:
+            if return_decoded_tokens and self.is_last_peer:
+                self.model.forward = original_forward
 
         sampled_token_ids = None
+        sampler_output = None
+        logits = captured_logits[0]
+        
         if return_decoded_tokens:
-            sampled_token_ids = super().sample_tokens(grammar_output=None).sampled_token_ids_cpu
+            sampler_output = super().sample_tokens(grammar_output=None)
+            sampled_token_ids = sampler_output.sampled_token_ids_cpu
 
-        return self.execute_model_state, sampled_token_ids
+        return self.execute_model_state, sampled_token_ids, sampler_output, logits
 
 
 def _init_and_reserve_workspace(device: torch.device, max_num_tokens: int) -> None:
