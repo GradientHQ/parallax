@@ -56,7 +56,7 @@ class RequestHandler:
 
         # Try to get a success response
         forward_attempts = 0
-        while attempts < self.MAX_FORWARD_RETRY:
+        while forward_attempts < self.MAX_FORWARD_RETRY:
             # Try to resolve routing; retry if table is an empty list (capacity full)
             attempts = 0
             routing_table = None
