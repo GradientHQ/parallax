@@ -330,6 +330,20 @@ class Node:
         self.start_layer = None
         self.end_layer = None
 
+    def clear_serving_state(self) -> None:
+        """Clear serving/runtime state for this node.
+
+        - Clear layer allocation
+        - Reset in-flight request counter
+        - Clear measured avg layer latency (will be re-learned / re-broadcast)
+
+        TODO: Verify the worker side / p2p server side state is kept in sync with this reset
+        (e.g. any runtime KV cache, in-flight request bookkeeping, and broadcasted metrics).
+        """
+        self.clear_layer_allocation()
+        self.current_requests = 0
+        self.avg_layer_latency_ms = None
+
     def set_layer_latency_ms(self, latency_ms: float) -> None:
         """Update the layer latency for this node."""
         self.avg_layer_latency_ms = latency_ms
