@@ -330,6 +330,20 @@ class VLLMExecutor(BaseExecutor):
                         .tolist()
                     )
 
+            # Align outputs to request order if vLLM reorders the batch internally.
+            input_batch = getattr(self.model_runner, "input_batch", None)
+            req_id_to_index = getattr(input_batch, "req_id_to_index", None)
+            if req_id_to_index:
+                request_ids = [req.request_id for req in requests]
+                if all(rid in req_id_to_index for rid in request_ids):
+                    order = [req_id_to_index[rid] for rid in request_ids]
+                    if isinstance(sampled_token_ids, torch.Tensor):
+                        sampled_token_ids = sampled_token_ids[order]
+                    elif isinstance(sampled_token_ids, list):
+                        sampled_token_ids = [sampled_token_ids[i] for i in order]
+                    if token_probs is not None:
+                        token_probs = [token_probs[i] for i in order]
+
             return {"hidden_states": sampled_token_ids, "probs": token_probs}
         else:
             # Intermediate peer: return hidden states for next peer
