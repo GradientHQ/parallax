@@ -707,23 +707,6 @@ class Scheduler:
             if node.manual_layer_assignment:
                 had_manual_assignment = True
 
-            # For fixed (RR) routing: register a pipeline set immediately after bootstrap.
-            if self.routing_strategy == "rr" and isinstance(
-                self.request_router, RoundRobinOverFixedPipelinesRouting
-            ):
-                try:
-                    self.request_router.register_pipelines(
-                        self.node_manager.active_nodes, self.num_layers
-                    )
-                    logger.info(
-                        f"[FixedRouter] register_pipelines with bootstrap success, number of pipelines: {len(self.request_router.get_registered_pipelines())}"
-                    )
-
-                except Exception as exc:
-                    logger.warning(
-                        f"[FixedRouter] register_pipelines after bootstrap failed (best-effort): {exc}"
-                    )
-
         # If we are not bootstrapped (e.g., after a leave-triggered rebalance) and
         # new nodes just joined, attempt a greedy bootstrap immediately when we have
         # enough nodes. If it doesn't produce a full pipeline, we'll try again on
@@ -746,6 +729,23 @@ class Scheduler:
                     "Deferring bootstrap: have %d nodes; need >= %d",
                     self.node_manager.num_standby_nodes,
                     self.min_nodes_bootstrapping,
+                )
+
+        # For fixed (RR) routing: register a pipeline set immediately after bootstrap.
+        if self.routing_strategy == "rr" and isinstance(
+            self.request_router, RoundRobinOverFixedPipelinesRouting
+        ):
+            try:
+                self.request_router.register_pipelines(
+                    self.node_manager.active_nodes, self.num_layers
+                )
+                logger.info(
+                    f"[FixedRouter] register_pipelines with bootstrap success, number of pipelines: {len(self.request_router.get_registered_pipelines())}"
+                )
+
+            except Exception as exc:
+                logger.warning(
+                    f"[FixedRouter] register_pipelines after bootstrap failed (best-effort): {exc}"
                 )
 
     def _process_leaves(self) -> None:
