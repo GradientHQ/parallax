@@ -232,6 +232,7 @@ class HTTPHandler:
                 {self.tokenizer.decode([token_id]): prob}
                 for token_id, prob in zip(request_info.token_ids_list, request_info.probs_list)
             ]
+            choice["token_ids"] = request_info.token_ids_list
         if request_info.weight_version is not None:
             response["weight_version"] = request_info.weight_version
         response_json = json.dumps(response, separators=(",", ":"))
@@ -307,6 +308,7 @@ class HTTPHandler:
                 {self.tokenizer.decode([token_id]): prob}
                 for token_id, prob in zip(request_info.token_ids_list, request_info.probs_list)
             ]
+            choice["token_ids"] = request_info.token_ids_list
         if request_info.weight_version is not None:
             response["weight_version"] = request_info.weight_version
         return response
