@@ -639,6 +639,7 @@ def initialize_vllm_model_runner(
         if enable_lora:
             logger.info(f"Initializing lora adapters...")
             model_runner.add_lora(lora_req)
+            model_runner.default_lora_req = lora_req
 
     return model_runner, config, tokenizer
 
@@ -680,6 +681,7 @@ def refit_vllm_model(
         for lora_id in before_loras:
             model_runner.remove_lora(lora_id)
         model_runner.add_lora(lora_req)
+        model_runner.default_lora_req = lora_req
         after_loras = model_runner.list_loras()
         logger.info(f"After lora refit number of lora adapters: {len(after_loras)}")
     else:

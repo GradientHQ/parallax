@@ -120,7 +120,7 @@ class VLLMExecutor(BaseExecutor):
             "using_hfcache": use_hfcache,
             "enable_lora": self.enable_lora,
             "max_lora_rank": self.max_lora_rank,
-            "lora_path": self.lora_path,
+            "lora_path": self.lora_paths[0] if self.lora_paths else None,
             "max_loras_per_batch": self.max_loras_per_batch,
             "max_loaded_loras": self.max_loaded_loras,
             "fully_sharded_loras": fully_sharded_loras,
