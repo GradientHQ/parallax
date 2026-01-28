@@ -229,6 +229,23 @@ class Scheduler:
         assignments = self.node_manager.list_node_allocations(self.num_layers)
         logger.info(f"[Scheduler] Post Bootstrap Layer Assignments: {assignments}")
 
+        # For fixed (RR) routing: register a pipeline set immediately after bootstrap.
+        if self.routing_strategy == "rr" and isinstance(
+            self.request_router, RoundRobinOverFixedPipelinesRouting
+        ):
+            try:
+                self.request_router.register_pipelines(
+                    self.node_manager.active_nodes, self.num_layers
+                )
+                logger.info(
+                    f"[FixedRouter] register_pipelines with bootstrap success, number of pipelines: {len(self.request_router.get_registered_pipelines())}"
+                )
+
+            except Exception as exc:
+                logger.warning(
+                    f"[FixedRouter] register_pipelines after bootstrap failed (best-effort): {exc}"
+                )
+
         self._bootstrapped_event.set()
         # Snapshot at INFO after bootstrap since allocations/pipelines may have materially changed.
         self.emit_alloc_log_snapshot(reason="Post Bootstrap")
