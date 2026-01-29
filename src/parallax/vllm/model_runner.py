@@ -527,6 +527,10 @@ def initialize_vllm_model_runner(
     lora_config = None
     lora_req = None
     if enable_lora:
+        # Hard code a large moe chunk size. Need to improve this.
+        if "VLLM_FUSED_MOE_CHUNK_SIZE" not in os.environ:
+            os.environ["VLLM_FUSED_MOE_CHUNK_SIZE"] = "65536"
+
         max_lora_rank = kwargs.get("max_lora_rank")
         if max_lora_rank is None:
             max_lora_rank = 64
