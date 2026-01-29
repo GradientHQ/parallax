@@ -108,6 +108,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--enable-prefix-cache", action="store_true", help="Enable prefix cache reuse"
     )
+    
+    # add --chunked-prefill-size
+    parser.add_argument(
+        "--chunked-prefill-size",
+        type=int,
+        default=None,
+        help="Chunk size for chunked prefill processing",
+    )
 
     # Scheduler configuration
     parser.add_argument(
