@@ -363,6 +363,8 @@ def initialize_vllm_model_runner(
     tp_rank: int = 0,
     tp_size: int = 1,
     nccl_port: int = None,
+    enable_return_routed_experts: bool = False,
+    instance_id: Optional[str] = None,
     **kwargs,
 ) -> Tuple[ParallaxVLLMModelRunner, Dict, Any]:
     from parallax.utils.selective_download import get_model_path_with_selective_download
@@ -491,6 +493,7 @@ def initialize_vllm_model_runner(
         dtype=dtype,
         seed=0,
         max_model_len=max_len,
+        enable_return_routed_experts=enable_return_routed_experts,
     )
 
     cache_config = CacheConfig(
@@ -578,7 +581,7 @@ def initialize_vllm_model_runner(
         kv_transfer_config=None,
         kv_events_config=None,
         additional_config={},
-        instance_id="",
+        instance_id=instance_id or "",
     )
 
     model_runner = ParallaxVLLMModelRunner(

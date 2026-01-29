@@ -91,6 +91,7 @@ class HTTPRequestInfo:
     return_probs: bool = False  # Whether to return probabilities
     probs_list: List = field(default_factory=list)  # Store probs for each token
     token_ids_list: List = field(default_factory=list)  # Store token IDs for each token
+    routed_experts: Optional[List] = None  # Routed experts for rollout replay
     # Weight version for RL
     weight_version: Optional[int] = None
 
@@ -309,6 +310,8 @@ class HTTPHandler:
                 for token_id, prob in zip(request_info.token_ids_list, request_info.probs_list)
             ]
             choice["token_ids"] = request_info.token_ids_list
+        if request_info.routed_experts is not None:
+            choice["routed_experts"] = request_info.routed_experts
         if request_info.weight_version is not None:
             response["weight_version"] = request_info.weight_version
         return response
@@ -362,6 +365,8 @@ class HTTPHandler:
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
             request_info.weight_version = recv_dict.get("weight_version", None)
+            if "routed_experts" in recv_dict:
+                request_info.routed_experts = recv_dict["routed_experts"]
 
             # Store probs and token IDs if requested
             if request_info.return_probs and "probs" in recv_dict:

@@ -257,6 +257,12 @@ def parse_args() -> argparse.Namespace:
         help="By default, only half of the LoRA computation is sharded with tensor parallelism. Enabling this will use the fully sharded layers. At high sequence length, max rank or tensor parallel size, this is likely faster. (vLLM only)",
     )
 
+    parser.add_argument(
+        "--enable-return-routed-experts",
+        action="store_true",
+        help="Enable returning MoE routed experts for rollout replay (vLLM only, single peer).",
+    )
+
     # Tensor parallel configuration
     parser.add_argument("--tp-size", type=int, default=1, help="Tensor parallel size")
 

@@ -2,9 +2,12 @@
 vLLM backend implementation of high level executor
 """
 
+import os
 import time
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import torch
 from vllm.sequence import IntermediateTensors
 
@@ -84,9 +87,15 @@ class VLLMExecutor(BaseExecutor):
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
         weight_refit_mode: Optional[str] = "disk",
+        # Routed experts
+        enable_return_routed_experts: bool = False,
         # Pipe communication
         conn: Optional[List[Any]] = [],
     ):
+        self.enable_return_routed_experts = enable_return_routed_experts
+        self.routed_experts_reader = None
+        self.routed_experts_instance_id = None
+
         self.enable_lora = True if lora_paths is not None else enable_lora
         self.lora_paths = lora_paths
         self.max_lora_rank = max_lora_rank
@@ -99,6 +108,9 @@ class VLLMExecutor(BaseExecutor):
         # output lora paths
         if self.lora_paths is not None:
             logger.info(f"LoRA paths provided: {[str(lora_path) for lora_path in self.lora_paths]}")
+
+        if self.enable_return_routed_experts:
+            self.routed_experts_instance_id = f"parallax_{os.getpid()}_{uuid.uuid4().hex}"
 
         model_runner_params = {
             "model_repo": model_repo,
@@ -122,6 +134,8 @@ class VLLMExecutor(BaseExecutor):
             "max_loras_per_batch": self.max_loras_per_batch,
             "max_loaded_loras": self.max_loaded_loras,
             "fully_sharded_loras": fully_sharded_loras,
+            "enable_return_routed_experts": self.enable_return_routed_experts,
+            "instance_id": self.routed_experts_instance_id,
         }
         logger.debug(
             f"Initializing vLLM model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
@@ -153,6 +167,8 @@ class VLLMExecutor(BaseExecutor):
             weight_refit_mode=weight_refit_mode,
             conn=conn,
         )
+        if self.enable_return_routed_experts:
+            self._init_routed_experts_reader()
 
     def check_and_refit_weight(self, refit_weight_path: str):
         if self.tp_size > 1:
@@ -227,7 +243,9 @@ class VLLMExecutor(BaseExecutor):
                     if req.abort:
                         original_req.abort = True
 
+                    routed_experts = None
                     if self.scheduler.check_and_update_request_status(original_req):
+                        routed_experts = self._get_routed_experts_for_request(original_req)
                         logger.debug(f"Releasing resources for finished request {req.request_id}")
                         self.release_and_evict_request(req.request_id)
                         if not self.is_last_peer:
@@ -254,6 +272,8 @@ class VLLMExecutor(BaseExecutor):
                             req_dict["weight_version"] = self.weight_version
                         if original_req.return_probs and req.token_prob is not None:
                             req_dict["probs"] = req.token_prob
+                        if routed_experts is not None:
+                            req_dict["routed_experts"] = routed_experts
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:
@@ -479,6 +499,112 @@ class VLLMExecutor(BaseExecutor):
         }
         logger.debug(f"Prepared CUDA prefill batch (vllm, size={batch_size})")
         return ret
+
+    def _init_routed_experts_reader(self) -> None:
+        if not self.enable_return_routed_experts:
+            return
+        num_hidden_layers = None
+        if isinstance(self.config, dict):
+            num_hidden_layers = self.config.get("num_hidden_layers")
+        else:
+            num_hidden_layers = getattr(self.config, "num_hidden_layers", None)
+
+        if num_hidden_layers is None:
+            logger.warning("Unable to determine num_hidden_layers; routed experts disabled.")
+            self.enable_return_routed_experts = False
+            return
+
+        if not (self.start_layer == 0 and self.end_layer == num_hidden_layers):
+            logger.warning(
+                "Routed experts is only supported for single peer. "
+                "Disabling routed experts for layers [%s, %s).",
+                self.start_layer,
+                self.end_layer,
+            )
+            self.enable_return_routed_experts = False
+            return
+
+        try:
+            from vllm.model_executor.layers.fused_moe.routed_experts_capturer import (
+                RoutedExpertsReader,
+            )
+        except Exception as exc:  # pragma: no cover - optional dependency
+            logger.warning("Failed to import RoutedExpertsReader: %s", exc)
+            self.enable_return_routed_experts = False
+            return
+
+        kv_cache_config = getattr(self.model_runner, "kv_cache_config", None)
+        if kv_cache_config is None or not getattr(kv_cache_config, "kv_cache_groups", None):
+            logger.warning("KV cache config unavailable; routed experts disabled.")
+            self.enable_return_routed_experts = False
+            return
+
+        block_size = self.model_runner.cache_config.block_size
+        num_groups = len(kv_cache_config.kv_cache_groups)
+        max_num_kv_tokens = (kv_cache_config.num_blocks // num_groups + 1) * block_size
+
+        instance_id = self.model_runner.vllm_config.instance_id
+        reader = RoutedExpertsReader.create()
+        try:
+            reader.attach_buffer(
+                max_num_kv_tokens=max_num_kv_tokens,
+                model_config=self.model_runner.model_config,
+                instance_id=instance_id,
+            )
+        except Exception as exc:
+            logger.warning("Failed to attach routed experts buffer: %s", exc)
+            self.enable_return_routed_experts = False
+            return
+        self.routed_experts_reader = reader
+
+    def _get_routed_experts_for_request(self, request: Request) -> Optional[List]:
+        if not self.enable_return_routed_experts or self.routed_experts_reader is None:
+            return None
+
+        kv_cache_manager = getattr(self.model_runner, "kv_cache_manager", None)
+        if kv_cache_manager is None:
+            return None
+
+        try:
+            kv_blocks = kv_cache_manager.get_blocks(request.request_id)
+            block_ids = kv_blocks.get_block_ids()
+        except Exception as exc:
+            logger.debug("Failed to get KV blocks for routed experts: %s", exc)
+            return None
+
+        if (
+            isinstance(block_ids, (list, tuple))
+            and block_ids
+            and isinstance(block_ids[0], (list, tuple))
+        ):
+            block_ids = block_ids[0]
+
+        if not block_ids:
+            return None
+
+        num_tokens = getattr(request, "total_length", None)
+        if num_tokens is None or num_tokens <= 0:
+            return None
+
+        block_size = self.model_runner.cache_config.block_size
+        block_ids_array = np.array(block_ids, dtype=np.int32)
+        block_offsets = np.arange(0, block_size, dtype=np.int32)
+        slot_mapping = (
+            block_offsets.reshape((1, block_size))
+            + block_ids_array.reshape((len(block_ids_array), 1)) * block_size
+        ).flatten()
+
+        slot_mapping = slot_mapping[: min(num_tokens, slot_mapping.size)]
+        if slot_mapping.size == 0:
+            return None
+
+        try:
+            routed_experts = self.routed_experts_reader.get_routed_experts(indices=slot_mapping)
+        except Exception as exc:
+            logger.debug("Failed to read routed experts: %s", exc)
+            return None
+
+        return routed_experts.tolist()
 
     def _prepare_decode_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """
