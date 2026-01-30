@@ -50,7 +50,6 @@ def create_executor_config(args: argparse.Namespace, shared_state=None, conn=Non
         "max_loaded_loras": args.max_loaded_loras,
         "enable_weight_refit": args.enable_weight_refit,
         "weight_refit_mode": args.weight_refit_mode,
-        "enable_return_routed_experts": getattr(args, "enable_return_routed_experts", False),
     }
 
     if args.gpu_backend == "sglang":
@@ -66,6 +65,9 @@ def create_executor_config(args: argparse.Namespace, shared_state=None, conn=Non
         config.update(
             {
                 "fully_sharded_loras": getattr(args, "fully_sharded_loras", False),
+                "enable_return_routed_experts": getattr(
+                    args, "enable_return_routed_experts", False
+                ),
             }
         )
 
