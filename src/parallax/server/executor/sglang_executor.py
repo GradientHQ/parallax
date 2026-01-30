@@ -198,6 +198,9 @@ class SGLExecutor(BaseExecutor):
         if chunked_prefill_size is not None and chunked_prefill_size <= 0:
             chunked_prefill_size = None
         self.chunked_req = None
+        # Per-request accumulator for chunked prefill hidden states (non-last peers only).
+        # When forwarding after all chunks are done, replace with concat of all chunks.
+        self._chunked_prefill_hidden_accumulator: Dict[str, List[torch.Tensor]] = {}
 
         # create a page tree cache for sglang prefill
         if enable_prefix_cache:
@@ -344,6 +347,15 @@ class SGLExecutor(BaseExecutor):
             requests, batch_output, context_lengths
         )
         if self.chunked_req is None or self.chunked_req.is_chunked <= 0:
+            # Chunked prefill just finished (or no chunked): replace hidden_states with full concat when forwarding.
+            if not self.is_last_peer and self._chunked_prefill_hidden_accumulator:
+                for req in base_to_forward:
+                    rid = req.request_id
+                    if rid in self._chunked_prefill_hidden_accumulator:
+                        chunks = self._chunked_prefill_hidden_accumulator[rid]
+                        chunks.append(req.hidden_states)
+                        req.hidden_states = torch.cat(chunks, dim=0)
+                        del self._chunked_prefill_hidden_accumulator[rid]
             return (base_chunked, base_to_forward)
         chunked_rid = self.chunked_req.rid
         self.stash_chunked_request(self.chunked_req)
@@ -353,6 +365,11 @@ class SGLExecutor(BaseExecutor):
             if req.request_id == chunked_rid:
                 req.status = RequestStatus.PREFILLING
                 chunked_reqs.append(req)
+                # Accumulate this chunk's hidden_states for full prefill when forwarding (non-last peers only).
+                if not self.is_last_peer:
+                    self._chunked_prefill_hidden_accumulator.setdefault(req.request_id, []).append(
+                        req.hidden_states
+                    )
             else:
                 to_forward_reqs.append(req)
         return (chunked_reqs, to_forward_reqs)
@@ -588,6 +605,7 @@ class SGLExecutor(BaseExecutor):
     def _release_request(self, rid: str):
         """Release per-request resources in SGLang."""
         try:
+            self._chunked_prefill_hidden_accumulator.pop(rid, None)
             # Debug: log running_batch before release to verify request eviction
             before_size = 0 if self.running_batch.is_empty() else len(self.running_batch.reqs)
             before_rids = (
