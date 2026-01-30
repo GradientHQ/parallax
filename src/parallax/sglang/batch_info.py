@@ -8,11 +8,11 @@ ScheduleBatch -> ModelWorkerBatch -> ForwardBatch
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 
-from sglang.srt.managers.schedule_policy import AddReqResult, PrefillAdder
 import torch
 from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
+from sglang.srt.managers.schedule_policy import AddReqResult, PrefillAdder
 from sglang.srt.mem_cache.radix_cache import RadixCache as PageRadixCache
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_executor.model_runner import ModelRunner
@@ -53,18 +53,35 @@ def transform_sampling_params_to_sglang(old_params: ParallaxSamplingParams) -> S
     return params
 
 
+def _dummy_tree_cache_for_adder():
+    """Dummy tree cache when prefix cache is disabled. PrefillAdder expects tree_cache
+    to have evictable_size(), inc_lock_ref(), dec_lock_ref() etc.; pass this instead of None."""
+    return SimpleNamespace(
+        evictable_size=lambda: 0,
+        full_evictable_size=lambda: 0,
+        swa_evictable_size=lambda: 0,
+        inc_lock_ref=lambda node: None,
+        dec_lock_ref=lambda node, uuid=None: None,
+    )
+
+
 def transform_requests_to_sglang(
-    old_requests: List[Request], 
+    old_requests: List[Request],
     executor: SGLExecutor,
 ) -> List[Req]:
     """Transforms Parallax Request to SGLang.Req format"""
     model_runner = executor.model_runner
     page_tree_cache = executor.page_tree_cache
     chunked_prefill_size = executor.chunked_prefill_size
+    # When prefix cache is disabled, sglang's PrefillAdder still expects tree_cache to have
+    # evictable_size(), inc_lock_ref(), etc. Pass a dummy instead of None.
+    tree_cache_for_adder = (
+        page_tree_cache if page_tree_cache is not None else _dummy_tree_cache_for_adder()
+    )
     # Prefill policy
     adder = PrefillAdder(
         model_runner.page_size,
-        page_tree_cache,
+        tree_cache_for_adder,
         model_runner.token_to_kv_pool_allocator,
         None,
         None,
@@ -74,15 +91,16 @@ def transform_requests_to_sglang(
         None,
         None,
     )
-    
+    # Save rid of chunked req added this round so we can reorder can_run_list to match old_requests.
+    chunked_rid = executor.chunked_req.rid if executor.chunked_req is not None else None
+
     if executor.chunked_req is not None:
         logger.debug(f"before add_chunked_req, chunked_req is not None")
         executor.chunked_req.init_next_round_input(page_tree_cache)
         executor.chunked_req = adder.add_chunked_req(executor.chunked_req)
         if executor.chunked_req is None:
             logger.debug(f"after add_chunked_req, chunked_req is None")
-        
-    
+
     reqs = []
     logger.debug(f"old_req size: {len(old_requests)}")
     for old_req in old_requests:
@@ -107,17 +125,21 @@ def transform_requests_to_sglang(
             )
 
         req.init_next_round_input(page_tree_cache)
-        
+
         res = adder.add_one_req(
-            req, executor.chunked_req is not None, None,
+            req,
+            executor.chunked_req is not None,
+            None,
         )
-        
+
         if res != AddReqResult.CONTINUE:
-            logger.warning(f"Request {old_req.request_id} failed to add to prefill batch, result: {res},\
-                           req_len: {len(req.origin_input_ids)}")
+            logger.warning(
+                f"Request {old_req.request_id} failed to add to prefill batch, result: {res},\
+                           req_len: {len(req.origin_input_ids)}"
+            )
             if res == AddReqResult.NO_TOKEN:
                 logger.warning(f"there is no token to add to prefill batch")
-                executor.running_batch.batch_is_full = True 
+                executor.running_batch.batch_is_full = True
             break
 
         # Debug: Log after cache lookup
@@ -133,9 +155,9 @@ def transform_requests_to_sglang(
             )
 
         reqs.append(req)
-        
+
     logger.debug(f"new reqs size: {len(reqs)}")
-        
+
     if adder.new_chunked_req is not None:
         # Update chunked prefill
         assert executor.chunked_req is None
@@ -144,8 +166,16 @@ def transform_requests_to_sglang(
 
     if executor.chunked_req is not None:
         executor.chunked_req.is_chunked += 1
-    
-    return adder.can_run_list
+
+    # Reorder so returned list follows old_requests order and each element is the Req
+    # that corresponds to that old_req (same rid). Use rid to map instead of assuming
+    # can_run_list order, so the relationship with reqs is explicit.
+    can_run_list = adder.can_run_list
+    if chunked_rid is None:
+        return can_run_list
+    rid_to_req = {req.rid: req for req in can_run_list}
+    reordered: List[Req] = [rid_to_req[old_req.request_id] for old_req in old_requests]
+    return reordered
 
 
 def form_sgl_batch_prefill(
@@ -155,7 +185,6 @@ def form_sgl_batch_prefill(
     """Initialize a prefill ScheduleBatch -> ModelWorkerBatch -> ForwardBatch workflow"""
     model_runner = executor.model_runner
     page_tree_cache = executor.page_tree_cache
-    
 
     sgl_reqs = transform_requests_to_sglang(requests, executor)
 
@@ -180,6 +209,10 @@ def form_sgl_batch_prefill(
         chunked_req=executor.chunked_req,
     )
     schedule_batch.prepare_for_extend()
+    if executor.chunked_req is not None:
+        logger.debug(
+            f"chunked_req.rid={executor.chunked_req.rid}, chunked_req.req_pool_idx: {executor.chunked_req.req_pool_idx}"
+        )
 
     num_tokens = schedule_batch.extend_num_tokens
     dp_size = model_runner.dp_size

@@ -7,12 +7,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from sglang.srt.lora.lora_registry import LoRARef
-from sglang.srt.managers.schedule_batch import ScheduleBatch
+from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
 from sglang.srt.mem_cache.cache_init_params import CacheInitParams
 from sglang.srt.mem_cache.radix_cache import RadixCache as PageRadixCache
 from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
 from sglang.srt.utils.common import SUPPORTED_LORA_TARGET_MODULES
-from sglang.srt.managers.schedule_batch import Req
 
 from parallax.server.executor.base_executor import BaseExecutor
 from parallax.server.request import (
@@ -194,7 +193,7 @@ class SGLExecutor(BaseExecutor):
         self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
         self.tp_group = self.model_runner.tp_group
         self.tp_cpu_group = self.tp_group.cpu_group
-        
+
         # add chunked_prefill_size and chunked_req
         if chunked_prefill_size is not None and chunked_prefill_size <= 0:
             chunked_prefill_size = None
@@ -319,6 +318,45 @@ class SGLExecutor(BaseExecutor):
                     and (self.max_lora_chunk_size & (self.max_lora_chunk_size - 1)) == 0
                 ), "--max-lora-chunk-size must be a power of 2 between 16 and 128."
 
+    def stash_chunked_request(self, req: Req):
+        logger.debug(f"req.fill_ids_size: {len(req.fill_ids)}")
+        # #endregion
+        if req.req_pool_idx is None:
+            logger.warning(
+                "stash_chunked_request: skipping cache_unfinished_req and free because req.req_pool_idx is None (rid=%s, fill_ids_len=%s)",
+                getattr(req, "rid", None),
+                len(req.fill_ids),
+            )
+            return
+        self.page_tree_cache.cache_unfinished_req(req, chunked=True)
+        # FIX: below code don't now if it is needed
+        # # Chunked request keeps its rid but will get a new req_pool_idx
+        if self.model_runner.mambaish_config is not None:
+            self.model_runner.req_to_token_pool.free(req.req_pool_idx, free_mamba_cache=False)
+        else:
+            self.model_runner.req_to_token_pool.free(req.req_pool_idx)
+
+    def prepare_next_batch_requests(
+        self, requests: List[Request], batch_output: Any, context_lengths: Any
+    ) -> Tuple[List[Request], List[Request]]:
+        """Split out chunked prefill reqs; set their status to PREFILLING and return (chunked, to_forward)."""
+        base_chunked, base_to_forward = super().prepare_next_batch_requests(
+            requests, batch_output, context_lengths
+        )
+        if self.chunked_req is None or self.chunked_req.is_chunked <= 0:
+            return (base_chunked, base_to_forward)
+        chunked_rid = self.chunked_req.rid
+        self.stash_chunked_request(self.chunked_req)
+        chunked_reqs: List[Request] = []
+        to_forward_reqs: List[Request] = []
+        for req in base_to_forward:
+            if req.request_id == chunked_rid:
+                req.status = RequestStatus.PREFILLING
+                chunked_reqs.append(req)
+            else:
+                to_forward_reqs.append(req)
+        return (chunked_reqs, to_forward_reqs)
+
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
         if self.tp_size > 1:
@@ -361,7 +399,6 @@ class SGLExecutor(BaseExecutor):
                                 f"[FirstPeer-CUDA] Committed token {req.next_token_id} for {req.request_id}, "
                                 f"output_ids now has {len(original_req.output_ids)} tokens"
                             )
-                        
 
                     if len(req.routing_table) > 0:
                         original_req.routing_table = req.routing_table
@@ -380,7 +417,7 @@ class SGLExecutor(BaseExecutor):
                         self.chunked_req.is_chunked -= 1
                         self.scheduler.enque_request(original_req)
                         continue
-                        
+
                     elif self.scheduler.check_and_update_request_status(original_req):
                         logger.debug(f"Releasing resources for finished request {req.request_id}")
                         self.release_and_evict_request(req.request_id)
@@ -427,15 +464,6 @@ class SGLExecutor(BaseExecutor):
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
-                    
-    def stash_chunked_request(self, req: Req):
-        self.page_tree_cache.cache_unfinished_req(req, chunked=True)
-        # FIX: below code don't now if it is needed
-        # # Chunked request keeps its rid but will get a new req_pool_idx
-        # if self.model_runner.mambaish_config is not None:
-        #     self.model_runner.req_to_token_pool.free(req.req_pool_idx, free_mamba_cache=False)
-        # else:
-        #     self.model_runner.req_to_token_pool.free(req.req_pool_idx)
 
     def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """Process a batch of requests in SGLang."""
@@ -454,22 +482,19 @@ class SGLExecutor(BaseExecutor):
             pp_proxy_tensors=pp_proxy_tensors,
         )
         logits_output = out.logits_output
-                    
 
         # Merge prefill batch into running batch
         chunked_req_to_exclude = set()
-        
+
         if self.chunked_req is not None:
             # Move the chunked request out of the batch so that we can merge
             # only finished requests to running_batch.
             chunked_req_to_exclude.add(self.chunked_req)
-            self.stash_chunked_request(self.chunked_req)
-        
-        
+
         if self.cur_batch and self.cur_batch.forward_mode.is_extend():
             if self.cur_batch.chunked_req is not None:
                 chunked_req_to_exclude.add(self.cur_batch.chunked_req)
-        
+
         if self.cur_batch:
             # Avoid duplicate rids in running_batch: exclude any cur_batch req
             # whose rid is already in running_batch (filter_batch uses object identity).
@@ -479,10 +504,8 @@ class SGLExecutor(BaseExecutor):
                     if req.rid in existing_rids:
                         chunked_req_to_exclude.add(req)
             cur_batch_size = self.cur_batch.batch_size()
-            self.cur_batch.filter_batch(
-                chunked_req_to_exclude=list[Req](chunked_req_to_exclude)
-            )
-            
+            self.cur_batch.filter_batch(chunked_req_to_exclude=list[Req](chunked_req_to_exclude))
+
             if self.cur_batch.batch_size() < cur_batch_size:
                 self.cur_batch.batch_is_full = False
             if self.cur_batch.forward_mode.is_extend():
@@ -499,9 +522,13 @@ class SGLExecutor(BaseExecutor):
         if return_decoded_tokens:
             # Debug: log running_batch vs prepared_inputs["requests"] to detect
             # "running_batch still has previous request" causing token mis-assignment
-            running_batch_size = 0 if self.running_batch.is_empty() else len(self.running_batch.reqs)
+            running_batch_size = (
+                0 if self.running_batch.is_empty() else len(self.running_batch.reqs)
+            )
             running_batch_rids = (
-                [] if self.running_batch.is_empty() else [req.rid for req in self.running_batch.reqs]
+                []
+                if self.running_batch.is_empty()
+                else [req.rid for req in self.running_batch.reqs]
             )
             requests_len = len(requests)
             requests_ids = [getattr(r, "request_id", str(r)) for r in requests]
@@ -564,7 +591,9 @@ class SGLExecutor(BaseExecutor):
             # Debug: log running_batch before release to verify request eviction
             before_size = 0 if self.running_batch.is_empty() else len(self.running_batch.reqs)
             before_rids = (
-                [] if self.running_batch.is_empty() else [req.rid for req in self.running_batch.reqs]
+                []
+                if self.running_batch.is_empty()
+                else [req.rid for req in self.running_batch.reqs]
             )
             logger.debug(
                 "[ChunkedPrefill-Debug] _release_request BEFORE: releasing rid=%s, "
@@ -576,7 +605,9 @@ class SGLExecutor(BaseExecutor):
             release_sglang_request(self.running_batch, rid)
             after_size = 0 if self.running_batch.is_empty() else len(self.running_batch.reqs)
             after_rids = (
-                [] if self.running_batch.is_empty() else [req.rid for req in self.running_batch.reqs]
+                []
+                if self.running_batch.is_empty()
+                else [req.rid for req in self.running_batch.reqs]
             )
             logger.debug(
                 "[ChunkedPrefill-Debug] _release_request AFTER: running_batch size=%s rids=%s",
