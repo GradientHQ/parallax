@@ -347,7 +347,10 @@ class SGLExecutor(BaseExecutor):
             return base_chunked, base_to_forward
         chunked_rid = self.chunked_req.rid
         self.stash_chunked_request(self.chunked_req)
-        base_chunked.append(self.chunked_req)
+        for req in base_to_forward:
+            if req.request_id == chunked_rid:
+                base_chunked.append(req)
+                break
         # delete chunked_req from base_to_forward if self is last_peer
         if self.is_last_peer:
             base_to_forward = [req for req in base_to_forward if req.request_id != chunked_rid]
