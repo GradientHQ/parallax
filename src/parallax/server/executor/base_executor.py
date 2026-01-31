@@ -634,24 +634,24 @@ class BaseExecutor:
             prompt = convert_chat(raw_request["messages"], raw_request.get("role_mapping"))
             prompt = self.tokenizer.encode(prompt)
 
-        max_req_len = self.max_sequence_length if self.max_sequence_length is not None else 4096
-        max_req_len = max(max_req_len, 4096)
+        max_seq_len = self.max_sequence_length if self.max_sequence_length is not None else 4096
+        max_seq_len = max(max_seq_len, 4096)
         max_new_tokens = raw_request.get("max_tokens", 2048)
         input_token_num = len(prompt)
-        if input_token_num + max_new_tokens >= max_req_len:
+        if input_token_num + max_new_tokens >= max_seq_len:
             logger.warning(
-                f"Input token length {input_token_num} + max_new_tokens {max_new_tokens} exceeds max_sequence_length {max_req_len}."
+                f"Input token length {input_token_num} + max_new_tokens {max_new_tokens} exceeds max_sequence_length {max_seq_len}."
             )
             if max_new_tokens > 2048:
                 logger.warning(
                     f"max_new_tokens {max_new_tokens} is too large, reduce to 2048 tokens."
                 )
                 max_new_tokens = 2048
-            if input_token_num + max_new_tokens >= max_req_len:
+            if input_token_num + max_new_tokens >= max_seq_len:
                 logger.warning(
-                    f"Trunc input prompt, keep last {max_req_len - max_new_tokens} tokens"
+                    f"Trunc input prompt, keep last {max_seq_len - max_new_tokens} tokens"
                 )
-                prompt = prompt[-(max_req_len - max_new_tokens) :]
+                prompt = prompt[-(max_seq_len - max_new_tokens) :]
 
         max_total_length = len(prompt) + max_new_tokens
         logger.debug(f"Final max_new_tokens for request ID {rid}: {max_new_tokens}")
