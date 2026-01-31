@@ -108,6 +108,9 @@ class VLLMExecutor(BaseExecutor):
         # output lora paths
         if self.lora_paths is not None:
             logger.info(f"LoRA paths provided: {[str(lora_path) for lora_path in self.lora_paths]}")
+        # force routed experts for RL
+        if enable_weight_refit and self.lora_paths is not None:
+            self.enable_return_routed_experts = True
 
         if self.enable_return_routed_experts:
             self.routed_experts_instance_id = f"parallax_{os.getpid()}_{uuid.uuid4().hex}"
