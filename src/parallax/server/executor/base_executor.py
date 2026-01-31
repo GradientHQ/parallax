@@ -562,7 +562,7 @@ class BaseExecutor:
                         if chunked_reqs:
                             self.handle_input_requests(chunked_reqs)
                         # 8. Dispatch to the appropriate destination
-                        if to_forward_reqs:
+                        if to_forward_reqs or chunked_reqs:
                             if self.is_last_peer and self.is_first_peer:
                                 # Single node: handle to_forward locally
                                 self.handle_input_requests(to_forward_reqs)
