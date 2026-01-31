@@ -338,24 +338,19 @@ class SGLExecutor(BaseExecutor):
 
     def prepare_next_batch_requests(
         self, requests: List[Request], batch_output: Any, context_lengths: Any
-    ) -> Tuple[List[Request], List[Request]]:
+    ) -> List[Request]:
         """Split out chunked prefill reqs; set their status to PREFILLING and return (chunked, to_forward)."""
-        base_chunked, base_to_forward = super().prepare_next_batch_requests(
+        base_to_forward = super().prepare_next_batch_requests(
             requests, batch_output, context_lengths
         )
-        if self.chunked_req is None or self.chunked_req.is_chunked <= 0:
-            return (base_chunked, base_to_forward)
+        if self.chunked_req is None or self.chunked_req.is_chunked <= 0 or self.chunked_req.rid not in [req.request_id for req in requests]:
+            return base_to_forward
         chunked_rid = self.chunked_req.rid
         self.stash_chunked_request(self.chunked_req)
-        chunked_reqs: List[Request] = []
-        to_forward_reqs: List[Request] = []
-        for req in base_to_forward:
-            if req.request_id == chunked_rid:
-                req.status = RequestStatus.PREFILLING
-                chunked_reqs.append(req)
-            else:
-                to_forward_reqs.append(req)
-        return (chunked_reqs, to_forward_reqs)
+        # delete chunked_req from base_to_forward if self is last_peer
+        if self.is_last_peer:
+            base_to_forward = [req for req in base_to_forward if req.request_id != chunked_rid]
+        return base_to_forward
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
@@ -701,7 +696,12 @@ class SGLExecutor(BaseExecutor):
             return None
 
         # Pre-check: Verify KV cache has enough space for prefill
-        total_tokens_needed = sum(req.total_length for req in batched_requests)
+        def _get_total_length(req: Request) -> int:
+            if hasattr(req, "hidden_states") and req.hidden_states is not None:
+                return req.hidden_states.shape[0]
+            return req.total_length
+
+        total_tokens_needed = sum(_get_total_length(req) for req in batched_requests)
         if not self._check_kv_cache_available(total_tokens_needed):
             self._abort_requests_due_to_kv_cache(
                 batched_requests,
@@ -751,7 +751,7 @@ class SGLExecutor(BaseExecutor):
                     if self.lora_paths and len(self.lora_paths) > 0
                     else None
                 )
-            lengths.append(req.total_length)
+            lengths.append(_get_total_length(req))
         lengths_tensor = torch.tensor(lengths, device=self.device)
 
         schedule_batch, forward_batch = form_sgl_batch_prefill(

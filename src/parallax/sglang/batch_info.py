@@ -94,7 +94,7 @@ def transform_requests_to_sglang(
     # Save rid of chunked req added this round so we can reorder can_run_list to match old_requests.
     chunked_rid = executor.chunked_req.rid if executor.chunked_req is not None else None
 
-    if executor.chunked_req is not None:
+    if executor.chunked_req is not None and executor.chunked_req.rid in [req.request_id for req in old_requests]:
         logger.debug(f"before add_chunked_req, chunked_req is not None")
         executor.chunked_req.init_next_round_input(page_tree_cache)
         executor.chunked_req = adder.add_chunked_req(executor.chunked_req)
@@ -164,14 +164,14 @@ def transform_requests_to_sglang(
         executor.chunked_req = adder.new_chunked_req
         logger.debug(f"new chunked_req is {executor.chunked_req}")
 
-    if executor.chunked_req is not None:
+    if executor.chunked_req is not None and executor.chunked_req.rid in [req.request_id for req in old_requests]:
         executor.chunked_req.is_chunked += 1
 
     # Reorder so returned list follows old_requests order and each element is the Req
     # that corresponds to that old_req (same rid). Use rid to map instead of assuming
     # can_run_list order, so the relationship with reqs is explicit.
     can_run_list = adder.can_run_list
-    if chunked_rid is None:
+    if chunked_rid is None or executor.chunked_req.rid not in [req.request_id for req in old_requests]:
         return can_run_list
     rid_to_req = {req.rid: req for req in can_run_list}
     reordered: List[Req] = [rid_to_req[old_req.request_id] for old_req in old_requests]
@@ -206,10 +206,10 @@ def form_sgl_batch_prefill(
         model_config=model_runner.model_config,
         enable_overlap=False,
         spec_algorithm=SpeculativeAlgorithm.NONE,
-        chunked_req=executor.chunked_req,
+        chunked_req=executor.chunked_req if executor.chunked_req is not None and executor.chunked_req.rid in [req.request_id for req in requests] else None,
     )
     schedule_batch.prepare_for_extend()
-    if executor.chunked_req is not None:
+    if executor.chunked_req is not None and executor.chunked_req.rid in [req.request_id for req in requests]:
         logger.debug(
             f"chunked_req.rid={executor.chunked_req.rid}, chunked_req.req_pool_idx: {executor.chunked_req.req_pool_idx}"
         )
