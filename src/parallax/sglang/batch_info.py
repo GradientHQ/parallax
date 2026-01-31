@@ -99,7 +99,7 @@ def transform_requests_to_sglang(
         executor.chunked_req.init_next_round_input(page_tree_cache)
         executor.chunked_req = adder.add_chunked_req(executor.chunked_req)
         if executor.chunked_req is None:
-            logger.debug(f"after add_chunked_req, chunked_req is None")
+            logger.debug(f"chunked_req{chunked_rid} has chunk all after add_chunked_req, chunked_req is None")
 
     reqs = []
     logger.debug(f"old_req size: {len(old_requests)}")

@@ -485,13 +485,13 @@ class SGLExecutor(BaseExecutor):
         # Merge prefill batch into running batch
         chunked_req_to_exclude = set()
 
-        if self.chunked_req is not None:
+        if self.chunked_req is not None and self.chunked_req.is_chunked > 0:
             # Move the chunked request out of the batch so that we can merge
             # only finished requests to running_batch.
             chunked_req_to_exclude.add(self.chunked_req)
 
         if self.cur_batch and self.cur_batch.forward_mode.is_extend():
-            if self.cur_batch.chunked_req is not None:
+            if self.cur_batch.chunked_req is not None and self.cur_batch.chunked_req.is_chunked > 0:
                 chunked_req_to_exclude.add(self.cur_batch.chunked_req)
 
         if self.cur_batch:
