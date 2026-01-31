@@ -636,7 +636,7 @@ class BaseExecutor:
 
         max_req_len = self.max_sequence_length if self.max_sequence_length is not None else 1024 * 6
         input_token_num = len(prompt)
-        if input_token_num >= 1024 * 4:
+        if input_token_num >= max_req_len:
             logger.warning(
                 f"Input token length {input_token_num} exceeds max_sequence_length {max_req_len}. Truncating input to 4k tokens (keeping last 4k)."
             )
