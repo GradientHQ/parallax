@@ -151,6 +151,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
 
         self.request_block_hasher: Optional[Callable[[Any], List[Any]]] = None
         self.enable_prefix_caching: bool = False
+        self.lora_history: List[Tuple[str, int, str]] = []  # lora_name, lora_id, lora_path
 
         super().__init__(vllm_config=vllm_config, device=device)
         self.kv_cache_config = kv_cache_config
@@ -529,6 +530,9 @@ def initialize_vllm_model_runner(
     enable_lora = kwargs.get("enable_lora", False)
     lora_config = None
     lora_req = None
+    lora_name = None
+    lora_int_id = None
+    lora_path = None
     if enable_lora:
         # Hard code a large moe chunk size. Need to improve this.
         if "VLLM_FUSED_MOE_CHUNK_SIZE" not in os.environ:
@@ -655,6 +659,9 @@ def initialize_vllm_model_runner(
             model_runner.add_lora(lora_req)
             model_runner.default_lora_req = lora_req
 
+            lora_info = (lora_name, lora_int_id, lora_path)
+            model_runner.lora_history.append(lora_info)
+
     return model_runner, config, tokenizer
 
 
@@ -690,13 +697,30 @@ def refit_vllm_model(
             f"Created LoRA request: {lora_name} (id={lora_int_id}) path={refit_weight_path}"
         )
 
+        # Release old loras if needed
         before_loras = model_runner.list_loras()
+        history = model_runner.lora_history
+        assert len(before_loras) == len(
+            history
+        ), f"Before lora refit, number of loaded lora mismatch!"
         logger.info(f"Before lora refit number of lora adapters: {len(before_loras)}")
-        for lora_id in before_loras:
-            model_runner.remove_lora(lora_id)
+        while len(history) > 1:
+            _, old_lora_id, _ = history.pop(0)
+            model_runner.remove_lora(old_lora_id)
+
+        # Add new lora
         model_runner.add_lora(lora_req)
         model_runner.default_lora_req = lora_req
+        lora_info = (lora_name, lora_int_id, refit_weight_path)
+        history.append(lora_info)
+        model_runner.lora_history = history
+
+        # Check lora slots
         after_loras = model_runner.list_loras()
+        after_history = model_runner.lora_history
+        assert len(after_loras) == len(
+            after_history
+        ), f"After lora refit, number of loaded lora mismatch!"
         logger.info(f"After lora refit number of lora adapters: {len(after_loras)}")
     else:
         assert False, "Weight refit needs host tensors or weight path"
