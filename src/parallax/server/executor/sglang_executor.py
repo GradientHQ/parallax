@@ -344,6 +344,7 @@ class SGLExecutor(BaseExecutor):
             requests, batch_output, context_lengths
         )
         if self.chunked_req is None or self.chunked_req.is_chunked <= 0 or self.chunked_req.rid not in [req.request_id for req in requests]:
+            logger.debug(f"sglang_executor: prepare_next_batch_requests: return base_chunked and base_to_forward because chunked_req is None or is_chunked <= 0 or rid not in requests")
             return base_chunked, base_to_forward
         chunked_rid = self.chunked_req.rid
         self.stash_chunked_request(self.chunked_req)
@@ -354,6 +355,7 @@ class SGLExecutor(BaseExecutor):
         # delete chunked_req from base_to_forward if self is last_peer
         if self.is_last_peer:
             base_to_forward = [req for req in base_to_forward if req.request_id != chunked_rid]
+        logger.debug(f"sglang_executor: prepare_next_batch_requests: return new_chunked and new_to_forward because chunked_req is not None and is_chunked > 0 and rid in requests")
         return base_chunked, base_to_forward
 
     def handle_input_requests(self, requests: List[Request]):
