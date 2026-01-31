@@ -338,19 +338,20 @@ class SGLExecutor(BaseExecutor):
 
     def prepare_next_batch_requests(
         self, requests: List[Request], batch_output: Any, context_lengths: Any
-    ) -> List[Request]:
+    ) -> Tuple[List[Request], List[Request]]:
         """Split out chunked prefill reqs; set their status to PREFILLING and return (chunked, to_forward)."""
-        base_to_forward = super().prepare_next_batch_requests(
+        base_chunked, base_to_forward = super().prepare_next_batch_requests(
             requests, batch_output, context_lengths
         )
         if self.chunked_req is None or self.chunked_req.is_chunked <= 0 or self.chunked_req.rid not in [req.request_id for req in requests]:
-            return base_to_forward
+            return base_chunked, base_to_forward
         chunked_rid = self.chunked_req.rid
         self.stash_chunked_request(self.chunked_req)
+        base_chunked.append(self.chunked_req)
         # delete chunked_req from base_to_forward if self is last_peer
         if self.is_last_peer:
             base_to_forward = [req for req in base_to_forward if req.request_id != chunked_rid]
-        return base_to_forward
+        return base_chunked, base_to_forward
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""

@@ -386,10 +386,13 @@ class BaseExecutor:
 
     def prepare_next_batch_requests(
         self, requests: List[Request], batch_output: Any, context_lengths: Any
-    ) -> List[Request]:
+    ) -> Tuple[List[Request], List[Request]]:
         """Prepares a batch of requests for the next stage of the pipeline.
 
-        Returns a list of requests to forward (single node: handle_input_requests;
+        Returns two lists:
+        - chunked_reqs: requests that still have chunks to complete (e.g. chunked prefill);
+          these should be handled locally via handle_input_requests only, not sent to next peer.
+        - to_forward_reqs: requests to forward (single node: handle_input_requests;
           multi-node and tp_rank==0: request_to_proto and send to next peer).
 
         Args:
@@ -406,7 +409,8 @@ class BaseExecutor:
         hidden_states = batch_output["hidden_states"]
         token_probs = batch_output["probs"]
 
-        batched_requests = []
+        chunked_reqs = []
+        to_forward_reqs = []
         pre_length = 0
         for i, src_request in enumerate(requests):
             if self.is_last_peer:
@@ -440,9 +444,9 @@ class BaseExecutor:
             next_req = self._prepare_next_single_request(
                 src_request, hidden_state_for_req, token_prob
             )
-            batched_requests.append(next_req)
+            to_forward_reqs.append(next_req)
 
-        return batched_requests
+        return chunked_reqs, to_forward_reqs
 
     def release_and_evict_request(self, rid: str):
         """Release per-request resources and evict from scheduler. Best-effort, never raises."""
@@ -550,12 +554,13 @@ class BaseExecutor:
                             except Exception:
                                 pass
                         # 7. Prepare requests for the next stage in the pipeline
-                        to_forward_reqs = self.prepare_next_batch_requests(
+                        chunked_reqs, to_forward_reqs = self.prepare_next_batch_requests(
                             requests=prepared_inputs["requests"],
                             batch_output=output,
                             context_lengths=prepared_inputs.get("context_lengths"),
                         )
-
+                        if chunked_reqs:
+                            self.handle_input_requests(chunked_reqs)
                         # 8. Dispatch to the appropriate destination
                         if to_forward_reqs:
                             if self.is_last_peer and self.is_first_peer:
@@ -567,12 +572,12 @@ class BaseExecutor:
                                     [
                                         b"forward",
                                         request_to_proto(
-                                            to_forward_reqs, self.device
+                                            to_forward_reqs + chunked_reqs, self.device
                                         ).SerializeToString(),
                                     ]
                                 )
                                 logger.debug(
-                                    f"Processed batch of type {batch_type} with {len(to_forward_reqs)} to_forward "
+                                    f"Processed batch of type {batch_type} with {len(to_forward_reqs + chunked_reqs)} to_forward "
                                     f"in {(time.time() - start_time) * 1000:.3f} ms"
                                 )
 
