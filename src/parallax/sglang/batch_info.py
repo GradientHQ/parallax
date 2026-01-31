@@ -171,7 +171,7 @@ def transform_requests_to_sglang(
     # that corresponds to that old_req (same rid). Use rid to map instead of assuming
     # can_run_list order, so the relationship with reqs is explicit.
     can_run_list = adder.can_run_list
-    if chunked_rid is None or executor.chunked_req.rid not in [req.request_id for req in old_requests]:
+    if chunked_rid is None and (executor.chunked_req is None or executor.chunked_req.rid not in [req.request_id for req in old_requests]):
         return can_run_list
     rid_to_req = {req.rid: req for req in can_run_list}
     reordered: List[Req] = [rid_to_req[old_req.request_id] for old_req in old_requests]
