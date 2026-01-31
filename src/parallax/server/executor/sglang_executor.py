@@ -352,10 +352,8 @@ class SGLExecutor(BaseExecutor):
             if req.request_id == chunked_rid:
                 base_chunked.append(req)
                 break
-        # delete chunked_req from base_to_forward if self is last_peer
-        if self.is_last_peer:
-            base_to_forward = [req for req in base_to_forward if req.request_id != chunked_rid]
-        logger.debug(f"sglang_executor: prepare_next_batch_requests: return new_chunked and new_to_forward because chunked_req is not None and is_chunked > 0 and rid in requests")
+        base_to_forward = [req for req in base_to_forward if req.request_id != chunked_rid]
+        logger.debug(f"sglang_executor: prepare_next_batch_requests: return new_chunked{len(base_chunked)} and new_to_forward{len(base_to_forward)} because chunked_req is not None and is_chunked > 0 and rid in requests")
         return base_chunked, base_to_forward
 
     def handle_input_requests(self, requests: List[Request]):

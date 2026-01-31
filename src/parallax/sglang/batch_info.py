@@ -105,7 +105,7 @@ def transform_requests_to_sglang(
     logger.debug(f"old_req size: {len(old_requests)}")
     for old_req in old_requests:
         # Chunked req is added via add_chunked_req above; skip to avoid double-add.
-        if executor.chunked_req is not None and old_req.request_id == executor.chunked_req.rid:
+        if chunked_rid is not None and old_req.request_id == chunked_rid:
             continue
         sampling_params = transform_sampling_params_to_sglang(old_req.sampling_params)
         req = Req(
