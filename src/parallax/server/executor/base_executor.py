@@ -299,6 +299,7 @@ class BaseExecutor:
                         if recv_req is not None and len(recv_req) > 0:
                             for req in recv_req:
                                 if req.hidden_states is not None:
+                                    logger.debug(f"recv request {req.request_id} hidden_states.length: {req.hidden_states.size()}")
                                     if req.hidden_states.dtype != self.dtype:
                                         logger.debug(
                                             f"Converting hidden_states dtype from {req.hidden_states.dtype} to {self.dtype} for request {req.request_id}"
