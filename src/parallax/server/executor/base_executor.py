@@ -211,7 +211,7 @@ class BaseExecutor:
         )
 
     @abstractmethod
-    def handle_input_requests(self, requests: List[Request]):
+    def handle_input_requests(self, requests: List[Request], from_previous_peer: bool = False):
         """Update requests states and status in scheduler and cache manager."""
 
     @abstractmethod
@@ -479,7 +479,7 @@ class BaseExecutor:
             if self.enable_weight_refit:
                 self.check_and_refit_weight(refit_weight_path)
 
-            self.handle_input_requests(received_requests)
+            self.handle_input_requests(received_requests, from_previous_peer=True)
             # Send abort signals to P2P server to broadcast to all nodes
             if len(self.finished_batch) > 0 and self.tp_rank == 0:
                 self.send_to_peer_socket.send_multipart(

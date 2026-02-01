@@ -357,7 +357,7 @@ class SGLExecutor(BaseExecutor):
         logger.debug(f"sglang_executor: prepare_next_batch_requests: return new_chunked{len(base_chunked)} and new_to_forward{len(base_to_forward)} because chunked_req is not None and is_chunked > 0 and rid in requests")
         return base_chunked, base_to_forward
 
-    def handle_input_requests(self, requests: List[Request]):
+    def handle_input_requests(self, requests: List[Request], from_previous_peer: bool = False):
         """Update requests states and status in scheduler and cache manager."""
         if self.tp_size > 1:
             requests = self._tensor_parallel_broadcast_pyobj(requests)
@@ -461,7 +461,7 @@ class SGLExecutor(BaseExecutor):
                     self.release_and_evict_request(req.request_id)
                     if not self.is_last_peer and not req.abort:
                         self.finished_batch.append(req)
-                elif self.chunked_req is not None and self.chunked_req.rid == req.request_id and self.chunked_req.is_chunked > 0:
+                elif self.chunked_req is not None and self.chunked_req.rid == req.request_id and self.chunked_req.is_chunked > 0 and not from_previous_peer:
                         self.chunked_req.is_chunked -= 1
                         req.status = RequestStatus.PREFILLING
                         continue
