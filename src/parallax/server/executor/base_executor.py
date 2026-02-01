@@ -584,7 +584,7 @@ class BaseExecutor:
                                 else:
                                     self.send_to_peer_socket.send_multipart(
                                         [
-                                            b"forward_chunked",
+                                            b"forward",
                                             request_to_proto(to_forward_reqs, self.device).SerializeToString(),
                                         ]
                                     )
