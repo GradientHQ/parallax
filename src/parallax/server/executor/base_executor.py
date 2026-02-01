@@ -567,19 +567,31 @@ class BaseExecutor:
                                 # Single node: handle to_forward locally
                                 self.handle_input_requests(to_forward_reqs)
                             elif self.tp_rank == 0:
-                                # Send to_forward to next peer (do not send chunked_reqs)
-                                self.send_to_peer_socket.send_multipart(
-                                    [
-                                        b"forward",
-                                        request_to_proto(
-                                            to_forward_reqs + chunked_reqs, self.device
-                                        ).SerializeToString(),
-                                    ]
-                                )
-                                logger.debug(
-                                    f"Processed batch of type {batch_type} with {len(to_forward_reqs + chunked_reqs)} to_forward "
-                                    f"in {(time.time() - start_time) * 1000:.3f} ms"
-                                )
+                                # Send to_forward to next peer (do not send chunked_reqs if self is last_peer)
+                                if not self.is_last_peer:
+                                    self.send_to_peer_socket.send_multipart(
+                                        [
+                                            b"forward",
+                                            request_to_proto(
+                                                to_forward_reqs + chunked_reqs, self.device
+                                            ).SerializeToString(),
+                                        ]
+                                    )
+                                    logger.debug(
+                                        f"Processed batch of with {len(to_forward_reqs + chunked_reqs)} to_forward and chunked_reqs "
+                                        f"in {(time.time() - start_time) * 1000:.3f} ms"
+                                    )
+                                else:
+                                    self.send_to_peer_socket.send_multipart(
+                                        [
+                                            b"forward_chunked",
+                                            request_to_proto(to_forward_reqs, self.device).SerializeToString(),
+                                        ]
+                                    )
+                                    logger.debug(
+                                        f"Processed batch of with {len(to_forward_reqs)} to_forward "
+                                        f"in {(time.time() - start_time) * 1000:.3f} ms"
+                                    )
 
             except Exception as e:
                 logger.exception(f"Error processing batch: {e}")

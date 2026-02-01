@@ -350,6 +350,7 @@ class SGLExecutor(BaseExecutor):
         self.stash_chunked_request(self.chunked_req)
         for req in base_to_forward:
             if req.request_id == chunked_rid:
+                req.status = RequestStatus.PREFILLING
                 base_chunked.append(req)
                 break
         base_to_forward = [req for req in base_to_forward if req.request_id != chunked_rid]
