@@ -313,6 +313,9 @@ class Scheduler:
         self.admit_requests()
         if not self._running_requests:
             return []
+        
+        logger.debug(f"Form batch with {len(self._running_requests)} running requests.")
+        logger.debug(f"Running requests: {[(req.request_id, req.status, req.ready_for_next_step) for req in self._running_requests.values()]}")
 
         inflight_tokens = 0
         batch: List[Request] = []
