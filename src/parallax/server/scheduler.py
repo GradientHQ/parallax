@@ -239,7 +239,9 @@ class Scheduler:
             req = self._wait_queue.popleft()
             rid = req.request_id
             if rid in self._running_requests:
-                logger.debug(f"Request {rid} already in running requests. skip admit.")
+                self._running_requests[rid].ready_for_next_step = True
+                self._running_requests[rid].last_updated_time = time.time()
+                logger.debug(f"Request {rid} already in running requests. update ready_for_next_step and last_updated_time.")
                 continue
 
             # Check kv cache pool
@@ -314,9 +316,6 @@ class Scheduler:
         if not self._running_requests:
             return []
         
-        logger.debug(f"Form batch with {len(self._running_requests)} running requests.")
-        logger.debug(f"Running requests: {[(req.request_id, req.status, req.ready_for_next_step) for req in self._running_requests.values()]}")
-
         inflight_tokens = 0
         batch: List[Request] = []
 
