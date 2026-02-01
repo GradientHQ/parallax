@@ -466,6 +466,7 @@ class BaseExecutor:
         )
         self._should_stop = False
         while not self._should_stop:
+            logger.debug(f"Executor for layers [{self.start_layer}, {self.end_layer}) running loop...")
             received_requests = []
 
             # Receive requests from http frontend
@@ -516,9 +517,10 @@ class BaseExecutor:
                             self.finished_batch.append(req)
             except Exception:
                 # Non-fatal; continue serving
-                pass
+                pass    
             batch_to_process = self.scheduler.form_batch()
             if not batch_to_process:
+                logger.debug(f"No batch to process. continue to next loop...")
                 continue
             logger.debug(f"Formed batch with {len(batch_to_process)} requests.")
 
