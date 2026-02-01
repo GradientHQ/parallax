@@ -21,7 +21,7 @@ Our scheduler also handles tokenization and pre-processing for the First Peer's 
 
 import time
 from collections import OrderedDict, deque
-from typing import Deque, Dict, List, Optional
+from typing import Deque, Dict, List, Optional, Set
 
 from parallax.server.cache_manager import CacheManager
 from parallax.server.request import InitialRequest, Request, RequestStatus
@@ -234,10 +234,15 @@ class Scheduler:
         """Move requests from wait queue into running (inflight) set, up to capacity.
 
         Pushes admitted requests directly into the running set.
+        Each request is updated or added to running at most once per call.
         """
+        seen_this_call: Set[str] = set()
         while self._wait_queue and len(self._running_requests) < self.max_batch_size:
             req = self._wait_queue.popleft()
             rid = req.request_id
+            if rid in seen_this_call:
+                continue
+            seen_this_call.add(rid)
             if rid in self._running_requests:
                 self._running_requests[rid] = req
                 logger.debug(f"Request {rid} already in running requests. update ready_for_next_step and last_updated_time.")
