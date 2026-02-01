@@ -571,6 +571,7 @@ class BaseExecutor:
                                 self.handle_input_requests(to_forward_reqs)
                             elif self.tp_rank == 0:
                                 # Send to_forward to next peer (do not send chunked_reqs if self is last_peer)
+                                logger.debug(f"self is last_peer: {self.is_last_peer}, self is first_peer: {self.is_first_peer}")
                                 if not self.is_last_peer:
                                     logger.debug(f"Send {len(to_forward_reqs + chunked_reqs)} to_forward and chunked_reqs to next peer.")
                                     self.send_to_peer_socket.send_multipart(
