@@ -16,13 +16,14 @@ Two classes that handles a post request from the frontend service:
 import asyncio
 import json
 import multiprocessing as mp
+import re
 import sys
 import time
 import traceback
 import uuid
 from dataclasses import dataclass, field
 from http import HTTPStatus
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import fastapi
 import uvicorn
@@ -40,6 +41,106 @@ from parallax.utils.utils import get_zmq_socket
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+class ToolCallParser:
+    """
+    Parse <tool_call>...</tool_call> tags from model output,
+    and convert them to OpenAI-compatible tool_calls format.
+    """
+    
+    # Match complete <tool_call>...</tool_call> tags
+    TOOL_CALL_PATTERN = re.compile(
+        r'<tool_call>\s*(\{.*?\})\s*</tool_call>',
+        re.DOTALL
+    )
+    
+    def __init__(self):
+        self.buffer = ""  # Accumulated text buffer
+        self.tool_calls: List[Dict] = []  # Parsed tool calls
+        self.tool_call_counter = 0  # Tool call ID counter
+        self.has_tool_call = False  # Whether a tool call was detected
+        self.in_tool_call = False  # Whether inside a tool_call tag
+    
+    def add_token(self, token: str) -> Tuple[str, Optional[Dict]]:
+        """
+        Add a token, return (text_to_send, tool_call_or_none)
+        - text_to_send: Content to send as plain text (may be empty string)
+        - tool_call_or_none: If a complete tool_call is parsed, return the tool_call dict
+        """
+        self.buffer += token
+        
+        # Detect <tool_call> opening tag
+        if '<tool_call>' in self.buffer and not self.in_tool_call:
+            self.in_tool_call = True
+            self.has_tool_call = True
+            # Extract text before <tool_call>
+            idx = self.buffer.find('<tool_call>')
+            text_before = self.buffer[:idx]
+            self.buffer = self.buffer[idx:]  # Keep the part starting from <tool_call>
+            return text_before, None
+        
+        # If inside tool_call tag, detect closing tag
+        if self.in_tool_call:
+            if '</tool_call>' in self.buffer:
+                # Parse complete tool_call
+                match = self.TOOL_CALL_PATTERN.search(self.buffer)
+                if match:
+                    try:
+                        tool_call_json = json.loads(match.group(1))
+                        self.tool_call_counter += 1
+                        tool_call = {
+                            "index": len(self.tool_calls),
+                            "id": f"call_{uuid.uuid4().hex[:24]}",
+                            "type": "function",
+                            "function": {
+                                "name": tool_call_json.get("name", ""),
+                                "arguments": json.dumps(tool_call_json.get("arguments", {}))
+                            }
+                        }
+                        self.tool_calls.append(tool_call)
+                        # Clear the parsed part
+                        end_idx = self.buffer.find('</tool_call>') + len('</tool_call>')
+                        self.buffer = self.buffer[end_idx:]
+                        self.in_tool_call = False
+                        return "", tool_call
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"[ToolCallParser] Failed to parse tool_call JSON: {e}")
+                        # Parse failed, treat as plain text
+                        self.in_tool_call = False
+                        text = self.buffer
+                        self.buffer = ""
+                        return text, None
+            # Still waiting for closing tag, don't send anything
+            return "", None
+        
+        # If potentially the start of <tool_call>, buffer it
+        if '<' in self.buffer:
+            # Check if it might be the start of <tool_call>
+            partial_patterns = ['<t', '<to', '<too', '<tool', '<tool_', '<tool_c', 
+                              '<tool_ca', '<tool_cal', '<tool_call', '<tool_call>']
+            for pattern in partial_patterns:
+                if self.buffer.endswith(pattern):
+                    # Might be start of tag, buffer and don't send
+                    idx = self.buffer.rfind('<')
+                    text_before = self.buffer[:idx]
+                    self.buffer = self.buffer[idx:]
+                    return text_before, None
+        
+        # Plain text, send directly
+        text = self.buffer
+        self.buffer = ""
+        return text, None
+    
+    def flush(self) -> str:
+        """Flush the buffer and return remaining text"""
+        text = self.buffer
+        self.buffer = ""
+        return text
+    
+    def get_finish_reason(self) -> str:
+        """Return finish_reason based on whether there are tool_calls"""
+        return "tool_calls" if self.tool_calls else "stop"
 
 
 def get_exception_traceback():
@@ -87,13 +188,6 @@ class HTTPRequestInfo:
     error_message: Optional[str] = None
     error_type: Optional[str] = None
     error_status: HTTPStatus = HTTPStatus.INTERNAL_SERVER_ERROR
-    # probs support
-    return_probs: bool = False  # Whether to return probabilities
-    probs_list: List = field(default_factory=list)  # Store probs for each token
-    token_ids_list: List = field(default_factory=list)  # Store token IDs for each token
-    routed_experts: Optional[List] = None  # Routed experts for rollout replay
-    # Weight version for RL
-    weight_version: Optional[int] = None
 
 
 class HTTPHandler:
@@ -135,7 +229,6 @@ class HTTPHandler:
         rid = request["rid"]
         stream = request.get("stream", False)
         model = request.get("model", "default")
-        return_probs = request.get("return_probs", False)  # Check if probs requested
         chat_object = "chat.completion.chunk" if stream else "chat.completion"
         detokenizer = self.detokenizer_class(self.tokenizer, self.tokenmap)
         create_time = time.time()
@@ -148,7 +241,6 @@ class HTTPHandler:
             create_time=create_time,
             update_time=update_time,
             detokenizer=detokenizer,
-            return_probs=return_probs,
         )
         if stream:
             request_info.token_queue = asyncio.Queue()
@@ -160,11 +252,6 @@ class HTTPHandler:
 
     def send_request(self, request: Dict):
         """Sends the request to model executor using IPC."""
-        # Ensure return_probs is included in the request sent to executor
-        rid = request.get("rid")
-        if rid and rid in self.processing_requests:
-            request_info = self.processing_requests[rid]
-            request["return_probs"] = request_info.return_probs
         self.send_to_executor.send_pyobj(request)
 
     def abort_request(self, request_id: str):
@@ -227,15 +314,6 @@ class HTTPHandler:
         }
         choice = response["choices"][0]
         choice["delta"] = {"role": role, "content": content}
-        # Add probs in the last chunk if requested (convert to object array format)
-        if is_last and request_info.return_probs:
-            choice["probs"] = [
-                {self.tokenizer.decode([token_id]): prob}
-                for token_id, prob in zip(request_info.token_ids_list, request_info.probs_list)
-            ]
-            choice["token_ids"] = request_info.token_ids_list
-        if request_info.weight_version is not None:
-            response["weight_version"] = request_info.weight_version
         response_json = json.dumps(response, separators=(",", ":"))
         return f"data: {response_json}\n\n".encode()
 
@@ -252,27 +330,112 @@ class HTTPHandler:
         response_json = json.dumps(response, separators=(",", ":"))
         return f"data: {response_json}\n\n".encode()
 
+    def _generate_tool_call_chunk(self, rid, tool_call: Dict, is_first: bool = False):
+        """Generates a SSE chunk for a tool call (OpenAI-compatible format)."""
+        request_info = self.processing_requests[rid]
+        
+        delta = {"tool_calls": [tool_call]}
+        if is_first:
+            delta["role"] = "assistant"
+        
+        response = {
+            "id": rid,
+            "object": "chat.completion.chunk",
+            "created": int(request_info.create_time),
+            "model": request_info.model,
+            "system_fingerprint": "fp_parallax",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": delta,
+                    "finish_reason": None,
+                },
+            ],
+        }
+        response_json = json.dumps(response, separators=(",", ":"))
+        return f"data: {response_json}\n\n".encode()
+
+    def _generate_final_chunk(self, rid, finish_reason: str):
+        """Generates the final SSE chunk with finish_reason."""
+        request_info = self.processing_requests[rid]
+        response = {
+            "id": rid,
+            "object": "chat.completion.chunk",
+            "created": int(request_info.create_time),
+            "model": request_info.model,
+            "system_fingerprint": "fp_parallax",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": finish_reason,
+                },
+            ],
+        }
+        response_json = json.dumps(response, separators=(",", ":"))
+        return f"data: {response_json}\n\n".encode()
+
     async def generate_stream_response(self, rid):
         """Generates a streaming response by consuming from a token queue."""
         # Send first chunk with role
+        logger.info(f"[HTTP_SERVER] Starting stream for {rid}")
         yield self._generate_stream_chunk(rid, None, is_first=True)
 
         request_info = self.processing_requests.get(rid)
         if not request_info or not request_info.stream:
+            logger.warning(f"[HTTP_SERVER] No request_info or not stream for {rid}")
             return
 
+        token_count = 0
+        tool_parser = ToolCallParser()  # For parsing tool_call tags
+        first_tool_call = True  # First tool_call chunk needs to include role
+        
+        logger.info(f"[HTTP_SERVER] Waiting for tokens for {rid}...")
         while True:
             token = await request_info.token_queue.get()
+            
             if token is None:  # End of stream sentinel
+                print()  # Newline
+                logger.info(f"[HTTP_SERVER] End sentinel received for {rid}, total tokens={token_count}")
+                # Flush parser buffer
+                remaining_text = tool_parser.flush()
+                if remaining_text:
+                    yield self._generate_stream_chunk(rid, remaining_text)
                 break
             if isinstance(token, dict) and token.get("type") == "error":
+                logger.error(f"[HTTP_SERVER] Error token received for {rid}: {token}")
                 yield self._generate_error_stream_chunk(rid, token.get("payload", {}))
                 continue
-            yield self._generate_stream_chunk(rid, token)
+            
+            token_count += 1
+            # Print token content in streaming mode
+            print(token, end='', flush=True)
+            
+            # Use ToolCallParser to parse token
+            text_to_send, tool_call = tool_parser.add_token(token)
+            
+            # Send plain text
+            if text_to_send:
+                yield self._generate_stream_chunk(rid, text_to_send)
+            
+            # Send tool_call
+            if tool_call:
+                logger.info(f"[HTTP_SERVER] Tool call detected: {tool_call['function']['name']}")
+                yield self._generate_tool_call_chunk(rid, tool_call, is_first=first_tool_call)
+                first_tool_call = False
 
+        # Set finish_reason based on whether there are tool_calls
+        finish_reason = tool_parser.get_finish_reason()
+        request_info.finish_reason = finish_reason
+        
+        if tool_parser.tool_calls:
+            logger.info(f"[HTTP_SERVER] Stream finished with {len(tool_parser.tool_calls)} tool calls")
+        
         # Send final chunk with finish reason
-        yield self._generate_stream_chunk(rid, None, is_last=True)
+        logger.info(f"[HTTP_SERVER] Streaming complete for {rid}, finish_reason={finish_reason}")
+        yield self._generate_final_chunk(rid, finish_reason)
         yield b"data: [DONE]\n\n"
+        logger.info(f"[HTTP_SERVER] [DONE] sent for {rid}")
 
     def generate_non_stream_response(self, rid):
         """Generates a non-streaming response"""
@@ -303,17 +466,6 @@ class HTTPHandler:
             "reasoning_content": None,
             "tool_calls": None,
         }
-        # Add probs if requested (convert to object array format)
-        if request_info.return_probs:
-            choice["probs"] = [
-                {self.tokenizer.decode([token_id]): prob}
-                for token_id, prob in zip(request_info.token_ids_list, request_info.probs_list)
-            ]
-            choice["token_ids"] = request_info.token_ids_list
-        if request_info.routed_experts is not None:
-            choice["routed_experts"] = request_info.routed_experts
-        if request_info.weight_version is not None:
-            response["weight_version"] = request_info.weight_version
         return response
 
     async def _handle_executor_error(self, rid: str, recv_dict: Dict):
@@ -364,20 +516,8 @@ class HTTPHandler:
             request_info.completion_tokens += 1
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
-            request_info.weight_version = recv_dict.get("weight_version", None)
-            if "routed_experts" in recv_dict:
-                request_info.routed_experts = recv_dict["routed_experts"]
 
-            # Store probs and token IDs if requested
-            if request_info.return_probs and "probs" in recv_dict:
-                request_info.probs_list.append(recv_dict["probs"])
-                request_info.token_ids_list.append(next_token_id)
-
-            is_finished = (
-                recv_dict.get("eos", False)
-                or recv_dict.get("length", False)
-                or recv_dict.get("abort", False)
-            )
+            is_finished = recv_dict.get("eos", False) or recv_dict.get("length", False)
 
             # Only process and send non-EOS tokens
             if not is_finished and len(output) > 0:
@@ -390,10 +530,7 @@ class HTTPHandler:
 
             # If it is the end of the stream, update status and send sentinel
             if is_finished:
-                if recv_dict.get("abort", False):
-                    logger.warning(f"Request {rid} finished with abort")
-                    request_info.finish_reason = "abort"
-                elif recv_dict.get("length", False):
+                if recv_dict.get("length", False):
                     logger.debug(f"Request {rid} finished with length")
                     request_info.finish_reason = "length"
                 elif recv_dict.get("eos", False):
