@@ -563,7 +563,7 @@ class BaseExecutor:
                             self.handle_input_requests(chunked_reqs)
                         # 8. Dispatch to the appropriate destination
                         if to_forward_reqs or chunked_reqs:
-                            if self.is_last_peer and self.is_first_peer:
+                            if self.is_last_peer and self.is_first_peer and (to_forward_reqs is not None and len(to_forward_reqs) > 0):
                                 # Single node: handle to_forward locally
                                 self.handle_input_requests(to_forward_reqs)
                             elif self.tp_rank == 0:
@@ -581,7 +581,7 @@ class BaseExecutor:
                                         f"Processed batch of with {len(to_forward_reqs + chunked_reqs)} to_forward and chunked_reqs "
                                         f"in {(time.time() - start_time) * 1000:.3f} ms"
                                     )
-                                elif to_forward_reqs is not None:
+                                elif to_forward_reqs is not None and len(to_forward_reqs) > 0:
                                     self.send_to_peer_socket.send_multipart(
                                         [
                                             b"forward",
