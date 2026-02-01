@@ -581,7 +581,7 @@ class BaseExecutor:
                                         f"Processed batch of with {len(to_forward_reqs + chunked_reqs)} to_forward and chunked_reqs "
                                         f"in {(time.time() - start_time) * 1000:.3f} ms"
                                     )
-                                else:
+                                elif to_forward_reqs is not None:
                                     self.send_to_peer_socket.send_multipart(
                                         [
                                             b"forward",
