@@ -461,6 +461,10 @@ class SGLExecutor(BaseExecutor):
                     self.release_and_evict_request(req.request_id)
                     if not self.is_last_peer and not req.abort:
                         self.finished_batch.append(req)
+                elif self.chunked_req is not None and self.chunked_req.rid == req.request_id and self.chunked_req.is_chunked > 0:
+                        self.chunked_req.is_chunked -= 1
+                        req.status = RequestStatus.PREFILLING
+                        continue
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
