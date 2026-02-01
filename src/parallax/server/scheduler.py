@@ -311,7 +311,6 @@ class Scheduler:
         """
         self.admit_requests()
         if not self._running_requests:
-            logger.debug(f"No running requests to form batch.")
             return []
 
         inflight_tokens = 0
