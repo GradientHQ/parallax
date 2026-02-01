@@ -564,6 +564,7 @@ class BaseExecutor:
                             self.handle_input_requests(chunked_reqs)
                         # 8. Dispatch to the appropriate destination
                         if to_forward_reqs or chunked_reqs:
+                            logger.debug(f"dispatch to_forward and chunked_reqs to next peer.")
                             if self.is_last_peer and self.is_first_peer and (to_forward_reqs is not None and len(to_forward_reqs) > 0):
                                 # Single node: handle to_forward locally
                                 logger.debug(f"Handle {len(to_forward_reqs)} to_forward requests.")
