@@ -488,10 +488,12 @@ class SGLExecutor(BaseExecutor):
         if self.chunked_req is not None and self.chunked_req.is_chunked > 0:
             # Move the chunked request out of the batch so that we can merge
             # only finished requests to running_batch.
+            logger.debug(f"exclude chunked_req {self.chunked_req.rid} from running_batch")
             chunked_req_to_exclude.add(self.chunked_req)
 
         if self.cur_batch and self.cur_batch.forward_mode.is_extend():
             if self.cur_batch.chunked_req is not None and self.cur_batch.chunked_req.is_chunked > 0:
+                logger.debug(f"exclude chunked_req {self.cur_batch.chunked_req.rid} from running_batch")
                 chunked_req_to_exclude.add(self.cur_batch.chunked_req)
 
         if self.cur_batch:
