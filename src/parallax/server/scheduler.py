@@ -239,8 +239,7 @@ class Scheduler:
             req = self._wait_queue.popleft()
             rid = req.request_id
             if rid in self._running_requests:
-                self._running_requests[rid].ready_for_next_step = True
-                self._running_requests[rid].last_updated_time = time.time()
+                self._running_requests[rid] = req
                 logger.debug(f"Request {rid} already in running requests. update ready_for_next_step and last_updated_time.")
                 continue
 
