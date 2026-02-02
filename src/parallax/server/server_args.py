@@ -218,7 +218,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-loras-per-batch",
         type=int,
-        default=8,
+        default=2,
         help="Maximum number of adapters for a running batch, include base-only request.",
     )
 
@@ -240,7 +240,7 @@ def parse_args() -> argparse.Namespace:
         "--lora-backend",
         choices=["triton", "csgmv"],
         default="triton",
-        help="Choose the kernel backend for multi-LoRA serving.",
+        help="Choose the kernel backend for multi-LoRA serving. (SGLang only)",
     )
 
     parser.add_argument(
@@ -248,7 +248,19 @@ def parse_args() -> argparse.Namespace:
         choices=[16, 32, 64, 128],
         type=int,
         default=16,
-        help="Maximum chunk size for the ChunkedSGMV LoRA backend. Only used when --lora-backend is 'csgmv'. Choosing a larger value might improve performance.",
+        help="Maximum chunk size for the ChunkedSGMV LoRA backend. Only used when --lora-backend is 'csgmv'. Choosing a larger value might improve performance. (SGLang only)",
+    )
+
+    parser.add_argument(
+        "--fully-sharded-loras",
+        action="store_true",
+        help="By default, only half of the LoRA computation is sharded with tensor parallelism. Enabling this will use the fully sharded layers. At high sequence length, max rank or tensor parallel size, this is likely faster. (vLLM only)",
+    )
+
+    parser.add_argument(
+        "--enable-return-routed-experts",
+        action="store_true",
+        help="Enable returning MoE routed experts for rollout replay (vLLM only, single peer).",
     )
 
     # Tensor parallel configuration

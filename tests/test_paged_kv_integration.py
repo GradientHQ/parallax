@@ -8,6 +8,9 @@ from parallax.server.cache_manager import CacheManager
 from parallax.utils.utils import is_metal_available
 
 
+@unittest.skip(
+    "Deprecated: old Python/Metal kernel incompatible with KVCachePacked layout. Use parallax_extensions ops instead."
+)
 class TestPagedKVIntegration(unittest.TestCase):
     def setUp(self):
         # Skip entire test class if Metal is not available

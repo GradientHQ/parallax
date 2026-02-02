@@ -221,7 +221,7 @@ def check_and_run_weight_refit(gradient_server, message):
 
     def _download_weight_thread(cid):
         raw_data = None
-        time_out = 10 * 60  # 10 minutes timeout
+        time_out = 20 * 60  # 20 minutes timeout
         time_begin_get_block = time.time()
         time_end_get_block = None
         peer_id = None
@@ -277,8 +277,6 @@ def check_and_run_weight_refit(gradient_server, message):
     # add sleep 10s for direct connection first
     logger.debug(f"Received weight refit message: {message}.")
     logger.info(f"Start dealing weight refit version: {weight_version}.")
-    logger.info(f"Wait 10s for lattica direct connection.")
-    time.sleep(10)
 
     # step2. download weight
     weight_dir = os.path.join("/tmp", str(time_stamp))
@@ -311,12 +309,7 @@ def check_and_run_weight_refit(gradient_server, message):
             new_tensors = concat_weight_partition(tensors)
             gradient_server.conn.send(new_tensors)
         elif gradient_server.weight_refit_mode == "disk":
-            process = multiprocessing.Process(
-                target=concat_weight_partition,
-                args=(tensors, weight_dir),
-            )
-            process.start()
-            process.join()
+            concat_weight_partition(tensors, weight_dir)
         else:
             logger.warning(f"Unrecognized weight refit mode: {gradient_server.weight_refit_mode}")
 
@@ -428,8 +421,8 @@ class GradientServer:
             )
 
     def check_and_release_disk_weight(self):
-        """Only save 2 history versions of weight"""
-        while len(self.refit_timestamp_history) > 2:
+        """Only save 3 history versions of weight"""
+        while len(self.refit_timestamp_history) > 3:
             time_stamp = self.refit_timestamp_history.pop(0)
             weight_dir = os.path.join("/tmp", str(int(time_stamp)))
             if os.path.isdir(weight_dir):
