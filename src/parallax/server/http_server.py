@@ -158,7 +158,10 @@ class HTTPHandler:
             return_probs=return_probs,
         )
         request_info.tool_state = ToolCallState.from_tokenizer(
-            self.tokenizer, request.get("tools"), stream
+            self.tokenizer,
+            request.get("tools"),
+            stream,
+            model_name=request.get("model") or self.model_path_str,
         )
         if stream:
             request_info.token_queue = asyncio.Queue()
@@ -419,6 +422,43 @@ class HTTPHandler:
 
             # If it is the end of the stream, update status and send sentinel
             if is_finished:
+                if tool_state is not None:
+                    final_tool_calls, fallback_text = tool_state.finalize()
+                    if final_tool_calls:
+                        request_info.tool_calls.extend(final_tool_calls)
+                        if request_info.stream:
+                            await request_info.token_queue.put(
+                                {"type": "tool_calls", "tool_calls": final_tool_calls}
+                            )
+                    if fallback_text:
+                        request_info.text += fallback_text
+                        if request_info.stream:
+                            await request_info.token_queue.put(fallback_text)
+                    full_text = request_info.text + output
+                    if (
+                        tool_state.tool_call_start
+                        == "<|start|>assistant<|channel|>commentary to=functions."
+                        and not request_info.tool_calls
+                    ):
+                        try:
+                            from parallax.utils.tool_parsers import gpt_oss
+
+                            parsed = tool_state.tool_parser(full_text, tool_state.tools)
+                            parsed_calls = parsed if isinstance(parsed, list) else [parsed]
+                            formatted_calls = [
+                                tool_state._format_tool_call(tc) for tc in parsed_calls
+                            ]
+                            request_info.tool_calls.extend(formatted_calls)
+                            tool_state.made_tool_call = True
+                            if request_info.stream:
+                                await request_info.token_queue.put(
+                                    {"type": "tool_calls", "tool_calls": formatted_calls}
+                                )
+                            request_info.text = gpt_oss.strip_tool_calls(full_text)
+                        except Exception:
+                            request_info.text = full_text
+                    else:
+                        request_info.text = full_text
                 if recv_dict.get("abort", False):
                     logger.warning(f"Request {rid} finished with abort")
                     request_info.finish_reason = "abort"
@@ -428,9 +468,7 @@ class HTTPHandler:
                 elif recv_dict.get("eos", False):
                     logger.debug(f"Request {rid} finished with eos")
                     request_info.finish_reason = (
-                        "tool_calls"
-                        if request_info.tool_state and request_info.tool_state.made_tool_call
-                        else "stop"
+                        "tool_calls" if request_info.tool_calls else "stop"
                     )
                     request_info.matched_stop = next_token_id
                 else:

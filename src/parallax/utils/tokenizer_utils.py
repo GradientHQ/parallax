@@ -142,11 +142,28 @@ class ToolCallState:
     made_tool_call: bool = False
 
     @classmethod
-    def from_tokenizer(cls, tokenizer, tools: Optional[List[Any]], stream: bool):
+    def from_tokenizer(
+        cls,
+        tokenizer,
+        tools: Optional[List[Any]],
+        stream: bool,
+        model_name: Optional[str] = None,
+    ):
         has_tool_calling = bool(getattr(tokenizer, "has_tool_calling", False))
         tool_parser = getattr(tokenizer, "tool_parser", None)
         tool_call_start = getattr(tokenizer, "tool_call_start", None)
         tool_call_end = getattr(tokenizer, "tool_call_end", None)
+        if (
+            (not has_tool_calling or not tool_parser)
+            and model_name
+            and "gpt-oss" in model_name.lower()
+        ):
+            from parallax.utils.tool_parsers import gpt_oss
+
+            has_tool_calling = True
+            tool_parser = gpt_oss.parse_tool_call
+            tool_call_start = gpt_oss.tool_call_start
+            tool_call_end = gpt_oss.tool_call_end
         if not (has_tool_calling and tool_parser and tool_call_start and tool_call_end):
             return cls(
                 has_tool_calling=False,
@@ -221,3 +238,11 @@ class ToolCallState:
                 self.in_tool_call = False
                 idx = end_pos + len(self.tool_call_end)
         return "".join(output_chunks), new_tool_calls
+
+    def finalize(self) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        if not self.in_tool_call or not self.tool_text:
+            return [], None
+        parsed_calls, fallback_text = self._parse_tool_text(self.tool_text)
+        self.tool_text = ""
+        self.in_tool_call = False
+        return parsed_calls, fallback_text
