@@ -299,8 +299,10 @@ class BaseExecutor:
                         if recv_req is not None and len(recv_req) > 0:
                             for req in recv_req:
                                 if req.hidden_states is not None:
+                                    size_attr = getattr(req.hidden_states, "size", None)
+                                    hidden_size = size_attr() if callable(size_attr) else size_attr
                                     logger.debug(
-                                        f"recv request {req.request_id} hidden_states.length: {req.hidden_states.size()}"
+                                        f"recv request {req.request_id} hidden_states.length: {hidden_size}"
                                     )
                                     if req.hidden_states.dtype != self.dtype:
                                         logger.debug(

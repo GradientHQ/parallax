@@ -109,6 +109,9 @@ class Request:
         self.last_updated_time: Optional[float] = None
         self.lora_id: Optional[str] = None
         self.lora_path = lora_path
+        self.is_chunked = 0
+        self.rid = self.request_id
+        self.origin_input_ids = input_ids
 
     @property
     def is_finished(self) -> bool:

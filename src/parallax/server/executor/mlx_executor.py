@@ -28,6 +28,7 @@ from parallax.utils.utils import (
     pad_inputs,
 )
 from parallax_utils.logging_config import get_logger
+from parallax.utils.mac_prefill_addr import AddReqResult, MACPrefillAdder
 
 logger = get_logger(__name__)
 
@@ -234,14 +235,13 @@ class MLXExecutor(BaseExecutor):
 
         # Prefix Cache Manager
         self.enable_prefix_cache = enable_prefix_cache
-        # self.prefix_cache = RadixCache(
-        #     num_kv_heads=num_key_value_heads,
-        #     head_dim=head_dim,
-        #     head_dim_v=v_head_dim,
-        #     num_layers=self.num_shard_layers,
-        #     dtype=self.dtype,
-        #     page_size=1,
-        # )
+        if chunked_prefill_size is not None and chunked_prefill_size > 0:
+            # up align to page size
+            self.chunked_prefill_size = (chunked_prefill_size + self.cache_manager.block_size - 1) // self.cache_manager.block_size * self.cache_manager.block_size
+        else:
+            self.chunked_prefill_size = None
+        self.chunked_req = None
+        self.chunked_req_offset = 0
         logger.debug(
             f"mlx_executor initialized; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}, total memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
         )
@@ -304,7 +304,10 @@ class MLXExecutor(BaseExecutor):
                         continue
 
                     if not req.abort and req.next_token_id is not None:
-                        original_req.commit_new_token(req.next_token_id)
+                        if self.chunked_req is not None and req.request_id == self.chunked_req.rid and self.chunked_req.is_chunked > 0:
+                            original_req.status = RequestStatus.PREFILLING
+                        else:
+                            original_req.commit_new_token(req.next_token_id)
 
                     if len(req.routing_table) > 0:
                         original_req.routing_table = req.routing_table
@@ -313,7 +316,12 @@ class MLXExecutor(BaseExecutor):
                     if req.abort:
                         original_req.abort = True
 
-                    if self.scheduler.check_and_update_request_status(original_req):
+                    
+                    if self.chunked_req is not None and req.request_id == self.chunked_req.rid and self.chunked_req.is_chunked > 0:
+                        self.chunked_req.is_chunked -= 1
+                        self.scheduler.enque_request(original_req)
+                        continue
+                    elif self.scheduler.check_and_update_request_status(original_req):
                         self.cache_manager.release_request(original_req.request_id)
                         logger.debug(
                             f"Released resources for finished request {req.request_id}, "
@@ -357,10 +365,10 @@ class MLXExecutor(BaseExecutor):
                     req, IntermediateRequest
                 ), "Non-first peers must receive IntermediateRequests."
                 if req.is_finished or req.hidden_states is None:
-                    if self.enable_prefix_cache:
-                        keys, values = self.cache_manager.gather_kv_cache(req.request_id)
-                        self.prefix_cache.cache_finished_request(req, keys, values)
-                        self.prefix_cache.evict_request(req.request_id)
+                    # if self.enable_prefix_cache:
+                    #     keys, values = self.cache_manager.gather_kv_cache(req.request_id)
+                    #     self.prefix_cache.cache_finished_request(req, keys, values)
+                    #     self.prefix_cache.evict_request(req.request_id)
 
                     self.cache_manager.release_request(req.request_id)
                     logger.debug(
@@ -370,9 +378,39 @@ class MLXExecutor(BaseExecutor):
                     self.scheduler.evict_request(req.request_id)
                     if not self.is_last_peer and not req.abort:
                         self.finished_batch.append(req)
+                elif (
+                    self.chunked_req is not None
+                    and req.request_id == self.chunked_req.rid
+                    and self.chunked_req.is_chunked > 0
+                    and not from_previous_peer
+                ):
+                    self.chunked_req.is_chunked -= 1
+                    req.status = RequestStatus.PREFILLING
+                    self.scheduler.evict_request(req.request_id)
+                    continue
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
+                    
+    def prepare_next_batch_requests(self, requests: List[Request], batch_output: Any, context_lengths: Any) -> Tuple[List[Request], List[Request]]:
+        """Prepares a batch of requests for the next stage of the pipeline."""
+        base_chunked, base_to_forward = super().prepare_next_batch_requests(requests, batch_output, context_lengths)
+        if (
+            self.chunked_req is None 
+            or self.chunked_req.is_chunked <= 0 
+            or self.chunked_req.rid not in [req.request_id for req in requests]
+        ):
+            logger.debug(f"mlx_executor: prepare_next_batch_requests: return base_chunked{len(base_chunked)} and base_to_forward{len(base_to_forward)} because chunked_req is None or is_chunked <= 0 or rid not in requests")
+            return base_chunked, base_to_forward
+        chunked_rid = self.chunked_req.rid
+        for req in base_to_forward:
+            if req.request_id == chunked_rid:
+                req.status = RequestStatus.PREFILLING
+                base_chunked.append(req)
+                break
+        base_to_forward = [req for req in base_to_forward if req.request_id != chunked_rid]
+        logger.debug(f"mlx_executor: prepare_next_batch_requests: return new_chunked{len(base_chunked)} and new_to_forward{len(base_to_forward)} because chunked_req is not None and is_chunked > 0 and rid in requests")
+        return base_chunked, base_to_forward
 
     def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """Process a batch of requests in MLX."""
@@ -522,6 +560,39 @@ class MLXExecutor(BaseExecutor):
         batch_size = len(batched_requests)
         if batch_size == 0:
             return None
+        
+        original_batched_requests = batched_requests
+        logger.debug(f"original_batched_requests_size: {len(original_batched_requests)}")
+        
+        adder = MACPrefillAdder(self.cache_manager.block_size, self.chunked_prefill_size, self.chunked_req_offset)
+        
+        chunked_rid = self.chunked_req.rid if self.chunked_req is not None else None
+        
+        if self.chunked_req is not None and chunked_rid in [req.request_id for req in original_batched_requests]:
+            logger.debug(f"before add_chunked_req, chunked_req is not None")
+            self.chunked_req = adder.add_chunked_req(self.chunked_req)
+            if self.chunked_req is None:
+                logger.debug(f"chunked_req{chunked_rid} has chunk all after add_chunked_req, chunked_req is None")
+                
+        for old_req in original_batched_requests:
+            if chunked_rid is not None and old_req.request_id == chunked_rid:
+                continue
+            res = adder.add_one_req(old_req)
+            if res != AddReqResult.CONTINUE:
+                logger.debug(f"macprefilladder has no token to add to prefill batch")
+                break
+            
+        if adder.new_chunked_req is not None:
+            self.chunked_req = adder.new_chunked_req
+            logger.debug(f"new chunked_req is {self.chunked_req.rid}")
+            
+        if self.chunked_req is not None and self.chunked_req.rid in [req.request_id for req in original_batched_requests]:
+            self.chunked_req.is_chunked += 1
+        
+        can_run_by_id = {req.request_id: req for req in adder.can_run_list}
+        batched_requests = [can_run_by_id[req.request_id] for req in original_batched_requests if req.request_id in can_run_by_id]
+        self.chunked_req_offset = adder.chunked_req_offset
+        logger.debug(f"after add_one_req, batched_requests size: {len(batched_requests)}")
 
         h_or_tokens_list = []
         block_tables_list = []
@@ -652,7 +723,7 @@ class MLXExecutor(BaseExecutor):
             "h_or_tokens": padded_inputs,
             "cache": self.cache_manager.get_caches(),
             "mask": mask,
-            "requests": batched_requests,
+            "requests": original_batched_requests,
             "block_tables": block_tables_tensor,
             "context_lengths": context_lengths_tensor,
             "slot_mapping": slot_mapping_tensor,
