@@ -203,8 +203,8 @@ class TransformerConnectionHandler(ConnectionHandler):
                 else:
                     response = client.post(
                         f"http://localhost:{self.http_port}/v1/chat/completions", json=request
-                    ).json()
-                    yield json.dumps(response).encode()
+                    )
+                    yield response.content
         except Exception as e:
             logger.exception(f"Error in chat completion: {e}")
             yield b"internal server error"
