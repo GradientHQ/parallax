@@ -51,6 +51,7 @@ The backend architecture:
 
 - [Installation](./docs/user_guide/install.md)
 - [Getting Started](./docs/user_guide/quick_start.md)
+- [Working with OpenClaw](./docs/user_guide/work_with_openclaw.md)
 
 ## Contributing
 
