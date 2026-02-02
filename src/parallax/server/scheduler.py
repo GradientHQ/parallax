@@ -126,6 +126,8 @@ class Scheduler:
 
         request.ready_for_next_step = True
         request.last_updated_time = time.time()
+        if request.origin_input_ids is not None:
+            request.input_ids = request.origin_input_ids
         # TODO: Handle chunked prefill.
         if request.is_decoding:
             rid = request.request_id
