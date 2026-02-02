@@ -45,17 +45,33 @@ def create_executor_config(args: argparse.Namespace, shared_state=None, conn=Non
         "use_hfcache": args.use_hfcache,
         "enable_lora": args.enable_lora,
         "max_lora_rank": args.max_lora_rank,
-        "lora_target_modules": args.lora_target_modules,
         "lora_paths": args.lora_paths,
         "max_loras_per_batch": args.max_loras_per_batch,
         "max_loaded_loras": args.max_loaded_loras,
-        "lora_eviction_policy": args.lora_eviction_policy,
-        "lora_backend": args.lora_backend,
-        "max_lora_chunk_size": args.max_lora_chunk_size,
         "enable_weight_refit": args.enable_weight_refit,
         "weight_refit_mode": args.weight_refit_mode,
         "chunked_prefill_size": args.chunked_prefill_size,
     }
+
+    if args.gpu_backend == "sglang":
+        config.update(
+            {
+                "lora_target_modules": args.lora_target_modules,
+                "lora_eviction_policy": args.lora_eviction_policy,
+                "lora_backend": args.lora_backend,
+                "max_lora_chunk_size": args.max_lora_chunk_size,
+            }
+        )
+    elif args.gpu_backend == "vllm":
+        config.update(
+            {
+                "fully_sharded_loras": getattr(args, "fully_sharded_loras", False),
+                "enable_return_routed_experts": getattr(
+                    args, "enable_return_routed_experts", False
+                ),
+            }
+        )
+
     return config
 
 

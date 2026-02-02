@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import os
+import shutil
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
+import torch.distributed
+import vllm.distributed.parallel_state as parallel_state
 from mlx_lm.utils import load_config
 from vllm.config import (
     CacheConfig,
-    CompilationConfig,
     DeviceConfig,
     LoadConfig,
+    LoRAConfig,
     ModelConfig,
     ParallelConfig,
     SchedulerConfig,
@@ -16,16 +20,20 @@ from vllm.config import (
     set_current_vllm_config,
 )
 from vllm.distributed.parallel_state import GroupCoordinator as VLLMGroupCoordinator
+from vllm.lora.request import LoRARequest
 from vllm.v1.core.kv_cache_manager import KVCacheManager
 from vllm.v1.core.kv_cache_utils import (
     generate_scheduler_kv_cache_config,
     get_kv_cache_configs,
-    get_request_block_hasher,
-    init_none_hash,
-    sha256_cbor,
 )
-from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheGroupSpec, KVCacheTensor
+from vllm.v1.kv_cache_interface import (
+    FullAttentionSpec,
+    KVCacheConfig,
+    KVCacheGroupSpec,
+    KVCacheTensor,
+)
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+from vllm.v1.worker.workspace import current_workspace_manager, init_workspace_manager
 
 from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
     apply_weight_loader_filter_patch,
@@ -34,6 +42,7 @@ from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
 from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.vllm.monkey_patch import apply_parallax_vllm_monkey_patch
 from parallax_utils.logging_config import get_logger
+from parallax_utils.prepare_adapter import download_adapter_config
 
 logger = get_logger(__name__)
 
@@ -83,10 +92,9 @@ def _create_kv_cache_config_from_specs(
     kv_cache_group: KVCacheGroupSpec,
     attn_layers: List[str],
     kv_cache_memory_fraction: float,
+    device: torch.device,
 ) -> KVCacheConfig:
-    import torch
-
-    free_memory, total_memory = torch.cuda.mem_get_info(0)
+    free_memory, total_memory = torch.cuda.mem_get_info(device.index)
     available_memory = int(free_memory * kv_cache_memory_fraction)
 
     logger.info(
@@ -125,7 +133,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         self,
         vllm_config: VllmConfig,
         kv_cache_config: Optional[KVCacheConfig],
-        device: str,
+        device: torch.device,
         start_layer: int,
         end_layer: int,
         num_hidden_layers: int,
@@ -142,9 +150,10 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         self.pp_size = 1
 
         self.request_block_hasher: Optional[Callable[[Any], List[Any]]] = None
-        self.enable_prefix_caching: bool = True
+        self.enable_prefix_caching: bool = False
+        self.lora_history: List[Tuple[str, int, str]] = []  # lora_name, lora_id, lora_path
 
-        super().__init__(vllm_config=vllm_config, device=torch.device(device))
+        super().__init__(vllm_config=vllm_config, device=device)
         self.kv_cache_config = kv_cache_config
 
         logger.info(
@@ -162,8 +171,6 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
                 "Cannot access get_kv_cache_spec due to cudagraph wrapper, using fallback method"
             )
             kv_cache_specs = None
-
-        import torch
 
         free_memory, total_memory = torch.cuda.mem_get_info(self.device.index or 0)
 
@@ -196,8 +203,6 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             hidden_size = getattr(hf_config, "hidden_size", 1024)
             head_size = hidden_size // num_attention_heads
 
-            from vllm.v1.kv_cache_interface import FullAttentionSpec, KVCacheGroupSpec
-
             model_dtype = self.vllm_config.model_config.dtype
             if isinstance(model_dtype, str):
                 try:
@@ -226,6 +231,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
                 kv_cache_group=kv_cache_group,
                 attn_layers=layer_names,
                 kv_cache_memory_fraction=memory_fraction,
+                device=self.device,
             )
 
         logger.debug(
@@ -236,7 +242,7 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
 
         return kv_cache_config
 
-    def initialize_kv_cache_manager(self, max_model_len: int) -> KVCacheManager:
+    def initialize_kv_cache_manager(self, max_model_len: int, block_size: int) -> KVCacheManager:
         logger.debug("Initializing vLLM KVCacheManager...")
 
         if self.kv_cache_config is None:
@@ -245,40 +251,15 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         kv_cache_manager = KVCacheManager(
             kv_cache_config=self.kv_cache_config,
             max_model_len=max_model_len,
-            enable_caching=True,
+            enable_caching=self.enable_prefix_caching,
             use_eagle=False,
             log_stats=True,
             enable_kv_cache_events=False,
             dcp_world_size=1,
+            hash_block_size=block_size,
         )
 
         self.kv_cache_manager = kv_cache_manager
-        cache_config = self.vllm_config.cache_config
-        enable_prefix = cache_config.enable_prefix_caching
-        if enable_prefix is None:
-            enable_prefix = True
-
-        self.enable_prefix_caching = False
-
-        self.request_block_hasher = None
-        if enable_prefix and kv_cache_manager.block_size is not None:
-            # Use sha256_cbor from vllm.v1.core.kv_cache_utils for hashing
-            # This is the standard hash function in vLLM 0.11+
-            hash_fn = sha256_cbor
-            init_none_hash(hash_fn)
-            logger.debug("Initialized prefix cache hashing with sha256_cbor")
-
-            block_size = kv_cache_manager.block_size
-            if block_size is None and self.kv_cache_config.kv_cache_groups:
-                block_size = self.kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
-            if block_size is not None:
-                self.request_block_hasher = get_request_block_hasher(block_size, hash_fn)
-                logger.info("Initialized prefix cache block hasher with block_size=%d", block_size)
-
-        logger.debug(
-            f"KVCacheManager initialized: block_size={kv_cache_manager.block_size}, "
-            f"usage={kv_cache_manager.usage:.2%}"
-        )
 
         return kv_cache_manager
 
@@ -310,7 +291,9 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
         finally:
             vllm.distributed.utils.get_pp_indices = original_get_pp_indices
 
-    def execute_model(self, scheduler_output, intermediate_tensors=None):
+    def execute_model(
+        self, scheduler_output, intermediate_tensors=None, return_decoded_tokens=False
+    ):
         """
         Execute the model with the given scheduler output and intermediate tensors.
         If this is not the first peer, and the intermediate_tensors buffer is not initialized,
@@ -324,7 +307,46 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             )
             logger.debug("Successfully initialized intermediate_tensors buffer")
 
-        return super().execute_model(scheduler_output, intermediate_tensors)
+        super().execute_model(scheduler_output, intermediate_tensors)
+
+        sampled_token_ids = None
+        sampler_output = None
+        logits = None
+
+        if return_decoded_tokens:
+            if hasattr(self.execute_model_state, "logits"):
+                logits = self.execute_model_state.logits
+
+            sampler_output = super().sample_tokens(grammar_output=None)
+            sampled_token_ids = sampler_output.sampled_token_ids_cpu
+
+        return self.execute_model_state, sampled_token_ids, sampler_output, logits
+
+
+def _init_and_reserve_workspace(device: torch.device, max_num_tokens: int) -> None:
+
+    init_workspace_manager(device)
+
+    try:
+        _MB = 1024**2
+        per_token_workspace = 24 * 1024
+        estimated_workspace = max_num_tokens * per_token_workspace
+        reserve_size = max(512 * _MB, min(estimated_workspace, 8192 * _MB))
+        free_mem, _ = torch.cuda.mem_get_info(device.index)
+        if reserve_size > free_mem * 0.5:
+            logger.warning(
+                f"Estimated workspace ({reserve_size / _MB:.0f}MB) is >50% of free memory "
+                f"({free_mem / _MB:.0f}MB). Clamping to 4GB to preserve memory for KV cache."
+            )
+            reserve_size = min(reserve_size, 4096 * _MB)
+
+        current_workspace_manager()._ensure_workspace_size(reserve_size)
+        logger.info(
+            f"Initialized WorkspaceManager and reserved {reserve_size / _MB:.2f} MB buffer "
+            f"(max_num_tokens={max_num_tokens})"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to reserve workspace buffer: {e}")
 
 
 def initialize_vllm_model_runner(
@@ -334,8 +356,16 @@ def initialize_vllm_model_runner(
     kv_cache_memory_fraction: float,
     attention_backend: str,
     kv_block_size: int,
+    max_batch_size: int,
+    max_sequence_length: int,
     max_num_tokens_per_batch: int = 16384,
     dtype: str = "float16",
+    moe_runner_backend: str = "auto",
+    tp_rank: int = 0,
+    tp_size: int = 1,
+    nccl_port: int = None,
+    enable_return_routed_experts: bool = False,
+    instance_id: Optional[str] = None,
     **kwargs,
 ) -> Tuple[ParallaxVLLMModelRunner, Dict, Any]:
     from parallax.utils.selective_download import get_model_path_with_selective_download
@@ -382,24 +412,24 @@ def initialize_vllm_model_runner(
     # For single process, always use pp_size=1
     virtual_pp_size = 1
 
-    import os
-
-    import vllm.distributed.parallel_state as parallel_state
+    # Set TP device
+    device = torch.device(f"cuda:{tp_rank}")
+    torch.cuda.set_device(device)
 
     if not parallel_state.model_parallel_is_initialized():
         logger.debug(f"Initializing vLLM distributed environment...")
 
         # Set environment variables for distributed initialization
         if "RANK" not in os.environ:
-            os.environ["RANK"] = "0"
+            os.environ["RANK"] = str(tp_rank)
         if "WORLD_SIZE" not in os.environ:
-            os.environ["WORLD_SIZE"] = "1"
+            os.environ["WORLD_SIZE"] = str(tp_size)
         if "LOCAL_RANK" not in os.environ:
-            os.environ["LOCAL_RANK"] = "0"
+            os.environ["LOCAL_RANK"] = str(tp_rank)
         if "MASTER_ADDR" not in os.environ:
             os.environ["MASTER_ADDR"] = "localhost"
         if "MASTER_PORT" not in os.environ:
-            os.environ["MASTER_PORT"] = "12355"
+            os.environ["MASTER_PORT"] = str(nccl_port)
 
         try:
             parallel_state.init_distributed_environment()
@@ -415,7 +445,6 @@ def initialize_vllm_model_runner(
             original_pp_group = parallel_state._PP
             if original_pp_group is not None:
                 # Get backend from device_group (torch is already imported at module level)
-                import torch.distributed
 
                 backend = torch.distributed.get_backend(original_pp_group.device_group)
 
@@ -452,6 +481,11 @@ def initialize_vllm_model_runner(
             f"num_hidden_layers ({num_hidden_layers})"
         )
 
+    if max_sequence_length is not None:
+        max_len = max_sequence_length
+    else:
+        max_len = getattr(config, "max_position_embeddings", 4096)
+
     model_config = ModelConfig(
         model=str(model_path),
         tokenizer=str(model_path),
@@ -459,7 +493,8 @@ def initialize_vllm_model_runner(
         trust_remote_code=True,
         dtype=dtype,
         seed=0,
-        max_model_len=getattr(config, "max_position_embeddings", 4096),
+        max_model_len=max_len,
+        enable_return_routed_experts=enable_return_routed_experts,
     )
 
     cache_config = CacheConfig(
@@ -471,19 +506,71 @@ def initialize_vllm_model_runner(
 
     parallel_config = ParallelConfig(
         pipeline_parallel_size=virtual_pp_size,
-        tensor_parallel_size=1,
+        tensor_parallel_size=tp_size,
+        node_rank=tp_rank,
+        rank=tp_rank,
         distributed_executor_backend=None,
     )
 
-    device_config = DeviceConfig(device="cuda")
+    device_config = DeviceConfig(device=device)
     load_config_for_config = LoadConfig(load_format="auto")
 
     max_batched_tokens = max(max_num_tokens_per_batch, model_config.max_model_len)
+    max_num_seqs = max_batch_size
+
     scheduler_config = SchedulerConfig(
         max_num_batched_tokens=max_batched_tokens,
-        max_num_seqs=256,
+        max_num_seqs=max_num_seqs,
         max_model_len=model_config.max_model_len,
+        is_encoder_decoder=False,
+        enable_chunked_prefill=False,
     )
+
+    # LoRA Config construction
+    enable_lora = kwargs.get("enable_lora", False)
+    lora_config = None
+    lora_req = None
+    lora_name = None
+    lora_int_id = None
+    lora_path = None
+    if enable_lora:
+        # Hard code a large moe chunk size. Need to improve this.
+        if "VLLM_FUSED_MOE_CHUNK_SIZE" not in os.environ:
+            os.environ["VLLM_FUSED_MOE_CHUNK_SIZE"] = "65536"
+
+        max_lora_rank = kwargs.get("max_lora_rank")
+        if max_lora_rank is None:
+            max_lora_rank = 64
+            logger.warning(f"max_lora_rank not specified, using default: {max_lora_rank}")
+
+        max_loras = kwargs.get("max_loras_per_batch", 1)
+        if max_loras is None:
+            max_loras = 1
+
+        max_cpu_loras = kwargs.get("max_loaded_loras")
+        fully_sharded_loras = kwargs.get("fully_sharded_loras", False)
+
+        lora_path = kwargs.get("lora_path")
+
+        lora_config = LoRAConfig(
+            max_lora_rank=max_lora_rank,
+            max_loras=max_loras,
+            fully_sharded_loras=fully_sharded_loras,
+            max_cpu_loras=max_cpu_loras,
+            lora_dtype=dtype,
+        )
+        logger.info(f"LoRA config: {lora_config}")
+
+        # Create a simple hash or ID for the LoRA based on path
+        # In a real scenario, we might want a more robust ID mapping mechanism
+        lora_name = f"lora_{hash(lora_path) % 10000}"
+        lora_int_id = abs(hash(lora_path)) % 10000 + 1
+
+        lora_req = LoRARequest(lora_name=lora_name, lora_int_id=lora_int_id, lora_path=lora_path)
+        logger.debug(f"Created LoRA request: {lora_name} (id={lora_int_id}) path={lora_path}")
+
+        # Workaround: save adapter_config.json locally for lora update
+        download_adapter_config(lora_path)
 
     vllm_config = VllmConfig(
         model_config=model_config,
@@ -492,83 +579,149 @@ def initialize_vllm_model_runner(
         scheduler_config=scheduler_config,
         device_config=device_config,
         load_config=load_config_for_config,
-        lora_config=None,
+        lora_config=lora_config,
         speculative_config=None,
-        observability_config=None,
-        prompt_adapter_config=None,
         quant_config=None,
-        compilation_config=CompilationConfig(),
         kv_transfer_config=None,
         kv_events_config=None,
         additional_config={},
-        instance_id="",
+        instance_id=instance_id or "",
     )
-
-    # Set the global vLLM config to avoid "Current vLLM config is not set" warning
-    set_current_vllm_config(vllm_config)
-    logger.debug("Set current vLLM config globally")
 
     model_runner = ParallaxVLLMModelRunner(
         vllm_config=vllm_config,
         kv_cache_config=None,
-        device="cuda",
+        device=device,
         start_layer=start_layer,
         end_layer=end_layer,
         num_hidden_layers=num_hidden_layers,
     )
 
-    logger.info("Loading vLLM model (partial layers)...")
-    model_runner.load_model()
-    logger.info("vLLM model loaded successfully")
+    with set_current_vllm_config(vllm_config):
+        logger.info("Loading vLLM model (partial layers)...")
+        model_runner.load_model()
+        logger.info("vLLM model loaded successfully")
 
-    logger.debug("Letting vLLM automatically generate KV cache configuration...")
+        logger.debug("Letting vLLM automatically generate KV cache configuration...")
 
-    kv_cache_specs = model_runner.get_kv_cache_spec()
+        # Init workspace manager for capturing graph and reserve memory
+        # We do this BEFORE calculating available memory for KV cache to avoid OOM
+        _init_and_reserve_workspace(device, max_num_tokens_per_batch)
 
-    if not kv_cache_specs:
-        raise RuntimeError("No KV cache specs found in the loaded model")
+        kv_cache_specs = model_runner.get_kv_cache_spec()
 
-    import torch
+        if not kv_cache_specs:
+            raise RuntimeError("No KV cache specs found in the loaded model")
 
-    free_memory, total_memory = torch.cuda.mem_get_info(0)
-    available_memory = int(free_memory * kv_cache_memory_fraction)
+        free_memory, _ = torch.cuda.mem_get_info(device.index)
+        available_memory = int(free_memory * kv_cache_memory_fraction)
 
-    logger.info(
-        f"Available GPU memory for KV cache: "
-        f"{available_memory / (1024**3):.2f} GB "
-        f"({kv_cache_memory_fraction:.1%} of {free_memory / (1024**3):.2f} GB)"
-    )
+        logger.info(
+            f"Available GPU memory for KV cache: "
+            f"{available_memory / (1024**3):.2f} GB "
+            f"({kv_cache_memory_fraction:.1%} of {free_memory / (1024**3):.2f} GB)"
+        )
 
-    from vllm.v1.core.kv_cache_utils import (
-        generate_scheduler_kv_cache_config,
-        get_kv_cache_configs,
-    )
+        kv_cache_configs = get_kv_cache_configs(
+            vllm_config=model_runner.vllm_config,
+            kv_cache_specs=[kv_cache_specs],
+            available_memory=[available_memory],
+        )
 
-    kv_cache_configs = get_kv_cache_configs(
-        vllm_config=model_runner.vllm_config,
-        kv_cache_specs=[kv_cache_specs],
-        available_memory=[available_memory],
-    )
+        kv_cache_config = generate_scheduler_kv_cache_config(kv_cache_configs)
 
-    kv_cache_config = generate_scheduler_kv_cache_config(kv_cache_configs)
+        model_runner.kv_cache_config = kv_cache_config
 
-    model_runner.kv_cache_config = kv_cache_config
+        logger.info("Initializing GPUModelRunner KV cache...")
+        model_runner.initialize_kv_cache(kv_cache_config)
+        logger.info("GPUModelRunner KV cache initialized successfully")
 
-    logger.info("Initializing GPUModelRunner KV cache...")
-    model_runner.initialize_kv_cache(kv_cache_config)
-    logger.info("GPUModelRunner KV cache initialized successfully")
+        logger.info("Initializing KV Cache Manager...")
+        model_runner.initialize_kv_cache_manager(
+            max_model_len=model_config.max_model_len, block_size=kv_block_size
+        )
+        logger.info("KV Cache Manager initialized successfully")
 
-    logger.info("Initializing KV Cache Manager...")
-    model_runner.initialize_kv_cache_manager(max_model_len=model_config.max_model_len)
-    logger.info("KV Cache Manager initialized successfully")
+        # Warm up the model and capture CUDA graphs if enabled
+        # This prevents the first request from triggering compilation/graph capture
+        logger.info("Warming up model and capturing CUDA graphs...")
+        try:
+            # Create a dedicated stream for graph capture to avoid "non-default stream" error
+            with torch.cuda.stream(torch.cuda.Stream(device=device)):
+                model_runner.capture_model()
+            torch.cuda.current_stream(device).synchronize()
+            logger.info("Model warmup and CUDA graph capture completed successfully")
+        except Exception as e:
+            logger.warning(f"Failed to capture CUDA graph during initialization: {e}")
 
-    # Warm up the model and capture CUDA graphs if enabled
-    # This prevents the first request from triggering compilation/graph capture
-    logger.info("Warming up model and capturing CUDA graphs...")
-    try:
-        model_runner.capture_model()
-        logger.info("Model warmup and CUDA graph capture completed successfully")
-    except Exception as e:
-        logger.warning(f"Failed to capture CUDA graph during initialization: {e}")
+        if enable_lora:
+            logger.info(f"Initializing lora adapters...")
+            model_runner.add_lora(lora_req)
+            model_runner.default_lora_req = lora_req
+
+            lora_info = (lora_name, lora_int_id, lora_path)
+            model_runner.lora_history.append(lora_info)
 
     return model_runner, config, tokenizer
+
+
+def refit_vllm_model(
+    model_runner: ParallaxVLLMModelRunner,
+    tensors: dict = None,
+    refit_weight_path: str = None,
+):
+    """Runtime weight refit from disk"""
+    if tensors is not None:
+        logger.info(f"Executor begins weight refit from host memory")
+        for x in tensors.keys():
+            refit_tensors = [(x, tensors.get(x))]
+            model_runner.model.load_weights(weights=refit_tensors)
+    elif refit_weight_path is not None:
+        logger.info(f"Executor begins weight refit from disk files")
+        # config_overrides = {"load_config": {"download_dir": refit_weight_path}}
+        # model_runner.update_config(overrides=config_overrides)
+        # model_runner.reload_weights()
+        adapter_path = os.path.join(os.getcwd(), "adapter_config.json")
+        if os.path.isfile(adapter_path):
+            shutil.copy(adapter_path, refit_weight_path)
+        else:
+            logger.warning(f"Cannot find adapter_config.json locally. Exit lora weight refit.")
+            return
+
+        lora_name = f"lora_{hash(refit_weight_path) % 10000}"
+        lora_int_id = abs(hash(refit_weight_path)) % 10000 + 1
+        lora_req = LoRARequest(
+            lora_name=lora_name, lora_int_id=lora_int_id, lora_path=refit_weight_path
+        )
+        logger.info(
+            f"Created LoRA request: {lora_name} (id={lora_int_id}) path={refit_weight_path}"
+        )
+
+        # Release old loras if needed
+        before_loras = model_runner.list_loras()
+        history = model_runner.lora_history
+        assert len(before_loras) == len(
+            history
+        ), f"Before lora refit, number of loaded lora mismatch!"
+        logger.info(f"Before lora refit number of lora adapters: {len(before_loras)}")
+        while len(history) > 1:
+            _, old_lora_id, _ = history.pop(0)
+            model_runner.remove_lora(old_lora_id)
+
+        # Add new lora
+        model_runner.add_lora(lora_req)
+        model_runner.default_lora_req = lora_req
+        lora_info = (lora_name, lora_int_id, refit_weight_path)
+        history.append(lora_info)
+        model_runner.lora_history = history
+
+        # Check lora slots
+        after_loras = model_runner.list_loras()
+        after_history = model_runner.lora_history
+        assert len(after_loras) == len(
+            after_history
+        ), f"After lora refit, number of loaded lora mismatch!"
+        logger.info(f"After lora refit number of lora adapters: {len(after_loras)}")
+    else:
+        assert False, "Weight refit needs host tensors or weight path"
+    logger.info(f"Finish weight refit")

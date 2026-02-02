@@ -145,6 +145,7 @@ class TestCreateExecutorConfig:
             weight_refit_mode="cpu",
             chunked_prefill_size=128,
             max_prefill_tokens=1024,
+            gpu_backend="sglang",
         )
 
         config = create_executor_config(args)
