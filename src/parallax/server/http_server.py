@@ -35,7 +35,11 @@ from pydantic import BaseModel
 from starlette.datastructures import State
 
 from parallax.utils.selective_download import download_metadata_only
-from parallax.utils.tokenizer_utils import ToolCallState, load_detokenizer, load_tokenizer
+from parallax.utils.tokenizer_utils import (
+    ToolCallState,
+    load_detokenizer,
+    load_tokenizer,
+)
 from parallax.utils.utils import get_zmq_socket
 from parallax_utils.logging_config import get_logger
 

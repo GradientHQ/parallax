@@ -44,7 +44,7 @@ parallax = "parallax.cli:main"
 
 mac = [
   "torch==2.8.0",
-  "mlx-lm==0.30.0",
+  "mlx-lm==0.30.5",
   "mlx==0.30.4",
 ]
 

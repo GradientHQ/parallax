@@ -125,9 +125,7 @@ def load_tokenizer(model_path, trust_remote_code=True, tokenizer_config_extra=No
         tokenizer_config_extra = tokenizer_config_extra.copy()
         tokenizer_config_extra["trust_remote_code"] = True
 
-    return _mlx_load_tokenizer(
-        model_path, tokenizer_config_extra=tokenizer_config_extra, **kwargs
-    )
+    return _mlx_load_tokenizer(model_path, tokenizer_config_extra=tokenizer_config_extra, **kwargs)
 
 
 @dataclass
