@@ -790,7 +790,7 @@ class BaseExecutor:
                 request_id=request.request_id,
                 status=RequestStatus.DECODING,
                 current_position=request.total_length + 1,
-                input_ids=request.input_ids,
+                input_ids=request.origin_input_ids,
                 hidden_states=hidden_states,
                 next_token_id=next_token_id,
                 routing_table=request.routing_table,
@@ -809,7 +809,7 @@ class BaseExecutor:
                 request_id=request.request_id,
                 status=RequestStatus.DECODING,  # Last peer always changes status to DECODING
                 current_position=request.total_length,
-                input_ids=request.input_ids,
+                input_ids=request.origin_input_ids,
                 hidden_states=hidden_states,
                 next_token_id=next_token_id,
                 routing_table=request.routing_table,

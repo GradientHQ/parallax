@@ -338,7 +338,7 @@ class IntermediateRequest(Request):
         return IntermediateRequest(
             request_id=initial_request.request_id,
             status=initial_request.status,
-            input_ids=initial_request.input_ids,
+            input_ids=initial_request.origin_input_ids,
             next_token_id=next_token_id,
             current_position=initial_request.total_length,
             hidden_states=hidden_states,
@@ -365,7 +365,7 @@ class IntermediateRequest(Request):
             request_id=old_request.request_id,
             status=old_request.status,
             current_position=old_request.total_length,
-            input_ids=old_request.input_ids,
+            input_ids=old_request.origin_input_ids,
             next_token_id=old_request.next_token_id,
             hidden_states=new_hidden_states,
             routing_table=old_request.routing_table,

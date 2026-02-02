@@ -319,6 +319,7 @@ class MLXExecutor(BaseExecutor):
                     
                     if self.chunked_req is not None and req.request_id == self.chunked_req.rid and self.chunked_req.is_chunked > 0:
                         self.chunked_req.is_chunked -= 1
+                        self.cache_manager.release_request(original_req.request_id)
                         self.scheduler.enque_request(original_req)
                         continue
                     elif self.scheduler.check_and_update_request_status(original_req):
@@ -386,6 +387,7 @@ class MLXExecutor(BaseExecutor):
                 ):
                     self.chunked_req.is_chunked -= 1
                     req.status = RequestStatus.PREFILLING
+                    self.cache_manager.release_request(req.request_id)
                     self.scheduler.evict_request(req.request_id)
                     continue
                 else:
