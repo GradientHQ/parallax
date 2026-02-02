@@ -272,7 +272,7 @@ class MLXExecutor(BaseExecutor):
         data = pickle.loads(np.array(data_arr).tobytes())
         return data
 
-    def handle_input_requests(self, requests: List[Request]):
+    def handle_input_requests(self, requests: List[Request], from_previous_peer: bool = False):
         """Update requests states and status in scheduler and cache manager."""
         if self.tp_size > 1:
             requests = self._tensor_parallel_broadcast_pyobj(requests)
