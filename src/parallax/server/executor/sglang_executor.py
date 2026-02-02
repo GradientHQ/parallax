@@ -319,7 +319,6 @@ class SGLExecutor(BaseExecutor):
                 ), "--max-lora-chunk-size must be a power of 2 between 16 and 128."
 
     def stash_chunked_request(self, req: Req):
-        logger.debug(f"req.fill_ids_size: {len(req.fill_ids)}")
         # #endregion
         if req.req_pool_idx is None:
             logger.warning(
@@ -343,8 +342,14 @@ class SGLExecutor(BaseExecutor):
         base_chunked, base_to_forward = super().prepare_next_batch_requests(
             requests, batch_output, context_lengths
         )
-        if self.chunked_req is None or self.chunked_req.is_chunked <= 0 or self.chunked_req.rid not in [req.request_id for req in requests]:
-            logger.debug(f"sglang_executor: prepare_next_batch_requests: return base_chunked and base_to_forward because chunked_req is None or is_chunked <= 0 or rid not in requests")
+        if (
+            self.chunked_req is None
+            or self.chunked_req.is_chunked <= 0
+            or self.chunked_req.rid not in [req.request_id for req in requests]
+        ):
+            logger.debug(
+                f"sglang_executor: prepare_next_batch_requests: return base_chunked and base_to_forward because chunked_req is None or is_chunked <= 0 or rid not in requests"
+            )
             return base_chunked, base_to_forward
         chunked_rid = self.chunked_req.rid
         self.stash_chunked_request(self.chunked_req)
@@ -354,7 +359,9 @@ class SGLExecutor(BaseExecutor):
                 base_chunked.append(req)
                 break
         base_to_forward = [req for req in base_to_forward if req.request_id != chunked_rid]
-        logger.debug(f"sglang_executor: prepare_next_batch_requests: return new_chunked{len(base_chunked)} and new_to_forward{len(base_to_forward)} because chunked_req is not None and is_chunked > 0 and rid in requests")
+        logger.debug(
+            f"sglang_executor: prepare_next_batch_requests: return new_chunked{len(base_chunked)} and new_to_forward{len(base_to_forward)} because chunked_req is not None and is_chunked > 0 and rid in requests"
+        )
         return base_chunked, base_to_forward
 
     def handle_input_requests(self, requests: List[Request], from_previous_peer: bool = False):
@@ -461,10 +468,15 @@ class SGLExecutor(BaseExecutor):
                     self.release_and_evict_request(req.request_id)
                     if not self.is_last_peer and not req.abort:
                         self.finished_batch.append(req)
-                elif self.chunked_req is not None and self.chunked_req.rid == req.request_id and self.chunked_req.is_chunked > 0 and not from_previous_peer:
-                        self.chunked_req.is_chunked -= 1
-                        req.status = RequestStatus.PREFILLING
-                        continue
+                elif (
+                    self.chunked_req is not None
+                    and self.chunked_req.rid == req.request_id
+                    and self.chunked_req.is_chunked > 0
+                    and not from_previous_peer
+                ):
+                    self.chunked_req.is_chunked -= 1
+                    req.status = RequestStatus.PREFILLING
+                    continue
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
@@ -498,7 +510,6 @@ class SGLExecutor(BaseExecutor):
 
         if self.cur_batch and self.cur_batch.forward_mode.is_extend():
             if self.cur_batch.chunked_req is not None and self.cur_batch.chunked_req.is_chunked > 0:
-                logger.debug(f"exclude chunked_req {self.cur_batch.chunked_req.rid} from running_batch")
                 chunked_req_to_exclude.add(self.cur_batch.chunked_req)
 
         if self.cur_batch:
@@ -526,43 +537,8 @@ class SGLExecutor(BaseExecutor):
 
         # Return appropriate output based on peer position
         if return_decoded_tokens:
-            # Debug: log running_batch vs prepared_inputs["requests"] to detect
-            # "running_batch still has previous request" causing token mis-assignment
-            running_batch_size = (
-                0 if self.running_batch.is_empty() else len(self.running_batch.reqs)
-            )
-            running_batch_rids = (
-                []
-                if self.running_batch.is_empty()
-                else [req.rid for req in self.running_batch.reqs]
-            )
-            requests_len = len(requests)
-            requests_ids = [getattr(r, "request_id", str(r)) for r in requests]
-            logger.debug(
-                "[ChunkedPrefill-Debug] process_batch decode: running_batch size=%s rids=%s, "
-                "prepared_inputs requests len=%s request_ids=%s",
-                running_batch_size,
-                running_batch_rids,
-                requests_len,
-                requests_ids,
-            )
-            if running_batch_size != requests_len:
-                logger.warning(
-                    "[ChunkedPrefill-Debug] MISMATCH: running_batch has %s reqs but prepared_inputs "
-                    "has %s requests; token indices may be assigned to wrong request. "
-                    "running_batch_rids=%s, request_ids=%s",
-                    running_batch_size,
-                    requests_len,
-                    running_batch_rids,
-                    requests_ids,
-                )
-
             # Last peer: sample and return token IDs
             next_token_ids = self.model_runner.sample(logits_output, forward_batch)
-            logger.debug(
-                "[ChunkedPrefill-Debug] process_batch after sample: len(next_token_ids)=%s",
-                len(next_token_ids),
-            )
 
             # Only compute probs if any request in the batch needs it
             # Check if any InitialRequest has return_probs=True

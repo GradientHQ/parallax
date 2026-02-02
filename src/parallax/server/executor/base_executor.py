@@ -299,7 +299,9 @@ class BaseExecutor:
                         if recv_req is not None and len(recv_req) > 0:
                             for req in recv_req:
                                 if req.hidden_states is not None:
-                                    logger.debug(f"recv request {req.request_id} hidden_states.length: {req.hidden_states.size()}")
+                                    logger.debug(
+                                        f"recv request {req.request_id} hidden_states.length: {req.hidden_states.size()}"
+                                    )
                                     if req.hidden_states.dtype != self.dtype:
                                         logger.debug(
                                             f"Converting hidden_states dtype from {req.hidden_states.dtype} to {self.dtype} for request {req.request_id}"
@@ -566,15 +568,23 @@ class BaseExecutor:
                         # 8. Dispatch to the appropriate destination
                         if to_forward_reqs or chunked_reqs:
                             logger.debug(f"dispatch to_forward and chunked_reqs to next peer.")
-                            if self.is_last_peer and self.is_first_peer and (to_forward_reqs is not None and len(to_forward_reqs) > 0):
+                            if (
+                                self.is_last_peer
+                                and self.is_first_peer
+                                and (to_forward_reqs is not None and len(to_forward_reqs) > 0)
+                            ):
                                 # Single node: handle to_forward locally
                                 logger.debug(f"Handle {len(to_forward_reqs)} to_forward requests.")
                                 self.handle_input_requests(to_forward_reqs)
                             elif self.tp_rank == 0:
                                 # Send to_forward to next peer (do not send chunked_reqs if self is last_peer)
-                                logger.debug(f"self is last_peer: {self.is_last_peer}, self is first_peer: {self.is_first_peer}")
+                                logger.debug(
+                                    f"self is last_peer: {self.is_last_peer}, self is first_peer: {self.is_first_peer}"
+                                )
                                 if not self.is_last_peer:
-                                    logger.debug(f"Send {len(to_forward_reqs + chunked_reqs)} to_forward and chunked_reqs to next peer.")
+                                    logger.debug(
+                                        f"Send {len(to_forward_reqs + chunked_reqs)} to_forward and chunked_reqs to next peer."
+                                    )
                                     self.send_to_peer_socket.send_multipart(
                                         [
                                             b"forward",
@@ -588,11 +598,15 @@ class BaseExecutor:
                                         f"in {(time.time() - start_time) * 1000:.3f} ms"
                                     )
                                 elif to_forward_reqs is not None and len(to_forward_reqs) > 0:
-                                    logger.debug(f"Send {len(to_forward_reqs)} to_forward to next peer.")
+                                    logger.debug(
+                                        f"Send {len(to_forward_reqs)} to_forward to next peer."
+                                    )
                                     self.send_to_peer_socket.send_multipart(
                                         [
                                             b"forward",
-                                            request_to_proto(to_forward_reqs, self.device).SerializeToString(),
+                                            request_to_proto(
+                                                to_forward_reqs, self.device
+                                            ).SerializeToString(),
                                         ]
                                     )
                                     logger.debug(

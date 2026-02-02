@@ -245,7 +245,9 @@ class Scheduler:
             seen_this_call.add(rid)
             if rid in self._running_requests:
                 self._running_requests[rid] = req
-                logger.debug(f"Request {rid} already in running requests. update ready_for_next_step and last_updated_time.")
+                logger.debug(
+                    f"Request {rid} already in running requests. update ready_for_next_step and last_updated_time."
+                )
                 continue
 
             # Check kv cache pool
@@ -319,7 +321,7 @@ class Scheduler:
         self.admit_requests()
         if not self._running_requests:
             return []
-        
+
         inflight_tokens = 0
         batch: List[Request] = []
 
