@@ -35,11 +35,9 @@ from pydantic import BaseModel
 from starlette.datastructures import State
 
 from parallax.utils.selective_download import download_metadata_only
-from parallax.utils.tokenizer_utils import (
-    ToolCallState,
-    load_detokenizer,
-    load_tokenizer,
-)
+from parallax.utils.reasoning_parsers import get_reasoning_state
+from parallax.utils.reasoning_parsers import gpt_oss as gpt_oss_reasoning
+from parallax.utils.tokenizer_utils import ToolCallState, load_detokenizer, load_tokenizer
 from parallax.utils.utils import get_zmq_socket
 from parallax_utils.logging_config import get_logger
 
@@ -101,6 +99,9 @@ class HTTPRequestInfo:
     # tool calling support
     tool_state: Optional[ToolCallState] = None
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    # reasoning support
+    reasoning_state: Optional[Any] = None
+    reasoning_content: str = ""
 
 
 class HTTPHandler:
@@ -161,8 +162,9 @@ class HTTPHandler:
             self.tokenizer,
             request.get("tools"),
             stream,
-            model_name=request.get("model") or self.model_path_str,
+            model_name=self.model_path_str,
         )
+        request_info.reasoning_state = get_reasoning_state(self.model_path_str)
         if stream:
             request_info.token_queue = asyncio.Queue()
         self.processing_requests[rid] = request_info
@@ -206,6 +208,7 @@ class HTTPHandler:
     def _generate_stream_chunk(self, rid, token, is_first=False, is_last=False):
         """Generates a SSE chunk for a single token."""
         request_info = self.processing_requests[rid]
+        reasoning_content = None
 
         if is_first:
             role = "assistant"
@@ -221,9 +224,13 @@ class HTTPHandler:
             role = None
             content = token
             tool_calls = None
+            reasoning_content = None
             if isinstance(token, dict) and token.get("type") == "tool_calls":
                 content = None
                 tool_calls = token.get("tool_calls")
+            elif isinstance(token, dict) and token.get("type") == "reasoning":
+                content = None
+                reasoning_content = token.get("content")
 
         response = {
             "id": rid,
@@ -248,6 +255,8 @@ class HTTPHandler:
         delta = {"role": role, "content": content}
         if tool_calls is not None:
             delta["tool_calls"] = tool_calls
+        if reasoning_content is not None:
+            delta["reasoning_content"] = reasoning_content
         choice["delta"] = delta
         # Add probs in the last chunk if requested (convert to object array format)
         if is_last and request_info.return_probs:
@@ -322,7 +331,7 @@ class HTTPHandler:
         choice["message"] = {
             "role": "assistant",
             "content": request_info.text,
-            "reasoning_content": None,
+            "reasoning_content": request_info.reasoning_content or None,
             "tool_calls": request_info.tool_calls or None,
         }
         # Add probs if requested (convert to object array format)
@@ -386,10 +395,29 @@ class HTTPHandler:
             request_info.completion_tokens += 1
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
+            raw_output = output
+            is_finished = (
+                recv_dict.get("eos", False)
+                or recv_dict.get("length", False)
+                or recv_dict.get("abort", False)
+            )
+            if is_finished and recv_dict.get("eos", False):
+                output = ""
+                raw_output = ""
+            if request_info.reasoning_state is not None:
+                output, reasoning_chunk = request_info.reasoning_state.extract_from_segment(
+                    output
+                )
+                if reasoning_chunk:
+                    request_info.reasoning_content += reasoning_chunk
+                    if request_info.stream:
+                        await request_info.token_queue.put(
+                            {"type": "reasoning", "content": reasoning_chunk}
+                        )
             tool_state = request_info.tool_state
             tool_calls = []
             if tool_state is not None:
-                output, tool_calls = tool_state.extract_from_segment(output)
+                tool_calls = tool_state.consume(raw_output, output)
             if tool_calls:
                 request_info.tool_calls.extend(tool_calls)
                 if request_info.stream:
@@ -404,12 +432,7 @@ class HTTPHandler:
             if request_info.return_probs and "probs" in recv_dict:
                 request_info.probs_list.append(recv_dict["probs"])
                 request_info.token_ids_list.append(next_token_id)
-
-            is_finished = (
-                recv_dict.get("eos", False)
-                or recv_dict.get("length", False)
-                or recv_dict.get("abort", False)
-            )
+                raw_output = ""
 
             # Only process and send non-EOS tokens
             if not is_finished and len(output) > 0:
@@ -422,6 +445,10 @@ class HTTPHandler:
 
             # If it is the end of the stream, update status and send sentinel
             if is_finished:
+                if request_info.reasoning_state is not None:
+                    trailing_reasoning = request_info.reasoning_state.finalize()
+                    if trailing_reasoning:
+                        request_info.reasoning_content += trailing_reasoning
                 if tool_state is not None:
                     final_tool_calls, fallback_text = tool_state.finalize()
                     if final_tool_calls:
@@ -434,31 +461,6 @@ class HTTPHandler:
                         request_info.text += fallback_text
                         if request_info.stream:
                             await request_info.token_queue.put(fallback_text)
-                    full_text = request_info.text + output
-                    if (
-                        tool_state.tool_call_start
-                        == "<|start|>assistant<|channel|>commentary to=functions."
-                        and not request_info.tool_calls
-                    ):
-                        try:
-                            from parallax.utils.tool_parsers import gpt_oss
-
-                            parsed = tool_state.tool_parser(full_text, tool_state.tools)
-                            parsed_calls = parsed if isinstance(parsed, list) else [parsed]
-                            formatted_calls = [
-                                tool_state._format_tool_call(tc) for tc in parsed_calls
-                            ]
-                            request_info.tool_calls.extend(formatted_calls)
-                            tool_state.made_tool_call = True
-                            if request_info.stream:
-                                await request_info.token_queue.put(
-                                    {"type": "tool_calls", "tool_calls": formatted_calls}
-                                )
-                            request_info.text = gpt_oss.strip_tool_calls(full_text)
-                        except Exception:
-                            request_info.text = full_text
-                    else:
-                        request_info.text = full_text
                 if recv_dict.get("abort", False):
                     logger.warning(f"Request {rid} finished with abort")
                     request_info.finish_reason = "abort"

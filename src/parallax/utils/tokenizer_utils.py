@@ -140,6 +140,9 @@ class ToolCallState:
     tool_text: str = ""
     tool_call_idx: int = 0
     made_tool_call: bool = False
+    record_raw: bool = False
+    raw_text: str = ""
+    tool_calls_seen: bool = False
 
     @classmethod
     def from_tokenizer(
@@ -180,6 +183,7 @@ class ToolCallState:
             tool_parser=tool_parser,
             tools=tools,
             stream=stream,
+            record_raw=bool(model_name and "gpt-oss" in model_name.lower()),
         )
 
     def _format_tool_call(self, tool_call: Dict[str, Any]):
@@ -232,6 +236,7 @@ class ToolCallState:
                 parsed_calls, fallback_text = self._parse_tool_text(self.tool_text)
                 if parsed_calls:
                     new_tool_calls.extend(parsed_calls)
+                    self.tool_calls_seen = True
                 if fallback_text:
                     output_chunks.append(fallback_text)
                 self.tool_text = ""
@@ -239,10 +244,30 @@ class ToolCallState:
                 idx = end_pos + len(self.tool_call_end)
         return "".join(output_chunks), new_tool_calls
 
+    def consume(self, raw_output: str, cleaned_output: str) -> List[Dict[str, Any]]:
+        if not self.has_tool_calling:
+            return []
+        if self.record_raw and raw_output:
+            self.raw_text += raw_output
+        segment = raw_output if self.record_raw else cleaned_output
+        _, tool_calls = self.extract_from_segment(segment)
+        return tool_calls
+
     def finalize(self) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        if not self.in_tool_call or not self.tool_text:
-            return [], None
-        parsed_calls, fallback_text = self._parse_tool_text(self.tool_text)
-        self.tool_text = ""
-        self.in_tool_call = False
+        parsed_calls: List[Dict[str, Any]] = []
+        fallback_text: Optional[str] = None
+        if self.in_tool_call and self.tool_text:
+            parsed_calls, fallback_text = self._parse_tool_text(self.tool_text)
+            self.tool_text = ""
+            self.in_tool_call = False
+            if parsed_calls:
+                self.tool_calls_seen = True
+        if self.record_raw and not self.tool_calls_seen and self.raw_text:
+            try:
+                parsed = self.tool_parser(self.raw_text, self.tools)
+                parsed_calls = parsed if isinstance(parsed, list) else [parsed]
+                parsed_calls = [self._format_tool_call(tc) for tc in parsed_calls]
+                self.tool_calls_seen = True
+            except Exception:
+                pass
         return parsed_calls, fallback_text
