@@ -89,6 +89,8 @@ class VLLMExecutor(BaseExecutor):
         weight_refit_mode: Optional[str] = "disk",
         # Routed experts
         enable_return_routed_experts: bool = False,
+        # Chunked prefill (SGL-only; accepted here for factory config compatibility)
+        chunked_prefill_size: Optional[int] = None,
         # Pipe communication
         conn: Optional[List[Any]] = [],
     ):
