@@ -476,6 +476,7 @@ class SGLExecutor(BaseExecutor):
                 ):
                     self.chunked_req.is_chunked -= 1
                     req.status = RequestStatus.PREFILLING
+                    self.scheduler.evict_request(req.request_id)
                     continue
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
