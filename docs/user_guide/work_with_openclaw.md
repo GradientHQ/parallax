@@ -19,7 +19,7 @@ Github repo of OpenClaw: https://github.com/openclaw/openclaw
 To integrate Parallax with OpenClaw, you need to meet the prerequisites for both projects:
 
 - **Node.js**: >= 22 (required by OpenClaw)
-- **Python**: 3.11 (required by Parallax)
+- **Python**: >=3.11 (required by Parallax)
 
 Before proceeding, we assume you have already deployed Parallax on your AI cluster. For deployment instructions, please refer to:
 
@@ -46,7 +46,7 @@ Open your browser and navigate to `localhost:3001` on the scheduler machine. Sel
 On your edge nodes, run:
 
 ```bash
-parallax join --max-sequence-length 65536 --max-num-tokens-per-batch 65536
+parallax join --max-sequence-length 65536 --max-num-tokens-per-batch 65536 --enable-prefix-cache
 ```
 
 **Step 4: Test the Model**
@@ -79,7 +79,7 @@ Create the configuration file at `~/.openclaw/openclaw.json` with the following 
   "models": {
     "providers": {
       "parallax": {
-        "baseUrl": "http://localhost:3000/v1",
+        "baseUrl": "http://localhost:3001/v1",
         "apiKey": "placeholder",
         "api": "openai-completions",
         "models": [
@@ -129,7 +129,7 @@ libc++abi: terminating due to uncaught exception of type std::runtime_error: [ME
 **A:** Add the `--kv-cache-memory-fraction` parameter when starting Parallax on edge nodes:
 
 ```bash
-parallax join --max-sequence-length 65536 --max-num-tokens-per-batch 65536 --kv-cache-memory-fraction 0.5
+parallax join --max-sequence-length 65536 --max-num-tokens-per-batch 65536 --enable-prefix-cache --kv-cache-memory-fraction 0.5 
 ```
 
 If OOM errors persist, try using a smaller value for `--kv-cache-memory-fraction`.
