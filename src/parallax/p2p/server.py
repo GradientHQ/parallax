@@ -9,7 +9,6 @@ It is used to handle the communication between the peers, and communicate with t
 
 import dataclasses
 import enum
-import json
 import multiprocessing
 import os
 import random
