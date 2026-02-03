@@ -494,6 +494,7 @@ def initialize_vllm_model_runner(
         dtype=dtype,
         seed=0,
         max_model_len=max_len,
+        max_logprobs=1,
         enable_return_routed_experts=enable_return_routed_experts,
     )
 

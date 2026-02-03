@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import torch
 from vllm.sequence import IntermediateTensors
+import torch.nn.functional as F
 
 from parallax.server.executor.base_executor import BaseExecutor
 from parallax.server.request import (
@@ -339,7 +340,7 @@ class VLLMExecutor(BaseExecutor):
                     logits = None
 
                 if logits is not None:
-                    probs = torch.softmax(logits, dim=-1)
+                    probs = F.log_softmax(logits, dim=-1)
                     if isinstance(sampled_token_ids, torch.Tensor):
                         sampled_ids = sampled_token_ids
                     else:
