@@ -304,8 +304,6 @@ class BaseExecutor:
                                     logger.debug(
                                         f"recv request {req.request_id} hidden_states.length: {hidden_size}"
                                     )
-                                    shape = req.hidden_states.shape
-                                    logger.debug(f"recv request {req.request_id} hidden_states.shape: {shape}")
                                     if req.hidden_states.dtype != self.dtype:
                                         logger.debug(
                                             f"Converting hidden_states dtype from {req.hidden_states.dtype} to {self.dtype} for request {req.request_id}"

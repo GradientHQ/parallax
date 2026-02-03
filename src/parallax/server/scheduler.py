@@ -254,8 +254,18 @@ class Scheduler:
             req = self._wait_queue.popleft()
             rid = req.request_id
             if rid in self._running_requests:
+                logger.debug(f"Request {rid} already in running requests, adding back to wait queue.")
                 self._wait_queue.append(req)
                 continue
+
+            # if cache_manager is not None and has allow attribute, break if allow is False
+            if (
+                self.cache_manager is not None
+                and hasattr(self.cache_manager, "allow")
+                and not self.cache_manager.allow
+            ):
+                logger.debug(f"Cache manager does not allow request {rid},breaking admission.")
+                break
 
             # # Check kv cache pool
             # if self.cache_manager is not None:
@@ -286,8 +296,6 @@ class Scheduler:
             logger.debug(
                 f"Admitted to running: rid={rid}, status={req.status}, running_size={len(self._running_requests)}, ready={req.ready_for_next_step}"
             )
-            if req.hidden_states is not None:
-                logger.debug(f"Admitted request {rid} to running requests, shape: {req.hidden_states.shape}")
 
         # Reflect current running requests metric after admission
         try:
@@ -330,7 +338,6 @@ class Scheduler:
         self.admit_requests()
         if not self._running_requests:
             return []
-
         inflight_tokens = 0
         batch: List[Request] = []
 
@@ -343,13 +350,13 @@ class Scheduler:
                     prefill_candidates.append(req)
                 elif req.is_decoding:
                     decode_candidates.append(req)
-
         # 1) Fill with prefills first
         for req in prefill_candidates:
             if len(batch) >= self.micro_batch_size:
                 break
             cost = req.prompt_len
             if cost + inflight_tokens > self.max_num_tokens_per_batch:
+                logger.debug(f"prefill request {req.request_id} cost {cost} + inflight_tokens {inflight_tokens} > max_num_tokens_per_batch {self.max_num_tokens_per_batch}, breaking")
                 continue
             batch.append(req)
             inflight_tokens += cost
