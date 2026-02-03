@@ -347,12 +347,8 @@ class VLLMExecutor(BaseExecutor):
                         sampled_ids = torch.tensor(
                             sampled_token_ids, device=logits.device, dtype=torch.long
                         )
-                    token_probs = (
-                        probs.gather(sampled_ids, dim=0)
-                        .cpu()
-                        .float()
-                        .tolist()
-                    )
+                    probs = torch.gather(probs, 0, sampled_ids)
+                    token_probs = probs.cpu().float().tolist()
 
             # Align outputs to request order if vLLM reorders the batch internally.
             input_batch = getattr(self.model_runner, "input_batch", None)
