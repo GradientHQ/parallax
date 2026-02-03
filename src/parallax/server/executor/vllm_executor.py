@@ -342,11 +342,11 @@ class VLLMExecutor(BaseExecutor):
                 if logits is not None:
                     probs = F.log_softmax(logits, dim=-1)
                     if isinstance(sampled_token_ids, torch.Tensor):
-                        sampled_ids = sampled_token_ids
+                        sampled_ids = sampled_token_ids.flatten().unsqueeze(0)
                     else:
                         sampled_ids = torch.tensor(
                             sampled_token_ids, device=logits.device, dtype=torch.long
-                        )
+                        ).flatten().unsqueeze(0)
                     probs = torch.gather(probs, 0, sampled_ids)
                     token_probs = probs.cpu().float().tolist()
 

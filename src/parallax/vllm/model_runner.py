@@ -321,7 +321,13 @@ class ParallaxVLLMModelRunner(GPUModelRunner):
             sampled_token_ids = sampler_output._sampled_token_ids
             sampled_token_ids_cpu = sampler_output.sampled_token_ids_cpu
 
-        return self.execute_model_state, sampled_token_ids, sampled_token_ids_cpu, sampler_output, logits
+        return (
+            self.execute_model_state,
+            sampled_token_ids,
+            sampled_token_ids_cpu,
+            sampler_output,
+            logits,
+        )
 
 
 def _init_and_reserve_workspace(device: torch.device, max_num_tokens: int) -> None:
