@@ -113,6 +113,10 @@ class SGLExecutor(BaseExecutor):
                 f"clamping to {kv_block_size}"
             )
             self.chunked_prefill_size = kv_block_size
+        elif self.chunked_prefill_size is not None:
+            self.chunked_prefill_size = chunked_prefill_size
+        else:
+            self.chunked_prefill_size = max_sequence_length if max_sequence_length is not None else max_num_tokens_per_batch
         if self.lora_paths is not None and len(self.lora_paths) > 0:
             self.check_lora_server_args()
 

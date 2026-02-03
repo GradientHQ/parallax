@@ -682,14 +682,14 @@ class MLXExecutor(BaseExecutor):
                 if matched_tokens > 0 and self.enable_prefix_cache:
                     # Skip the prefix hidden states that correspond to cached tokens
                     # 使用 chunked_rid 判断：最后一个 chunk 时 add_chunked_req 已将 chunked_req 置为 None，但本 batch 中该请求仍应按 chunked 分支用完整 hidden_states
-                    is_chunked_req_in_batch = (
-                        self.chunked_req is not None and req.request_id == self.chunked_req.rid
-                    ) or (chunked_rid is not None and req.request_id == chunked_rid)
-                    if is_chunked_req_in_batch:
-                        keep_len = req.total_length - matched_tokens
-                        new_hidden = req.hidden_states[-keep_len:]
-                    else:
-                        new_hidden = req.hidden_states[matched_tokens:]
+                    # is_chunked_req_in_batch = (
+                    #     self.chunked_req is not None and req.request_id == self.chunked_req.rid
+                    # ) or (chunked_rid is not None and req.request_id == chunked_rid)
+                    # if is_chunked_req_in_batch:
+                    keep_len = req.total_length - matched_tokens
+                    new_hidden = req.hidden_states[-keep_len:]
+                    # else:
+                    #     new_hidden = req.hidden_states[matched_tokens:]
                     if new_hidden.shape[0] == 0:
                         # All tokens cached - keep the last hidden state
                         new_hidden = req.hidden_states[-1:]
