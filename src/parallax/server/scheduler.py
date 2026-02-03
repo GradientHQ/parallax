@@ -254,7 +254,6 @@ class Scheduler:
             req = self._wait_queue.popleft()
             rid = req.request_id
             if rid in self._running_requests:
-                logger.debug(f"Request {rid} already in running requests, adding back to wait queue.")
                 self._wait_queue.append(req)
                 continue
 
