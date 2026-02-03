@@ -347,6 +347,8 @@ class VLLMExecutor(BaseExecutor):
                         sampled_ids = torch.tensor(
                             sampled_token_ids, device=logits.device, dtype=torch.long
                         ).flatten().unsqueeze(0)
+                    print("[ty]probs shape=", probs.shape)
+                    print("[ty]ids shape=", sampled_ids.shape)
                     probs = torch.gather(probs, 0, sampled_ids)
                     token_probs = probs.cpu().float().tolist()
 
