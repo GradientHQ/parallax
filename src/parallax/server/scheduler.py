@@ -286,6 +286,8 @@ class Scheduler:
             logger.debug(
                 f"Admitted to running: rid={rid}, status={req.status}, running_size={len(self._running_requests)}, ready={req.ready_for_next_step}"
             )
+            if req.hidden_states is not None:
+                logger.debug(f"Admitted request {rid} to running requests, shape: {req.hidden_states.shape}")
 
         # Reflect current running requests metric after admission
         try:

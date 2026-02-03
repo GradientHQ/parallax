@@ -564,6 +564,8 @@ class MLXExecutor(BaseExecutor):
         
         original_batched_requests = batched_requests
         logger.debug(f"original_batched_requests_size: {len(original_batched_requests)}")
+        for req in original_batched_requests:
+            logger.debug(f"before prepare_prefill_batch, req {req.request_id} hidden_states.shape: {req.hidden_states.shape}")
         adder = MACPrefillAdder(
             self.cache_manager.block_size, 
             self.chunked_prefill_size, 
@@ -573,6 +575,8 @@ class MLXExecutor(BaseExecutor):
         chunked_rid = self.chunked_req.rid if self.chunked_req is not None else None
         
         if self.chunked_req is not None and chunked_rid in [req.request_id for req in original_batched_requests]:
+            # update chunked_req use old_req
+            self.chunked_req = [req for req in original_batched_requests if req.request_id == chunked_rid][0]
             logger.debug(f"before add_chunked_req, chunked_req is not None")
             self.chunked_req = adder.add_chunked_req(self.chunked_req)
             if self.chunked_req is None:
@@ -596,6 +600,8 @@ class MLXExecutor(BaseExecutor):
         can_run_by_id = {req.request_id: req for req in adder.can_run_list}
         batched_requests = [can_run_by_id[req.request_id] for req in original_batched_requests if req.request_id in can_run_by_id]
         logger.debug(f"after add_one_req, batched_requests size: {len(batched_requests)}")
+        for req in batched_requests:
+            logger.debug(f"after add_one_req, can_run_list, req {req.request_id} hidden_states.shape: {req.hidden_states.shape}")
 
         h_or_tokens_list = []
         block_tables_list = []
@@ -644,9 +650,16 @@ class MLXExecutor(BaseExecutor):
                     h_or_tokens_list.append(req.input_ids)
                     actual_processed_lengths_list.append(len(req.input_ids))
             else:
+                logger.debug(f"intermediate peer, req {req.request_id} hidden_states.shape: {req.hidden_states.shape}")
                 if matched_tokens > 0 and self.enable_prefix_cache:
                     # Skip the prefix hidden states that correspond to cached tokens
-                    new_hidden = req.hidden_states[matched_tokens:]
+                    # 使用 chunked_rid 判断：最后一个 chunk 时 add_chunked_req 已将 chunked_req 置为 None，但本 batch 中该请求仍应按 chunked 分支用完整 hidden_states
+                    is_chunked_req_in_batch = (self.chunked_req is not None and req.request_id == self.chunked_req.rid) or (chunked_rid is not None and req.request_id == chunked_rid)
+                    if is_chunked_req_in_batch:
+                        keep_len = req.total_length - matched_tokens
+                        new_hidden = req.hidden_states[-keep_len:]
+                    else:
+                        new_hidden = req.hidden_states[matched_tokens:]
                     if new_hidden.shape[0] == 0:
                         # All tokens cached - keep the last hidden state
                         new_hidden = req.hidden_states[-1:]
@@ -664,12 +677,18 @@ class MLXExecutor(BaseExecutor):
             # For prefill, context length after this step will be total_length
             context_lengths_list.append(req.total_length)
 
+        for i, req in enumerate(batched_requests):  
+            logger.debug(f"before pad_inputs, req {req.request_id} h_or_tokens_list length: {len(h_or_tokens_list[i])}")
+
         if self.is_first_peer:
             padded_inputs, padding_mask = pad_inputs(
                 self.pad_token_id, h_or_tokens_list, self.dtype
             )
         else:
             padded_inputs, padding_mask = pad_inputs(0, h_or_tokens_list, self.dtype)
+            
+        for i, req in enumerate(batched_requests):  
+            logger.debug(f"after pad_inputs, req {req.request_id} h_or_tokens_list length: {len(h_or_tokens_list[i])}")
 
         # Generate slot_mapping for prefill (only for NEW tokens, starting from prefix_len)
         max_len = padded_inputs.shape[1]
