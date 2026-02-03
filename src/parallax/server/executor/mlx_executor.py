@@ -241,7 +241,6 @@ class MLXExecutor(BaseExecutor):
         else:
             self.chunked_prefill_size = None
         self.chunked_req = None
-        self.chunked_req_offset = 0
         logger.debug(
             f"mlx_executor initialized; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}, total memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
         )
@@ -565,8 +564,11 @@ class MLXExecutor(BaseExecutor):
         
         original_batched_requests = batched_requests
         logger.debug(f"original_batched_requests_size: {len(original_batched_requests)}")
-        
-        adder = MACPrefillAdder(self.cache_manager.block_size, self.chunked_prefill_size, self.chunked_req_offset)
+        adder = MACPrefillAdder(
+            self.cache_manager.block_size, 
+            self.chunked_prefill_size, 
+            self.cache_manager
+            )
         
         chunked_rid = self.chunked_req.rid if self.chunked_req is not None else None
         
@@ -593,7 +595,6 @@ class MLXExecutor(BaseExecutor):
         
         can_run_by_id = {req.request_id: req for req in adder.can_run_list}
         batched_requests = [can_run_by_id[req.request_id] for req in original_batched_requests if req.request_id in can_run_by_id]
-        self.chunked_req_offset = adder.chunked_req_offset
         logger.debug(f"after add_one_req, batched_requests size: {len(batched_requests)}")
 
         h_or_tokens_list = []
