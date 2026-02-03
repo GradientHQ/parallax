@@ -334,7 +334,7 @@ class VLLMExecutor(BaseExecutor):
             if needs_probs and logits is not None and isinstance(logits, torch.Tensor):
 
                 if logits.ndim == 3:
-                    logits = logits[:, -1, :]
+                    logits = logits[:, -1, :]  # [batch, seq, vocab_size]
                 elif logits.ndim != 2:
                     logger.warning(f"Unexpected logits shape: {logits.shape}")
                     logits = None
@@ -348,7 +348,7 @@ class VLLMExecutor(BaseExecutor):
                             sampled_token_ids, device=logits.device, dtype=torch.long
                         )
                     token_probs = (
-                        probs[torch.arange(len(sampled_ids), device=logits.device), sampled_ids]
+                        probs.gather(0, sampled_ids)
                         .cpu()
                         .float()
                         .tolist()
