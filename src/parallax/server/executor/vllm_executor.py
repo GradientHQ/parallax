@@ -342,14 +342,12 @@ class VLLMExecutor(BaseExecutor):
                 if logits is not None:
                     probs = F.log_softmax(logits, dim=-1)
                     if isinstance(sampled_token_ids, torch.Tensor):
-                        sampled_ids = sampled_token_ids.flatten().unsqueeze(0)
+                        sampled_ids = sampled_token_ids
                     else:
                         sampled_ids = torch.tensor(
                             sampled_token_ids, device=logits.device, dtype=torch.long
-                        ).flatten().unsqueeze(0)
-                    print("[ty]probs shape=", probs.shape)
-                    print("[ty]ids shape=", sampled_ids.shape)
-                    probs = torch.gather(probs, 0, sampled_ids)
+                        )
+                    probs = torch.gather(probs, 1, sampled_ids)
                     token_probs = probs.cpu().float().tolist()
 
             # Align outputs to request order if vLLM reorders the batch internally.
