@@ -129,7 +129,7 @@ libc++abi: terminating due to uncaught exception of type std::runtime_error: [ME
 **A:** Add the `--kv-cache-memory-fraction` parameter when starting Parallax on edge nodes:
 
 ```bash
-parallax join --max-sequence-length 65536 --max-num-tokens-per-batch 65536 --enable-prefix-cache --kv-cache-memory-fraction 0.5 
+parallax join --max-sequence-length 65536 --max-num-tokens-per-batch 65536 --enable-prefix-cache --kv-cache-memory-fraction 0.5
 ```
 
 If OOM errors persist, try using a smaller value for `--kv-cache-memory-fraction`.
