@@ -611,7 +611,7 @@ class MLXExecutor(BaseExecutor):
             token_ids = None
             if self.enable_prefix_cache and req.input_ids is not None:
                 token_ids = req.input_ids
-
+            logger.debug(f"before allocate_request: {req.request_id}, token_ids length: {len(token_ids)}, req.total_length: {req.total_length}")
             success, matched_tokens = self.cache_manager.allocate_request(
                 req.request_id, req.total_length, token_ids=token_ids
             )

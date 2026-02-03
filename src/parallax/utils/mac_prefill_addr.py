@@ -36,7 +36,7 @@ class MACPrefillAdder:
         truncated = extend_input_len > self.rem_chunk_tokens
         chunked_req_offset = min(self.rem_chunk_tokens, extend_input_len) + matched_tokens
         chunked_req.input_ids = chunked_req.origin_input_ids[: chunked_req_offset]
-        chunked_req.total_len = chunked_req_offset
+        chunked_req._effective_total_length = chunked_req_offset
         self.can_run_list.append(chunked_req)
         self.rem_chunk_tokens -= min(self.rem_chunk_tokens, extend_input_len)
         return chunked_req if truncated else None
@@ -60,7 +60,7 @@ class MACPrefillAdder:
             extend_input_len = trunc_len
             chunked_req_offset = extend_input_len + matched_tokens
             req.input_ids = req.origin_input_ids[: chunked_req_offset]
-            req.total_len = chunked_req_offset
+            req._effective_total_length = chunked_req_offset
             self.can_run_list.append(req)
             self.new_chunked_req = req
             self.rem_chunk_tokens -= extend_input_len

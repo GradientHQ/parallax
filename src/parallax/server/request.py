@@ -112,6 +112,8 @@ class Request:
         self.is_chunked = 0
         self.rid = self.request_id
         self.origin_input_ids = input_ids
+        # When set (e.g. by chunked prefill), total_length property returns this instead of computed value.
+        self._effective_total_length: Optional[int] = None
 
     @property
     def is_finished(self) -> bool:
@@ -202,7 +204,9 @@ class InitialRequest(Request):
 
     @property
     def total_length(self) -> int:
-        """Total length of the sequence (input + output)."""
+        """Total length of the sequence (input + output). Overridable via _effective_total_length (e.g. chunked prefill)."""
+        if self._effective_total_length is not None:
+            return self._effective_total_length
         return self.prompt_len + self.output_length
 
     def get_model_input_for_first_peer(self) -> List[int]:
@@ -303,7 +307,9 @@ class IntermediateRequest(Request):
 
     @property
     def total_length(self) -> int:
-        """Total length of the sequence (input + output)."""
+        """Total length of the sequence (input + output). Overridable via _effective_total_length (e.g. chunked prefill)."""
+        if self._effective_total_length is not None:
+            return self._effective_total_length
         return self.current_position
 
     @classmethod
