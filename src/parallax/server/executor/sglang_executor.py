@@ -438,9 +438,7 @@ class SGLExecutor(BaseExecutor):
             # Extract probs for the sampled tokens only if needed
             if needs_probs and hasattr(logits_output, "next_token_logits"):
                 # Get probs for sampled tokens (next_token_logits contains probabilities)
-                real_probs = logits_output.next_token_logits[
-                    torch.arange(len(next_token_ids)), next_token_ids
-                ]
+                real_probs = logits_output.next_token_logits.gather(next_token_ids, dim=0)
                 token_probs = real_probs.cpu().float().tolist()
 
             # Return dict with token_ids and optional probs

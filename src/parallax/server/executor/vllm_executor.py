@@ -348,7 +348,7 @@ class VLLMExecutor(BaseExecutor):
                             sampled_token_ids, device=logits.device, dtype=torch.long
                         )
                     token_probs = (
-                        probs.gather(0, sampled_ids)
+                        probs.gather(sampled_ids, dim=0)
                         .cpu()
                         .float()
                         .tolist()
