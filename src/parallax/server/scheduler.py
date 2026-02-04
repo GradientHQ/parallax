@@ -355,7 +355,9 @@ class Scheduler:
                 break
             cost = req.prompt_len
             if cost + inflight_tokens > self.max_num_tokens_per_batch:
-                logger.debug(f"prefill request {req.request_id} cost {cost} + inflight_tokens {inflight_tokens} > max_num_tokens_per_batch {self.max_num_tokens_per_batch}, breaking")
+                logger.debug(
+                    f"prefill request {req.request_id} cost {cost} + inflight_tokens {inflight_tokens} > max_num_tokens_per_batch {self.max_num_tokens_per_batch}, breaking"
+                )
                 continue
             batch.append(req)
             inflight_tokens += cost
