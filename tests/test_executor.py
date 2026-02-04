@@ -65,7 +65,9 @@ def create_executor(start_layer, end_layer, device, kv_cache_memory_fraction=0.3
 
 
 def run_executor_pipeline_stage(executor, requests, batch_type, is_last_peer):
-    """Run executor pipeline stage. Input and output should be requests"""
+    """Run executor pipeline stage. Input and output should be requests.
+    Returns (to_forward_reqs, batch_output); chunked_reqs are handled locally via handle_input_requests.
+    """
     executor.handle_input_requests(requests)
     executor.scheduler.admit_requests()
     input_batch = executor.scheduler.form_batch()
@@ -73,12 +75,14 @@ def run_executor_pipeline_stage(executor, requests, batch_type, is_last_peer):
     assert prepared_batch is not None, "Failed to prepare batch inputs"
     batch_data = prepared_batch[batch_type]
     batch_output = executor.process_batch(batch_data, return_decoded_tokens=is_last_peer)
-    output_reqs = executor.prepare_next_batch_requests(
+    chunked_reqs, to_forward_reqs = executor.prepare_next_batch_requests(
         requests=batch_data["requests"],
         batch_output=batch_output,
         context_lengths=batch_data.get("context_lengths"),
     )
-    return output_reqs, batch_output
+    if chunked_reqs:
+        executor.handle_input_requests(chunked_reqs)
+    return to_forward_reqs, batch_output
 
 
 @pytest.mark.parametrize(
@@ -119,8 +123,8 @@ def test_decode_pipeline_multiple_steps(pipeline_devices, pp_end_layers, num_dec
             ref_cuda_model = AutoModelForCausalLM.from_pretrained(
                 CUDA_MODEL_REPO,
                 torch_dtype=torch.bfloat16,
-                device_map="cuda:0",
             )
+            ref_cuda_model = ref_cuda_model.to("cuda:0")
             ref_cuda_tokenizer = AutoTokenizer.from_pretrained(CUDA_MODEL_REPO)
             if ref_cuda_tokenizer.pad_token is None:
                 ref_cuda_tokenizer.pad_token = ref_cuda_tokenizer.eos_token
