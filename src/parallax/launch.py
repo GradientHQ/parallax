@@ -120,36 +120,42 @@ if __name__ == "__main__":
             check_latest_release()
 
             config = fetch_model_from_hf(args.model_path, local_files_only=args.use_hfcache)
+            if args.start_layer is None:
+                args.start_layer = 0
+            if args.end_layer is None:
+                args.end_layer = config.get("num_hidden_layers")
+
             # only launch http server on head node
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
             # Launch P2P server as subprocess
-            p2p_server_process = launch_p2p_server_process(
-                initial_peers=args.initial_peers,
-                scheduler_addr=args.scheduler_addr,
-                relay_servers=args.relay_servers,
-                pp_start_layer=args.start_layer,
-                pp_end_layer=args.end_layer,
-                hidden_layers=config.get("num_hidden_layers"),
-                tp_size=args.tp_size,
-                dp_size=args.dp_size,
-                tcp_port=args.tcp_port,
-                udp_port=args.udp_port,
-                dht_prefix=args.dht_prefix,
-                announce_maddrs=args.announce_maddrs,
-                http_port=args.port,
-                notify_url=args.notify_url,
-                recv_from_peer_addr=args.recv_from_peer_addr,
-                send_to_peer_addr=args.send_to_peer_addr,
-                model_name=args.model_path,
-                max_batch_size=args.max_batch_size,
-                max_sequence_length=args.max_sequence_length,
-                param_mem_ratio=args.param_mem_ratio,
-                kvcache_mem_ratio=args.kvcache_mem_ratio,
-                shared_state=shared_state.dict,
-                log_level=args.log_level,
-                conn=conn_main,
-            )
+            if not (args.start_layer == 0 and args.end_layer == config.get("num_hidden_layers")):
+                p2p_server_process = launch_p2p_server_process(
+                    initial_peers=args.initial_peers,
+                    scheduler_addr=args.scheduler_addr,
+                    relay_servers=args.relay_servers,
+                    pp_start_layer=args.start_layer,
+                    pp_end_layer=args.end_layer,
+                    hidden_layers=config.get("num_hidden_layers"),
+                    tp_size=args.tp_size,
+                    dp_size=args.dp_size,
+                    tcp_port=args.tcp_port,
+                    udp_port=args.udp_port,
+                    dht_prefix=args.dht_prefix,
+                    announce_maddrs=args.announce_maddrs,
+                    http_port=args.port,
+                    notify_url=args.notify_url,
+                    recv_from_peer_addr=args.recv_from_peer_addr,
+                    send_to_peer_addr=args.send_to_peer_addr,
+                    model_name=args.model_path,
+                    max_batch_size=args.max_batch_size,
+                    max_sequence_length=args.max_sequence_length,
+                    param_mem_ratio=args.param_mem_ratio,
+                    kvcache_mem_ratio=args.kvcache_mem_ratio,
+                    shared_state=shared_state.dict,
+                    log_level=args.log_level,
+                    conn=conn_main,
+                )
 
             # Build connectors for tp communication
             conn_tp_0 = [conn_refit]

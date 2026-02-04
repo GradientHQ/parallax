@@ -9,7 +9,9 @@ MLX official instructions for custom extensions: https://ml-explore.github.io/ml
 ├── bindings.cpp                   # Nanobind
 ├── CMakelists.txt
 ├── lib
-│   ├── _ext.cpython-311-darwin.so # Python Binding
+│   ├── _ext.cpython-311-darwin.so # Python 3.11 binding
+│   ├── _ext.cpython-312-darwin.so # Python 3.12 binding
+│   ├── _ext.cpython-313-darwin.so # Python 3.13 binding
 │   ├── libparallax_ext.dylib      # C++ extension library
 │   └── parallax_ext.metallib      # Metal library
 ├── paged_attention_v1             # Kernel Source Code Directories
@@ -30,6 +32,9 @@ python setup.py build_ext -j8 --inplace
 ```
 Then you can try to install in the directory using the command ```python -m pip install .```.
 The pre-built package should be already installed in the parallax project.
+
+When multiple prebuilt `_ext.cpython-<ver>-darwin.so` files are present in `lib/`,
+Parallax automatically loads the one matching the current Python runtime.
 
 ### Usage Example
 ```python

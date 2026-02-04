@@ -22,7 +22,7 @@ import traceback
 import uuid
 from dataclasses import dataclass, field
 from http import HTTPStatus
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import fastapi
 import uvicorn
@@ -35,7 +35,11 @@ from pydantic import BaseModel
 from starlette.datastructures import State
 
 from parallax.utils.selective_download import download_metadata_only
-from parallax.utils.tokenizer_utils import load_detokenizer, load_tokenizer
+from parallax.utils.tokenizer_utils import (
+    ToolCallState,
+    load_detokenizer,
+    load_tokenizer,
+)
 from parallax.utils.utils import get_zmq_socket
 from parallax_utils.logging_config import get_logger
 
@@ -94,6 +98,9 @@ class HTTPRequestInfo:
     routed_experts: Optional[List] = None  # Routed experts for rollout replay
     # Weight version for RL
     weight_version: Optional[int] = None
+    # tool calling support
+    tool_state: Optional[ToolCallState] = None
+    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class HTTPHandler:
@@ -150,6 +157,9 @@ class HTTPHandler:
             detokenizer=detokenizer,
             return_probs=return_probs,
         )
+        request_info.tool_state = ToolCallState.from_tokenizer(
+            self.tokenizer, request.get("tools"), stream
+        )
         if stream:
             request_info.token_queue = asyncio.Queue()
         self.processing_requests[rid] = request_info
@@ -199,12 +209,18 @@ class HTTPHandler:
             content = ""
             if "minimax-m2" in self.model_path_str.lower():
                 content = "<think>"
+            tool_calls = None
         elif is_last:
             role = None
             content = None
+            tool_calls = None
         else:
             role = None
             content = token
+            tool_calls = None
+            if isinstance(token, dict) and token.get("type") == "tool_calls":
+                content = None
+                tool_calls = token.get("tool_calls")
 
         response = {
             "id": rid,
@@ -226,7 +242,10 @@ class HTTPHandler:
             },
         }
         choice = response["choices"][0]
-        choice["delta"] = {"role": role, "content": content}
+        delta = {"role": role, "content": content}
+        if tool_calls is not None:
+            delta["tool_calls"] = tool_calls
+        choice["delta"] = delta
         # Add probs in the last chunk if requested (convert to object array format)
         if is_last and request_info.return_probs:
             choice["probs"] = [
@@ -301,7 +320,7 @@ class HTTPHandler:
             "role": "assistant",
             "content": request_info.text,
             "reasoning_content": None,
-            "tool_calls": None,
+            "tool_calls": request_info.tool_calls or None,
         }
         # Add probs if requested (convert to object array format)
         if request_info.return_probs:
@@ -364,6 +383,16 @@ class HTTPHandler:
             request_info.completion_tokens += 1
             request_info.detokenizer.add_token(next_token_id)
             output = request_info.detokenizer.last_segment
+            tool_state = request_info.tool_state
+            tool_calls = []
+            if tool_state is not None:
+                output, tool_calls = tool_state.extract_from_segment(output)
+            if tool_calls:
+                request_info.tool_calls.extend(tool_calls)
+                if request_info.stream:
+                    await request_info.token_queue.put(
+                        {"type": "tool_calls", "tool_calls": tool_calls}
+                    )
             request_info.weight_version = recv_dict.get("weight_version", None)
             if "routed_experts" in recv_dict:
                 request_info.routed_experts = recv_dict["routed_experts"]
@@ -398,7 +427,11 @@ class HTTPHandler:
                     request_info.finish_reason = "length"
                 elif recv_dict.get("eos", False):
                     logger.debug(f"Request {rid} finished with eos")
-                    request_info.finish_reason = "eos"
+                    request_info.finish_reason = (
+                        "tool_calls"
+                        if request_info.tool_state and request_info.tool_state.made_tool_call
+                        else "stop"
+                    )
                     request_info.matched_stop = next_token_id
                 else:
                     logger.debug(f"Request {rid} finished with unknown reason")
