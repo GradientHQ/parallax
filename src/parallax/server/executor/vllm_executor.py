@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from vllm.sequence import IntermediateTensors
 
 from parallax.server.executor.base_executor import BaseExecutor
@@ -315,7 +316,7 @@ class VLLMExecutor(BaseExecutor):
         requests = prepared_inputs.get("requests", [])
 
         # Execute model with vLLM
-        execute_model_state, sampled_token_ids, sampler_output, logits = (
+        execute_model_state, sampled_token_ids, sampled_token_ids_cpu, sampler_output, logits = (
             self.model_runner.execute_model(
                 scheduler_output=scheduler_output,
                 intermediate_tensors=intermediate_tensors,
@@ -335,25 +336,21 @@ class VLLMExecutor(BaseExecutor):
             if needs_probs and logits is not None and isinstance(logits, torch.Tensor):
 
                 if logits.ndim == 3:
-                    logits = logits[:, -1, :]
+                    logits = logits[:, -1, :]  # [batch, seq, vocab_size]
                 elif logits.ndim != 2:
                     logger.warning(f"Unexpected logits shape: {logits.shape}")
                     logits = None
 
                 if logits is not None:
-                    probs = torch.softmax(logits, dim=-1)
+                    probs = F.log_softmax(logits, dim=-1)
                     if isinstance(sampled_token_ids, torch.Tensor):
                         sampled_ids = sampled_token_ids
                     else:
                         sampled_ids = torch.tensor(
                             sampled_token_ids, device=logits.device, dtype=torch.long
                         )
-                    token_probs = (
-                        probs[torch.arange(len(sampled_ids), device=logits.device), sampled_ids]
-                        .cpu()
-                        .float()
-                        .tolist()
-                    )
+                    probs = torch.gather(probs, 1, sampled_ids)
+                    token_probs = probs.cpu().float().tolist()
 
             # Align outputs to request order if vLLM reorders the batch internally.
             input_batch = getattr(self.model_runner, "input_batch", None)
@@ -362,14 +359,14 @@ class VLLMExecutor(BaseExecutor):
                 request_ids = [req.request_id for req in requests]
                 if all(rid in req_id_to_index for rid in request_ids):
                     order = [req_id_to_index[rid] for rid in request_ids]
-                    if isinstance(sampled_token_ids, torch.Tensor):
-                        sampled_token_ids = sampled_token_ids[order]
-                    elif isinstance(sampled_token_ids, list):
-                        sampled_token_ids = [sampled_token_ids[i] for i in order]
+                    if isinstance(sampled_token_ids_cpu, torch.Tensor):
+                        sampled_token_ids_cpu = sampled_token_ids_cpu[order]
+                    elif isinstance(sampled_token_ids_cpu, list):
+                        sampled_token_ids_cpu = [sampled_token_ids_cpu[i] for i in order]
                     if token_probs is not None:
                         token_probs = [token_probs[i] for i in order]
 
-            return {"hidden_states": sampled_token_ids, "probs": token_probs}
+            return {"hidden_states": sampled_token_ids_cpu, "probs": token_probs}
         else:
             # Intermediate peer: return hidden states for next peer
             return {"hidden_states": execute_model_state.hidden_states, "probs": None}

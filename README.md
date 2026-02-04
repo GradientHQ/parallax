@@ -29,6 +29,7 @@
 | [**Arxiv**](https://arxiv.org/pdf/2509.26182v1)
 
 ## News
+- [2026/2] 🦞 Parallax now supports OpenClaw integration! See [Docs](./docs/user_guide/work_with_openclaw.md)
 - [2025/10] 🔥 Parallax won #1 Product of The Day on Product Hunt!
 - [2025/10] 🔥 Parallax version 0.0.1 has been released!
 
@@ -51,6 +52,7 @@ The backend architecture:
 
 - [Installation](./docs/user_guide/install.md)
 - [Getting Started](./docs/user_guide/quick_start.md)
+- [Working with OpenClaw 🦞](./docs/user_guide/work_with_openclaw.md)
 
 ## Contributing
 

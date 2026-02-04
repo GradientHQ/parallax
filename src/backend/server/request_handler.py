@@ -1,10 +1,9 @@
 import asyncio
-import json
 import time
 from typing import Dict
 
 import aiohttp
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from backend.server.constants import NODE_STATUS_AVAILABLE
@@ -152,8 +151,7 @@ class RequestHandler:
                     response = stub.chat_completion(request_data)
                     content = (await anext(iterate_in_threadpool(response))).decode()
                     logger.debug(f"Non-stream response completed for {request_id}")
-                    # response is a JSON string; parse to Python object before returning
-                    return JSONResponse(content=json.loads(content))
+                    return Response(content=content, media_type="application/json")
             except Exception as e:
                 forward_attempts += 1
                 if forward_attempts < self.MAX_FORWARD_RETRY:

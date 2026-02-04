@@ -3,8 +3,11 @@ Implements parallax detokenizers for performance.
 """
 
 import json
+import uuid
+from dataclasses import dataclass
 from functools import partial
 from json import JSONDecodeError
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from mlx_lm.tokenizer_utils import (
     BPEStreamingDetokenizer,
@@ -123,3 +126,98 @@ def load_tokenizer(model_path, trust_remote_code=True, tokenizer_config_extra=No
         tokenizer_config_extra["trust_remote_code"] = True
 
     return _mlx_load_tokenizer(model_path, tokenizer_config_extra=tokenizer_config_extra, **kwargs)
+
+
+@dataclass
+class ToolCallState:
+    has_tool_calling: bool
+    tool_call_start: Optional[str]
+    tool_call_end: Optional[str]
+    tool_parser: Optional[Callable[[str, Any], Dict[str, Any]]]
+    tools: Optional[List[Any]]
+    stream: bool
+    in_tool_call: bool = False
+    tool_text: str = ""
+    tool_call_idx: int = 0
+    made_tool_call: bool = False
+
+    @classmethod
+    def from_tokenizer(cls, tokenizer, tools: Optional[List[Any]], stream: bool):
+        has_tool_calling = bool(getattr(tokenizer, "has_tool_calling", False))
+        tool_parser = getattr(tokenizer, "tool_parser", None)
+        tool_call_start = getattr(tokenizer, "tool_call_start", None)
+        tool_call_end = getattr(tokenizer, "tool_call_end", None)
+        if not (has_tool_calling and tool_parser and tool_call_start and tool_call_end):
+            return cls(
+                has_tool_calling=False,
+                tool_call_start=None,
+                tool_call_end=None,
+                tool_parser=None,
+                tools=tools,
+                stream=stream,
+            )
+        return cls(
+            has_tool_calling=True,
+            tool_call_start=tool_call_start,
+            tool_call_end=tool_call_end,
+            tool_parser=tool_parser,
+            tools=tools,
+            stream=stream,
+        )
+
+    def _format_tool_call(self, tool_call: Dict[str, Any]):
+        tool_call_id = tool_call.pop("id", None) or str(uuid.uuid4())
+        tool_call["arguments"] = json.dumps(tool_call["arguments"], ensure_ascii=False)
+        out = {
+            "function": tool_call,
+            "type": "function",
+            "id": tool_call_id,
+        }
+        if self.stream:
+            out["index"] = self.tool_call_idx
+            self.tool_call_idx += 1
+        return out
+
+    def _parse_tool_text(self, tool_text: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        try:
+            parsed = self.tool_parser(tool_text, self.tools)
+        except Exception:
+            fallback_text = f"{self.tool_call_start}{tool_text}{self.tool_call_end}"
+            return [], fallback_text
+        if isinstance(parsed, list):
+            return [self._format_tool_call(tc) for tc in parsed], None
+        return [self._format_tool_call(parsed)], None
+
+    def extract_from_segment(self, segment: str) -> Tuple[str, List[Dict[str, Any]]]:
+        if not self.has_tool_calling or not segment:
+            return segment, []
+        output_chunks: List[str] = []
+        new_tool_calls: List[Dict[str, Any]] = []
+        idx = 0
+        while idx < len(segment):
+            if not self.in_tool_call:
+                start_pos = segment.find(self.tool_call_start, idx)
+                if start_pos == -1:
+                    output_chunks.append(segment[idx:])
+                    break
+                if start_pos > idx:
+                    output_chunks.append(segment[idx:start_pos])
+                self.in_tool_call = True
+                self.made_tool_call = True
+                self.tool_text = ""
+                idx = start_pos + len(self.tool_call_start)
+            else:
+                end_pos = segment.find(self.tool_call_end, idx)
+                if end_pos == -1:
+                    self.tool_text += segment[idx:]
+                    break
+                self.tool_text += segment[idx:end_pos]
+                parsed_calls, fallback_text = self._parse_tool_text(self.tool_text)
+                if parsed_calls:
+                    new_tool_calls.extend(parsed_calls)
+                if fallback_text:
+                    output_chunks.append(fallback_text)
+                self.tool_text = ""
+                self.in_tool_call = False
+                idx = end_pos + len(self.tool_call_end)
+        return "".join(output_chunks), new_tool_calls
