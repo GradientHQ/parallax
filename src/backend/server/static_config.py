@@ -47,6 +47,8 @@ MODELS = {
     "deepseek-ai/DeepSeek-V2.5-1210": "mlx-community/DeepSeek-V2.5-1210-4bit",
     "deepseek-ai/DeepSeek-R1": "mlx-community/DeepSeek-R1-4bit",
     "deepseek-ai/DeepSeek-V3.2": "mlx-community/DeepSeek-V3.2-4bit",
+    # StepFun Models
+    "stepfun-ai/Step-3.5-Flash-Int4": "mlx-community/Step-3.5-Flash-4bit",
     # Qwen 2.5 Series
     "Qwen/Qwen2.5-0.5B-Instruct": "Qwen/Qwen2.5-0.5B-Instruct",
     "Qwen/Qwen2.5-1.5B-Instruct": "Qwen/Qwen2.5-1.5B-Instruct",
@@ -148,6 +150,10 @@ def get_model_info(model_name, use_hfcache: bool = False):
     if num_local_experts is None:
         num_local_experts = config.get("n_routed_experts", None)
 
+    num_kv_heads = config.get("num_key_value_heads", None)
+    if num_kv_heads is None:
+        num_kv_heads = config.get("num_attention_groups", None)
+
     model_info = ModelInfo(
         model_name=model_name,
         mlx_model_name=mlx_model_name,
@@ -157,7 +163,7 @@ def get_model_info(model_name, use_hfcache: bool = False):
         hidden_dim=config.get("hidden_size", 0),
         intermediate_dim=config.get("intermediate_size", 0),
         num_attention_heads=config.get("num_attention_heads", 0),
-        num_kv_heads=config.get("num_key_value_heads", 0),
+        num_kv_heads=num_kv_heads or 0,
         vocab_size=config.get("vocab_size", 0),
         num_layers=config.get("num_hidden_layers", 0),
         ffn_num_projections=3,
