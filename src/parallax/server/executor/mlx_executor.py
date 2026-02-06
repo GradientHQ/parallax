@@ -134,6 +134,9 @@ class MLXExecutor(BaseExecutor):
 
         # Calculate feature dimensions for kv cache
         num_key_value_heads = self.config.get("num_key_value_heads")
+        if num_key_value_heads is None:
+            # Step3.5 flash use num_attention_groups instead.
+            num_key_value_heads = self.config.get("num_attention_groups")
         head_dim = self.config.get("head_dim") or self.config.get("hidden_size") // self.config.get(
             "num_attention_heads"
         )

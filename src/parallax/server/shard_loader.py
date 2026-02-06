@@ -405,6 +405,19 @@ class MLXModelLoader:
                 if prefixed in qcfg:
                     override = qcfg[prefixed]
                     return override
+                # Handle pipeline shards: map local layer index to global index for overrides.
+                if p.startswith("layers."):
+                    parts = p.split(".")
+                    if len(parts) > 2 and parts[1].isdigit():
+                        global_idx = int(parts[1]) + current_start_layer
+                        global_key = "model.layers." + str(global_idx) + "." + ".".join(parts[2:])
+                        if global_key in qcfg:
+                            override = qcfg[global_key]
+                            if isinstance(override, dict):
+                                logger.debug(
+                                    f"[quantize] Using override for '{global_key}' (local '{p}'): bits={override.get('bits')} group_size={override.get('group_size')}"
+                                )
+                            return override
                 if not hasattr(m, "to_quantized"):
                     return False
                 # Handle legacy models by checking if quantized weights exist
