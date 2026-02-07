@@ -408,10 +408,13 @@ def initialize_vllm_model_runner(
     # Reuse the generic monkey patch used by sglang implementation to reduce
     # local weight file reads when loading a partial layer shard.
     try:
-        set_layer_range_for_filtering(start_layer, end_layer, num_hidden_layers)
+        from parallax.utils.config_utils import is_vlm_model
+
+        is_vlm = is_vlm_model(config)
+        set_layer_range_for_filtering(start_layer, end_layer, num_hidden_layers, is_vlm=is_vlm)
         apply_weight_loader_filter_patch()
         logger.debug(
-            f"Applied weight loader filter monkey patch for layers [{start_layer}, {end_layer})"
+            f"Applied weight loader filter monkey patch for layers [{start_layer}, {end_layer}), is_vlm={is_vlm}"
         )
     except Exception as e:
         logger.warning("Failed to apply weight loader filter patch for vLLM loading: %s", e)

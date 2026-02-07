@@ -19,7 +19,7 @@ Note: If you are using DGX Spark, please refer to the Docker installation sectio
 ```sh
 git clone https://github.com/GradientHQ/parallax.git
 cd parallax
-pip install -e '.[gpu]'
+pip install -e ".[gpu]" && pip install mlx-lm==0.30.6 --no-deps
 ```
 
 #### For macOS (Apple silicon):
@@ -34,14 +34,14 @@ cd parallax
 python3 -m venv ./venv
 source ./venv/bin/activate
 
-pip install -e '.[mac]'
+pip install -e ".[mac]"
 ```
 
 Next time to re-activate this virtual environment, run ```source ./venv/bin/activate```.
 
 #### Extra step for development:
 ```sh
-pip install -e '.[dev]'
+pip install -e ".[dev]"
 ```
 
 ### Windows Application

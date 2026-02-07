@@ -128,6 +128,36 @@ def load_tokenizer(model_path, trust_remote_code=True, tokenizer_config_extra=No
     return _mlx_load_tokenizer(model_path, tokenizer_config_extra=tokenizer_config_extra, **kwargs)
 
 
+def get_tool_call_stop_token_ids(tokenizer) -> List[int]:
+    """Return token IDs that should act as *stop tokens* for tool call generation.
+
+    When the model generates one of these tokens the scheduler should treat it
+    as end-of-sequence so that the HTTP handler can inspect the generated text
+    and extract tool calls.
+
+    Note: tool call *parsing* (``has_tool_calling``, ``tool_parser``, etc.) is
+    handled automatically by the updated ``mlx-lm`` ``TokenizerWrapper``.
+    This function only provides the stop-token IDs that the parallax scheduler
+    needs to halt generation at tool-call boundaries.
+    """
+    stop_ids: List[int] = []
+    _get_vocab = getattr(tokenizer, "get_vocab", None)
+    vocab = _get_vocab() if _get_vocab else {}
+
+    # Markers whose token IDs should halt generation
+    markers = [
+        "<|tool_calls_section_end|>",  # Kimi K2 / K2.5
+        "<|im_end|>",  # common chat turn-end token
+    ]
+
+    for marker in markers:
+        token_id = vocab.get(marker)
+        if token_id is not None:
+            stop_ids.append(token_id)
+
+    return list(set(stop_ids))
+
+
 @dataclass
 class ToolCallState:
     has_tool_calling: bool

@@ -3,6 +3,8 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
+from parallax.utils.config_utils import get_config_value, is_vlm_model
+
 logger = logging.getLogger(__name__)
 
 
@@ -13,22 +15,42 @@ def should_include_weight_key(
     is_first_shard: bool,
     is_last_shard: bool,
     tie_word_embeddings: bool = False,
+    is_vlm: bool = False,
 ) -> bool:
-    if is_first_shard and "embed_tokens" in key and key.startswith("model."):
+    # Embeddings on first shard
+    # Handles: model.embed_tokens, model.language_model.embed_tokens, language_model.model.embed_tokens
+    if is_first_shard and "embed_tokens" in key:
         return True
 
+    if is_first_shard and is_vlm:
+        vlm_prefixes = [
+            "vision_tower",
+            "vision_model",
+            "visual",
+            "multi_modal_projector",
+            "mm_projector",
+        ]
+        for prefix in vlm_prefixes:
+            if key.startswith(prefix) or key.startswith(f"model.{prefix}"):
+                return True
+
     if is_last_shard:
-        if "model.norm" in key or "lm_head" in key:
+        if ("lm_head" in key) or (
+            (".norm." in key or key.endswith(".norm.weight")) and "layers" not in key
+        ):
             return True
-        if tie_word_embeddings and "embed" in key and key.startswith("model.embed_tokens"):
+        if tie_word_embeddings and "embed_tokens" in key:
             return True
 
     if "layers." in key:
         parts = key.split(".")
         for i, part in enumerate(parts):
             if part == "layers" and i + 1 < len(parts):
-                layer_idx = int(parts[i + 1])
-                return start_layer <= layer_idx < end_layer
+                try:
+                    layer_idx = int(parts[i + 1])
+                    return start_layer <= layer_idx < end_layer
+                except ValueError:
+                    continue
 
     return False
 
@@ -41,6 +63,7 @@ def filter_weight_files_by_layer_range_for_load(
     is_first_shard: bool,
     is_last_shard: bool,
     config: Optional[Dict] = None,
+    is_vlm: bool = False,
 ) -> List[str]:
     index_file = model_path / "model.safetensors.index.json"
 
@@ -58,13 +81,13 @@ def filter_weight_files_by_layer_range_for_load(
 
     tie_word_embeddings = False
     if config:
-        tie_word_embeddings = config.get("tie_word_embeddings", False)
+        tie_word_embeddings = get_config_value(config, "tie_word_embeddings", False)
     else:
         config_file = model_path / "config.json"
         if config_file.exists():
             with open(config_file, "r") as f:
                 cfg = json.load(f)
-                tie_word_embeddings = cfg.get("tie_word_embeddings", False)
+                tie_word_embeddings = get_config_value(cfg, "tie_word_embeddings", False)
 
     needed_files: Set[str] = set()
 
@@ -78,6 +101,7 @@ def filter_weight_files_by_layer_range_for_load(
             is_first_shard=is_first_shard,
             is_last_shard=is_last_shard,
             tie_word_embeddings=tie_word_embeddings,
+            is_vlm=is_vlm,
         ):
             needed_files.add(filename)
 
@@ -95,8 +119,17 @@ def filter_weight_files_by_layer_range_for_load(
 
     logger.debug(
         f"Filtered weight files from {len(weight_files)} to {len(filtered_files)} "
-        f"for layers [{start_layer}, {end_layer})"
+        f"for layers [{start_layer}, {end_layer}), is_vlm={is_vlm}, is_first_shard={is_first_shard}"
     )
+
+    # If filtering resulted in no files but we had input files,
+    # fall back to original files (file naming may differ from index)
+    if not filtered_files and weight_files:
+        logger.debug(
+            f"Filtering resulted in no files, falling back to all {len(weight_files)} weight files. "
+            f"needed_files={needed_files}, input_files={[Path(wf).name for wf in weight_files]}"
+        )
+        return weight_files
 
     return filtered_files
 
@@ -110,16 +143,19 @@ def determine_needed_weight_files_for_download(
     is_first_shard = start_layer == 0
 
     is_last_shard = False
+    is_vlm_flag = False
     if config:
-        num_hidden_layers = config.get("num_hidden_layers", 0)
+        num_hidden_layers = get_config_value(config, "num_hidden_layers", 0)
         is_last_shard = end_layer >= num_hidden_layers
+        is_vlm_flag = is_vlm_model(config)
     else:
         config_file = model_path / "config.json"
         if config_file.exists():
             with open(config_file, "r") as f:
                 cfg = json.load(f)
-                num_hidden_layers = cfg.get("num_hidden_layers", 0)
+                num_hidden_layers = get_config_value(cfg, "num_hidden_layers", 0)
                 is_last_shard = end_layer >= num_hidden_layers
+                is_vlm_flag = is_vlm_model(cfg)
 
     index_file = model_path / "model.safetensors.index.json"
 
@@ -147,9 +183,9 @@ def determine_needed_weight_files_for_download(
         logger.debug("weight_map is empty in index file")
         return []
 
-    tie_word_embeddings = False
-    if config:
-        tie_word_embeddings = config.get("tie_word_embeddings", False)
+    tie_word_embeddings = (
+        get_config_value(config, "tie_word_embeddings", False) if config else False
+    )
 
     needed_files: Set[str] = set()
 
@@ -163,6 +199,7 @@ def determine_needed_weight_files_for_download(
             is_first_shard=is_first_shard,
             is_last_shard=is_last_shard,
             tie_word_embeddings=tie_word_embeddings,
+            is_vlm=is_vlm_flag,
         ):
             needed_files.add(filename)
 
