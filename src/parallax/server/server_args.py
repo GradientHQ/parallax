@@ -218,7 +218,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-loras-per-batch",
         type=int,
-        default=8,
+        default=2,
         help="Maximum number of adapters for a running batch, include base-only request.",
     )
 
@@ -255,6 +255,12 @@ def parse_args() -> argparse.Namespace:
         "--fully-sharded-loras",
         action="store_true",
         help="By default, only half of the LoRA computation is sharded with tensor parallelism. Enabling this will use the fully sharded layers. At high sequence length, max rank or tensor parallel size, this is likely faster. (vLLM only)",
+    )
+
+    parser.add_argument(
+        "--enable-return-routed-experts",
+        action="store_true",
+        help="Enable returning MoE routed experts for rollout replay (vLLM only, single peer).",
     )
 
     # Tensor parallel configuration

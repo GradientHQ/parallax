@@ -42,7 +42,7 @@ class Scheduler:
         request_arrival_horizon_sec: float = 600.0,
         rebalance_threshold: float = float("inf"),
         water_filling_max_iterations: int = 40,
-        heartbeat_timeout: float = 60.0,
+        heartbeat_timeout: float = 30.0,
         trim_layers_on_turning_points: bool = True,
     ) -> None:
         """Initialize the scheduler.

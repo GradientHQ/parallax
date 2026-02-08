@@ -9,7 +9,6 @@ It is used to handle the communication between the peers, and communicate with t
 
 import dataclasses
 import enum
-import json
 import multiprocessing
 import os
 import random
@@ -203,8 +202,8 @@ class TransformerConnectionHandler(ConnectionHandler):
                 else:
                     response = client.post(
                         f"http://localhost:{self.http_port}/v1/chat/completions", json=request
-                    ).json()
-                    yield json.dumps(response).encode()
+                    )
+                    yield response.content
         except Exception as e:
             logger.exception(f"Error in chat completion: {e}")
             yield b"internal server error"
@@ -309,12 +308,7 @@ def check_and_run_weight_refit(gradient_server, message):
             new_tensors = concat_weight_partition(tensors)
             gradient_server.conn.send(new_tensors)
         elif gradient_server.weight_refit_mode == "disk":
-            process = multiprocessing.Process(
-                target=concat_weight_partition,
-                args=(tensors, weight_dir),
-            )
-            process.start()
-            process.join()
+            concat_weight_partition(tensors, weight_dir)
         else:
             logger.warning(f"Unrecognized weight refit mode: {gradient_server.weight_refit_mode}")
 
@@ -426,8 +420,8 @@ class GradientServer:
             )
 
     def check_and_release_disk_weight(self):
-        """Only save 2 history versions of weight"""
-        while len(self.refit_timestamp_history) > 2:
+        """Only save 3 history versions of weight"""
+        while len(self.refit_timestamp_history) > 3:
             time_stamp = self.refit_timestamp_history.pop(0)
             weight_dir = os.path.join("/tmp", str(int(time_stamp)))
             if os.path.isdir(weight_dir):

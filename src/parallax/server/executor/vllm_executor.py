@@ -2,10 +2,14 @@
 vLLM backend implementation of high level executor
 """
 
+import os
 import time
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import torch
+import torch.nn.functional as F
 from vllm.sequence import IntermediateTensors
 
 from parallax.server.executor.base_executor import BaseExecutor
@@ -67,6 +71,7 @@ class VLLMExecutor(BaseExecutor):
         moe_runner_backend: Optional[str] = "auto",
         enable_lora: Optional[bool] = False,
         max_lora_rank: Optional[int] = None,
+        lora_paths: Optional[List[str]] = None,
         max_loras_per_batch: Optional[int] = None,
         max_loaded_loras: Optional[int] = None,
         fully_sharded_loras: bool = False,
@@ -83,9 +88,34 @@ class VLLMExecutor(BaseExecutor):
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
         weight_refit_mode: Optional[str] = "disk",
+        # Routed experts
+        enable_return_routed_experts: bool = False,
         # Pipe communication
         conn: Optional[List[Any]] = [],
     ):
+        self.enable_return_routed_experts = enable_return_routed_experts
+        self.routed_experts_reader = None
+        self.routed_experts_instance_id = None
+
+        self.enable_lora = True if lora_paths is not None else enable_lora
+        self.lora_paths = lora_paths
+        self.max_lora_rank = max_lora_rank
+        self.max_loras_per_batch = 1 if max_loras_per_batch is None else max_loras_per_batch
+        self.max_loaded_loras = max_loaded_loras
+
+        if self.lora_paths is not None and len(self.lora_paths) > 0:
+            self.check_lora_server_args()
+
+        # output lora paths
+        if self.lora_paths is not None:
+            logger.info(f"LoRA paths provided: {[str(lora_path) for lora_path in self.lora_paths]}")
+        # force routed experts for RL
+        if enable_weight_refit and self.lora_paths is not None:
+            self.enable_return_routed_experts = True
+
+        if self.enable_return_routed_experts:
+            self.routed_experts_instance_id = f"parallax_{os.getpid()}_{uuid.uuid4().hex}"
+
         model_runner_params = {
             "model_repo": model_repo,
             "start_layer": start_layer,
@@ -93,6 +123,7 @@ class VLLMExecutor(BaseExecutor):
             "kv_cache_memory_fraction": kv_cache_memory_fraction,
             "attention_backend": attention_backend,
             "kv_block_size": kv_block_size,
+            "max_batch_size": max_batch_size,
             "max_sequence_length": max_sequence_length,
             "max_num_tokens_per_batch": max_num_tokens_per_batch,
             "dtype": dtype,
@@ -101,11 +132,14 @@ class VLLMExecutor(BaseExecutor):
             "tp_size": tp_size,
             "nccl_port": nccl_port,
             "using_hfcache": use_hfcache,
-            "enable_lora": enable_lora,
-            "max_lora_rank": max_lora_rank,
-            "max_loras_per_batch": max_loras_per_batch,
-            "max_loaded_loras": max_loaded_loras,
+            "enable_lora": self.enable_lora,
+            "max_lora_rank": self.max_lora_rank,
+            "lora_path": self.lora_paths[0] if self.lora_paths else None,
+            "max_loras_per_batch": self.max_loras_per_batch,
+            "max_loaded_loras": self.max_loaded_loras,
             "fully_sharded_loras": fully_sharded_loras,
+            "enable_return_routed_experts": self.enable_return_routed_experts,
+            "instance_id": self.routed_experts_instance_id,
         }
         logger.debug(
             f"Initializing vLLM model runner for repo={model_repo}, layers=[{start_layer}, {end_layer})"
@@ -137,6 +171,8 @@ class VLLMExecutor(BaseExecutor):
             weight_refit_mode=weight_refit_mode,
             conn=conn,
         )
+        if self.enable_return_routed_experts:
+            self._init_routed_experts_reader()
 
     def check_and_refit_weight(self, refit_weight_path: str):
         if self.tp_size > 1:
@@ -155,6 +191,19 @@ class VLLMExecutor(BaseExecutor):
             refit_vllm_model(self.model_runner, refit_weight_path=weight_path)
         else:
             logger.warning(f"Unrecognized weight refit mode={self.weight_refit_mode}")
+
+    def check_lora_server_args(self):
+        assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
+
+        # Enable LoRA if any LoRA paths are provided for backward compatibility.
+        if self.lora_paths:
+            if self.enable_lora is None:
+                self.enable_lora = True
+                logger.warning("--enable-lora is set to True because --lora-paths is provided.")
+            elif self.enable_lora is False:
+                logger.warning(
+                    "--enable-lora is set to False, any provided lora_paths will be ignored."
+                )
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
@@ -198,7 +247,9 @@ class VLLMExecutor(BaseExecutor):
                     if req.abort:
                         original_req.abort = True
 
+                    routed_experts = None
                     if self.scheduler.check_and_update_request_status(original_req):
+                        routed_experts = self._get_routed_experts_for_request(original_req)
                         logger.debug(f"Releasing resources for finished request {req.request_id}")
                         self.release_and_evict_request(req.request_id)
                         if not self.is_last_peer:
@@ -223,6 +274,10 @@ class VLLMExecutor(BaseExecutor):
                             req_dict["abort"] = True
                         if self.enable_weight_refit:
                             req_dict["weight_version"] = self.weight_version
+                        if original_req.return_probs and req.token_prob is not None:
+                            req_dict["probs"] = req.token_prob
+                        if routed_experts is not None:
+                            req_dict["routed_experts"] = routed_experts
                         if hasattr(self, "send_to_ipc_socket"):
                             self.send_to_ipc_socket.send_pyobj(req_dict)
                 else:
@@ -256,18 +311,60 @@ class VLLMExecutor(BaseExecutor):
         if intermediate_tensors is not None:
             logger.debug(f"vLLM: Using intermediate_tensors for PP (non-first peer)")
 
-        # Import IntermediateTensors for type checking
+        requests = prepared_inputs.get("requests", [])
 
         # Execute model with vLLM
-        execute_model_state, sampled_token_ids = self.model_runner.execute_model(
-            scheduler_output=scheduler_output,
-            intermediate_tensors=intermediate_tensors,
-            return_decoded_tokens=return_decoded_tokens,
+        execute_model_state, sampled_token_ids, sampled_token_ids_cpu, sampler_output, logits = (
+            self.model_runner.execute_model(
+                scheduler_output=scheduler_output,
+                intermediate_tensors=intermediate_tensors,
+                return_decoded_tokens=return_decoded_tokens,
+            )
         )
 
         # Return appropriate output based on peer position
         if return_decoded_tokens:
-            return {"hidden_states": sampled_token_ids, "probs": None}
+            needs_probs = any(
+                (isinstance(req, InitialRequest) and req.return_probs)
+                or (isinstance(req, IntermediateRequest) and req.return_probs)
+                for req in requests
+            )
+
+            token_probs = None
+            if needs_probs and logits is not None and isinstance(logits, torch.Tensor):
+
+                if logits.ndim == 3:
+                    logits = logits[:, -1, :]  # [batch, seq, vocab_size]
+                elif logits.ndim != 2:
+                    logger.warning(f"Unexpected logits shape: {logits.shape}")
+                    logits = None
+
+                if logits is not None:
+                    probs = F.log_softmax(logits, dim=-1)
+                    if isinstance(sampled_token_ids, torch.Tensor):
+                        sampled_ids = sampled_token_ids
+                    else:
+                        sampled_ids = torch.tensor(
+                            sampled_token_ids, device=logits.device, dtype=torch.long
+                        )
+                    probs = torch.gather(probs, 1, sampled_ids)
+                    token_probs = probs.cpu().float().tolist()
+
+            # Align outputs to request order if vLLM reorders the batch internally.
+            input_batch = getattr(self.model_runner, "input_batch", None)
+            req_id_to_index = getattr(input_batch, "req_id_to_index", None)
+            if req_id_to_index:
+                request_ids = [req.request_id for req in requests]
+                if all(rid in req_id_to_index for rid in request_ids):
+                    order = [req_id_to_index[rid] for rid in request_ids]
+                    if isinstance(sampled_token_ids_cpu, torch.Tensor):
+                        sampled_token_ids_cpu = sampled_token_ids_cpu[order]
+                    elif isinstance(sampled_token_ids_cpu, list):
+                        sampled_token_ids_cpu = [sampled_token_ids_cpu[i] for i in order]
+                    if token_probs is not None:
+                        token_probs = [token_probs[i] for i in order]
+
+            return {"hidden_states": sampled_token_ids_cpu, "probs": token_probs}
         else:
             # Intermediate peer: return hidden states for next peer
             return {"hidden_states": execute_model_state.hidden_states, "probs": None}
@@ -402,6 +499,112 @@ class VLLMExecutor(BaseExecutor):
         }
         logger.debug(f"Prepared CUDA prefill batch (vllm, size={batch_size})")
         return ret
+
+    def _init_routed_experts_reader(self) -> None:
+        if not self.enable_return_routed_experts:
+            return
+        num_hidden_layers = None
+        if isinstance(self.config, dict):
+            num_hidden_layers = self.config.get("num_hidden_layers")
+        else:
+            num_hidden_layers = getattr(self.config, "num_hidden_layers", None)
+
+        if num_hidden_layers is None:
+            logger.warning("Unable to determine num_hidden_layers; routed experts disabled.")
+            self.enable_return_routed_experts = False
+            return
+
+        if not (self.start_layer == 0 and self.end_layer == num_hidden_layers):
+            logger.warning(
+                "Routed experts is only supported for single peer. "
+                "Disabling routed experts for layers [%s, %s).",
+                self.start_layer,
+                self.end_layer,
+            )
+            self.enable_return_routed_experts = False
+            return
+
+        try:
+            from vllm.model_executor.layers.fused_moe.routed_experts_capturer import (
+                RoutedExpertsReader,
+            )
+        except Exception as exc:  # pragma: no cover - optional dependency
+            logger.warning("Failed to import RoutedExpertsReader: %s", exc)
+            self.enable_return_routed_experts = False
+            return
+
+        kv_cache_config = getattr(self.model_runner, "kv_cache_config", None)
+        if kv_cache_config is None or not getattr(kv_cache_config, "kv_cache_groups", None):
+            logger.warning("KV cache config unavailable; routed experts disabled.")
+            self.enable_return_routed_experts = False
+            return
+
+        block_size = self.model_runner.cache_config.block_size
+        num_groups = len(kv_cache_config.kv_cache_groups)
+        max_num_kv_tokens = (kv_cache_config.num_blocks // num_groups + 1) * block_size
+
+        instance_id = self.model_runner.vllm_config.instance_id
+        reader = RoutedExpertsReader.create()
+        try:
+            reader.attach_buffer(
+                max_num_kv_tokens=max_num_kv_tokens,
+                model_config=self.model_runner.model_config,
+                instance_id=instance_id,
+            )
+        except Exception as exc:
+            logger.warning("Failed to attach routed experts buffer: %s", exc)
+            self.enable_return_routed_experts = False
+            return
+        self.routed_experts_reader = reader
+
+    def _get_routed_experts_for_request(self, request: Request) -> Optional[List]:
+        if not self.enable_return_routed_experts or self.routed_experts_reader is None:
+            return None
+
+        kv_cache_manager = getattr(self.model_runner, "kv_cache_manager", None)
+        if kv_cache_manager is None:
+            return None
+
+        try:
+            kv_blocks = kv_cache_manager.get_blocks(request.request_id)
+            block_ids = kv_blocks.get_block_ids()
+        except Exception as exc:
+            logger.debug("Failed to get KV blocks for routed experts: %s", exc)
+            return None
+
+        if (
+            isinstance(block_ids, (list, tuple))
+            and block_ids
+            and isinstance(block_ids[0], (list, tuple))
+        ):
+            block_ids = block_ids[0]
+
+        if not block_ids:
+            return None
+
+        num_tokens = getattr(request, "total_length", None)
+        if num_tokens is None or num_tokens <= 0:
+            return None
+
+        block_size = self.model_runner.cache_config.block_size
+        block_ids_array = np.array(block_ids, dtype=np.int32)
+        block_offsets = np.arange(0, block_size, dtype=np.int32)
+        slot_mapping = (
+            block_offsets.reshape((1, block_size))
+            + block_ids_array.reshape((len(block_ids_array), 1)) * block_size
+        ).flatten()
+
+        slot_mapping = slot_mapping[: min(num_tokens, slot_mapping.size)]
+        if slot_mapping.size == 0:
+            return None
+
+        try:
+            routed_experts = self.routed_experts_reader.get_routed_experts(indices=slot_mapping)
+        except Exception as exc:
+            logger.debug("Failed to read routed experts: %s", exc)
+            return None
+
+        return routed_experts.tolist()
 
     def _prepare_decode_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """

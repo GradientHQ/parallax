@@ -149,8 +149,6 @@ def _build_vllm_request(
     if hasattr(req, "lora_path") and req.lora_path:
         from vllm.lora.request import LoRARequest
 
-        # Create a simple hash or ID for the LoRA based on path
-        # In a real scenario, we might want a more robust ID mapping mechanism
         lora_name = getattr(req, "lora_name", f"lora_{hash(req.lora_path) % 10000}")
         lora_int_id = getattr(req, "lora_int_id", abs(hash(req.lora_path)) % 10000 + 1)
 
@@ -158,6 +156,11 @@ def _build_vllm_request(
             lora_name=lora_name, lora_int_id=lora_int_id, lora_path=req.lora_path
         )
         logger.debug(f"Created LoRA request: {lora_name} (id={lora_int_id}) path={req.lora_path}")
+
+    # Fallback to default LoRA if configured in model_runner
+    if lora_req is None:
+        lora_req = getattr(model_runner, "default_lora_req", None)
+        logger.debug(f"Using default LoRA request: {lora_req}")
 
     vllm_req = VLLMRequest(
         request_id=req.request_id,
@@ -167,7 +170,7 @@ def _build_vllm_request(
         eos_token_id=getattr(req, "eos_token_id", None),
         arrival_time=getattr(req, "arrival_time", 0.0),
         block_hasher=block_hasher,
-        lora_request=lora_req,  # Pass the LoRA request here
+        lora_request=lora_req,
     )
     if include_outputs:
         output_ids = getattr(req, "output_ids", None) or []
@@ -237,7 +240,7 @@ def form_vllm_batch_prefill(
             pooling_params=None,
             block_ids=block_ids,
             num_computed_tokens=num_computed_tokens,
-            lora_request=vllm_req.lora_request,  # Pass lora_request from vllm_req
+            lora_request=vllm_req.lora_request,
             prompt_embeds=None,
         )
         new_request_data_list.append(new_req_data)

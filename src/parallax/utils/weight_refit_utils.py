@@ -47,23 +47,10 @@ def concat_weight_partition(original_tensors, save_directory=None):
     res_tensors = {}
     prev_key = None
     concate_list = []
-    file_idx = 0
-    max_size = 1024 * 1024 * 1024  # max size 1GB
-    param_size = 0
     for key in sorted_keys:
         val = original_tensors[key]
         if "part" not in key:
             tensors[key] = val
-            param_size += val.numel() * val.element_size()
-            if param_size > max_size:
-                if save_directory is None:
-                    res_tensors.update(tensors)
-                else:
-                    save_file_name = save_directory + "/model_" + str(file_idx) + ".safetensors"
-                    save_file(tensors, save_file_name)
-                    file_idx += 1
-                param_size = 0
-                tensors = {}
             continue
 
         name_split = key.split(".")
@@ -82,16 +69,6 @@ def concat_weight_partition(original_tensors, save_directory=None):
                 cur_name_list.append("weight")
                 final_key = ".".join(cur_name_list)
                 tensors[final_key] = concate_result
-                param_size += val.numel() * val.element_size()
-                if param_size > max_size:
-                    if save_directory is None:
-                        res_tensors.update(tensors)
-                    else:
-                        save_file_name = save_directory + "/model_" + str(file_idx) + ".safetensors"
-                        save_file(tensors, save_file_name)
-                        file_idx += 1
-                    param_size = 0
-                    tensors = {}
 
                 # for next tensor
                 concate_list = []
@@ -109,7 +86,7 @@ def concat_weight_partition(original_tensors, save_directory=None):
         res_tensors.update(tensors)
         return res_tensors
     else:
-        save_file_name = save_directory + "/model_" + str(file_idx) + ".safetensors"
+        save_file_name = save_directory + "/adapter_model.safetensors"
         save_file(tensors, save_file_name)
         return {}
 

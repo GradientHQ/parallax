@@ -30,17 +30,21 @@ mx::array paged_attention_v1(
     const int64_t block_size,
     const int64_t max_seq_len,
     const float scale,
+    const int window_size,          // Sliding window size (0 = no window)
+    const mx::array& sinks,         // Attention sink biases [num_heads]
+    const int has_sink,             // 1 = use sinks, 0 = ignore sinks
     mx::StreamOrDevice s /* = {} */ // Stream on which to schedule the operation
 ) {
     auto out_dtype = query.dtype();
     auto out_shape = query.shape();
-    const std::vector<mx::array> inputs = {query, key_cache, value_cache, block_tables, seq_lens};
+    const std::vector<mx::array> inputs = {query, key_cache, value_cache, block_tables, seq_lens, sinks};
     // Construct the array as the output of the PagedAttentionV1 primitive
     return mx::array(
         /* const std::vector<int>& shape = */ out_shape,
         /* Dtype dtype = */ out_dtype,
         /* std::unique_ptr<Primitive> primitive = */
-        std::make_shared<PagedAttentionV1>(to_stream(s), num_kv_heads, block_size, max_seq_len, scale),
+        std::make_shared<PagedAttentionV1>(to_stream(s), num_kv_heads, block_size,
+                                           max_seq_len, scale, window_size, has_sink),
         /* const std::vector<array>& inputs = */ inputs);
 }
 
@@ -57,12 +61,13 @@ void PagedAttentionV1::eval_gpu(
   const std::vector<mx::array>& inputs,
   std::vector<mx::array>& outputs) {
     // Prepare inputs
-    assert(inputs.size() == 5);
+    assert(inputs.size() == 6);
     auto& q = inputs[0];
     auto& k = inputs[1];
     auto& v = inputs[2];
     auto& block_tables = inputs[3];
     auto& seq_lens = inputs[4];
+    auto& sinks = inputs[5];
     auto& out = outputs[0];
     int head_size = q.shape(2);
 
@@ -76,14 +81,21 @@ void PagedAttentionV1::eval_gpu(
     out.set_data(mlx::core::allocator::malloc(out.nbytes()));
 
     // Set kernel paramas
-    const int num_threads = 256;
+    int num_threads = 256;
+    if (window_size_ > 0) {
+      if (window_size_ <= block_size_) {
+        num_threads = 64;
+      } else if (window_size_ <= 8 * block_size_) {
+        num_threads = 128;
+      }
+    }
     const int num_simd_lanes = 32;
     const int partition_size = 0; // v1 doesn't use partitioning
+
+    // Function constants
     bool use_partitioning = false;
     bool use_alibi = false;
     bool use_fp8_scales = false;
-
-    // Function constants
     mx::metal::MTLFCList func_consts = {
       {&use_partitioning, MTL::DataType::DataTypeBool, 10},
       {&use_alibi, MTL::DataType::DataTypeBool, 20},
@@ -112,7 +124,14 @@ void PagedAttentionV1::eval_gpu(
     compute_encoder.set_compute_pipeline_state(kernel);
 
     // Shared Memory
-    const int padded_max_context_len = ((max_seq_len_ + block_size_ - 1) / block_size_) * block_size_;
+    int effective_max_context_len = max_seq_len_;
+    if (window_size_ > 0) {
+      // Windowed attention only needs logits for a small tail of the sequence.
+      effective_max_context_len =
+          std::min<int>(max_seq_len_, window_size_ + block_size_);
+    }
+    const int padded_max_context_len =
+        ((effective_max_context_len + block_size_ - 1) / block_size_) * block_size_;
     const int num_simds = num_threads / num_simd_lanes;
     const int logits_size = padded_max_context_len * sizeof(float);
     const int outputs_size = (num_simds / 2) * head_size * sizeof(float);
@@ -155,6 +174,11 @@ void PagedAttentionV1::eval_gpu(
     compute_encoder.set_bytes(q_stride_32, 15);
     compute_encoder.set_bytes(kv_block_stride_32, 16);
     compute_encoder.set_bytes(kv_head_stride_32, 17);
+    int32_t window_size_32 = static_cast<int32_t>(window_size_);
+    int32_t has_sink_32 = static_cast<int32_t>(has_sink_);
+    compute_encoder.set_bytes(window_size_32, 18);
+    compute_encoder.set_input_array(sinks, 19);
+    compute_encoder.set_bytes(has_sink_32, 20);
 
     // Dispatch configuration
     // Grid: (num_heads, num_seqs, 1) - no partitioning for v1
@@ -170,7 +194,8 @@ void PagedAttentionV1::eval_gpu(
 bool PagedAttentionV1::is_equivalent(const mx::Primitive& other) const {
   const PagedAttentionV1& r_other = static_cast<const PagedAttentionV1&>(other);
   return num_kv_heads_ == r_other.num_kv_heads_ && block_size_ == r_other.block_size_ &&
-         max_seq_len_ == r_other.max_seq_len_ && scale_ == r_other.scale_;
+         max_seq_len_ == r_other.max_seq_len_ && scale_ == r_other.scale_ &&
+         window_size_ == r_other.window_size_ && has_sink_ == r_other.has_sink_;
 }
 
 } // namespace parallax_ext

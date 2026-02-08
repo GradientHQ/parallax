@@ -33,7 +33,7 @@ dependencies = [
   "pydantic",
   "protobuf==6.31.1",
   "dijkstar==2.6.0",
-  "lattica==1.0.19",
+  "lattica==1.0.21",
   "orjson",
 ]
 
@@ -43,9 +43,10 @@ parallax = "parallax.cli:main"
 [project.optional-dependencies]
 
 mac = [
+  "nanobind==2.10.2",
   "torch==2.8.0",
-  "mlx-lm==0.30.0",
-  "mlx==0.30.1",
+  "mlx-lm==0.30.5",
+  "mlx==0.30.4",
 ]
 
 gpu = [

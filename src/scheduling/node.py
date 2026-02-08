@@ -376,9 +376,6 @@ class Node:
     def layer_latency_ms(self) -> float:
         """Get effective layer latency considering both roofline and load."""
         if self.is_overloaded:
-            logger.warning(
-                f"Node {self.node_id} is overloaded: {self.current_requests} >= {self.max_requests}"
-            )
             return float("inf")
         if self.avg_layer_latency_ms is None:
             return self.roofline_layer_latency_ms()

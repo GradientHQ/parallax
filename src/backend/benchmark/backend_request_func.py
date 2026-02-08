@@ -12,7 +12,7 @@ from typing import List, Optional, Union
 
 import aiohttp
 import huggingface_hub.constants
-from modelscope import snapshot_download
+from huggingface_hub import snapshot_download
 from tqdm.asyncio import tqdm
 from transformers import AutoTokenizer, PreTrainedTokenizer, PreTrainedTokenizerFast
 
@@ -269,9 +269,9 @@ async def async_request_openai_chat_completions(
 def get_model(pretrained_model_name_or_path: str) -> str:
 
     model_path = snapshot_download(
-        model_id=pretrained_model_name_or_path,
+        repo_id=pretrained_model_name_or_path,
         local_files_only=huggingface_hub.constants.HF_HUB_OFFLINE,
-        ignore_file_pattern=[".*.pt", ".*.safetensors", ".*.bin"],
+        ignore_patterns=[".*.pt", ".*.safetensors", ".*.bin"],
     )
     return model_path
 
