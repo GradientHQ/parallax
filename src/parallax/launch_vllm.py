@@ -16,6 +16,7 @@ from parallax.utils.shared_state import SharedState
 from parallax.utils.utils import initialize_nccl_port
 from parallax_utils.ascii_anime import display_parallax_join
 from parallax_utils.logging_config import get_logger, set_log_level
+from parallax_utils.prepare_adapter import download_adapter_config
 from parallax_utils.version_check import check_latest_release
 
 logger = get_logger("parallax.launch")
@@ -80,6 +81,8 @@ def _launch_vllm_server(args):
         f"--tensor-parallel-size={args.tp_size}",
         f"--gpu-memory-utilization={args.kv_cache_memory_fraction}",
         f"--max-model-len={args.max_sequence_length}",
+        f"--enable-lora",
+        f"--lora-modules={args.lora_paths[0]}",
         "--trust-remote-code",
     ]
     return subprocess.Popen(cmd)
@@ -174,11 +177,18 @@ if __name__ == "__main__":
             display_parallax_join(args.model_path)
         check_latest_release()
 
+        # Prepare lora config
+        os.environ["VLLM_ALLOW_RUNTIME_LORA_UPDATING"] = "true"
+        if args.lora_paths is not None and len(args.lora_paths) > 0:
+            lora_path = args.lora_paths[0]
+            download_adapter_config(lora_path)
+
         # Main execution loop with layer reallocation support
         while True:
             try:
                 proc = _launch_vllm_server(args)
                 executor_subprocs.append(proc)
+                shared_state.set_status(ServerState.READY.value)
 
                 # Wait for executors and restart if layer allocation changes
                 if _wait_executors_check_layer_change(shared_state, executor_subprocs):

@@ -19,6 +19,7 @@ from typing import Any, List, Optional
 
 import dijkstar
 import httpx
+import requests
 import zmq
 from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream, rpc_stream_iter
 
@@ -312,12 +313,31 @@ def check_and_run_weight_refit(gradient_server, message):
         else:
             logger.warning(f"Unrecognized weight refit mode: {gradient_server.weight_refit_mode}")
 
-        # step4. send ipc message to update weight
-        gradient_server.connection_handler.ipc_weight_refit(weight_dir, weight_version)
+        # step4. Post process
         last_refit_time = float(time_stamp)
         gradient_server.last_refit_time = last_refit_time
         gradient_server.refit_timestamp_history.append(last_refit_time)
         gradient_server.check_and_release_disk_weight()
+
+        # step5. Send lora requests to vllm
+        cur_lora_name = f"lora_{hash(weight_dir) % 10000}"
+        # load new lora
+        response = requests.post(
+            "https://localhost:3000/v1/load_lora_adapter",
+            headers={"Content-Type": "application/json"},
+            json={"lora_path": weight_dir, "lora_name": cur_lora_name},
+        )
+        # unload old lora
+        while len(gradient_server.lora_history) > 2:
+            unload_lora_path = gradient_server.lora_history.pop(0)
+            response = requests.post(
+                "https://localhost:3000/v1/unload_lora_adapter",
+                headers={"Content-Type": "application/json"},
+                json={"lora_name": unload_lora_path},
+            )
+        # update lora history list
+        gradient_server.lora_history.append(cur_lora_name)
+
         logger.info(
             f"Finish download weight_version={weight_version}, last_refit_time={gradient_server.last_refit_time}"
         )
@@ -355,6 +375,7 @@ class GradientServer:
         max_sequence_length: Optional[int] = None,
         param_mem_ratio: float = 0.65,
         kvcache_mem_ratio: float = 0.25,
+        lora_path: str = None,
         conn: Any = None,
     ):
         self.recv_from_peer_addr = recv_from_peer_addr
@@ -404,6 +425,10 @@ class GradientServer:
         logger.debug(f"manual_layer_assignment: {self.manual_layer_assignment}")
         self._layer_allocation_changed = False
         self._shared_state = None  # Will be set if running in subprocess mode
+
+        self.lora_path = lora_path
+        lora_name = f"lora_{hash(lora_path) % 10000}"
+        self.lora_history = [lora_name]
 
     def _sync_to_shared_state(self):
         """Sync current layer allocation and status to shared state if available"""
@@ -987,6 +1012,7 @@ def _run_p2p_server_process(
     kvcache_mem_ratio: float = 0.25,
     shared_state: Optional[dict] = None,
     log_level: str = "INFO",
+    lora_path: str = None,
     conn: Any = None,
 ):
     """Run P2P server in subprocess"""
@@ -1018,6 +1044,7 @@ def _run_p2p_server_process(
             max_sequence_length=max_sequence_length,
             param_mem_ratio=param_mem_ratio,
             kvcache_mem_ratio=kvcache_mem_ratio,
+            lora_path=lora_path,
             conn=conn,
         )
         # Attach shared state to server for syncing layer allocation
@@ -1069,6 +1096,7 @@ def launch_p2p_server_process(
     kvcache_mem_ratio: float = 0.25,
     shared_state: Optional[dict] = None,
     log_level: str = "INFO",
+    lora_path: str = None,
     conn: Optional[Any] = None,
 ) -> multiprocessing.Process:
     """Launch P2P server as a subprocess and return the process object
@@ -1104,6 +1132,7 @@ def launch_p2p_server_process(
             kvcache_mem_ratio,
             shared_state,
             log_level,
+            lora_path,
             conn,
         ),
     )
