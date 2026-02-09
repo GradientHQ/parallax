@@ -59,7 +59,10 @@ def _wait_executors_check_layer_change(shared_state: SharedState, executor_subpr
     """
     while True:
         for proc in executor_subprocs:
-            proc.join(timeout=1.0)  # Check every second
+            if proc.poll() is not None:
+                break
+            else:
+                time.sleep(1)
 
         if shared_state.get_layer_allocation_changed():
             return True
