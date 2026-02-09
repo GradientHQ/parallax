@@ -218,7 +218,7 @@ def join_command(args, passthrough_args: list[str] | None = None):
     check_python_version()
 
     project_root = get_project_root()
-    launch_script = project_root / "src" / "parallax" / "launch.py"
+    launch_script = project_root / "src" / "parallax" / "launch_vllm.py"
 
     if not launch_script.exists():
         logger.info(f"Error: Launch script not found at {launch_script}")

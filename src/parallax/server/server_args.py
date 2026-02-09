@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     # HTTP server configuration
-    parser.add_argument("--host", type=str, default="localhost", help="Host of the HTTP server.")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host of the HTTP server.")
     parser.add_argument("--port", type=int, default=3000, help="Port of the HTTP server")
     parser.add_argument(
         "--node-chat-port", type=int, default=3002, help="Port of the node chat HTTP server"
