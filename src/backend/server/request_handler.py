@@ -105,10 +105,24 @@ class RequestHandler:
             # Handling vllm template
             model = request_data.get("model", None)
             return_probs = request_data.get("return_probs", False)
+            sampling_params = request_data.get("sampling_params", None)
             if model is not None:
                 del request_data["model"]
             if return_probs:
                 request_data["logprobs"] = 1
+            if sampling_params is not None:
+                temperature = sampling_params.get("temperature", None)
+                if temperature is not None:
+                    request_data["temperature"] = temperature
+                top_p = sampling_params.get("top_p", None)
+                if top_p is not None:
+                    request_data["top_p"] = top_p
+                top_k = sampling_params.get("top_k", None)
+                if top_k is not None:
+                    request_data["top_k"] = top_k
+                ignore_eos = sampling_params.get("ignore_eos", None)
+                if ignore_eos is not None:
+                    request_data["ignore_eos"] = ignore_eos
             try:
                 if is_stream:
 
