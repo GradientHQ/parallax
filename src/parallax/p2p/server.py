@@ -313,31 +313,30 @@ def check_and_run_weight_refit(gradient_server, message):
         else:
             logger.warning(f"Unrecognized weight refit mode: {gradient_server.weight_refit_mode}")
 
-        # step4. Post process
-        last_refit_time = float(time_stamp)
-        gradient_server.last_refit_time = last_refit_time
-        gradient_server.refit_timestamp_history.append(last_refit_time)
-        gradient_server.check_and_release_disk_weight()
-
-        # step5. Send lora requests to vllm
+        # step4. Send lora requests to vllm
         cur_lora_name = f"lora_{hash(weight_dir) % 10000}"
-        # load new lora
-        response = requests.post(
-            "https://localhost:3000/v1/load_lora_adapter",
-            headers={"Content-Type": "application/json"},
-            json={"lora_path": weight_dir, "lora_name": cur_lora_name},
-        )
         # unload old lora
-        while len(gradient_server.lora_history) > 2:
+        while len(gradient_server.lora_history) > 1:
             unload_lora_path = gradient_server.lora_history.pop(0)
             response = requests.post(
                 "https://localhost:3000/v1/unload_lora_adapter",
                 headers={"Content-Type": "application/json"},
                 json={"lora_name": unload_lora_path},
             )
+        # load new lora
+        response = requests.post(
+            "https://localhost:3000/v1/load_lora_adapter",
+            headers={"Content-Type": "application/json"},
+            json={"lora_path": weight_dir, "lora_name": cur_lora_name},
+        )
         # update lora history list
         gradient_server.lora_history.append(cur_lora_name)
 
+        # step5. Post-process
+        last_refit_time = float(time_stamp)
+        gradient_server.last_refit_time = last_refit_time
+        gradient_server.refit_timestamp_history.append(last_refit_time)
+        gradient_server.check_and_release_disk_weight()
         logger.info(
             f"Finish download weight_version={weight_version}, last_refit_time={gradient_server.last_refit_time}"
         )
@@ -426,7 +425,6 @@ class GradientServer:
         self._layer_allocation_changed = False
         self._shared_state = None  # Will be set if running in subprocess mode
 
-        self.lora_path = lora_path
         lora_name = f"lora_{hash(lora_path) % 10000}"
         self.lora_history = [lora_name]
 

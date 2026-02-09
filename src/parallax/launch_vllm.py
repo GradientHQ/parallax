@@ -119,6 +119,13 @@ if __name__ == "__main__":
         # Pipe for subprocess communication
         conn_main, conn_refit = multiprocessing.Pipe()
 
+        # Prepare lora config
+        os.environ["VLLM_ALLOW_RUNTIME_LORA_UPDATING"] = "true"
+        lora_path = None
+        if args.lora_paths is not None and len(args.lora_paths) > 0:
+            lora_path = args.lora_paths[0]
+            download_adapter_config(lora_path)
+
         # Launch P2P server as subprocess (with scheduler)
         # Pass dict to subprocess (multiprocessing requires serializable objects)
         p2p_server_process = launch_p2p_server_process(
@@ -145,6 +152,7 @@ if __name__ == "__main__":
             kvcache_mem_ratio=args.kvcache_mem_ratio,
             shared_state=shared_state.dict,  # Pass dict to subprocess
             log_level=args.log_level,
+            lora_path=args.lora_path,
             conn=conn_main,
         )
 
@@ -176,12 +184,6 @@ if __name__ == "__main__":
         if args.log_level != "DEBUG":
             display_parallax_join(args.model_path)
         check_latest_release()
-
-        # Prepare lora config
-        os.environ["VLLM_ALLOW_RUNTIME_LORA_UPDATING"] = "true"
-        if args.lora_paths is not None and len(args.lora_paths) > 0:
-            lora_path = args.lora_paths[0]
-            download_adapter_config(lora_path)
 
         # Main execution loop with layer reallocation support
         while True:
