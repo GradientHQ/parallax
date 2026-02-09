@@ -355,6 +355,16 @@ def validate_args(args: argparse.Namespace) -> None:
     if args.kv_block_size <= 0:
         raise ValueError("kv_block_size must be positive")
 
+    # chunked-prefill 依赖 prefix-cache，未开启 prefix-cache 时不能单独使用 chunked-prefill
+    chunked_prefill_size = getattr(args, "chunked_prefill_size", None)
+    if chunked_prefill_size is not None and not args.enable_prefix_cache:
+        raise ValueError(
+            "chunked-prefill requires prefix-cache to be enabled. "
+            "Use --enable-prefix-cache when specifying --chunked-prefill-size."
+        )
+    if chunked_prefill_size is not None and chunked_prefill_size <= 0:
+        raise ValueError("chunked_prefill_size must be positive")
+
     if args.micro_batch_ratio <= 0:
         raise ValueError("micro_batch_ratio must be positive")
 
