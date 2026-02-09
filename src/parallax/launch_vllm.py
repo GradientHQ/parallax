@@ -152,7 +152,7 @@ if __name__ == "__main__":
             kvcache_mem_ratio=args.kvcache_mem_ratio,
             shared_state=shared_state.dict,  # Pass dict to subprocess
             log_level=args.log_level,
-            lora_path=args.lora_path,
+            lora_path=lora_path,
             conn=conn_main,
         )
 
