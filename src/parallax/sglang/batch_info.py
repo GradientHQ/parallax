@@ -4,8 +4,6 @@ The following is the flow of data structures for a batch in SGLang:
 
 ScheduleBatch -> ModelWorkerBatch -> ForwardBatch
 """
-
-from types import SimpleNamespace
 from typing import List, Optional
 
 import torch
@@ -26,6 +24,53 @@ from parallax.server.sampling.sampling_params import (
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+class _NoPrefixCacheAdapter:
+    """Minimal tree-cache adapter when prefix cache is disabled.
+
+    Newer sglang versions call additional tree-cache methods (e.g.
+    supports_swa/supports_mamba) during extend allocation. This adapter
+    provides a stable no-cache surface so Parallax can run with prefix cache
+    disabled across sglang versions.
+    """
+
+    def __init__(self, model_runner: ModelRunner):
+        self.page_size = model_runner.server_args.page_size
+        self.device = model_runner.device
+        self.token_to_kv_pool_allocator = model_runner.token_to_kv_pool_allocator
+        self.req_to_token_pool = model_runner.req_to_token_pool
+        self.sliding_window_size = 0
+
+    def evict(self, *args, **kwargs):
+        return None
+
+    def supports_swa(self) -> bool:
+        return False
+
+    def supports_mamba(self) -> bool:
+        return False
+
+    def is_chunk_cache(self) -> bool:
+        return False
+
+    def evictable_size(self) -> int:
+        return 0
+
+    def full_evictable_size(self) -> int:
+        return 0
+
+    def swa_evictable_size(self) -> int:
+        return 0
+
+    def full_lru_list_evictable_size(self) -> int:
+        return 0
+
+    def swa_lru_list_evictable_size(self) -> int:
+        return 0
+
+    def pretty_print(self):
+        return None
 
 
 def transform_sampling_params_to_sglang(old_params: ParallaxSamplingParams) -> SGLSamplingParams:
@@ -97,16 +142,7 @@ def form_sgl_batch_prefill(
 
     sgl_reqs = transform_requests_to_sglang(requests, page_tree_cache)
 
-    def dummy_evict(*args):
-        pass
-
-    dummy_tree_cache = SimpleNamespace(
-        page_size=model_runner.server_args.page_size,
-        device=model_runner.device,
-        token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
-        evictable_size=0,
-    )
-    dummy_tree_cache.evict = dummy_evict
+    dummy_tree_cache = _NoPrefixCacheAdapter(model_runner)
     schedule_batch = ScheduleBatch.init_new(
         reqs=sgl_reqs,
         req_to_token_pool=model_runner.req_to_token_pool,
