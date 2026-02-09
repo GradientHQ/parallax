@@ -103,7 +103,7 @@ class BaseLayerAllocator:
         dynamic_pipelines_router: bool = False,
         rebalance_threshold: float = 0.25,
         water_filling_max_iterations: int = 40,
-        trim_layers_on_turning_points: bool = True,
+        trim_layers_on_turning_points: bool = False,
     ) -> None:
         self.model_info = model_info
         self.num_total_layers = model_info.num_layers
@@ -186,6 +186,7 @@ class BaseLayerAllocator:
 
     def reallocate(self, node: Node, start_layer: int, end_layer: int) -> None:
         """Reallocate a node to a specific layer range."""
+        logger.debug("[LayerAllocator] Reallocating node %s", node.node_id)
         self.deallocate(node)
         self.allocate(node, start_layer, end_layer)
 
@@ -193,7 +194,7 @@ class BaseLayerAllocator:
         """In case of using Dynamic Programming request router, a node is joined dynamically to the lightest layers."""
         lightest_layer = self.get_lightest_layer()
         logger.info(
-            "[LayerAllocator] Joining node %s with the lightest layer %d",
+            "[LayerAllocator] Dynamically Join node %s with the lightest layer %d",
             node.node_id,
             lightest_layer.layer_id,
         )

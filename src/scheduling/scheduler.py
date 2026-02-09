@@ -43,7 +43,7 @@ class Scheduler:
         rebalance_threshold: float = float("inf"),
         water_filling_max_iterations: int = 40,
         heartbeat_timeout: float = 30.0,
-        trim_layers_on_turning_points: bool = True,
+        trim_layers_on_turning_points: bool = False,
     ) -> None:
         """Initialize the scheduler.
 
