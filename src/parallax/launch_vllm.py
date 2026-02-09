@@ -189,6 +189,7 @@ if __name__ == "__main__":
             try:
                 proc = _launch_vllm_server(args)
                 executor_subprocs.append(proc)
+                time.sleep(300)
                 shared_state.set_status(ServerState.READY.value)
 
                 # Wait for executors and restart if layer allocation changes

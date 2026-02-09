@@ -102,12 +102,14 @@ class RequestHandler:
             stub = self.get_stub(routing_table[0])
             is_stream = request_data.get("stream", False)
 
-            # Handling vllm logprobs
+            # Handling vllm template
+            model = request_data.get("model", None)
             return_probs = request_data.get("return_probs", False)
             sampling_params = request_data.get("sampling_params", None)
+            if model is not None:
+                del request_data["model"]
             if return_probs and sampling_params is not None:
-                sampling_params["logprobs"] = True
-                sampling_params["top_logprobs"] = 1
+                sampling_params["logprobs"] = 1
             try:
                 if is_stream:
 
