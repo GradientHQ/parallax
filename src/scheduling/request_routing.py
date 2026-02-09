@@ -246,7 +246,41 @@ class RequestRoutingStrategy(ABC):
             )
         if len(lines) == 2:
             lines.append("  (none)")
+        self._extend_snapshot_with_standby_nodes(lines)
         return "\n".join(lines)
+
+    def _extend_snapshot_with_standby_nodes(self, lines: List[str]) -> None:
+        """Append standby-node info to a snapshot being built.
+
+        This is intentionally router-agnostic so all snapshot formats include a
+        view of nodes that have joined but are not currently serving.
+        """
+        standby = sorted(self.node_manager.standby_nodes, key=lambda n: n.node_id)
+        header = f"Standby nodes ({len(standby)})"
+        sep = "-" * len(header)
+
+        # Add a blank line to visually separate sections.
+        lines.append("")
+        lines.append(header)
+        lines.append(sep)
+
+        if not standby:
+            lines.append("  (none)")
+            return
+
+        for n in standby:
+            lat = n.layer_latency_ms
+            lat_str = "inf" if lat == float("inf") else f"{lat:.2f}"
+            lines.append(
+                "  %-16s | load %3d/%-3d | latency %7s ms | ready %s"
+                % (
+                    n.node_id,
+                    n.current_requests,
+                    n.max_requests,
+                    lat_str,
+                    n.is_active,
+                )
+            )
 
 
 class DynamicProgrammingRouting(RequestRoutingStrategy):
@@ -380,6 +414,7 @@ class DynamicProgrammingRouting(RequestRoutingStrategy):
             )
         if len(lines) == 2:
             lines.append("  (none)")
+        self._extend_snapshot_with_standby_nodes(lines)
         return "\n".join(lines)
 
     def routing_ready(self) -> bool:
@@ -728,6 +763,7 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
 
         if not pipelines:
             lines.append("  (none)")
+            self._extend_snapshot_with_standby_nodes(lines)
             return "\n".join(lines)
 
         for pid in sorted(pipelines.keys()):
@@ -755,6 +791,7 @@ class RoundRobinOverFixedPipelinesRouting(RequestRoutingStrategy):
                         n.is_active,
                     )
                 )
+        self._extend_snapshot_with_standby_nodes(lines)
         return "\n".join(lines)
 
     def find_optimal_path(
