@@ -48,7 +48,7 @@ MODELS = {
     "deepseek-ai/DeepSeek-R1": "mlx-community/DeepSeek-R1-4bit",
     "deepseek-ai/DeepSeek-V3.2": "mlx-community/DeepSeek-V3.2-4bit",
     # StepFun Models
-    "stepfun-ai/Step-3.5-Flash-Int4": "mlx-community/Step-3.5-Flash-4bit",
+    "stepfun-ai/Step-3.5-Flash": "mlx-community/Step-3.5-Flash-4bit",
     # Qwen 2.5 Series
     "Qwen/Qwen2.5-0.5B-Instruct": "Qwen/Qwen2.5-0.5B-Instruct",
     "Qwen/Qwen2.5-1.5B-Instruct": "Qwen/Qwen2.5-1.5B-Instruct",
