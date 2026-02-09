@@ -80,6 +80,7 @@ def _launch_vllm_server(args):
         f"--gpu-memory-utilization={args.kv_cache_memory_fraction}",
         f"--max-model-len={args.max_sequence_length}",
         f"--enable-lora",
+        f"--max-lora-rank=32",
         f"--lora-modules={args.lora_paths[0]}={args.lora_paths[0]}",
         "--trust-remote-code",
     ]
