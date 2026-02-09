@@ -46,9 +46,8 @@ def _update_args_from_shared_state(args, shared_state: SharedState, force_update
 def _stop_executor_processes(executor_subprocs):
     """Stop all executor processes"""
     for executor_process in executor_subprocs:
-        if executor_process.is_alive():
-            logger.debug(f"Terminating executor process {executor_process.pid}")
-            stop_executor_process(executor_process)
+        logger.debug(f"Terminating executor process {executor_process.pid}")
+        stop_executor_process(executor_process)
 
 
 def _wait_executors_check_layer_change(shared_state: SharedState, executor_subprocs):
@@ -58,16 +57,12 @@ def _wait_executors_check_layer_change(shared_state: SharedState, executor_subpr
         True if layer allocation changed (need to reload executors),
         False if all executors exited normally.
     """
-    while any(proc.is_alive() for proc in executor_subprocs):
+    while True:
         for proc in executor_subprocs:
-            if proc.is_alive():
-                proc.join(timeout=1.0)  # Check every second
+            proc.join(timeout=1.0)  # Check every second
 
         if shared_state.get_layer_allocation_changed():
             return True
-
-    # Check race condition: layer allocation changed after all processes exited
-    return shared_state.get_layer_allocation_changed()
 
 
 def _launch_vllm_server(args):
@@ -218,8 +213,7 @@ if __name__ == "__main__":
                 logger.exception(f"Executor error: {e}")
                 # Shutdown all executor processes on error
                 for proc in executor_subprocs:
-                    if proc.is_alive():
-                        stop_executor_process(proc)
+                    stop_executor_process(proc)
                 raise
     except KeyboardInterrupt:
         logger.debug("Received interrupt signal, shutting down...")
@@ -231,8 +225,7 @@ if __name__ == "__main__":
 
         # Shutdown executor subprocesses
         for executor_process in executor_subprocs:
-            if executor_process.is_alive():
-                stop_executor_process(executor_process)
+            stop_executor_process(executor_process)
 
         # Shutdown P2P server subprocess
         if p2p_server_process is not None:
