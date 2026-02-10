@@ -202,7 +202,7 @@ class TransformerConnectionHandler(ConnectionHandler):
         del choice["logprobs"]
         choices[0] = choice
 
-        return ORJSONResponse(status_code=200, content=response)
+        return ORJSONResponse(status_code=200, content=data)
 
     @rpc_stream_iter
     def chat_completion(
