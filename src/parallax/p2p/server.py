@@ -21,6 +21,7 @@ import dijkstar
 import httpx
 import requests
 import zmq
+from fastapi.responses import ORJSONResponse
 from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream, rpc_stream_iter
 
 from backend.server.rpc_connection_handler import RPCConnectionHandler
@@ -130,6 +131,7 @@ class TransformerConnectionHandler(ConnectionHandler):
         self.notify_url = notify_url
         self._recv_from_peer = None
         self._recv_from_peer_lock = threading.Lock()
+        self.weight_version = 0
 
     @property
     def recv_from_peer(self):
@@ -182,6 +184,26 @@ class TransformerConnectionHandler(ConnectionHandler):
         except Exception as e:
             logger.exception(f"Error in ipc_weight_refit: {e}")
 
+    def vllm_post_process(self, response):
+        data = response.json()
+        data["weight_version"] = self.weight_version
+        choices = data.get("choices")
+
+        choice = choices[0]
+        logprobs = choice.get("logprobs", None)
+        new_probs = []
+        if logprobs is not None:
+            content = logprobs.get("content")
+            for it in content:
+                token = it.get("token")
+                logprob = it.get("logprob")
+                new_probs.append({token: logprob})
+        choice["probs"] = new_probs
+        del choice["logprobs"]
+        choices[0] = choice
+
+        return ORJSONResponse(status_code=200, content=response)
+
     @rpc_stream_iter
     def chat_completion(
         self,
@@ -204,6 +226,7 @@ class TransformerConnectionHandler(ConnectionHandler):
                     response = client.post(
                         f"http://localhost:{self.http_port}/v1/chat/completions", json=request
                     )
+                    response = self.vllm_post_process(response)
                     yield response.content
         except Exception as e:
             logger.exception(f"Error in chat completion: {e}")
@@ -337,6 +360,7 @@ def check_and_run_weight_refit(gradient_server, message):
         gradient_server.last_refit_time = last_refit_time
         gradient_server.refit_timestamp_history.append(last_refit_time)
         gradient_server.check_and_release_disk_weight()
+        gradient_server.connection_handler.weight_version = weight_version
         logger.info(
             f"Finish download weight_version={weight_version}, last_refit_time={gradient_server.last_refit_time}"
         )
