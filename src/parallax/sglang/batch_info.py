@@ -4,12 +4,16 @@ The following is the flow of data structures for a batch in SGLang:
 
 ScheduleBatch -> ModelWorkerBatch -> ForwardBatch
 """
-
-from types import SimpleNamespace
 from typing import List, Optional
 
 import torch
 from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
+from sglang.srt.mem_cache.base_prefix_cache import BasePrefixCache
+from sglang.srt.mem_cache.cache_init_params import CacheInitParams
+from sglang.srt.mem_cache.chunk_cache import ChunkCache, SWAChunkCache
+from sglang.srt.mem_cache.radix_cache import RadixCache
+from sglang.srt.mem_cache.swa_memory_pool import SWATokenToKVPoolAllocator
+from sglang.srt.mem_cache.swa_radix_cache import SWARadixCache
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_executor.model_runner import ModelRunner
 from sglang.srt.sampling.sampling_batch_info import (
@@ -26,6 +30,41 @@ from parallax.server.sampling.sampling_params import (
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def _build_no_prefix_tree_cache(model_runner: ModelRunner) -> BasePrefixCache:
+    """Build sglang-native no-prefix cache for allocation/scheduling.
+
+    Mirror sglang scheduler cache selection when radix cache is disabled:
+    - if chunked prefill is enabled: ChunkCache / SWAChunkCache
+    - otherwise: RadixCache(disable=True) / SWARadixCache(disable=True)
+    """
+
+    sliding_window_size = getattr(model_runner, "sliding_window_size", None)
+    chunked_prefill_size = getattr(model_runner.server_args, "chunked_prefill_size", None)
+    if chunked_prefill_size is not None and chunked_prefill_size <= 0:
+        chunked_prefill_size = None
+
+    params = CacheInitParams(
+        disable=True,
+        req_to_token_pool=model_runner.req_to_token_pool,
+        token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
+        page_size=model_runner.server_args.page_size,
+        chunked_prefill_size=chunked_prefill_size,
+        sliding_window_size=sliding_window_size,
+    )
+
+    is_swa_allocator = isinstance(
+        model_runner.token_to_kv_pool_allocator, SWATokenToKVPoolAllocator
+    )
+    if chunked_prefill_size is not None:
+        if is_swa_allocator and sliding_window_size is not None:
+            return SWAChunkCache(params)
+        return ChunkCache(params)
+
+    if is_swa_allocator and sliding_window_size is not None:
+        return SWARadixCache(params)
+    return RadixCache(params)
 
 
 def transform_sampling_params_to_sglang(old_params: ParallaxSamplingParams) -> SGLSamplingParams:
@@ -48,7 +87,7 @@ def transform_sampling_params_to_sglang(old_params: ParallaxSamplingParams) -> S
 
 
 def transform_requests_to_sglang(
-    old_requests: List[Request], page_tree_cache: Optional[PageRadixCache] = None
+    old_requests: List[Request], page_tree_cache: Optional[BasePrefixCache] = None
 ) -> List[Req]:
     """Transforms Parallax Request to SGLang.Req format"""
     reqs = []
@@ -95,23 +134,22 @@ def form_sgl_batch_prefill(
 ) -> ForwardBatch:
     """Initialize a prefill ScheduleBatch -> ModelWorkerBatch -> ForwardBatch workflow"""
 
-    sgl_reqs = transform_requests_to_sglang(requests, page_tree_cache)
-
-    def dummy_evict(*args):
-        pass
-
-    dummy_tree_cache = SimpleNamespace(
-        page_size=model_runner.server_args.page_size,
-        device=model_runner.device,
-        token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
-        evictable_size=0,
+    tree_cache = (
+        page_tree_cache if page_tree_cache is not None else _build_no_prefix_tree_cache(model_runner)
     )
-    dummy_tree_cache.evict = dummy_evict
+    logger.debug(
+        "Prefill tree_cache=%s allocator=%s sliding_window_size=%s chunked_prefill_size=%s",
+        type(tree_cache).__name__,
+        type(model_runner.token_to_kv_pool_allocator).__name__,
+        getattr(model_runner, "sliding_window_size", None),
+        getattr(model_runner.server_args, "chunked_prefill_size", None),
+    )
+    sgl_reqs = transform_requests_to_sglang(requests, tree_cache)
     schedule_batch = ScheduleBatch.init_new(
         reqs=sgl_reqs,
         req_to_token_pool=model_runner.req_to_token_pool,
         token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
-        tree_cache=page_tree_cache if page_tree_cache is not None else dummy_tree_cache,
+        tree_cache=tree_cache,
         model_config=model_runner.model_config,
         enable_overlap=False,
         spec_algorithm=SpeculativeAlgorithm.NONE,
@@ -259,12 +297,12 @@ def release_sglang_request(running_batch: ScheduleBatch, request_id: str):
     # use running batch's tree cache to release kv cache
     tree_cache = running_batch.tree_cache
 
-    # for completed requests, is_insert=True to insert into prefix cache
-    # for aborted requests, is_insert=False to not insert into prefix cache
-    is_insert = True  # can be adjusted based on request status
+    # For completed requests, insert into prefix cache if enabled.
+    # For aborted requests, callers can wire is_insert=False in the future.
+    is_insert = True
 
-    if isinstance(tree_cache, PageRadixCache):
-        tree_cache.cache_finished_req(req)
+    if hasattr(tree_cache, "cache_finished_req"):
+        tree_cache.cache_finished_req(req, is_insert=is_insert)
     else:
         page_size = running_batch.token_to_kv_pool_allocator.page_size
         last_uncached_pos = (len(req.prefix_indices) // page_size) * page_size

@@ -35,6 +35,12 @@ def apply_parallax_sglang_monkey_patch():
 
     apply_qwen3_next_monkey_patch()
 
+    from parallax.sglang.monkey_patch_utils.step3p5_model import (
+        apply_step3p5_monkey_patch,
+    )
+
+    apply_step3p5_monkey_patch()
+
     from parallax.sglang.monkey_patch_utils.gpt_oss_model import (
         apply_gpt_oss_monkey_patch,
     )
