@@ -445,11 +445,13 @@ class SGLExecutor(BaseExecutor):
             return {"hidden_states": next_token_ids, "probs": token_probs}
         else:
             # Intermediate peer: return hidden states for next peer
-            # Note: SGLang stores hidden_states + residual separately
-            final_hidden_states = (
-                logits_output.tensors["hidden_states"] + logits_output.tensors["residual"]
-            )
-            return {"hidden_states": final_hidden_states, "probs": None}
+            if hasattr(logits_output, "tensors"):
+                return {
+                    "hidden_states": logits_output.tensors.get("hidden_states"),
+                    "residual_states": logits_output.tensors.get("residual"),
+                    "probs": None,
+                }
+            return {"hidden_states": logits_output, "residual_states": None, "probs": None}
 
     def _release_request(self, rid: str):
         """Release per-request resources in SGLang."""
@@ -565,10 +567,23 @@ class SGLExecutor(BaseExecutor):
                 dim=0,
             )
 
-            # Create residual tensor with same shape
-            residual = torch.zeros(
-                hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
-            )
+            residual_tensors = []
+            has_residual = True
+            for req in batched_requests:
+                req_residual = getattr(req, "residual_states", None)
+                if req_residual is None:
+                    has_residual = False
+                    break
+                residual_tensors.append(
+                    req_residual if req_residual.ndim == 2 else req_residual.unsqueeze(0)
+                )
+
+            if has_residual:
+                residual = torch.cat(residual_tensors, dim=0)
+            else:
+                residual = torch.zeros(
+                    hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
+                )
 
             pp_proxy_tensors = PPProxyTensors(
                 {
@@ -644,10 +659,23 @@ class SGLExecutor(BaseExecutor):
                 dim=0,
             )
 
-            # Create residual tensor with same shape
-            residual = torch.zeros(
-                hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
-            )
+            residual_tensors = []
+            has_residual = True
+            for req in batched_requests:
+                req_residual = getattr(req, "residual_states", None)
+                if req_residual is None:
+                    has_residual = False
+                    break
+                residual_tensors.append(
+                    req_residual if req_residual.ndim == 2 else req_residual.unsqueeze(0)
+                )
+
+            if has_residual:
+                residual = torch.cat(residual_tensors, dim=0)
+            else:
+                residual = torch.zeros(
+                    hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
+                )
 
             pp_proxy_tensors = PPProxyTensors(
                 {

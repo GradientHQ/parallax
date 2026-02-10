@@ -24,15 +24,15 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n$src/parallax/p2p/proto/forward.proto\x12\x08gradient\"Z\n\x0e\x46orwardRequest\x12+\n\x0c\x66orward_mode\x18\x01 \x01(\x0e\x32\x15.gradient.ForwardMode\x12\x1b\n\x04reqs\x18\x02 \x03(\x0b\x32\r.gradient.Req\"\x11\n\x0f\x46orwardResponse\"+\n\x0c\x41\x62ortRequest\x12\x1b\n\x04reqs\x18\x01 \x03(\x0b\x32\r.gradient.Req\"\x0f\n\rAbortResponse\"\x85\x02\n\x03Req\x12\x0b\n\x03rid\x18\x01 \x01(\t\x12\x15\n\routput_length\x18\x02 \x01(\x05\x12\x15\n\rrouting_table\x18\x03 \x03(\t\x12\x11\n\tinput_ids\x18\x04 \x03(\x05\x12\x31\n\x0fsampling_params\x18\x05 \x01(\x0b\x32\x18.gradient.SamplingParams\x12\x15\n\rnext_token_id\x18\x06 \x01(\x05\x12\x15\n\rhidden_states\x18\x07 \x01(\x0c\x12\x11\n\tlora_path\x18\x08 \x01(\t\x12\x17\n\ntoken_prob\x18\t \x01(\x02H\x00\x88\x01\x01\x12\x14\n\x0creturn_probs\x18\n \x01(\x08\x42\r\n\x0b_token_prob\"\xa7\x02\n\x0eSamplingParams\x12\x16\n\x0emax_new_tokens\x18\x01 \x01(\x05\x12\x16\n\x0emin_new_tokens\x18\x02 \x01(\x05\x12\x13\n\x0btemperature\x18\x03 \x01(\x02\x12\r\n\x05top_p\x18\x04 \x01(\x02\x12\r\n\x05min_p\x18\x05 \x01(\x02\x12\r\n\x05top_k\x18\x06 \x01(\x05\x12\x16\n\x0estop_token_ids\x18\x07 \x03(\x05\x12\x12\n\nignore_eos\x18\x08 \x01(\x08\x12\x11\n\tstop_strs\x18\t \x03(\t\x12\x1a\n\x12repetition_penalty\x18\n \x01(\x02\x12\x18\n\x10presence_penalty\x18\x0b \x01(\x02\x12\x19\n\x11\x66requency_penalty\x18\x0c \x01(\x02\x12\x13\n\x0bjson_schema\x18\r \x01(\t*0\n\x0b\x46orwardMode\x12\n\n\x06\x45XTEND\x10\x00\x12\n\n\x06\x44\x45\x43ODE\x10\x01\x12\t\n\x05MIXED\x10\x02\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n$src/parallax/p2p/proto/forward.proto\x12\x08gradient\"Z\n\x0e\x46orwardRequest\x12+\n\x0c\x66orward_mode\x18\x01 \x01(\x0e\x32\x15.gradient.ForwardMode\x12\x1b\n\x04reqs\x18\x02 \x03(\x0b\x32\r.gradient.Req\"\x11\n\x0f\x46orwardResponse\"+\n\x0c\x41\x62ortRequest\x12\x1b\n\x04reqs\x18\x01 \x03(\x0b\x32\r.gradient.Req\"\x0f\n\rAbortResponse\"\x9e\x02\n\x03Req\x12\x0b\n\x03rid\x18\x01 \x01(\t\x12\x15\n\routput_length\x18\x02 \x01(\x05\x12\x15\n\rrouting_table\x18\x03 \x03(\t\x12\x11\n\tinput_ids\x18\x04 \x03(\x05\x12\x31\n\x0fsampling_params\x18\x05 \x01(\x0b\x32\x18.gradient.SamplingParams\x12\x15\n\rnext_token_id\x18\x06 \x01(\x05\x12\x15\n\rhidden_states\x18\x07 \x01(\x0c\x12\x11\n\tlora_path\x18\x08 \x01(\t\x12\x17\n\ntoken_prob\x18\t \x01(\x02H\x00\x88\x01\x01\x12\x14\n\x0creturn_probs\x18\n \x01(\x08\x12\x17\n\x0fresidual_states\x18\x0b \x01(\x0c\x42\r\n\x0b_token_prob\"\xa7\x02\n\x0eSamplingParams\x12\x16\n\x0emax_new_tokens\x18\x01 \x01(\x05\x12\x16\n\x0emin_new_tokens\x18\x02 \x01(\x05\x12\x13\n\x0btemperature\x18\x03 \x01(\x02\x12\r\n\x05top_p\x18\x04 \x01(\x02\x12\r\n\x05min_p\x18\x05 \x01(\x02\x12\r\n\x05top_k\x18\x06 \x01(\x05\x12\x16\n\x0estop_token_ids\x18\x07 \x03(\x05\x12\x12\n\nignore_eos\x18\x08 \x01(\x08\x12\x11\n\tstop_strs\x18\t \x03(\t\x12\x1a\n\x12repetition_penalty\x18\n \x01(\x02\x12\x18\n\x10presence_penalty\x18\x0b \x01(\x02\x12\x19\n\x11\x66requency_penalty\x18\x0c \x01(\x02\x12\x13\n\x0bjson_schema\x18\r \x01(\t*0\n\x0b\x46orwardMode\x12\n\n\x06\x45XTEND\x10\x00\x12\n\n\x06\x44\x45\x43ODE\x10\x01\x12\t\n\x05MIXED\x10\x02\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'src.parallax.p2p.proto.forward_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_FORWARDMODE']._serialized_start=785
-  _globals['_FORWARDMODE']._serialized_end=833
+  _globals['_FORWARDMODE']._serialized_start=810
+  _globals['_FORWARDMODE']._serialized_end=858
   _globals['_FORWARDREQUEST']._serialized_start=50
   _globals['_FORWARDREQUEST']._serialized_end=140
   _globals['_FORWARDRESPONSE']._serialized_start=142
@@ -42,7 +42,7 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_ABORTRESPONSE']._serialized_start=206
   _globals['_ABORTRESPONSE']._serialized_end=221
   _globals['_REQ']._serialized_start=224
-  _globals['_REQ']._serialized_end=485
-  _globals['_SAMPLINGPARAMS']._serialized_start=488
-  _globals['_SAMPLINGPARAMS']._serialized_end=783
+  _globals['_REQ']._serialized_end=510
+  _globals['_SAMPLINGPARAMS']._serialized_start=513
+  _globals['_SAMPLINGPARAMS']._serialized_end=808
 # @@protoc_insertion_point(module_scope)

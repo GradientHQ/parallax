@@ -313,6 +313,23 @@ class BaseExecutor:
                                             raise ValueError(
                                                 f"Unsupported device type: {self.device}"
                                             )
+                                if getattr(req, "residual_states", None) is not None:
+                                    if req.residual_states.dtype != self.dtype:
+                                        logger.debug(
+                                            f"Converting residual_states dtype from {req.residual_states.dtype} to {self.dtype} for request {req.request_id}"
+                                        )
+                                        if self.device is not None and self.device.startswith(
+                                            "cuda"
+                                        ):
+                                            req.residual_states = req.residual_states.to(self.dtype)
+                                        elif self.device == "mlx":
+                                            req.residual_states = req.residual_states.astype(
+                                                self.dtype
+                                            )
+                                        else:
+                                            raise ValueError(
+                                                f"Unsupported device type: {self.device}"
+                                            )
 
                         # Move current position for first peer
                         if self.is_first_peer:
@@ -401,6 +418,7 @@ class BaseExecutor:
             batch_output, dict
         ), f"Expected dict from process_batch, got {type(batch_output)}"
         hidden_states = batch_output["hidden_states"]
+        residual_states = batch_output.get("residual_states")
         token_probs = batch_output["probs"]
 
         batched_requests = []
@@ -427,6 +445,22 @@ class BaseExecutor:
                         hidden_state_for_req = hidden_states[pre_length : pre_length + 1, :]
                     pre_length += 1
 
+            residual_for_req = None
+            if residual_states is not None:
+                if src_request.is_prefill:
+                    true_length = int(context_lengths[i])
+                    if residual_states.ndim == 3:
+                        residual_for_req = residual_states[i, :true_length, :]
+                    else:
+                        residual_for_req = residual_states[
+                            pre_length - true_length : pre_length, :
+                        ]
+                else:
+                    if residual_states.ndim == 3:
+                        residual_for_req = residual_states[i, :, :]
+                    else:
+                        residual_for_req = residual_states[pre_length - 1 : pre_length, :]
+
             # Get prob for this request if available
             token_prob = (
                 token_probs[i]
@@ -435,7 +469,7 @@ class BaseExecutor:
             )
 
             next_req = self._prepare_next_single_request(
-                src_request, hidden_state_for_req, token_prob
+                src_request, hidden_state_for_req, token_prob, residual_for_req
             )
             batched_requests.append(next_req)
 
@@ -718,7 +752,11 @@ class BaseExecutor:
             logger.debug("Failed to send error notification to HTTP handler", exc_info=True)
 
     def _prepare_next_single_request(
-        self, request: Request, hidden_states: Any, token_prob: Optional[float] = None
+        self,
+        request: Request,
+        hidden_states: Any,
+        token_prob: Optional[float] = None,
+        residual_states: Optional[Any] = None,
     ) -> Request:
         """Handle request state changes both inter and intra peers.
 
@@ -746,6 +784,7 @@ class BaseExecutor:
                 current_position=request.total_length + 1,
                 input_ids=request.input_ids,
                 hidden_states=hidden_states,
+                residual_states=residual_states,
                 next_token_id=next_token_id,
                 routing_table=request.routing_table,
                 lora_path=request.lora_path,
@@ -765,6 +804,7 @@ class BaseExecutor:
                 current_position=request.total_length,
                 input_ids=request.input_ids,
                 hidden_states=hidden_states,
+                residual_states=residual_states,
                 next_token_id=next_token_id,
                 routing_table=request.routing_table,
                 lora_path=request.lora_path,
@@ -776,11 +816,14 @@ class BaseExecutor:
             if request.is_finished:
                 hidden_states = None
             return IntermediateRequest.from_initial_request(
-                request, hidden_states=hidden_states, lora_path=request.lora_path
+                request,
+                hidden_states=hidden_states,
+                residual_states=residual_states,
+                lora_path=request.lora_path,
             )
         assert isinstance(
             request, IntermediateRequest
         ), "Intermediate peer must process an IntermediateRequest."
         return IntermediateRequest.from_intermediate_request(
-            request, hidden_states, lora_path=request.lora_path
+            request, hidden_states, new_residual_states=residual_states, lora_path=request.lora_path
         )

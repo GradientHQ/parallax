@@ -22,7 +22,6 @@ from sglang.srt.sampling.sampling_batch_info import (
 from sglang.srt.sampling.sampling_params import SamplingParams as SGLSamplingParams
 from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
 
-from parallax.server.executor.sglang_executor import PageRadixCache
 from parallax.server.request import Request
 from parallax.server.sampling.sampling_params import (
     SamplingParams as ParallaxSamplingParams,
@@ -130,7 +129,7 @@ def transform_requests_to_sglang(
 def form_sgl_batch_prefill(
     requests: List[Request],
     model_runner: ModelRunner,
-    page_tree_cache: Optional[PageRadixCache] = None,
+    page_tree_cache: Optional[BasePrefixCache] = None,
 ) -> ForwardBatch:
     """Initialize a prefill ScheduleBatch -> ModelWorkerBatch -> ForwardBatch workflow"""
 
