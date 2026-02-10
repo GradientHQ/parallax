@@ -11,7 +11,9 @@ from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
 from sglang.srt.mem_cache.base_prefix_cache import BasePrefixCache
 from sglang.srt.mem_cache.cache_init_params import CacheInitParams
 from sglang.srt.mem_cache.chunk_cache import ChunkCache, SWAChunkCache
+from sglang.srt.mem_cache.radix_cache import RadixCache
 from sglang.srt.mem_cache.swa_memory_pool import SWATokenToKVPoolAllocator
+from sglang.srt.mem_cache.swa_radix_cache import SWARadixCache
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_executor.model_runner import ModelRunner
 from sglang.srt.sampling.sampling_batch_info import (
@@ -33,26 +35,36 @@ logger = get_logger(__name__)
 def _build_no_prefix_tree_cache(model_runner: ModelRunner) -> BasePrefixCache:
     """Build sglang-native no-prefix cache for allocation/scheduling.
 
-    For hybrid SWA models, use SWAChunkCache so schedule_batch can run
-    SWA-specific eviction logic. For others, use ChunkCache.
+    Mirror sglang scheduler cache selection when radix cache is disabled:
+    - if chunked prefill is enabled: ChunkCache / SWAChunkCache
+    - otherwise: RadixCache(disable=True) / SWARadixCache(disable=True)
     """
 
     sliding_window_size = getattr(model_runner, "sliding_window_size", None)
+    chunked_prefill_size = getattr(model_runner.server_args, "chunked_prefill_size", None)
+    if chunked_prefill_size is not None and chunked_prefill_size <= 0:
+        chunked_prefill_size = None
+
     params = CacheInitParams(
         disable=True,
         req_to_token_pool=model_runner.req_to_token_pool,
         token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
         page_size=model_runner.server_args.page_size,
-        chunked_prefill_size=getattr(model_runner.server_args, "chunked_prefill_size", None),
+        chunked_prefill_size=chunked_prefill_size,
         sliding_window_size=sliding_window_size,
     )
 
     is_swa_allocator = isinstance(
         model_runner.token_to_kv_pool_allocator, SWATokenToKVPoolAllocator
     )
+    if chunked_prefill_size is not None:
+        if is_swa_allocator and sliding_window_size is not None:
+            return SWAChunkCache(params)
+        return ChunkCache(params)
+
     if is_swa_allocator and sliding_window_size is not None:
-        return SWAChunkCache(params)
-    return ChunkCache(params)
+        return SWARadixCache(params)
+    return RadixCache(params)
 
 
 def transform_sampling_params_to_sglang(old_params: ParallaxSamplingParams) -> SGLSamplingParams:
@@ -124,6 +136,13 @@ def form_sgl_batch_prefill(
 
     tree_cache = (
         page_tree_cache if page_tree_cache is not None else _build_no_prefix_tree_cache(model_runner)
+    )
+    logger.debug(
+        "Prefill tree_cache=%s allocator=%s sliding_window_size=%s chunked_prefill_size=%s",
+        type(tree_cache).__name__,
+        type(model_runner.token_to_kv_pool_allocator).__name__,
+        getattr(model_runner, "sliding_window_size", None),
+        getattr(model_runner.server_args, "chunked_prefill_size", None),
     )
     sgl_reqs = transform_requests_to_sglang(requests, tree_cache)
     schedule_batch = ScheduleBatch.init_new(
@@ -278,12 +297,12 @@ def release_sglang_request(running_batch: ScheduleBatch, request_id: str):
     # use running batch's tree cache to release kv cache
     tree_cache = running_batch.tree_cache
 
-    # for completed requests, is_insert=True to insert into prefix cache
-    # for aborted requests, is_insert=False to not insert into prefix cache
-    is_insert = True  # can be adjusted based on request status
+    # For completed requests, insert into prefix cache if enabled.
+    # For aborted requests, callers can wire is_insert=False in the future.
+    is_insert = True
 
-    if isinstance(tree_cache, PageRadixCache):
-        tree_cache.cache_finished_req(req)
+    if hasattr(tree_cache, "cache_finished_req"):
+        tree_cache.cache_finished_req(req, is_insert=is_insert)
     else:
         page_size = running_batch.token_to_kv_pool_allocator.page_size
         last_uncached_pos = (len(req.prefix_indices) // page_size) * page_size
