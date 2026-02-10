@@ -336,7 +336,16 @@ def check_and_run_weight_refit(gradient_server, message):
         else:
             logger.warning(f"Unrecognized weight refit mode: {gradient_server.weight_refit_mode}")
 
-        # step4. Send lora requests to vllm
+        # step4. copy adapter_config.json to the new directory
+        adapter_path = os.path.join(os.getcwd(), "adapter_config.json")
+        if os.path.isfile(adapter_path):
+            shutil.copy(adapter_path, weight_dir)
+        else:
+            logger.warning(f"Cannot find adapter_config.json locally. Exit lora weight refit.")
+            gradient_server.refit_finish = True
+            return
+
+        # step5. Send lora requests to vllm
         cur_lora_name = f"lora_{hash(weight_dir) % 10000}"
         # unload old lora
         while len(gradient_server.lora_history) > 1:
@@ -355,7 +364,7 @@ def check_and_run_weight_refit(gradient_server, message):
         # update lora history list
         gradient_server.lora_history.append(cur_lora_name)
 
-        # step5. Post-process
+        # step6. Post-process
         last_refit_time = float(time_stamp)
         gradient_server.last_refit_time = last_refit_time
         gradient_server.refit_timestamp_history.append(last_refit_time)
