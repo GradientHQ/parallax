@@ -202,7 +202,7 @@ class TransformerConnectionHandler(ConnectionHandler):
         del choice["logprobs"]
         choices[0] = choice
 
-        return Response(content=content, media_type="application/json")
+        return Response(content=data, media_type="application/json")
 
     @rpc_stream_iter
     def chat_completion(
