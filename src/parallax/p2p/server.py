@@ -19,9 +19,9 @@ from typing import Any, List, Optional
 
 import dijkstar
 import httpx
+import orjson
 import requests
 import zmq
-from fastapi.responses import Response
 from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream, rpc_stream_iter
 
 from backend.server.rpc_connection_handler import RPCConnectionHandler
@@ -202,7 +202,7 @@ class TransformerConnectionHandler(ConnectionHandler):
         del choice["logprobs"]
         choices[0] = choice
 
-        return Response(content=data, media_type="application/json")
+        return orjson.dumps(data)
 
     @rpc_stream_iter
     def chat_completion(
@@ -226,8 +226,8 @@ class TransformerConnectionHandler(ConnectionHandler):
                     response = client.post(
                         f"http://localhost:{self.http_port}/v1/chat/completions", json=request
                     )
-                    response = self.vllm_post_process(response)
-                    yield response.content
+                    content = self.vllm_post_process(response)
+                    yield content
         except Exception as e:
             logger.exception(f"Error in chat completion: {e}")
             yield b"internal server error"
