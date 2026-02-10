@@ -1,5 +1,4 @@
 import logging
-import os
 from pathlib import Path
 from typing import List
 
@@ -45,21 +44,6 @@ def _filter_weight_files_by_cache(hf_weights_files: List[str]) -> List[str]:
         is_first_shard=is_first_shard,
         is_last_shard=is_last_shard,
     )
-
-    if os.environ.get("PARALLAX_STEP3P5_DEBUG", "0") == "1":
-        logger.warning(
-            "[step3p5-debug][weight-filter] model_path=%s range=[%s,%s) hidden_layers=%s "
-            "is_first=%s is_last=%s files_in=%d files_out=%d out_names=%s",
-            model_path,
-            pp_start_layer,
-            pp_end_layer,
-            num_hidden_layers,
-            is_first_shard,
-            is_last_shard,
-            len(hf_weights_files),
-            len(filtered_files),
-            [Path(f).name for f in filtered_files],
-        )
 
     return filtered_files
 

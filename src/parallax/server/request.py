@@ -262,7 +262,6 @@ class IntermediateRequest(Request):
         status: RequestStatus = RequestStatus.PREFILLING,
         input_ids: Optional[List[int]] = None,
         hidden_states: Optional[Any] = None,
-        residual_states: Optional[Any] = None,
         next_token_id: Optional[int] = None,
         routing_table: Optional[List[str]] = [],
         sampling_params: Optional[SamplingParams] = None,
@@ -289,7 +288,6 @@ class IntermediateRequest(Request):
 
         self.current_position = current_position
         self.hidden_states = hidden_states
-        self.residual_states = residual_states
         self.next_token_id = next_token_id
         self.token_prob = token_prob
         self.return_probs = return_probs
@@ -310,7 +308,6 @@ class IntermediateRequest(Request):
         cls,
         initial_request: InitialRequest,
         hidden_states: Optional[Any] = None,
-        residual_states: Optional[Any] = None,
         lora_path: Optional[str] = None,
         token_prob: Optional[float] = None,
     ) -> "IntermediateRequest":
@@ -342,7 +339,6 @@ class IntermediateRequest(Request):
             next_token_id=next_token_id,
             current_position=initial_request.total_length,
             hidden_states=hidden_states,
-            residual_states=residual_states,
             sampling_params=initial_request.sampling_params,
             routing_table=initial_request.routing_table,
             lora_path=lora_path,
@@ -355,7 +351,6 @@ class IntermediateRequest(Request):
         cls,
         old_request: "IntermediateRequest",
         new_hidden_states: Any,
-        new_residual_states: Optional[Any] = None,
         lora_path: Optional[str] = None,
         token_prob: Optional[float] = None,
     ) -> "IntermediateRequest":
@@ -370,7 +365,6 @@ class IntermediateRequest(Request):
             input_ids=old_request.input_ids,
             next_token_id=old_request.next_token_id,
             hidden_states=new_hidden_states,
-            residual_states=new_residual_states,
             routing_table=old_request.routing_table,
             sampling_params=old_request.sampling_params,
             lora_path=lora_path,
@@ -390,8 +384,6 @@ class IntermediateRequest(Request):
 
         if self.hidden_states is not None:
             fields.append(f"hidden_states_shape={self.hidden_states.shape}")
-        if self.residual_states is not None and hasattr(self.residual_states, "shape"):
-            fields.append(f"residual_states_shape={self.residual_states.shape}")
 
         fields.append(f"next_token_id={self.next_token_id}")
 
