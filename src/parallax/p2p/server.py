@@ -342,13 +342,13 @@ def check_and_run_weight_refit(gradient_server, message):
         while len(gradient_server.lora_history) > 1:
             unload_lora_path = gradient_server.lora_history.pop(0)
             response = requests.post(
-                "https://localhost:3000/v1/unload_lora_adapter",
+                "http://localhost:3000/v1/unload_lora_adapter",
                 headers={"Content-Type": "application/json"},
                 json={"lora_name": unload_lora_path},
             )
         # load new lora
         response = requests.post(
-            "https://localhost:3000/v1/load_lora_adapter",
+            "http://localhost:3000/v1/load_lora_adapter",
             headers={"Content-Type": "application/json"},
             json={"lora_path": weight_dir, "lora_name": cur_lora_name},
         )
