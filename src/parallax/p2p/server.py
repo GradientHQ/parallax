@@ -21,7 +21,7 @@ import dijkstar
 import httpx
 import requests
 import zmq
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import JSONResponse
 from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream, rpc_stream_iter
 
 from backend.server.rpc_connection_handler import RPCConnectionHandler
@@ -202,7 +202,7 @@ class TransformerConnectionHandler(ConnectionHandler):
         del choice["logprobs"]
         choices[0] = choice
 
-        return ORJSONResponse(status_code=200, content=data)
+        return JSONResponse(status_code=200, content=data)
 
     @rpc_stream_iter
     def chat_completion(
