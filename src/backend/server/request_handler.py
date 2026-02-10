@@ -123,6 +123,7 @@ class RequestHandler:
                 ignore_eos = sampling_params.get("ignore_eos", None)
                 if ignore_eos is not None:
                     request_data["ignore_eos"] = ignore_eos
+                del request_data["sampling_params"]
             try:
                 if is_stream:
 
