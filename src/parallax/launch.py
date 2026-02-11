@@ -26,6 +26,7 @@ from parallax.p2p.server import ServerState, launch_p2p_server_process, stop_p2p
 from parallax.server.executor.factory import run_executor_process, stop_executor_process
 from parallax.server.http_server import launch_http_server, stop_http_server
 from parallax.server.server_args import parse_args
+from parallax.utils.config_utils import get_config_value
 from parallax.utils.shared_state import SharedState
 from parallax.utils.utils import fetch_model_from_hf, initialize_nccl_port
 from parallax_utils.ascii_anime import display_parallax_join
@@ -120,23 +121,25 @@ if __name__ == "__main__":
             check_latest_release()
 
             config = fetch_model_from_hf(args.model_path, local_files_only=args.use_hfcache)
+            num_layers = get_config_value(config, "num_hidden_layers")
+
             if args.start_layer is None:
                 args.start_layer = 0
             if args.end_layer is None:
-                args.end_layer = config.get("num_hidden_layers")
+                args.end_layer = num_layers
 
             # only launch http server on head node
             if args.start_layer == 0:
                 http_server_process = launch_http_server(args)
             # Launch P2P server as subprocess
-            if not (args.start_layer == 0 and args.end_layer == config.get("num_hidden_layers")):
+            if not (args.start_layer == 0 and args.end_layer == num_layers):
                 p2p_server_process = launch_p2p_server_process(
                     initial_peers=args.initial_peers,
                     scheduler_addr=args.scheduler_addr,
                     relay_servers=args.relay_servers,
                     pp_start_layer=args.start_layer,
                     pp_end_layer=args.end_layer,
-                    hidden_layers=config.get("num_hidden_layers"),
+                    hidden_layers=num_layers,
                     tp_size=args.tp_size,
                     dp_size=args.dp_size,
                     tcp_port=args.tcp_port,

@@ -40,6 +40,7 @@ from parallax.sglang.monkey_patch import apply_parallax_sglang_monkey_patch
 from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
     set_layer_range_for_filtering,
 )
+from parallax.utils.config_utils import ModelConfigAccessor
 from parallax.utils.tokenizer_utils import load_tokenizer
 
 logger = logging.getLogger(__name__)
@@ -74,8 +75,14 @@ class ParallaxModelRunner(SGLModelRunner):
         """Add pp_start_layer and pp_end_layer for decentralized model"""
         self.pp_start_layer = pp_start_layer
         self.pp_end_layer = pp_end_layer
-        num_hidden_layers = model_config.hf_config.num_hidden_layers
-        set_layer_range_for_filtering(pp_start_layer, pp_end_layer, num_hidden_layers)
+        config_accessor = ModelConfigAccessor(model_config.hf_config)
+        num_hidden_layers = config_accessor.get_num_hidden_layers()
+        if num_hidden_layers is None:
+            raise ValueError("num_hidden_layers is required but not found in model config")
+        is_vlm = config_accessor.is_vlm
+        set_layer_range_for_filtering(
+            pp_start_layer, pp_end_layer, num_hidden_layers, is_vlm=is_vlm
+        )
 
         super().__init__(
             model_config=model_config,
@@ -278,6 +285,7 @@ def initialize_sgl_model_runner(
       - model_runner: SGL model runner
       - config: model config driven by mlx-lm
       - tokenizer: tokenizer driven by mlx-lm
+      - processor: optional processor for multimodal models
     """
     apply_parallax_sglang_monkey_patch()
 
@@ -301,6 +309,16 @@ def initialize_sgl_model_runner(
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype", "bfloat16")
+
+    # Load processor if available (for multimodal models)
+    processor = None
+    try:
+        from transformers import AutoProcessor
+
+        processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+        logger.info(f"Loaded processor for model {model_path}")
+    except Exception as e:
+        logger.debug(f"No processor loaded (normal for text-only models): {e}")
 
     if nccl_port is None:
         nccl_port = random.randint(4000, 5000)
@@ -374,7 +392,7 @@ def initialize_sgl_model_runner(
         dp_rank=dp_rank,
         dp_size=dp_size,
     )
-    return model_runner, config, tokenizer
+    return model_runner, config, tokenizer, processor
 
 
 def refit_sgl_model(
