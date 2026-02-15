@@ -295,6 +295,14 @@ def chat_command(args, passthrough_args: list[str] | None = None):
     _execute_with_graceful_shutdown(cmd)
 
 
+def doctor_command(args, passthrough_args: list[str] | None = None):
+    """Run environment diagnostics to validate Parallax setup."""
+    from parallax.doctor import run_all_checks
+
+    results, success = run_all_checks(verbose=args.verbose)
+    sys.exit(0 if success else 1)
+
+
 def update_package_info():
     """Update package information."""
     version = get_current_version()
@@ -364,6 +372,7 @@ Examples:
   parallax join                                                         # Join cluster in local network
   parallax join -s {scheduler-address}                                  # Join cluster in public network
   parallax join -s 12D3KooWLX7MWuzi1Txa5LyZS4eTQ2tPaJijheH8faHggB9SxnBu # example
+  parallax doctor                                                       # Validate environment setup
         """,
     )
 
@@ -415,6 +424,12 @@ Examples:
         "-r", "--use-relay", action="store_true", help="Use public relay servers"
     )
 
+    # Add 'doctor' command parser
+    doctor_parser = subparsers.add_parser(
+        "doctor", help="Run environment diagnostics to validate setup"
+    )
+    doctor_parser.add_argument("-v", "--verbose", action="store_true", help="Show detailed output")
+
     # Accept unknown args and pass them through to the underlying python command
     args, passthrough_args = parser.parse_known_args()
 
@@ -428,6 +443,8 @@ Examples:
         join_command(args, passthrough_args)
     elif args.command == "chat":
         chat_command(args, passthrough_args)
+    elif args.command == "doctor":
+        doctor_command(args, passthrough_args)
     else:
         parser.print_help()
         sys.exit(1)

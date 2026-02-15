@@ -4,6 +4,20 @@ We will walk through you the easiest way to quickly set up your own AI cluster.
 
 If you have not installed Parallax yet, please refer to the [installation guide](./install.md) and follow the instructions.
 
+### Verify Your Setup
+
+Before running Parallax, you can verify your environment is correctly configured:
+
+```sh
+parallax doctor
+```
+
+This checks Python version, CUDA/Metal availability, dependencies, and common path issues. Use `-v` for detailed output:
+
+```sh
+parallax doctor -v
+```
+
 ### With Frontend
 
 #### Step 1: Launch scheduler
