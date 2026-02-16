@@ -143,6 +143,8 @@ class TestCreateExecutorConfig:
             max_lora_chunk_size=128,
             enable_weight_refit=False,
             weight_refit_mode="cpu",
+            chunked_prefill_size=128,
+            max_prefill_tokens=1024,
             gpu_backend="sglang",
         )
 

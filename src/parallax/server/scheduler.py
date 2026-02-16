@@ -126,6 +126,8 @@ class Scheduler:
 
         request.ready_for_next_step = True
         request.last_updated_time = time.time()
+        if request.origin_input_ids is not None:
+            request.input_ids = request.origin_input_ids
         # TODO: Handle chunked prefill.
         if request.is_decoding:
             rid = request.request_id
@@ -242,34 +244,27 @@ class Scheduler:
         """Move requests from wait queue into running (inflight) set, up to capacity.
 
         Pushes admitted requests directly into the running set.
+        Each request is updated or added to running at most once per call.
         """
-        while self._wait_queue and len(self._running_requests) < self.max_batch_size:
+        # One pass over wait_queue to avoid infinite loop when all front items are already in running_requests
+        initial_len = len(self._wait_queue)
+        for _ in range(initial_len):
+            if not self._wait_queue or len(self._running_requests) >= self.max_batch_size:
+                break
             req = self._wait_queue.popleft()
             rid = req.request_id
             if rid in self._running_requests:
+                self._wait_queue.append(req)
                 continue
 
-            # Check kv cache pool
-            if self.cache_manager is not None:
-                if not self.cache_manager.has_request(req.request_id):
-                    # TODO: Handle chunked prefill, and support preemption.
-                    # Pass input_ids for prefix cache matching
-                    token_ids = getattr(req, "input_ids", None)
-                    success, matched_tokens = self.cache_manager.allocate_request(
-                        req.request_id, req.total_length, token_ids=token_ids
-                    )
-                    if not success:
-                        logger.warning(
-                            f"Request {rid} can't be admit to running batch due to KV cache size."
-                        )
-                        # Put back to wait queue if allocation fails
-                        self._wait_queue.appendleft(req)
-                        # Stop admitting since we are out of memory
-                        break
-                    if matched_tokens > 0:
-                        logger.debug(
-                            f"Request {rid} matched {matched_tokens} tokens from prefix cache"
-                        )
+            # if cache_manager is not None and has allow attribute, break if allow is False
+            if (
+                self.cache_manager is not None
+                and hasattr(self.cache_manager, "allow")
+                and not self.cache_manager.allow
+            ):
+                logger.debug(f"Cache manager does not allow request {rid},breaking admission.")
+                break
 
             # Add request to running requests
             self._running_requests[rid] = req
@@ -320,7 +315,6 @@ class Scheduler:
         self.admit_requests()
         if not self._running_requests:
             return []
-
         inflight_tokens = 0
         batch: List[Request] = []
 
@@ -333,13 +327,15 @@ class Scheduler:
                     prefill_candidates.append(req)
                 elif req.is_decoding:
                     decode_candidates.append(req)
-
         # 1) Fill with prefills first
         for req in prefill_candidates:
             if len(batch) >= self.micro_batch_size:
                 break
             cost = req.prompt_len
             if cost + inflight_tokens > self.max_num_tokens_per_batch:
+                logger.debug(
+                    f"prefill request {req.request_id} cost {cost} + inflight_tokens {inflight_tokens} > max_num_tokens_per_batch {self.max_num_tokens_per_batch}, breaking"
+                )
                 continue
             batch.append(req)
             inflight_tokens += cost

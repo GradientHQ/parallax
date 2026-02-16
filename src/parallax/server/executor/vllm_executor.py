@@ -90,6 +90,8 @@ class VLLMExecutor(BaseExecutor):
         weight_refit_mode: Optional[str] = "disk",
         # Routed experts
         enable_return_routed_experts: bool = False,
+        # Chunked prefill (SGL-only; accepted here for factory config compatibility)
+        chunked_prefill_size: Optional[int] = None,
         # Pipe communication
         conn: Optional[List[Any]] = [],
     ):
@@ -205,7 +207,7 @@ class VLLMExecutor(BaseExecutor):
                     "--enable-lora is set to False, any provided lora_paths will be ignored."
                 )
 
-    def handle_input_requests(self, requests: List[Request]):
+    def handle_input_requests(self, requests: List[Request], from_previous_peer: bool = False):
         """Update requests states and status in scheduler and cache manager."""
         if self.tp_size > 1:
             requests = self._tensor_parallel_broadcast_pyobj(requests)

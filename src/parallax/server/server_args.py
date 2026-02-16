@@ -109,6 +109,14 @@ def parse_args() -> argparse.Namespace:
         "--enable-prefix-cache", action="store_true", help="Enable prefix cache reuse"
     )
 
+    # add --chunked-prefill-size
+    parser.add_argument(
+        "--chunked-prefill-size",
+        type=int,
+        default=None,
+        help="Chunk size for chunked prefill processing",
+    )
+
     # Scheduler configuration
     parser.add_argument(
         "--max-batch-size",
@@ -346,6 +354,16 @@ def validate_args(args: argparse.Namespace) -> None:
 
     if args.kv_block_size <= 0:
         raise ValueError("kv_block_size must be positive")
+
+    # chunked-prefill 依赖 prefix-cache，未开启 prefix-cache 时不能单独使用 chunked-prefill
+    chunked_prefill_size = getattr(args, "chunked_prefill_size", None)
+    if chunked_prefill_size is not None and not args.enable_prefix_cache:
+        raise ValueError(
+            "chunked-prefill requires prefix-cache to be enabled. "
+            "Use --enable-prefix-cache when specifying --chunked-prefill-size."
+        )
+    if chunked_prefill_size is not None and chunked_prefill_size <= 0:
+        raise ValueError("chunked_prefill_size must be positive")
 
     if args.micro_batch_ratio <= 0:
         raise ValueError("micro_batch_ratio must be positive")
