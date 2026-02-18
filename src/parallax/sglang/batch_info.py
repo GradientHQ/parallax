@@ -1,15 +1,12 @@
 """
 Store information about a SGLang batch.
-The following is the flow of data structures for a batch in SGLang:
-
-ScheduleBatch -> ModelWorkerBatch -> ForwardBatch
 """
 
 from types import SimpleNamespace
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import torch
-from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
+from sglang.srt.managers.schedule_batch import MultimodalInputs, Req, ScheduleBatch
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_executor.model_runner import ModelRunner
 from sglang.srt.sampling.sampling_batch_info import (
@@ -23,6 +20,7 @@ from parallax.server.request import Request
 from parallax.server.sampling.sampling_params import (
     SamplingParams as ParallaxSamplingParams,
 )
+from parallax.sglang.multimodal_utils import process_multimodal_request
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -48,19 +46,56 @@ def transform_sampling_params_to_sglang(old_params: ParallaxSamplingParams) -> S
 
 
 def transform_requests_to_sglang(
-    old_requests: List[Request], page_tree_cache: Optional[PageRadixCache] = None
+    old_requests: List[Request],
+    page_tree_cache: Optional[PageRadixCache] = None,
+    processor: Optional[Any] = None,
+    hf_config: Optional[dict] = None,
+    tokenizer: Optional[Any] = None,
 ) -> List[Req]:
-    """Transforms Parallax Request to SGLang.Req format"""
     reqs = []
+    mm_config = hf_config or {}
+
     for old_req in old_requests:
         sampling_params = transform_sampling_params_to_sglang(old_req.sampling_params)
         req = Req(
             rid=old_req.request_id,
             origin_input_text="",
-            origin_input_ids=old_req.input_ids,
+            origin_input_ids=list(old_req.input_ids),
             sampling_params=sampling_params,
             lora_id=old_req.lora_id,
         )
+
+        if old_req.multimodal_params is not None:
+            try:
+                if "mm_items" in old_req.multimodal_params:
+                    req.multimodal_inputs = MultimodalInputs.from_dict(old_req.multimodal_params)
+
+                elif "images" in old_req.multimodal_params and processor is not None:
+                    image_urls = old_req.multimodal_params["images"]
+                    multimodal_inputs, padded_input_ids = process_multimodal_request(
+                        image_urls=image_urls,
+                        input_ids=old_req.input_ids,
+                        processor=processor,
+                        tokenizer=tokenizer,
+                        mm_config=mm_config,
+                    )
+                    if multimodal_inputs is not None:
+                        req.multimodal_inputs = multimodal_inputs
+                        req.origin_input_ids = padded_input_ids
+
+                else:
+                    logger.warning(
+                        f"Cannot process multimodal_params: no 'mm_items' or 'images' key, "
+                        f"or processor not available. "
+                        f"Params keys: {old_req.multimodal_params.keys()}, Processor: {processor is not None}"
+                    )
+                    # Don't assign raw dict - SGLang expects MultimodalInputs object
+                    req.multimodal_inputs = None
+
+            except Exception as e:
+                logger.exception(f"Failed to construct MultimodalInputs: {e}")
+                # Don't assign raw dict - SGLang expects MultimodalInputs object
+                req.multimodal_inputs = None
 
         # Debug: Log before cache lookup
         if page_tree_cache is not None:
@@ -92,12 +127,16 @@ def form_sgl_batch_prefill(
     requests: List[Request],
     model_runner: ModelRunner,
     page_tree_cache: Optional[PageRadixCache] = None,
+    processor: Optional[Any] = None,
+    hf_config: Optional[dict] = None,
+    tokenizer: Optional[Any] = None,
 ) -> ForwardBatch:
-    """Initialize a prefill ScheduleBatch -> ModelWorkerBatch -> ForwardBatch workflow"""
 
-    sgl_reqs = transform_requests_to_sglang(requests, page_tree_cache)
+    sgl_reqs = transform_requests_to_sglang(
+        requests, page_tree_cache, processor, hf_config, tokenizer
+    )
 
-    def dummy_evict(*args):
+    def dummy_function(*args):
         pass
 
     dummy_tree_cache = SimpleNamespace(
@@ -105,8 +144,12 @@ def form_sgl_batch_prefill(
         device=model_runner.device,
         token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
         evictable_size=0,
+        sliding_window_size=0,
     )
-    dummy_tree_cache.evict = dummy_evict
+    dummy_tree_cache.evict = dummy_function
+    dummy_tree_cache.supports_swa = dummy_function
+    dummy_tree_cache.is_chunk_cache = dummy_function
+    dummy_tree_cache.supports_mamba = dummy_function
     schedule_batch = ScheduleBatch.init_new(
         reqs=sgl_reqs,
         req_to_token_pool=model_runner.req_to_token_pool,

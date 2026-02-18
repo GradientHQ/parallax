@@ -224,6 +224,15 @@ class Scheduler:
         ):
             request.update_status(RequestStatus.FINISHED_EOS)
             finished = True
+        elif (
+            not finished
+            and not request.sampling_params.ignore_eos
+            and request.sampling_params.stop_token_ids
+            and last_token_id is not None
+            and last_token_id in request.sampling_params.stop_token_ids
+        ):
+            request.update_status(RequestStatus.FINISHED_EOS)
+            finished = True
         elif request.output_length >= request.max_new_tokens:
             request.update_status(RequestStatus.FINISHED_MAX_LENGTH)
             finished = True

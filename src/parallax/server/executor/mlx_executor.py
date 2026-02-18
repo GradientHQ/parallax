@@ -20,6 +20,7 @@ from parallax.server.request import (
 )
 from parallax.server.sampling.sampler import SamplingBatchInfo
 from parallax.server.shard_loader import MLXModelLoader
+from parallax.utils.config_utils import get_config_value
 from parallax.utils.utils import (
     combine_padding_and_causal_masks,
     create_causal_mask,
@@ -122,8 +123,47 @@ class MLXExecutor(BaseExecutor):
             self.model_shard = self.shard_loader.load_lora(self.model_shard, adapters)
 
         logger.debug(
-            f"MLX sharded model loaded in {(time.time() - t0) * 1000:.1f} ms; num_layers={self.config.get('num_hidden_layers')}"
+            f"MLX sharded model loaded in {(time.time() - t0) * 1000:.1f} ms; num_layers={get_config_value(self.config, 'num_hidden_layers')}"
         )
+
+        # Load VLM processor if this is a VLM model (first peer only)
+        self.vlm_processor = None
+        self.model_type = self.config.get("model_type")
+        if hasattr(self.model_shard, "is_vlm") and self.model_shard.is_vlm and start_layer == 0:
+            processor_path = self.shard_loader.model_path_str
+            logger.debug(f"Trying to load VLM processor from: {processor_path}")
+
+            processor_loaded = False
+
+            try:
+                from transformers import AutoProcessor
+
+                self.vlm_processor = AutoProcessor.from_pretrained(
+                    processor_path,
+                    trust_remote_code=True,
+                )
+                processor_type = type(self.vlm_processor).__name__
+                # Verify it has image processing capability
+                if (
+                    hasattr(self.vlm_processor, "image_processor")
+                    and self.vlm_processor.image_processor is not None
+                ):
+                    logger.info(
+                        f"Loaded VLM processor (AutoProcessor -> {processor_type}) for {self.model_type}"
+                    )
+                    processor_loaded = True
+                else:
+                    logger.warning(
+                        f"AutoProcessor loaded {processor_type} but it doesn't have image_processor, skipping"
+                    )
+                    self.vlm_processor = None
+            except Exception as e:
+                logger.debug(f"AutoProcessor failed: {e}")
+
+            if not processor_loaded:
+                logger.warning(
+                    "VLM image processing will be disabled - no processor could be loaded."
+                )
 
         # TODO: Duplicate code to BaseExecutor since num_shard_layers and dtype are needed for initializing kv cache
         self.num_shard_layers = end_layer - start_layer
@@ -133,13 +173,21 @@ class MLXExecutor(BaseExecutor):
         )
 
         # Calculate feature dimensions for kv cache
-        num_key_value_heads = self.config.get("num_key_value_heads")
+        # Use helper to handle VLM models where these are in text_config
+        num_key_value_heads = get_config_value(self.config, "num_key_value_heads")
         if num_key_value_heads is None:
             # Step3.5 flash use num_attention_groups instead.
-            num_key_value_heads = self.config.get("num_attention_groups")
-        head_dim = self.config.get("head_dim") or self.config.get("hidden_size") // self.config.get(
-            "num_attention_heads"
-        )
+            num_key_value_heads = get_config_value(self.config, "num_attention_groups")
+        head_dim = get_config_value(self.config, "head_dim")
+        if head_dim is None:
+            hidden_size = get_config_value(self.config, "hidden_size")
+            num_attention_heads = get_config_value(self.config, "num_attention_heads")
+            if hidden_size and num_attention_heads:
+                head_dim = hidden_size // num_attention_heads
+            else:
+                raise ValueError(
+                    f"Cannot determine head_dim: hidden_size={hidden_size}, num_attention_heads={num_attention_heads}"
+                )
         qk_nope_head_dim = self.config.get("qk_nope_head_dim", None)
         qk_rope_head_dim = self.config.get("qk_rope_head_dim", None)
         if qk_nope_head_dim is not None and qk_rope_head_dim is not None:
@@ -246,6 +294,139 @@ class MLXExecutor(BaseExecutor):
         logger.debug(
             f"mlx_executor initialized; wired_limit set; prefix_cache={'on' if self.enable_prefix_cache else 'off'}, total memory usage: {mx.get_active_memory() / 1024**3 :.3f} GB"
         )
+
+    # ========== VLM Processing Methods ==========
+
+    def _process_request_prompt(
+        self, rid: str, messages: list, image_urls: list, raw_request: Dict
+    ) -> Tuple[list, Optional[Any]]:
+        """
+        Override base class method to handle VLM requests for MLX.
+
+        If VLM processor is available and images are present, use VLM processing.
+        Otherwise, fall back to text-only processing.
+        """
+        if image_urls and self.vlm_processor is not None:
+            return self._process_vlm_request(rid, messages, image_urls)
+        else:
+            prompt = self._process_text_request(rid, messages, raw_request)
+            return prompt, None
+
+    def _process_vlm_request(self, rid: str, messages: list, image_urls: list):
+        """Process a VLM (multimodal) request using the VLM processor."""
+        from parallax.server.request import VLMInputs
+        from parallax.utils.vlm_utils import load_image
+
+        try:
+            images = []
+            for url in image_urls:
+                try:
+                    img = load_image(url)
+                    images.append(img)
+                except Exception as e:
+                    logger.warning(f"Failed to load image {url}: {e}")
+
+            if not images:
+                logger.warning(
+                    f"No images loaded for VLM request {rid}, falling back to text processing"
+                )
+                return self._process_text_request(rid, messages, {}), None
+
+            formatted_messages = self._format_messages_for_vlm(messages)
+
+            if hasattr(self.vlm_processor, "apply_chat_template"):
+                text_prompt = self.vlm_processor.apply_chat_template(
+                    formatted_messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            elif self.tokenizer.chat_template:
+                text_prompt = self.tokenizer.apply_chat_template(
+                    formatted_messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            else:
+                text_prompt = "\n".join(
+                    f"{msg.get('role', 'user')}: {self._extract_text_from_content(msg.get('content', ''))}"
+                    for msg in formatted_messages
+                )
+
+            processor_inputs = self.vlm_processor(
+                text=text_prompt,
+                images=images,
+                return_tensors="pt",
+            )
+            input_ids = processor_inputs.get("input_ids")
+            if input_ids is None:
+                raise ValueError("Processor did not return input_ids")
+            prompt = input_ids.flatten().tolist()
+
+            pixel_values = processor_inputs.get("pixel_values")
+            image_grid_thw = processor_inputs.get("image_grid_thw")
+
+            vlm_inputs = VLMInputs(
+                pixel_values=pixel_values,
+                image_grid_thw=image_grid_thw,
+                image_sizes=[(img.height, img.width) for img in images],
+                images_processed=False,
+            )
+
+            logger.debug(
+                f"VLM request {rid}: {len(images)} images, "
+                f"input_ids length={len(prompt)}, "
+                f"pixel_values shape={pixel_values.shape if pixel_values is not None else None}"
+            )
+
+            return prompt, vlm_inputs
+
+        except Exception as e:
+            logger.error(f"Failed to process VLM request {rid}: {e}")
+            return self._process_text_request(rid, messages, {}), None
+
+    def _format_messages_for_vlm(self, messages: list) -> list:
+        """
+        Format messages for VLM processing.
+        Keep the original structure so chat template can handle image placeholders correctly.
+        """
+        formatted = []
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                new_content = []
+                for part in content:
+                    if isinstance(part, dict):
+                        if part.get("type") == "text":
+                            new_content.append({"type": "text", "text": part.get("text", "")})
+                        elif part.get("type") == "image_url":
+                            new_content.append({"type": "image"})
+                    elif isinstance(part, str):
+                        new_content.append({"type": "text", "text": part})
+                formatted.append(
+                    {
+                        "role": msg.get("role", "user"),
+                        "content": new_content,
+                    }
+                )
+            else:
+                formatted.append(msg)
+        return formatted
+
+    def _extract_text_from_content(self, content) -> str:
+        """Extract text from message content (handles both string and list formats)."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            texts = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    texts.append(part.get("text", ""))
+                elif isinstance(part, str):
+                    texts.append(part)
+            return " ".join(texts)
+        return str(content)
+
+    # ========== End VLM Processing Methods ==========
 
     def _tensor_parallel_broadcast_pyobj(self, broadcast_obj):
         """Wrapper for broadcast pyobject in TP group using send/recv with explicit sync"""
@@ -395,6 +576,9 @@ class MLXExecutor(BaseExecutor):
             slot_mapping=prepared_inputs.get("slot_mapping"),
             state_slot_mapping=prepared_inputs.get("state_slot_mapping"),
             prefix_lens=prepared_inputs.get("prefix_lens"),  # For RoPE offset in prefix cache
+            # VLM inputs (only present for first peer with VLM model)
+            pixel_values=prepared_inputs.get("pixel_values"),
+            image_grid_thw=prepared_inputs.get("image_grid_thw"),
         )
         mx.eval(hidden_states)
 
@@ -661,6 +845,38 @@ class MLXExecutor(BaseExecutor):
             "prefix_lens": prefix_lens_tensor,  # For RoPE offset calculation
             "actual_processed_lengths": actual_processed_lengths_tensor,  # For correct logit selection
         }
+
+        # VLM support: collect pixel_values and image metadata for first peer
+        if self.is_first_peer and hasattr(self.model_shard, "is_vlm") and self.model_shard.is_vlm:
+            pixel_values_list = []
+            image_grid_thw_list = []
+            has_vlm_inputs = False
+
+            for req in batched_requests:
+                if req.vlm_inputs is not None and req.vlm_inputs.has_images():
+                    has_vlm_inputs = True
+                    pixel_values_list.append(req.vlm_inputs.pixel_values)
+                    if req.vlm_inputs.image_grid_thw is not None:
+                        image_grid_thw_list.append(req.vlm_inputs.image_grid_thw)
+                else:
+                    pixel_values_list.append(None)
+
+            if has_vlm_inputs:
+                # For now, we only support single-image batching where all requests
+                # in the batch either have images or don't have images
+                # TODO: Support mixed batches with proper padding
+                non_none_pixels = [p for p in pixel_values_list if p is not None]
+                if len(non_none_pixels) > 0:
+                    # Concatenate all pixel values along batch dimension
+                    ret["pixel_values"] = mx.concatenate(
+                        [mx.array(p) for p in non_none_pixels], axis=0
+                    )
+                    if image_grid_thw_list:
+                        ret["image_grid_thw"] = mx.concatenate(
+                            [mx.array(g) for g in image_grid_thw_list], axis=0
+                        )
+                    logger.debug(f"VLM batch: pixel_values shape={ret['pixel_values'].shape}")
+
         logger.debug(f"Prepared MLX prefill batch (size={batch_size})")
         return ret
 

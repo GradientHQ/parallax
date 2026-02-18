@@ -25,7 +25,11 @@ def is_mps_available():
 
 
 def is_metal_available():
-    """Check if MLX Metal backend is available"""
+    """Check if MLX Metal backend is available (macOS only)"""
+    import sys
+
+    if sys.platform != "darwin":
+        return False
     try:
         import mlx.core as mx
 

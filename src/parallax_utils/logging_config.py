@@ -6,10 +6,12 @@ import sys
 import threading
 from typing import Optional
 
-__all__ = ["get_logger", "use_parallax_log_handler", "set_log_level"]
+__all__ = ["get_logger", "use_parallax_log_handler", "set_log_level", "set_rank"]
 
 _init_lock = threading.Lock()
 _default_handler: logging.Handler | None = None
+_current_rank: int = 0  # Default to rank 0 (will print logs)
+_rank_filter_enabled: bool = False  # Whether to filter logs by rank
 
 
 class _Ansi:
@@ -138,3 +140,34 @@ def use_parallax_log_handler(for_root: bool = True):
     root = logging.getLogger()
     if _default_handler not in root.handlers:
         root.addHandler(_default_handler)
+
+
+def set_rank(rank: int, enable_filter: bool = True):
+    """
+    Set the current process rank for log filtering.
+
+    When rank filtering is enabled, only rank 0 will print logs.
+    This is useful for multi-GPU (TP/DP) scenarios where you want
+    to avoid duplicate log messages from all processes.
+
+    Args:
+        rank: The rank of the current process (0 for master).
+        enable_filter: If True, only rank 0 will print logs.
+    """
+    global _current_rank, _rank_filter_enabled
+    _current_rank = rank
+    _rank_filter_enabled = enable_filter
+
+    if enable_filter and rank != 0:
+        # Disable logging for non-zero ranks by setting to a high level
+        logging.getLogger().setLevel(logging.CRITICAL + 1)
+
+
+def get_rank() -> int:
+    """Get the current process rank."""
+    return _current_rank
+
+
+def is_rank_zero() -> bool:
+    """Check if the current process is rank 0."""
+    return _current_rank == 0

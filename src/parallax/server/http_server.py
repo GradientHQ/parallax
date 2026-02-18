@@ -46,6 +46,77 @@ from parallax_utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Kimi-K2.5 immutable parameter constraints
+# These parameters are locked to specific values and the API must reject
+# any request that attempts to override them with different values.
+# See: https://github.com/MoonshotAI/Kimi-Vendor-Verifier
+# ---------------------------------------------------------------------------
+_KIMI_K25_CONSTRAINTS = {
+    "think": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "presence_penalty": 0,
+        "frequency_penalty": 0,
+        "n": 1,
+    },
+    "non_think": {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "presence_penalty": 0,
+        "frequency_penalty": 0,
+        "n": 1,
+    },
+}
+
+# Model names that should enforce immutable parameter constraints.
+# Add more model name patterns as needed.
+_KIMI_K25_MODEL_KEYWORDS = ("kimi-k2.5", "kimi_k2.5", "kimi-k2-5")
+
+
+def _is_kimi_k25_model(model_name: str) -> bool:
+    """Check if the model name matches Kimi-K2.5."""
+    name_lower = model_name.lower()
+    return any(kw in name_lower for kw in _KIMI_K25_MODEL_KEYWORDS)
+
+
+def _detect_thinking_mode(request_json: dict) -> bool:
+    """Detect whether the request uses thinking mode."""
+    # opensource format: chat_template_kwargs.thinking
+    ctk = request_json.get("chat_template_kwargs", {})
+    if isinstance(ctk, dict) and ctk.get("thinking"):
+        return True
+    # kimi SaaS format: thinking.type == "enabled"
+    thinking = request_json.get("thinking", {})
+    if isinstance(thinking, dict) and thinking.get("type") == "enabled":
+        return True
+    return False
+
+
+def validate_kimi_k25_params(request_json: dict) -> Optional[str]:
+    """Validate immutable parameters for Kimi-K2.5 models.
+
+    Returns an error message string if validation fails, or None if OK.
+    """
+    model = request_json.get("model", "")
+    if not _is_kimi_k25_model(model):
+        return None  # Not a Kimi-K2.5 model, skip
+
+    is_thinking = _detect_thinking_mode(request_json)
+    mode = "think" if is_thinking else "non_think"
+    constraints = _KIMI_K25_CONSTRAINTS[mode]
+    mode_label = "thinking" if is_thinking else "non-thinking"
+
+    for param, expected in constraints.items():
+        if param in request_json and request_json[param] != expected:
+            return (
+                f"Invalid parameter for {model} ({mode_label} mode): "
+                f"'{param}' must be {expected}, got {request_json[param]}"
+            )
+
+    return None
+
+
 def get_exception_traceback():
     """Traceback function to handle asyncio function errors"""
     etype, value, tb = sys.exc_info()
@@ -76,7 +147,7 @@ class HTTPRequestInfo:
     finish_reason: str = None
     object: str = "chat.completion"
     model: str = "default"
-    create_time: float = 0.0
+    create_time: int = 0
     update_time: float = 0.0
     logprobs: float = None
     matched_stop: int = None
@@ -145,7 +216,7 @@ class HTTPHandler:
         return_probs = request.get("return_probs", False)  # Check if probs requested
         chat_object = "chat.completion.chunk" if stream else "chat.completion"
         detokenizer = self.detokenizer_class(self.tokenizer, self.tokenmap)
-        create_time = time.time()
+        create_time = int(time.time())
         update_time = create_time
         request_info = HTTPRequestInfo(
             id=rid,
@@ -421,7 +492,7 @@ class HTTPHandler:
             if is_finished:
                 if recv_dict.get("abort", False):
                     logger.warning(f"Request {rid} finished with abort")
-                    request_info.finish_reason = "abort"
+                    request_info.finish_reason = "stop"
                 elif recv_dict.get("length", False):
                     logger.debug(f"Request {rid} finished with length")
                     request_info.finish_reason = "length"
@@ -435,7 +506,7 @@ class HTTPHandler:
                     request_info.matched_stop = next_token_id
                 else:
                     logger.debug(f"Request {rid} finished with unknown reason")
-                    request_info.finish_reason = "unknown"
+                    request_info.finish_reason = "stop"
 
                 request_info.is_finish = True
                 if request_info.stream:
@@ -493,6 +564,11 @@ async def v1_chat_completions(raw_request: fastapi.Request):
         request_json = await raw_request.json()
     except Exception as e:
         return create_error_response("Invalid request body, error: ", str(e))
+
+    # Validate immutable parameter constraints (e.g. Kimi-K2.5)
+    param_error = validate_kimi_k25_params(request_json)
+    if param_error is not None:
+        return create_error_response(param_error, "BadRequestError", HTTPStatus.BAD_REQUEST)
 
     # Check if request_json has "rid", otherwise generate new one
     request_id = request_json.get("rid")
