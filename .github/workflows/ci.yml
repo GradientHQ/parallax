@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: '3.11'
+            # Install gpu (sglang) and dev dependencies for Linux
+            extras: 'gpu, dev'
+          - os: macos-latest
+            python-version: '3.11'
+            # Install mac (mlx) and dev dependencies for macOS
+            extras: 'mac, dev'
+
+    steps:
+    - name: Free Disk Space (Ubuntu)
+      if: runner.os == 'Linux'
+      uses: jlumbroso/free-disk-space@v1.3.1
+      with:
+        tool-cache: false
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: false
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check for file changes
+      id: changes
+      uses: dorny/paths-filter@v2
+      with:
+        filters: |
+          src:
+            - 'src/**'
+            - 'tests/**'
+            - 'pyproject.toml'
+
+    - name: Set up Python ${{ matrix.python-version }}
+      if: steps.changes.outputs.src == 'true'
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      if: steps.changes.outputs.src == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-${{ matrix.python-version }}-
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      if: steps.changes.outputs.src == 'true'
+      run: |
+        python -m pip install --upgrade pip
+        # Install extras dependencies based on matrix variable
+        pip install -e ".[${{ matrix.extras }}]"
+
+    - name: Run Unit Tests
+      if: steps.changes.outputs.src == 'true'
+      shell: bash
+      run: |
+        pytest tests/ -v --cov=src/parallax --cov-report=xml
+
+    - name: Upload coverage to Codecov
+      if: steps.changes.outputs.src == 'true' && runner.os == 'macOS'
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+    - name: Run E2E tests (macOS only)
+      if: steps.changes.outputs.src == 'true' && runner.os == 'macOS'
+      shell: bash
+      env:
+        TERM: xterm-256color
+      run: |
+        # Start the server
+        python src/parallax/launch.py \
+          --model-path Qwen/Qwen3-0.6B \
+          --max-num-tokens-per-batch 16384 \
+          --kv-block-size 32 \
+          --max-batch-size 128 \
+          --start-layer 0 \
+          --end-layer 28 &
+        PID=$!
+
+        echo "Waiting for server to start..."
+        # Poll to check if the port is ready (wait up to 120 seconds)
+        for i in {1..60}; do
+          # If curl succeeds (200) or returns 405 (Method Not Allowed), the port is open
+          if curl -s --max-time 5 --connect-timeout 2 -o /dev/null -w "%{http_code}" http://localhost:3000/v1/chat/completions | grep -qE "200|400|405"; then
+             echo "Server is up!"
+             break
+          fi
+
+          # Check if the process is still alive
+          if ! kill -0 $PID 2>/dev/null; then
+             echo "Server process died prematurely"
+             exit 1
+          fi
+
+          if [ $i -eq 60 ]; then
+             echo "Server failed to start within 120 seconds"
+             kill $PID 2>/dev/null
+             exit 1
+          fi
+          sleep 2
+        done
+
+        # Wait additional time to ensure server is fully ready (model loaded, KV cache allocated, etc.)
+        echo "Waiting for server to be fully ready..."
+        sleep 10
+
+        echo "Sending test request..."
+        # Capture the response with increased timeout (5 minutes for model inference)
+        RESPONSE=$(curl --fail --silent --show-error --location \
+          --max-time 300 \
+          --connect-timeout 10 \
+          'http://localhost:3000/v1/chat/completions' \
+          --header 'Content-Type: application/json' \
+          --data '{
+            "messages": [
+              {
+                "role": "user",
+                "content": "What is the capital of France"
+              }
+            ],
+            "stream": false,
+            "max_tokens": 1024,
+            "chat_template_kwargs": {"enable_thinking": false},
+            "sampling_params": {
+                "top_k": 3
+            }
+        }')
+
+        echo "Response received:"
+        echo "$RESPONSE"
+
+        # Check if the response contains "Paris" (case-insensitive)
+        if echo "$RESPONSE" | grep -iq "Paris"; then
+            echo "Test passed: Response contains 'Paris'"
+        else
+            echo "Test failed: Response does not contain 'Paris'"
+            kill $PID 2>/dev/null || true
+            exit 1
+        fi
+
+        # Clean up process
+        kill $PID 2>/dev/null || true

@@ -1,0 +1,870 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Parallax Router - Endpoints</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 20px; }
+      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .pill { padding: 4px 10px; border-radius: 999px; background: rgba(127,127,127,0.15); font-size: 12px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { border-bottom: 1px solid rgba(127,127,127,0.25); padding: 8px 10px; text-align: left; vertical-align: top; }
+      th { position: sticky; top: 0; background: rgba(30,30,30,0.06); }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12px; }
+      .ok { color: #1a7f37; }
+      .bad { color: #d1242f; }
+      .muted { color: rgba(127,127,127,0.9); }
+      button { padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(127,127,127,0.35); background: transparent; cursor: pointer; }
+      button:hover { background: rgba(127,127,127,0.12); }
+      .iconBtn { padding: 4px; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; }
+      .iconBtn svg { width: 14px; height: 14px; opacity: 0.9; }
+      .baseCell { display: flex; align-items: center; gap: 10px; }
+      .baseCell code { overflow-wrap: anywhere; }
+      .baseCell .spacer { flex: 1; }
+      .switch { position: relative; display: inline-block; width: 34px; height: 20px; }
+      .switch input { opacity: 0; width: 0; height: 0; }
+      .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: rgba(127,127,127,0.35); transition: .2s; border-radius: 999px; }
+      .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 2px; top: 2px; background: #fff; transition: .2s; border-radius: 50%; }
+      input:checked + .slider { background: rgba(31,136,61,0.95); }
+      input:checked + .slider:before { transform: translateX(14px); }
+      tr.disabledRow { opacity: 0.55; }
+      .cellCenter { text-align: center; vertical-align: middle; }
+      .actionCol { width: 44px; padding-left: 6px !important; padding-right: 6px !important; }
+      .iconBtn.tiny { width: 20px; height: 20px; padding: 2px; }
+      .iconBtn.tiny svg { width: 12px; height: 12px; }
+      .switch.tiny { width: 28px; height: 16px; }
+      .switch.tiny .slider:before { width: 12px; height: 12px; top: 2px; left: 2px; }
+      .switch.tiny input:checked + .slider:before { transform: translateX(12px); }
+      .primaryBtn { background: #1f883d; border-color: #1f883d; color: #fff; font-weight: 600; }
+      .primaryBtn:hover { background: #1a7f37; border-color: #1a7f37; }
+      .primaryBtn:active { background: #166534; border-color: #166534; }
+      .chartWrap { padding: 10px 10px 14px 10px; }
+      .chartRow { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+      .chartBox {
+        border: 1px solid rgba(127,127,127,0.25);
+        border-radius: 10px;
+        padding: 8px;
+        height: 210px; /* fixed visual height to avoid "stretching" */
+        display: flex;
+        flex-direction: column;
+      }
+      .chartTitle { font-size: 12px; color: rgba(127,127,127,0.9); margin-bottom: 6px; display:flex; justify-content: space-between; }
+      .chartSvg { width: 100%; height: 120px; display: block; }
+      .chartCanvas { width: 100%; flex: 1; display: block; }
+      tr.dataRow { cursor: pointer; }
+      tr.dataRow:hover td { background: rgba(127,127,127,0.06); }
+      .right { margin-left: auto; }
+      .small { font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <h2 style="margin:0">Endpoints</h2>
+      <span id="status" class="pill muted">Loading...</span>
+      <div class="right row">
+        <button id="registerBtn" class="primaryBtn">Register</button>
+        <label class="pill" style="display:inline-flex; align-items:center; gap:8px; user-select:none;">
+          <span>Auto refresh</span>
+          <label class="switch tiny" style="margin:0;" title="Toggle auto refresh" aria-label="Toggle auto refresh">
+            <input id="autoRefreshToggle" type="checkbox" checked>
+            <span class="slider"></span>
+          </label>
+          <span class="muted">(<span id="intervalLabel">1.0</span>s)</span>
+        </label>
+        <button id="refreshBtn">Refresh</button>
+      </div>
+    </div>
+
+    <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 12px;">
+      <div style="border: 1px solid rgba(127,127,127,0.25); border-radius: 12px; padding: 10px 12px;">
+        <div class="row" style="gap: 10px;">
+          <div style="font-weight: 600;">Prob Config</div>
+        </div>
+        <div id="probGrid" style="margin-top: 10px; display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 10px;"></div>
+      </div>
+
+      <div style="border: 1px solid rgba(127,127,127,0.25); border-radius: 12px; padding: 10px 12px;">
+        <div class="row" style="gap: 10px;">
+          <div style="font-weight: 600;">Strategy Config</div>
+          <span id="cfgStatus" class="pill muted">Loading...</span>
+        </div>
+        <div id="strategyTabs" style="margin-top: 10px;"></div>
+        <div id="strategyGrid" style="margin-top: 10px; display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 10px;"></div>
+        <div class="small muted" style="margin-top: 8px;">Edits apply immediately via <code>POST /balancer/config</code>.</div>
+      </div>
+    </div>
+
+    <div class="small muted" style="margin-top:8px">
+      Data source: <code>GET /endpoints</code>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>base_url</th>
+          <th>inflight</th>
+          <th>max_running_request</th>
+          <th>requests</th>
+          <th>errors</th>
+          <th>ema_ttft_ms</th>
+          <th>ema_tpot_ms</th>
+          <th>throughput_tok_s</th>
+          <th class="scoreCol">score</th>
+          <th>status</th>
+          <th>status_error</th>
+          <th>updated</th>
+          <th class="cellCenter actionCol"></th>
+          <th class="cellCenter actionCol"></th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+
+    <script>
+      const intervalMs = 1000;
+      document.getElementById("intervalLabel").textContent = (intervalMs / 1000).toFixed(1);
+      let autoRefreshEnabled = true;
+      let autoTimer = null;
+
+      function normalizeBaseUrl(s) {
+        if (!s) return "";
+        return String(s).trim().replace(/\/+$/, "");
+      }
+
+      const expanded = new Set();
+
+      function setScoreVisibility(show) {
+        const display = show ? "" : "none";
+        for (const el of document.querySelectorAll(".scoreCol")) {
+          el.style.display = display;
+        }
+      }
+
+      function getVisibleColCount() {
+        const ths = document.querySelectorAll("table thead th");
+        let n = 0;
+        for (const th of ths) {
+          const d = window.getComputedStyle(th).display;
+          if (d !== "none") n += 1;
+        }
+        return n;
+      }
+
+      function compressZeroRunsWithIndex(vals, opts) {
+        const minRun = (opts && Number.isFinite(opts.minRun)) ? opts.minRun : 20;
+        if (!Array.isArray(vals) || vals.length === 0) return { vals: [], idx: [] };
+        const outVals = [];
+        const outIdx = [];
+        let i = 0;
+        while (i < vals.length) {
+          const v = vals[i];
+          if (v !== 0) {
+            outVals.push(v);
+            outIdx.push(i);
+            i += 1;
+            continue;
+          }
+          // Zero run [i, j)
+          let j = i;
+          while (j < vals.length && vals[j] === 0) j += 1;
+          const runLen = j - i;
+          if (runLen < minRun) {
+            for (let k = i; k < j; k++) {
+              outVals.push(0);
+              outIdx.push(k);
+            }
+          } else {
+            // Keep the first and last point of this run to compress the visual width,
+            // while still allowing meaningful x-axis labels.
+            outVals.push(0);
+            outIdx.push(i);
+            outVals.push(0);
+            outIdx.push(j - 1);
+          }
+          i = j;
+        }
+        return { vals: outVals, idx: outIdx };
+      }
+
+      function formatHmsFromSec(sec) {
+        const d = new Date(Number(sec) * 1000);
+        const hh = String(d.getHours()).padStart(2, "0");
+        const mm = String(d.getMinutes()).padStart(2, "0");
+        const ss = String(d.getSeconds()).padStart(2, "0");
+        return `${hh}:${mm}:${ss}`;
+      }
+
+      function fmtNum(x) {
+        if (x === null || x === undefined) return "-";
+        if (typeof x === "number") return Number.isFinite(x) ? x.toFixed(1) : String(x);
+        return String(x);
+      }
+
+      function fmtTs(sec) {
+        if (!sec) return "-";
+        const d = new Date(sec * 1000);
+        return d.toLocaleString();
+      }
+
+      async function loadOnce() {
+        const prevScrollX = window.scrollX;
+        const prevScrollY = window.scrollY;
+        const statusEl = document.getElementById("status");
+        const tbody = document.getElementById("tbody");
+        const t0 = performance.now();
+        try {
+          const resp = await fetch("/endpoints", { cache: "no-store" });
+          const text = await resp.text();
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${text}`);
+          const data = JSON.parse(text);
+          const endpoints = Array.isArray(data.endpoints) ? data.endpoints : [];
+
+          const hasScore = endpoints.some((ep) => ep && typeof ep === "object" && ("score" in ep));
+          // Apply first to header so colspan can be computed correctly.
+          setScoreVisibility(hasScore);
+          tbody.innerHTML = "";
+          for (const ep of endpoints) {
+            const m = ep.metrics || {};
+            const enabled = ep.enabled !== false;
+            const ok = m.last_status_ok;
+            let statusText = "unknown";
+            let cls = "muted";
+            if (!enabled) { statusText = "disabled"; cls = "muted"; }
+            else if (ok === true) { statusText = "available"; cls = "ok"; }
+            else if (ok === false) { statusText = "unavailable"; cls = "bad"; }
+
+            const baseUrl = String(ep.base_url || "");
+            const tr = document.createElement("tr");
+            tr.className = "dataRow";
+            if (!enabled) tr.classList.add("disabledRow");
+            tr.setAttribute("data-base-url", baseUrl);
+            tr.innerHTML = `
+              <td>
+                <code>${baseUrl}</code>
+              </td>
+              <td>${m.inflight ?? "-"}</td>
+              <td>${m.max_running_request ?? "-"}</td>
+              <td>${m.total_requests ?? "-"}</td>
+              <td>${m.total_errors ?? "-"}</td>
+              <td>${fmtNum(m.ema_ttft_ms)}</td>
+              <td>${fmtNum(m.ema_tpot_ms)}</td>
+              <td>${fmtNum(m.throughput_tok_s)}</td>
+              <td class="scoreCol">${fmtNum(ep.score)}</td>
+              <td class="${cls}">${statusText}</td>
+              <td class="muted">${m.last_status_error ? String(m.last_status_error) : "-"}</td>
+              <td class="muted">${fmtTs(m.last_status_ts)}</td>
+              <td class="cellCenter actionCol">
+                <button class="iconBtn tiny unregBtn" data-base-url="${baseUrl.replace(/"/g, "&quot;")}" title="Unregister" aria-label="Unregister">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 6h18"></path>
+                    <path d="M8 6V4h8v2"></path>
+                    <path d="M6 6l1 16h10l1-16"></path>
+                    <path d="M10 11v7"></path>
+                    <path d="M14 11v7"></path>
+                  </svg>
+                </button>
+              </td>
+              <td class="cellCenter actionCol">
+                <label class="switch tiny" title="Enable/disable" aria-label="Enable/disable">
+                  <input class="enableToggle" type="checkbox" ${enabled ? "checked" : ""} data-base-url="${baseUrl.replace(/"/g, "&quot;")}">
+                  <span class="slider"></span>
+                </label>
+              </td>
+            `;
+            tbody.appendChild(tr);
+
+            // Expanded row (charts)
+            if (expanded.has(baseUrl)) {
+              const tr2 = document.createElement("tr");
+              tr2.className = "expandRow";
+              const colCount = getVisibleColCount();
+              const samples = Array.isArray(m.request_samples) ? m.request_samples : [];
+              const thr = (m && typeof m === "object") ? m.throughput_series_1h : null;
+              const thrArrFull = thr && Array.isArray(thr.tok_s) ? thr.tok_s : [];
+              const thrWindowSec = 3600; // show last 1 hour by default
+              const thrArrRaw = thrArrFull.length > thrWindowSec ? thrArrFull.slice(-thrWindowSec) : thrArrFull;
+              const thrComp = compressZeroRunsWithIndex(thrArrRaw, { minRun: 20 });
+              const thrStartSec = (thr && Number.isFinite(thr.start_sec)) ? Number(thr.start_sec) : null;
+              tr2.innerHTML = `
+                <td colspan="${colCount}">
+                  <div class="chartWrap">
+                    <div class="chartRow">
+                      <div class="chartBox">
+                        <div class="chartTitle"><span>TTFT (ms)</span><span>${samples.length} pts</span></div>
+                        <canvas class="chartCanvas" data-source="samples" data-kind="ttft_ms" data-chart-key="${baseUrl}::ttft_ms"></canvas>
+                      </div>
+                      <div class="chartBox">
+                        <div class="chartTitle"><span>TPOT (ms)</span><span>${samples.length} pts</span></div>
+                        <canvas class="chartCanvas" data-source="samples" data-kind="tpot_ms" data-chart-key="${baseUrl}::tpot_ms"></canvas>
+                      </div>
+                      <div class="chartBox">
+                        <div class="chartTitle"><span>Throughput (tok/s)</span><span>${thrComp.vals.length} pts (compressed)</span></div>
+                        <canvas class="chartCanvas" data-source="throughput" data-kind="tok_s" data-chart-key="${baseUrl}::throughput" data-start-sec="${thrStartSec === null ? "" : String(thrStartSec)}" data-idx="${thrComp.idx.join(",")}"></canvas>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+              `;
+              tbody.appendChild(tr2);
+
+              // Draw charts
+              for (const canvas of tr2.querySelectorAll(".chartCanvas")) {
+                const kind = canvas.getAttribute("data-kind");
+                const src = canvas.getAttribute("data-source");
+                if (src === "throughput") {
+                  drawChartJsThroughput(canvas, thrComp.vals, thrStartSec);
+                } else {
+                  drawChartJsSamples(canvas, samples, kind);
+                }
+              }
+            }
+          }
+
+          // Apply again after tbody is rebuilt so newly created score cells also follow visibility.
+          setScoreVisibility(hasScore);
+
+          // Click any row to toggle charts (except the delete icon).
+          for (const row of tbody.querySelectorAll("tr.dataRow")) {
+            row.addEventListener("click", async (e) => {
+              if (e.target && e.target.closest && (e.target.closest(".unregBtn") || e.target.closest(".enableToggle") || e.target.closest(".switch"))) return;
+              const baseUrl = normalizeBaseUrl(row.getAttribute("data-base-url"));
+              if (!baseUrl) return;
+              if (expanded.has(baseUrl)) expanded.delete(baseUrl);
+              else expanded.add(baseUrl);
+              await loadOnce();
+            });
+          }
+
+          // Wire enable toggles after render.
+          for (const t of tbody.querySelectorAll(".enableToggle")) {
+            t.addEventListener("click", (e) => e.stopPropagation());
+            t.addEventListener("change", async (e) => {
+              e.stopPropagation();
+              const baseUrl = normalizeBaseUrl(e.currentTarget.getAttribute("data-base-url"));
+              const enabled = !!e.currentTarget.checked;
+              const r = await postJson("/endpoint/enabled", { base_url: baseUrl, enabled });
+              showResultDialog("Set enabled", r);
+              await loadOnce();
+            });
+          }
+
+          // Wire unregister buttons after render.
+          for (const btn of tbody.querySelectorAll(".unregBtn")) {
+            btn.addEventListener("click", async (e) => {
+              e.stopPropagation();
+              const baseUrl = normalizeBaseUrl(e.currentTarget.getAttribute("data-base-url"));
+              if (!baseUrl) return;
+              setActionResult("muted", `Unregistering ${baseUrl}...`);
+              const r = await postJson("/unregister", { base_url: baseUrl });
+              showResultDialog("Unregister", r);
+              if (r.ok) {
+                // Remove row immediately from the table.
+                const tr = e.currentTarget.closest("tr");
+                if (tr) tr.remove();
+                setActionResult("ok", `Unregistered (${r.status})`);
+              } else {
+                setActionResult("bad", `Unregister failed (${r.status})`);
+              }
+            });
+          }
+
+          const dt = performance.now() - t0;
+          statusEl.className = "pill";
+          statusEl.textContent = `OK • ${endpoints.length} endpoints • ${dt.toFixed(0)}ms`;
+
+          // Preserve scroll position across auto refresh re-renders.
+          requestAnimationFrame(() => {
+            const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+            const maxX = Math.max(0, document.documentElement.scrollWidth - window.innerWidth);
+            window.scrollTo(
+              Math.min(prevScrollX, maxX),
+              Math.min(prevScrollY, maxY),
+            );
+          });
+        } catch (e) {
+          statusEl.className = "pill bad";
+          statusEl.textContent = `Error: ${e && e.message ? e.message : e}`;
+        }
+      }
+
+      document.getElementById("refreshBtn").addEventListener("click", loadOnce);
+
+      function startAutoRefresh() {
+        if (autoTimer) return;
+        autoTimer = setInterval(() => {
+          if (!autoRefreshEnabled) return;
+          loadOnce();
+        }, intervalMs);
+      }
+
+      function stopAutoRefresh() {
+        if (!autoTimer) return;
+        clearInterval(autoTimer);
+        autoTimer = null;
+      }
+
+      const autoToggle = document.getElementById("autoRefreshToggle");
+      autoToggle.addEventListener("change", () => {
+        autoRefreshEnabled = !!autoToggle.checked;
+        if (autoRefreshEnabled) startAutoRefresh();
+        else stopAutoRefresh();
+      });
+
+      async function postJson(path, payload) {
+        const resp = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const text = await resp.text();
+        let body;
+        try { body = JSON.parse(text); } catch { body = text; }
+        return { ok: resp.ok, status: resp.status, body };
+      }
+
+      function extractMessage(body) {
+        if (body === null || body === undefined) return "";
+        if (typeof body === "string") return body;
+        if (typeof body === "object") {
+          if (body.detail) return String(body.detail);
+          if (body.error) return String(body.error);
+          try { return JSON.stringify(body); } catch { return String(body); }
+        }
+        return String(body);
+      }
+
+      function showResultDialog(action, result) {
+        const msg = extractMessage(result.body);
+        if (result.ok) return;
+        window.alert(`${action} failed (HTTP ${result.status}).\n\n${msg}`);
+      }
+
+      let cfgTimer = null;
+
+      async function loadConfig() {
+        const el = document.getElementById("cfgStatus");
+        try {
+          const resp = await fetch("/balancer/config", { cache: "no-store" });
+          const txt = await resp.text();
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${txt}`);
+          const data = JSON.parse(txt);
+          // Backend returns { "config": { ... } } for GET /balancer/config.
+          const cfg = (data && data.config) ? data.config : (data || {});
+          el.className = "pill ok";
+          el.textContent = "OK";
+          renderConfigForm(cfg);
+        } catch (e) {
+          el.className = "pill bad";
+          el.textContent = "Error";
+        }
+      }
+
+      function renderConfigForm(cfg) {
+        const probGrid = document.getElementById("probGrid");
+        const tabsHost = document.getElementById("strategyTabs");
+        const strategyGrid = document.getElementById("strategyGrid");
+        probGrid.innerHTML = "";
+        tabsHost.innerHTML = "";
+        strategyGrid.innerHTML = "";
+
+        const strategy = cfg.strategy || "performance";
+        const prob = cfg.prob || {};
+        const scfg = cfg.config || {};
+
+        const available = Array.isArray(cfg.available_strategies) ? cfg.available_strategies : [];
+        const tabs = available
+          .filter((x) => typeof x === "string" && x.trim().length > 0)
+          .map((x) => ({ key: x, label: x }));
+        if (tabs.length === 0) {
+          // If backend doesn't provide the list, still render the current strategy tab.
+          tabs.push({ key: strategy, label: strategy });
+        }
+
+        // Tabs row (inside Strategy Config)
+        const tabRow = document.createElement("div");
+        tabRow.className = "row";
+        tabRow.style.gap = "8px";
+        for (const t of tabs) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.textContent = t.label;
+          b.style.padding = "6px 10px";
+          b.style.borderRadius = "999px";
+          if (t.key === strategy) {
+            b.className = "pill ok";
+            b.style.border = "1px solid rgba(31,136,61,0.55)";
+            b.disabled = true;
+            b.style.cursor = "default";
+          } else {
+            b.className = "pill";
+            b.style.border = "1px solid rgba(127,127,127,0.35)";
+            b.style.cursor = "pointer";
+          }
+          b.addEventListener("click", async () => {
+            if (t.key === strategy) return;
+            await applyConfigPatch({ strategy: t.key });
+          });
+          tabRow.appendChild(b);
+        }
+        tabsHost.appendChild(tabRow);
+
+        const addField = (host, key, type, value, patchBuilder) => {
+          const wrap = document.createElement("div");
+          wrap.style.display = "flex";
+          wrap.style.flexDirection = "column";
+          wrap.style.gap = "6px";
+
+          const label = document.createElement("div");
+          label.className = "small muted";
+          label.textContent = key;
+          wrap.appendChild(label);
+
+          const input = document.createElement("input");
+          input.type = type;
+          input.value = value !== undefined && value !== null ? String(value) : "";
+          input.style.padding = "8px 10px";
+          input.style.borderRadius = "8px";
+          input.style.border = "1px solid rgba(127,127,127,0.35)";
+          input.style.background = "transparent";
+          input.style.color = "inherit";
+          input.addEventListener("input", () => {
+            if (cfgTimer) clearTimeout(cfgTimer);
+            cfgTimer = setTimeout(async () => {
+              const v = (type === "number") ? Number(input.value) : input.value;
+              await applyConfigPatch(patchBuilder(v));
+            }, 250);
+          });
+          wrap.appendChild(input);
+          host.appendChild(wrap);
+        };
+
+        // Prob config (probe)
+        addField(probGrid, "status_check_path", "text", prob.status_check_path, (v) => ({ prob: { status_check_path: v } }));
+        addField(probGrid, "status_check_ttl_sec", "number", prob.status_check_ttl_sec, (v) => ({ prob: { status_check_ttl_sec: v } }));
+        addField(probGrid, "status_check_timeout_sec", "number", prob.status_check_timeout_sec, (v) => ({ prob: { status_check_timeout_sec: v } }));
+
+        // Strategy config fields
+        if (strategy === "performance") {
+          addField(strategyGrid, "ema_alpha", "number", scfg.ema_alpha, (v) => ({ config: { ema_alpha: v } }));
+          addField(strategyGrid, "default_ttft_ms", "number", scfg.default_ttft_ms, (v) => ({ config: { default_ttft_ms: v } }));
+          addField(strategyGrid, "default_tpot_ms", "number", scfg.default_tpot_ms, (v) => ({ config: { default_tpot_ms: v } }));
+          addField(strategyGrid, "inflight_penalty_ms", "number", scfg.inflight_penalty_ms, (v) => ({ config: { inflight_penalty_ms: v } }));
+          addField(strategyGrid, "err_rate_penalty_ms", "number", scfg.err_rate_penalty_ms, (v) => ({ config: { err_rate_penalty_ms: v } }));
+          addField(strategyGrid, "recent_error_window_sec", "number", scfg.recent_error_window_sec, (v) => ({ config: { recent_error_window_sec: v } }));
+          addField(strategyGrid, "recent_error_penalty_ms", "number", scfg.recent_error_penalty_ms, (v) => ({ config: { recent_error_penalty_ms: v } }));
+          addField(strategyGrid, "tpot_weight", "number", scfg.tpot_weight, (v) => ({ config: { tpot_weight: v } }));
+          addField(strategyGrid, "top_k", "number", scfg.top_k, (v) => ({ config: { top_k: v } }));
+          addField(strategyGrid, "explore_ratio", "number", scfg.explore_ratio, (v) => ({ config: { explore_ratio: v } }));
+        } else {
+          const note = document.createElement("div");
+          note.className = "small muted";
+          note.style.marginTop = "6px";
+          note.textContent = "No additional config for this strategy.";
+          strategyGrid.appendChild(note);
+        }
+      }
+
+      async function applyConfigPatch(patch) {
+        const el = document.getElementById("cfgStatus");
+        el.className = "pill muted";
+        el.textContent = "Saving...";
+        const r = await postJson("/balancer/config", patch);
+        if (r.ok) {
+          el.className = "pill ok";
+          el.textContent = "Saved";
+          await loadConfig();
+          await loadOnce();
+        } else {
+          el.className = "pill bad";
+          el.textContent = `Failed (${r.status})`;
+          window.alert(`Config update failed (HTTP ${r.status}).\n\n${extractMessage(r.body)}`);
+        }
+      }
+
+      const chartByCanvas = new WeakMap();
+      function percentile(sorted, p) {
+        if (!sorted.length) return null;
+        const x = (sorted.length - 1) * p;
+        const lo = Math.floor(x);
+        const hi = Math.ceil(x);
+        if (lo === hi) return sorted[lo];
+        const t = x - lo;
+        return sorted[lo] * (1 - t) + sorted[hi] * t;
+      }
+
+      function robustYRange(vals, opts) {
+        const pLow = (opts && Number.isFinite(opts.pLow)) ? opts.pLow : 0.02;
+        const pHigh = (opts && Number.isFinite(opts.pHigh)) ? opts.pHigh : 0.98;
+        const xs = [];
+        for (const v of vals) {
+          if (typeof v === "number" && Number.isFinite(v)) xs.push(v);
+        }
+        if (xs.length === 0) return null;
+        xs.sort((a, b) => a - b);
+        let min = xs[0];
+        let max = xs[xs.length - 1];
+        if (xs.length >= 20) {
+          const lo = percentile(xs, pLow);
+          const hi = percentile(xs, pHigh);
+          if (lo !== null && hi !== null && Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) {
+            min = lo;
+            max = hi;
+          }
+        }
+        if (min === max) {
+          min -= 1;
+          max += 1;
+        }
+        const pad = (max - min) * 0.08;
+        return { min: min - pad, max: max + pad };
+      }
+
+      function chartJsBaseOptions(yTitle, yRange) {
+        return {
+          responsive: true,
+          maintainAspectRatio: false,
+          // Completely disable any animation/transitions to avoid "always animating" on 1s refresh.
+          animation: false,
+          responsiveAnimationDuration: 0,
+          animations: false,
+          transitions: {
+            active: { animation: { duration: 0 } },
+            resize: { animation: { duration: 0 } },
+            show: { animations: {} },
+            hide: { animations: {} },
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: { enabled: true },
+          },
+          elements: {
+            line: {
+              tension: 0.35,
+              cubicInterpolationMode: "monotone",
+              borderWidth: 2,
+            },
+            point: { radius: 1.5, hitRadius: 6 },
+          },
+          scales: {
+            x: {
+              ticks: { maxTicksLimit: 8, autoSkip: true, color: "rgba(127,127,127,0.9)" },
+              grid: { color: "rgba(127,127,127,0.15)" },
+            },
+            y: {
+              ticks: { color: "rgba(127,127,127,0.9)" },
+              grid: { color: "rgba(127,127,127,0.15)" },
+              min: yRange ? yRange.min : undefined,
+              max: yRange ? yRange.max : undefined,
+              title: yTitle ? { display: true, text: yTitle, color: "rgba(127,127,127,0.9)" } : undefined,
+            },
+          },
+        };
+      }
+
+      function drawChartJsSamples(canvas, samples, kind) {
+        if (!window.Chart) return;
+        const labels = [];
+        const data = [];
+        for (const s of samples) {
+          const ts = s && typeof s === "object" ? s.ts : null;
+          const v = s && typeof s === "object" ? s[kind] : null;
+          if (typeof v !== "number" || !Number.isFinite(v)) continue;
+          if (typeof ts === "number" && Number.isFinite(ts)) labels.push(formatHmsFromSec(ts));
+          else labels.push("");
+          data.push(v);
+        }
+        if (data.length === 0) {
+          canvas.replaceWith(document.createTextNode("No data"));
+          return;
+        }
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const prev = chartByCanvas.get(canvas);
+        if (prev) prev.destroy();
+        const yRange = robustYRange(data, { pLow: 0.02, pHigh: 0.98 });
+        const ch = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {
+                data,
+                borderColor: "rgba(31,136,61,0.9)",
+                backgroundColor: "rgba(31,136,61,0.15)",
+                fill: false,
+              },
+            ],
+          },
+          options: chartJsBaseOptions(kind, yRange),
+        });
+        // Force a non-animated render (scale changes included).
+        ch.update("none");
+        chartByCanvas.set(canvas, ch);
+      }
+
+      function drawChartJsThroughput(canvas, tokS, startSec) {
+        if (!window.Chart) return;
+        const idxStr = canvas.getAttribute("data-idx") || "";
+        const idx = idxStr ? idxStr.split(",").map((x) => Number(x)).filter((x) => Number.isFinite(x)) : null;
+        const labels = [];
+        const data = [];
+        for (let i = 0; i < tokS.length; i++) {
+          const v = tokS[i];
+          if (typeof v !== "number" || !Number.isFinite(v)) continue;
+          if (startSec !== null && Number.isFinite(startSec) && idx && idx.length === tokS.length) {
+            labels.push(formatHmsFromSec(startSec + idx[i]));
+          } else if (startSec !== null && Number.isFinite(startSec)) {
+            labels.push(formatHmsFromSec(startSec + i));
+          } else {
+            labels.push(String(i));
+          }
+          data.push(v);
+        }
+        if (data.length === 0) {
+          canvas.replaceWith(document.createTextNode("No data"));
+          return;
+        }
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const prev = chartByCanvas.get(canvas);
+        if (prev) prev.destroy();
+        const yRange = robustYRange(data, { pLow: 0.02, pHigh: 0.98 });
+        const ch = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {
+                data,
+                borderColor: "rgba(31,136,61,0.9)",
+                backgroundColor: "rgba(31,136,61,0.15)",
+                fill: false,
+              },
+            ],
+          },
+          options: chartJsBaseOptions("tok/s", yRange),
+        });
+        // Force a non-animated render (scale changes included).
+        ch.update("none");
+        chartByCanvas.set(canvas, ch);
+      }
+
+      function drawChart(svg, samples, kind) {
+        const width = 360;
+        const height = 120;
+        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+        const vals = [];
+        for (const s of samples) {
+          const v = s && typeof s === "object" ? s[kind] : null;
+          if (typeof v === "number" && Number.isFinite(v)) vals.push(v);
+        }
+        if (vals.length === 0) {
+          const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          t.setAttribute("x", "8");
+          t.setAttribute("y", "18");
+          t.setAttribute("fill", "rgba(127,127,127,0.9)");
+          t.setAttribute("font-size", "12");
+          t.textContent = "No data";
+          svg.appendChild(t);
+          return;
+        }
+
+        const padLeft = 38;
+        const padRight = 10;
+        const padTop = 10;
+        const padBottom = 18;
+        const minY = Math.min(...vals);
+        const maxY = Math.max(...vals);
+        const spanY = Math.max(maxY - minY, 1e-6);
+
+        // Grid + y-axis labels (max/mid/min)
+        const ticks = [
+          { v: maxY, label: maxY.toFixed(1) },
+          { v: (maxY + minY) / 2, label: ((maxY + minY) / 2).toFixed(1) },
+          { v: minY, label: minY.toFixed(1) },
+        ];
+        for (const t of ticks) {
+          const y = padTop + (1 - (t.v - minY) / spanY) * (height - padTop - padBottom);
+          const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          line.setAttribute("x1", String(padLeft));
+          line.setAttribute("x2", String(width - padRight));
+          line.setAttribute("y1", y.toFixed(2));
+          line.setAttribute("y2", y.toFixed(2));
+          line.setAttribute("stroke", "rgba(127,127,127,0.20)");
+          line.setAttribute("stroke-width", "1");
+          svg.appendChild(line);
+
+          const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          text.setAttribute("x", "2");
+          text.setAttribute("y", (y + 4).toFixed(2));
+          text.setAttribute("fill", "rgba(127,127,127,0.9)");
+          text.setAttribute("font-size", "11");
+          text.textContent = t.label;
+          svg.appendChild(text);
+        }
+
+        const points = [];
+        const n = samples.length;
+        for (let i = 0; i < n; i++) {
+          const v = samples[i] && typeof samples[i] === "object" ? samples[i][kind] : null;
+          if (typeof v !== "number" || !Number.isFinite(v)) continue;
+          const x = padLeft + (i / Math.max(n - 1, 1)) * (width - padLeft - padRight);
+          const y = padTop + (1 - (v - minY) / spanY) * (height - padTop - padBottom);
+          points.push([x, y]);
+        }
+        if (points.length === 0) return;
+
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        let d = `M ${points[0][0].toFixed(2)} ${points[0][1].toFixed(2)}`;
+        for (let i = 1; i < points.length; i++) {
+          d += ` L ${points[i][0].toFixed(2)} ${points[i][1].toFixed(2)}`;
+        }
+        path.setAttribute("d", d);
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "rgba(31,136,61,0.9)");
+        path.setAttribute("stroke-width", "2");
+        svg.appendChild(path);
+
+        for (const [x, y] of points) {
+          const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          c.setAttribute("cx", x.toFixed(2));
+          c.setAttribute("cy", y.toFixed(2));
+          c.setAttribute("r", "2.6");
+          c.setAttribute("fill", "rgba(31,136,61,0.95)");
+          svg.appendChild(c);
+        }
+      }
+
+      function setActionResult(kind, msg) {
+        // No-op: action status pill removed from UI.
+      }
+
+      document.getElementById("registerBtn").addEventListener("click", async () => {
+        const input = window.prompt("Enter base_url (e.g. http://127.0.0.1:3001):", "");
+        const baseUrl = normalizeBaseUrl(input);
+        if (!baseUrl) {
+          setActionResult("muted", "Cancelled");
+          return;
+        }
+        setActionResult("muted", "Registering...");
+        const r = await postJson("/register", { base_url: baseUrl });
+        showResultDialog("Register", r);
+        if (r.ok) {
+          setActionResult("ok", `Registered (${r.status})`);
+          await loadOnce();
+        } else {
+          setActionResult("bad", `Register failed (${r.status})`);
+        }
+      });
+
+      loadOnce();
+      loadConfig();
+      startAutoRefresh();
+    </script>
+  </body>
+</html>

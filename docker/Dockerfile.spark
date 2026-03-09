@@ -1,0 +1,14 @@
+FROM lmsysorg/sglang:spark
+
+ENV SGLANG_ENABLE_JIT_DEEPGEMM=0
+
+WORKDIR /parallax
+
+COPY README.md ./README.md
+COPY src ./src
+COPY pyproject.toml ./pyproject.toml
+
+# remove sglang[all] from pyproject.toml
+RUN sed -i '/sglang\[all\]/d' pyproject.toml
+
+RUN pip install -e '.[gpu]' --break-system-packages

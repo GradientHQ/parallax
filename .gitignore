@@ -1,0 +1,14 @@
+.idea/
+*.iml
+# .vscode/
+*~
+__pycache__/
+*.egg-info/
+build/
+# dist/
+.venv
+.DS_Store
+*.key
+.cache
+.vscode/
+hosts.json

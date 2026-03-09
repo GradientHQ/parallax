@@ -1,0 +1,1 @@
+*,*:before,*:after{box-sizing:border-box}:root{font-size:16px}html,body,#root{position:relative;width:100vw;height:100vh;margin:0;padding:0;overflow:hidden}input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{-webkit-appearance:none}input[type=number]{-moz-appearance:textfield}

@@ -1,0 +1,60 @@
+// python -m grpc_tools.protoc -I. --python_out=.  src/parallax/p2p/proto/forward.proto
+
+syntax = "proto3";
+package gradient;
+
+enum ForwardMode {
+  EXTEND = 0;
+  DECODE = 1;
+  MIXED = 2;
+}
+
+message ForwardRequest {
+  ForwardMode forward_mode = 1;
+  repeated Req reqs = 2;
+}
+
+message ForwardResponse {
+}
+
+
+message AbortRequest {
+  repeated Req reqs = 1;
+}
+
+message AbortResponse {
+}
+
+message Req {
+  string rid = 1;
+  int32 output_length = 2;
+  repeated string routing_table = 3;
+
+  repeated int32 input_ids = 4;
+  SamplingParams sampling_params = 5;
+
+  int32 next_token_id = 6;
+  bytes hidden_states = 7;
+  string lora_path = 8;
+  optional float token_prob = 9;  // Probability value for the sampled token
+  bool return_probs = 10;  // Whether to return probabilities
+}
+
+message SamplingParams {
+  int32 max_new_tokens = 1;
+  int32 min_new_tokens = 2;
+  float temperature = 3;
+  float top_p = 4;
+  float min_p = 5;
+  int32 top_k = 6;
+  repeated int32 stop_token_ids = 7;
+  bool ignore_eos = 8;
+  repeated string stop_strs = 9;
+  float repetition_penalty = 10;
+  float presence_penalty = 11;
+  float frequency_penalty = 12;
+  string json_schema = 13;
+  bool logprobs = 14;
+  optional int32 top_logprobs = 15;
+  map<int32, float> logit_bias = 16;
+}
