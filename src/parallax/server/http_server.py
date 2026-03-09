@@ -46,6 +46,36 @@ from parallax_utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+def _decode_token_safe(tokenizer, token_id: int) -> str:
+    """Decode a single token ID to string; fallback on decode/UTF-8 errors (e.g. mid-sequence truncation)."""
+    try:
+        s = tokenizer.decode([token_id])
+        if s is None:
+            return ""
+        if isinstance(s, bytes):
+            s = s.decode("utf-8", errors="replace")
+        return str(s)
+    except Exception:
+        return ""
+
+
+def _build_logprobs_content_entry(
+    tokenizer,
+    token_id: int,
+    chosen_logprob: float,
+    top_logprobs_dict: Dict[int, float],
+) -> Dict[str, Any]:
+    """Build one OpenAI-style content entry: {token, logprob, top_logprobs}."""
+    token_str = _decode_token_safe(tokenizer, token_id)
+    entry: Dict[str, Any] = {"token": token_str, "logprob": chosen_logprob}
+    if top_logprobs_dict:
+        entry["top_logprobs"] = [
+            {"token": _decode_token_safe(tokenizer, tid), "logprob": lp}
+            for tid, lp in sorted(top_logprobs_dict.items(), key=lambda x: -x[1])
+        ]
+    return entry
+
+
 def get_exception_traceback():
     """Traceback function to handle asyncio function errors"""
     etype, value, tb = sys.exc_info()
@@ -78,7 +108,8 @@ class HTTPRequestInfo:
     model: str = "default"
     create_time: float = 0.0
     update_time: float = 0.0
-    logprobs: float = None
+    logprobs: Optional[bool] = None  # Whether to return logprobs (OpenAI request field)
+    top_logprobs: Optional[int] = None  # Number of top logprobs per token (0-20)
     matched_stop: int = None
     # usage
     prompt_tokens: int = 0
@@ -95,6 +126,8 @@ class HTTPRequestInfo:
     return_probs: bool = False  # Whether to return probabilities
     probs_list: List = field(default_factory=list)  # Store probs for each token
     token_ids_list: List = field(default_factory=list)  # Store token IDs for each token
+    # OpenAI-style logprobs: list of content entries (one per generated token)
+    logprobs_content_list: List[Dict[str, Any]] = field(default_factory=list)
     routed_experts: Optional[List] = None  # Routed experts for rollout replay
     # Weight version for RL
     weight_version: Optional[int] = None
@@ -142,7 +175,11 @@ class HTTPHandler:
         rid = request["rid"]
         stream = request.get("stream", False)
         model = request.get("model", "default")
-        return_probs = request.get("return_probs", False)  # Check if probs requested
+        return_probs = request.get("return_probs", False)
+        logprobs = request.get("logprobs", False)
+        top_logprobs = request.get("top_logprobs")
+        if logprobs is True and top_logprobs is None:
+            top_logprobs = 0
         chat_object = "chat.completion.chunk" if stream else "chat.completion"
         detokenizer = self.detokenizer_class(self.tokenizer, self.tokenmap)
         create_time = time.time()
@@ -156,6 +193,8 @@ class HTTPHandler:
             update_time=update_time,
             detokenizer=detokenizer,
             return_probs=return_probs,
+            logprobs=bool(logprobs),
+            top_logprobs=int(top_logprobs) if top_logprobs is not None else None,
         )
         request_info.tool_state = ToolCallState.from_tokenizer(
             self.tokenizer, request.get("tools"), stream
@@ -170,11 +209,17 @@ class HTTPHandler:
 
     def send_request(self, request: Dict):
         """Sends the request to model executor using IPC."""
-        # Ensure return_probs is included in the request sent to executor
         rid = request.get("rid")
         if rid and rid in self.processing_requests:
             request_info = self.processing_requests[rid]
             request["return_probs"] = request_info.return_probs
+            if request_info.logprobs:
+                request["logprobs"] = True
+                if request_info.top_logprobs is not None:
+                    request["top_logprobs"] = request_info.top_logprobs
+            sp = request.setdefault("sampling_params", {})
+            sp["logprobs"] = request_info.logprobs
+            sp["top_logprobs"] = request_info.top_logprobs
         self.send_to_executor.send_pyobj(request)
 
     def abort_request(self, request_id: str):
@@ -210,17 +255,24 @@ class HTTPHandler:
             if "minimax-m2" in self.model_path_str.lower():
                 content = "<think>"
             tool_calls = None
+            stream_logprobs = None
         elif is_last:
             role = None
             content = None
             tool_calls = None
+            stream_logprobs = None
         else:
             role = None
             content = token
             tool_calls = None
+            stream_logprobs = None
             if isinstance(token, dict) and token.get("type") == "tool_calls":
                 content = None
                 tool_calls = token.get("tool_calls")
+            elif isinstance(token, dict) and "content" in token:
+                content = token.get("content")
+                if token.get("logprobs") is not None:
+                    stream_logprobs = {"content": [token["logprobs"]]}
 
         response = {
             "id": rid,
@@ -230,7 +282,6 @@ class HTTPHandler:
             "choices": [
                 {
                     "index": 0,
-                    "logprobs": request_info.logprobs,
                     "finish_reason": request_info.finish_reason if is_last else None,
                     "matched_stop": request_info.matched_stop,
                 },
@@ -242,14 +293,15 @@ class HTTPHandler:
             },
         }
         choice = response["choices"][0]
+        if stream_logprobs is not None:
+            choice["logprobs"] = stream_logprobs
         delta = {"role": role, "content": content}
         if tool_calls is not None:
             delta["tool_calls"] = tool_calls
         choice["delta"] = delta
-        # Add probs in the last chunk if requested (convert to object array format)
         if is_last and request_info.return_probs:
             choice["probs"] = [
-                {self.tokenizer.decode([token_id]): prob}
+                {_decode_token_safe(self.tokenizer, token_id): prob}
                 for token_id, prob in zip(request_info.token_ids_list, request_info.probs_list)
             ]
             choice["token_ids"] = request_info.token_ids_list
@@ -304,7 +356,6 @@ class HTTPHandler:
             "choices": [
                 {
                     "index": 0,
-                    "logprobs": request_info.logprobs,
                     "finish_reason": request_info.finish_reason,
                     "matched_stop": request_info.matched_stop,
                 },
@@ -322,10 +373,11 @@ class HTTPHandler:
             "reasoning_content": None,
             "tool_calls": request_info.tool_calls or None,
         }
-        # Add probs if requested (convert to object array format)
+        if request_info.logprobs_content_list:
+            choice["logprobs"] = {"content": request_info.logprobs_content_list}
         if request_info.return_probs:
             choice["probs"] = [
-                {self.tokenizer.decode([token_id]): prob}
+                {_decode_token_safe(self.tokenizer, token_id): prob}
                 for token_id, prob in zip(request_info.token_ids_list, request_info.probs_list)
             ]
             choice["token_ids"] = request_info.token_ids_list
@@ -402,6 +454,36 @@ class HTTPHandler:
                 request_info.probs_list.append(recv_dict["probs"])
                 request_info.token_ids_list.append(next_token_id)
 
+            # Build and store OpenAI-style logprobs content entry if present (with fallback on error)
+            logprobs_entry = None
+            if request_info.logprobs and "logprobs" in recv_dict:
+                try:
+                    lp = recv_dict["logprobs"]
+                    if not isinstance(lp, dict):
+                        raise TypeError("logprobs payload is not a dict")
+                    chosen_logprob = lp.get("chosen_logprob")
+                    raw_top = lp.get("top_logprobs_dict") or {}
+                    top_logprobs_dict = {}
+                    for k, v in raw_top.items():
+                        try:
+                            top_logprobs_dict[int(k)] = float(v)
+                        except (TypeError, ValueError):
+                            continue
+                    if chosen_logprob is not None:
+                        logprobs_entry = _build_logprobs_content_entry(
+                            self.tokenizer,
+                            next_token_id,
+                            float(chosen_logprob),
+                            top_logprobs_dict,
+                        )
+                        request_info.logprobs_content_list.append(logprobs_entry)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to build logprobs entry for token %s, skipping logprobs for this token: %s",
+                        next_token_id,
+                        e,
+                    )
+
             is_finished = (
                 recv_dict.get("eos", False)
                 or recv_dict.get("length", False)
@@ -410,12 +492,13 @@ class HTTPHandler:
 
             # Only process and send non-EOS tokens
             if not is_finished and len(output) > 0:
-                # Accumulate full text for non-streaming and potentially for logging
                 request_info.text += output
 
-                # For streaming, put the individual token into the queue.
                 if request_info.stream:
-                    await request_info.token_queue.put(output)
+                    if logprobs_entry is not None:
+                        await request_info.token_queue.put({"content": output, "logprobs": logprobs_entry})
+                    else:
+                        await request_info.token_queue.put(output)
 
             # If it is the end of the stream, update status and send sentinel
             if is_finished:

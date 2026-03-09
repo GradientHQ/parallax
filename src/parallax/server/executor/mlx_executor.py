@@ -3,6 +3,7 @@ MLX-LM backend implementation of high level executor
 """
 
 import logging
+import math
 import pickle
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -341,9 +342,14 @@ class MLXExecutor(BaseExecutor):
                         if original_req.status == RequestStatus.FINISHED_ABORT:
                             req_dict["abort"] = True
 
-                        # Add prob value for the sampled token (if requested and available)
                         if original_req.return_probs and req.token_prob is not None:
                             req_dict["probs"] = req.token_prob
+                        if getattr(req, "token_logprobs", None) is not None:
+                            entry = req.token_logprobs
+                            req_dict["logprobs"] = {
+                                "chosen_logprob": entry.chosen_logprob,
+                                "top_logprobs_dict": entry.top_logprobs_dict,
+                            }
                         if self.enable_weight_refit:
                             req_dict["weight_version"] = self.weight_version
                         if hasattr(self, "send_to_ipc_socket"):
@@ -461,9 +467,15 @@ class MLXExecutor(BaseExecutor):
 
             # For MLX, hidden_states at last shard is already logits (after lm_head)
             # hidden_states shape: [batch_size, seq_len, vocab_size]
-            token_ids = mx.array(
-                self.model_shard.logits_to_tokens(hidden_states, lengths, sampling_info)
+            out = self.model_shard.logits_to_tokens(
+                hidden_states, lengths, sampling_info
             )
+            if isinstance(out, tuple):
+                token_ids, logprobs_info = out
+                token_ids = mx.array(token_ids)
+            else:
+                token_ids = mx.array(out)
+                logprobs_info = None
 
             needs_probs = any(
                 (isinstance(req, InitialRequest) and req.return_probs)
@@ -472,31 +484,30 @@ class MLXExecutor(BaseExecutor):
             )
 
             token_probs = None
-            if needs_probs:
-                # Extract probability values for sampled tokens
+            if needs_probs and logprobs_info is None:
+                # Fallback: extract probability values when sampler did not return logprobs
                 try:
-                    # Get last position logits for each request
                     batch_probs = []
                     for i, req in enumerate(requests):
                         if lengths[i] > 0:
-                            # Get logit at last position
                             last_idx = int(lengths[i]) - 1
-                            last_logits = hidden_states[i, last_idx, :]  # [vocab_size]
+                            last_logits = hidden_states[i, last_idx, :]
                             probs = last_logits / sampling_info.temperatures.reshape(-1, 1)
-                            probs[:] = mx.softmax(probs, axis=-1)
-                            # logit_value = float(last_logits[token_id])
-                            # batch_logits.append(logit_value)
-                            # Extract probability for the sampled token
+                            probs = mx.softmax(probs, axis=-1)
                             token_id = int(token_ids[i])
                             batch_probs.append(float(probs[i, token_id]))
-
                     token_probs = batch_probs if batch_probs else None
                 except Exception as e:
                     logger.debug(f"Failed to extract token probs: {e}")
-                    token_probs = None
+            elif logprobs_info is not None:
+                token_probs = [
+                    math.exp(entry.chosen_logprob) for entry in logprobs_info
+                ]
 
-            # Return dict with token_ids and optional probs
-            return {"hidden_states": token_ids, "probs": token_probs}
+            result = {"hidden_states": token_ids, "probs": token_probs}
+            if logprobs_info is not None:
+                result["logprobs"] = logprobs_info
+            return result
         # Intermediate peer: return hidden states without probs
         return {"hidden_states": hidden_states, "probs": None}
 

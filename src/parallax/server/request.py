@@ -268,6 +268,7 @@ class IntermediateRequest(Request):
         lora_path: Optional[str] = None,
         token_prob: Optional[float] = None,
         return_probs: bool = False,
+        token_logprobs: Optional[Any] = None,
     ):
         super().__init__(
             request_id=request_id,
@@ -277,12 +278,6 @@ class IntermediateRequest(Request):
             sampling_params=sampling_params,
             lora_path=lora_path,
         )
-        # Hidden states from the previous peer's computation.
-        # Shape:
-        #   prefill: (prompt_len, hidden_dim)
-        #   decode: (1, hidden_dim)
-        # For data sent from Last Peer to First Peer, this can also be a single token_id
-        # wrapped in a numpy array, e.g., np.array([token_id]).
         if not self.is_finished and hidden_states is None:
             raise ValueError(f"hidden_states cannot be None for unfinished request {request_id}.")
 
@@ -291,6 +286,7 @@ class IntermediateRequest(Request):
         self.next_token_id = next_token_id
         self.token_prob = token_prob
         self.return_probs = return_probs
+        self.token_logprobs = token_logprobs
 
     @property
     def input_length(self) -> int:
