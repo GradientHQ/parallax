@@ -144,6 +144,13 @@ class Scheduler:
         """Check if there is a full pipeline among ACTIVE nodes."""
         return self.node_manager.has_full_pipeline(self.num_layers)
 
+    def report_pipeline_capacity(
+        self,
+        ready_only: bool = True,
+    ) -> Tuple[Optional[Dict[int, Tuple[int, int]]], int, int]:
+        """Backward-compatible capacity report delegated to ``NodeManager``."""
+        return self.node_manager.report_pipeline_capacity(ready_only=ready_only)
+
     def bootstrap(self, reboot: bool = False) -> bool:
         """Initial Node Allocation Assignment."""
         logger.info("[Scheduler] Starting Bootstrap")
