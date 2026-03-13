@@ -36,13 +36,13 @@ int kv_head_idx = head_idx / (_num_heads / _num_kv_heads);
 // Q: [batch, num_heads, k_head_dim]
 // Thread i loads elements i, i+32, ...
 
-// Support up to 256 head dim (8 * 32)
-float q_vec[8] = {0.0f};
+// Support up to 640 head dim (20 * 32)
+float q_vec[20] = {0.0f};
 
 int q_offset = batch_idx * _num_heads * _k_head_dim + head_idx * _k_head_dim;
 
 for (int i = tid.x; i < _k_head_dim; i += 32) {
-  if (i < 256) {
+  if (i < 640) {
     q_vec[i / 32] = queries[q_offset + i];
   }
 }
@@ -50,7 +50,7 @@ for (int i = tid.x; i < _k_head_dim; i += 32) {
 // Running statistics for Softmax
 float m_i = -INFINITY;
 float l_i = 0.0f;
-float acc_vec[8] = {0.0f};
+float acc_vec[20] = {0.0f};
 
 int context_len = context_lengths[batch_idx];
 int num_context_blocks = (context_len + _block_size - 1) / _block_size;
@@ -86,7 +86,7 @@ for (int b = 0; b < num_context_blocks; b++) {
       // offset inside block: t * k_head_dim + i
       float k_val = key_cache[k_block_base + t * _k_head_dim + i];
 
-      if (i < 256) {
+      if (i < 640) {
         score += q_vec[i / 32] * k_val;
       }
     }
@@ -106,7 +106,7 @@ for (int b = 0; b < num_context_blocks; b++) {
     // Accumulate V
     for (int i = tid.x; i < _v_head_dim; i += 32) {
       float v_val = value_cache[v_block_base + t * _v_head_dim + i];
-      if (i < 256) {
+      if (i < 640) {
         acc_vec[i / 32] = acc_vec[i / 32] * alpha + v_val * beta;
       }
     }
@@ -114,14 +114,14 @@ for (int b = 0; b < num_context_blocks; b++) {
 }
 
 // Finalize Output
-for (int i = 0; i < 8; i++) {
+for (int i = 0; i < 20; i++) {
   acc_vec[i] /= l_i;
 }
 
 int out_offset = batch_idx * _num_heads * _v_head_dim + head_idx * _v_head_dim;
 
 for (int i = tid.x; i < _v_head_dim; i += 32) {
-  if (i < 256) {
+  if (i < 640) {
     output[out_offset + i] = ({{T}})acc_vec[i / 32];
   }
 }

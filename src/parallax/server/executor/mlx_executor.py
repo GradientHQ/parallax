@@ -142,13 +142,32 @@ class MLXExecutor(BaseExecutor):
         )
         qk_nope_head_dim = self.config.get("qk_nope_head_dim", None)
         qk_rope_head_dim = self.config.get("qk_rope_head_dim", None)
+        kv_lora_rank = self.config.get("kv_lora_rank", None)
+        v_head_dim = self.config.get("v_head_dim", head_dim)
+        model_type = self.config.get("model_type", "")
+
+        # KV cache dimensions: default to head_dim / v_head_dim / num_key_value_heads,
+        # but override for MLA models based on their cache storage format.
+        cache_head_dim = head_dim
+        cache_head_dim_v = v_head_dim
+        cache_num_kv_heads = num_key_value_heads
+
         if qk_nope_head_dim is not None and qk_rope_head_dim is not None:
             logger.debug(
                 f"qk_nope_head_dim={qk_nope_head_dim}, qk_rope_head_dim={qk_rope_head_dim}"
             )
-            head_dim = qk_nope_head_dim + qk_rope_head_dim
-
-        v_head_dim = self.config.get("v_head_dim", None)
+            if model_type in ("glm4_moe_lite",) and kv_lora_rank is not None:
+                # MLA without kv_b_proj: cache stores compressed latent KV (1 head)
+                cache_head_dim = kv_lora_rank + qk_rope_head_dim
+                cache_head_dim_v = kv_lora_rank
+                cache_num_kv_heads = 1
+            else:
+                # MLA with kv_b_proj (DeepSeek V3/V2): cache stores expanded per-head KV
+                cache_head_dim = qk_nope_head_dim + qk_rope_head_dim
+            logger.debug(
+                f"MLA cache ({model_type}): key_dim={cache_head_dim}, "
+                f"value_dim={cache_head_dim_v}, num_kv_heads={cache_num_kv_heads}"
+            )
         linear_key_head_dim = self.config.get("linear_key_head_dim", None)
         linear_value_head_dim = self.config.get("linear_value_head_dim", None)
         linear_conv_kernel_dim = self.config.get("linear_conv_kernel_dim", None)
@@ -189,12 +208,12 @@ class MLXExecutor(BaseExecutor):
         )
         self.cache_manager = CacheManager(
             num_layers=self.num_shard_layers,
-            num_kv_heads=num_key_value_heads // tp_size,
-            head_dim=head_dim,
+            num_kv_heads=cache_num_kv_heads // tp_size,
+            head_dim=cache_head_dim,
             dtype=self.dtype,
             block_size=kv_block_size,
             cache_memory_fraction=kv_cache_memory_fraction,
-            head_dim_v=v_head_dim,
+            head_dim_v=cache_head_dim_v,
             index_head_dim=index_head_dim,
             index_n_heads=index_n_heads,
             layer_types=layer_types,
