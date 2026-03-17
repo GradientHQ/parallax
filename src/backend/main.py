@@ -111,6 +111,27 @@ async def openai_v1_chat_completions(raw_request: Request):
     return await request_handler.v1_chat_completions(request_data, request_id, received_ts)
 
 
+@app.get("/v1/models")
+async def openai_v1_models():
+    model_name = scheduler_manage.get_model_name() if scheduler_manage is not None else None
+    data = []
+    if model_name:
+        data.append(
+            {
+                "id": model_name,
+                "object": "model",
+                "owned_by": "parallax",
+            }
+        )
+    return JSONResponse(
+        content={
+            "object": "list",
+            "data": data,
+        },
+        status_code=200,
+    )
+
+
 # Disable caching for index.html
 @app.get("/")
 async def serve_index():

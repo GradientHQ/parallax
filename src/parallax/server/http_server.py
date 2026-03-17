@@ -104,11 +104,29 @@ class HTTPHandler:
         self.send_to_executor = get_zmq_socket(context, zmq.PUSH, executor_input_ipc_name, True)
         self.recv_from_executor = get_zmq_socket(context, zmq.PULL, executor_output_ipc_name, True)
         self.processing_requests: Dict[str, HTTPRequestInfo] = {}
+        self.model_path_str = model_path_str
         # Load tokenizer for separate detokenizers
         model_path, _ = get_model_path(model_path_str)
         config = load_config(model_path)
         self.tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
         self.detokenizer_class, self.tokenmap = load_detokenizer(model_path, self.tokenizer)
+
+    def build_models_response(self):
+        """Return an OpenAI-style model list for the currently served model."""
+        model_id = str(self.model_path_str or "").strip()
+        data = []
+        if model_id:
+            data.append(
+                {
+                    "id": model_id,
+                    "object": "model",
+                    "owned_by": "parallax",
+                }
+            )
+        return {
+            "object": "list",
+            "data": data,
+        }
 
     def create_request(self, request: Dict):
         """Creates a new request information"""
@@ -400,6 +418,12 @@ async def v1_chat_completions(raw_request: fastapi.Request):
 async def openai_v1_chat_completions(raw_request: fastapi.Request):
     """OpenAI v1/chat/complete post function"""
     return await v1_chat_completions(raw_request)
+
+
+@app.get("/v1/models")
+async def openai_v1_models():
+    """OpenAI v1/models endpoint for discovery by compatible clients."""
+    return ORJSONResponse(status_code=200, content=app.state.http_handler.build_models_response())
 
 
 class ParallaxHttpServer:
