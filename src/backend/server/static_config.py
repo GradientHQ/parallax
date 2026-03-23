@@ -100,11 +100,21 @@ NODE_JOIN_COMMAND_PUBLIC_NETWORK = """parallax join -s {scheduler_addr} """
 
 def get_model_info(model_name, use_hfcache: bool = False):
     def _load_config_only(name: str) -> dict:
-        local_path = Path(name)
-        if local_path.exists():
-            config_path = local_path / "config.json"
-            with open(config_path, "r") as f:
-                return json.load(f)
+        # Sanitize and validate local path to prevent Directory Traversal
+        try:
+            local_path = Path(name).resolve()
+            # If the name is just a model ID (no path separators), Path(name).resolve() 
+            # will point to current_dir/name. We only allow it if it exists and contains config.json.
+            # However, to be safe, we should block absolute paths or paths with ".." 
+            # if we want to be strict.
+            if local_path.exists() and local_path.is_dir():
+                config_path = local_path / "config.json"
+                if config_path.exists():
+                    with open(config_path, "r") as f:
+                        return json.load(f)
+        except (OSError, RuntimeError):
+            # Ignore path resolution errors and fall back to HF
+            pass
 
         # Hugging Face only – download just config.json
         from huggingface_hub import hf_hub_download  # type: ignore

@@ -24,14 +24,6 @@ from parallax_utils.version_check import check_latest_release
 
 app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 logger = get_logger(__name__)
 
 scheduler_manage = None
@@ -210,6 +202,14 @@ if __name__ == "__main__":
     args = parse_args()
     set_log_level(args.log_level)
     logger.info(f"args: {args}")
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=args.allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     if args.model_name is None:
         init_model_info_dict_cache(args.use_hfcache)
