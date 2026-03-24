@@ -25,7 +25,7 @@
 | [**Blog**](https://gradient.network/blog/parallax-the-sovereign-ai-os)
 | [**X(Twitter)(Gradient)**](https://x.com/Gradient_HQ)
 | [**X(Twitter)(Parallax)**](https://x.com/tryParallax)
-| [**Discord**](https://discord.gg/parallax)
+| [**Discord**](http://discord.gg/parallaxai)
 | [**Arxiv**](https://arxiv.org/pdf/2509.26182v1)
 
 ## News
