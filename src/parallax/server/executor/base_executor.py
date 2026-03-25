@@ -39,12 +39,14 @@ from parallax.server.request import (
     IntermediateRequest,
     Request,
     RequestStatus,
+    VLMInputs,
 )
 from parallax.server.sampling.sampling_params import SamplingParams
 from parallax.server.scheduler import Scheduler
+from parallax.utils.config_utils import ModelConfigAccessor
 from parallax.utils.shared_state import SharedState
 from parallax.utils.utils import get_current_device, get_device_dtype, get_zmq_socket
-from parallax_utils.logging_config import get_logger
+from parallax_utils.logging_config import get_logger, set_rank
 
 logger = get_logger(__name__)
 
@@ -112,12 +114,23 @@ class BaseExecutor:
         # Pipe communication
         self.conn = conn
 
+        # Use VLM-aware config accessor for unified config access
+        self._config_accessor = ModelConfigAccessor(self.config)
+        self.is_vlm = self._config_accessor.is_vlm
+
+        # Get num_hidden_layers using unified config accessor
+        num_hidden_layers = self._config_accessor.get_num_hidden_layers()
+
         self.is_first_peer = start_layer == 0
-        self.is_last_peer = end_layer == self.config.get("num_hidden_layers")
+        self.is_last_peer = end_layer == num_hidden_layers
         self.tp_size = tp_size
         self.tp_rank = tp_rank
         self.dp_size = dp_size
         self.dp_rank = dp_rank
+
+        # Configure logging to only print on rank 0 when using multiple GPUs
+        if tp_size > 1:
+            set_rank(tp_rank, enable_filter=True)
 
         # Runtime weight refit for RL
         self.enable_weight_refit = enable_weight_refit
@@ -143,7 +156,16 @@ class BaseExecutor:
         else:
             self.pad_token_id = self.tokenizer.pad_token_id
 
-        self.eos_token_id = self.config.get("eos_token_id", None)
+        self.eos_token_id = self._config_accessor.get_eos_token_id()
+
+        # Ensure <|im_end|> is in the EOS token list.  Some models (e.g.
+        # Kimi-K2.5) use <|im_end|> to end assistant turns but only list
+        # [EOS] in config.json.  Without this the scheduler will never
+        # detect end-of-turn and generation runs until max_tokens.
+        self._augment_eos_with_im_end()
+
+        # Build multimodal config (only meaningful for VLM models)
+        self.mm_config = self._config_accessor.build_mm_config()
 
         # Scheduler: derive final max_batch_size with KV constraints
         # Remove this for now as it's not working on gpu devices
@@ -207,7 +229,8 @@ class BaseExecutor:
             f"(layers [{self.start_layer}, {self.end_layer}), "
             f"tp_rank={self.tp_rank}/{self.tp_size}, "
             f"device={self.device}, "
-            f"num_shard_layers={self.num_shard_layers})"
+            f"num_shard_layers={self.num_shard_layers}, "
+            f"is_vlm={self.is_vlm})"
         )
 
     @abstractmethod
@@ -611,15 +634,51 @@ class BaseExecutor:
 
         logger.debug("Executor shutdown complete.")
 
-    def _handle_raw_request(self, raw_request: Dict):
-        assert "messages" in raw_request, "Request did not contain messages"
+    def _augment_eos_with_im_end(self):
+        """Add ``<|im_end|>`` to the EOS token list when it is present in the
+        vocabulary but missing from the configured ``eos_token_id``.
 
-        rid = raw_request["rid"]
+        Many chat models (Kimi-K2.5, Qwen, etc.) use ``<|im_end|>`` as the
+        turn-ending token, yet their ``config.json`` only lists ``[EOS]`` as
+        the EOS token.  Without this augmentation the scheduler will never
+        detect end-of-turn and generation will run until ``max_tokens``.
+        """
+        _get_vocab = getattr(self.tokenizer, "get_vocab", None)
+        vocab = _get_vocab() if _get_vocab else {}
+        im_end_id = vocab.get("<|im_end|>")
+        if im_end_id is None:
+            return
+
+        # Normalise eos_token_id to a list for easy comparison
+        if self.eos_token_id is None:
+            self.eos_token_id = [im_end_id]
+            logger.info(f"Set eos_token_id to [{im_end_id}] (<|im_end|>)")
+        elif isinstance(self.eos_token_id, list):
+            if im_end_id not in self.eos_token_id:
+                self.eos_token_id.append(im_end_id)
+                logger.info(f"Added <|im_end|> (id={im_end_id}) to eos_token_id list")
+        elif isinstance(self.eos_token_id, int):
+            if self.eos_token_id != im_end_id:
+                self.eos_token_id = [self.eos_token_id, im_end_id]
+                logger.info(
+                    f"Expanded eos_token_id to {self.eos_token_id} "
+                    f"(added <|im_end|> id={im_end_id})"
+                )
+
+    def _process_text_request(self, rid: str, messages: list, raw_request: Dict) -> list:
+        """Process a text-only request using the tokenizer."""
         if self.tokenizer.chat_template:
-            messages = raw_request["messages"]
-            process_message_content(messages)
+            has_non_text_content = any(
+                isinstance(msg.get("content"), list)
+                and any(
+                    isinstance(part, dict) and part.get("type") != "text"
+                    for part in msg.get("content")
+                )
+                for msg in messages
+            )
+            if not has_non_text_content:
+                process_message_content(messages)
             chat_template_kwargs = raw_request.get("chat_template_kwargs", {})
-            # check extra_body for backward compatibility
             if "extra_body" in raw_request and "chat_template_kwargs" in raw_request["extra_body"]:
                 chat_template_kwargs.update(raw_request["extra_body"]["chat_template_kwargs"])
 
@@ -631,27 +690,81 @@ class BaseExecutor:
                 **chat_template_kwargs,
             )
         else:
-            prompt = convert_chat(raw_request["messages"], raw_request.get("role_mapping"))
+            prompt = convert_chat(messages, raw_request.get("role_mapping"))
             prompt = self.tokenizer.encode(prompt)
+
+        return prompt
+
+    def _process_request_prompt(
+        self, rid: str, messages: list, image_urls: list, raw_request: Dict
+    ) -> Tuple[list, Optional[VLMInputs]]:
+        """
+        Process request messages and return (input_ids, vlm_inputs).
+
+        Subclasses can override this method to implement custom VLM processing.
+        Default implementation only handles text requests.
+
+        Args:
+            rid: Request ID
+            messages: List of message dicts
+            image_urls: List of image URLs extracted from messages
+            raw_request: Original raw request dict
+
+        Returns:
+            Tuple of (input_ids, vlm_inputs). vlm_inputs is None for text-only requests.
+        """
+        # Default: text-only processing, subclasses override for VLM support
+        prompt = self._process_text_request(rid, messages, raw_request)
+        return prompt, None
+
+    def _handle_raw_request(self, raw_request: Dict):
+        assert "messages" in raw_request, "Request did not contain messages"
+
+        rid = raw_request["rid"]
+        messages = raw_request["messages"]
+
+        # Extract image URLs first to determine if this is a multimodal request
+        multimodal_params = None
+        image_urls = []
+        for message in messages:
+            content = message.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "image_url":
+                        if multimodal_params is None:
+                            multimodal_params = {"images": []}
+                        image_url = part["image_url"]
+                        multimodal_params["images"].append(image_url)
+                        # Extract URL string for processing
+                        if isinstance(image_url, dict):
+                            image_urls.append(image_url.get("url", image_url))
+                        else:
+                            image_urls.append(image_url)
+
+        # Process request prompt (subclasses can override for VLM support)
+        prompt, vlm_inputs = self._process_request_prompt(rid, messages, image_urls, raw_request)
 
         max_seq_len = self.max_sequence_length if self.max_sequence_length is not None else 4096
         max_seq_len = max(max_seq_len, 4096)
         max_new_tokens = raw_request.get("max_tokens", 2048)
         input_token_num = len(prompt)
         if input_token_num + max_new_tokens >= max_seq_len:
-            logger.warning(
-                f"Input token length {input_token_num} + max_new_tokens {max_new_tokens} exceeds max_sequence_length {max_seq_len}."
-            )
-            if max_new_tokens > 2048:
+            available_new_tokens = max_seq_len - input_token_num
+            if available_new_tokens <= 0:
                 logger.warning(
-                    f"max_new_tokens {max_new_tokens} is too large, reduce to 2048 tokens."
+                    f"Input token length {input_token_num} already exceeds "
+                    f"max_sequence_length {max_seq_len}. "
+                    f"Truncating input to keep last {max_seq_len - 1} tokens."
                 )
-                max_new_tokens = 2048
-            if input_token_num + max_new_tokens >= max_seq_len:
+                prompt = prompt[-(max_seq_len - 1) :]
+                max_new_tokens = 1
+            else:
                 logger.warning(
-                    f"Trunc input prompt, keep last {max_seq_len - max_new_tokens} tokens"
+                    f"Input token length {input_token_num} + max_new_tokens {max_new_tokens} "
+                    f"exceeds max_sequence_length {max_seq_len}. "
+                    f"Reducing max_new_tokens to {available_new_tokens}."
                 )
-                prompt = prompt[-(max_seq_len - max_new_tokens) :]
+                max_new_tokens = available_new_tokens
 
         max_total_length = len(prompt) + max_new_tokens
         logger.debug(f"Final max_new_tokens for request ID {rid}: {max_new_tokens}")
@@ -675,6 +788,29 @@ class BaseExecutor:
             if "ignore_eos" in raw_sampling_params:
                 sampling_params.ignore_eos = raw_sampling_params["ignore_eos"]
 
+        # Also read OpenAI-style top-level sampling parameters as fallback
+        if "temperature" in raw_request and raw_sampling_params is None:
+            sampling_params.temperature = raw_request["temperature"]
+            if sampling_params.temperature == 0.0:
+                sampling_params.temperature = 1.0
+                sampling_params.top_k = 1
+        if "top_p" in raw_request and raw_sampling_params is None:
+            sampling_params.top_p = raw_request["top_p"]
+
+        # When tools are present, add tool-call-related stop token IDs so the
+        # scheduler halts generation at the tool-call boundary instead of
+        # running until max_tokens.
+        tools = raw_request.get("tools")
+        if tools and self.tokenizer is not None:
+            from parallax.utils.tokenizer_utils import get_tool_call_stop_token_ids
+
+            tool_stop_ids = get_tool_call_stop_token_ids(self.tokenizer)
+            if tool_stop_ids:
+                if sampling_params.stop_token_ids is None:
+                    sampling_params.stop_token_ids = set()
+                sampling_params.stop_token_ids.update(tool_stop_ids)
+                logger.debug(f"Added tool call stop token IDs for request {rid}: {tool_stop_ids}")
+
         req = InitialRequest(
             request_id=rid,
             output_ids=None,
@@ -684,6 +820,8 @@ class BaseExecutor:
             max_total_length=max_total_length,
             lora_path=lora_path,
             return_probs=return_probs,
+            multimodal_params=multimodal_params,
+            vlm_inputs=vlm_inputs,
         )
         if "routing_table" in raw_request:
             req.routing_table = raw_request["routing_table"]
