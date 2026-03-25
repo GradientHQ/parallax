@@ -30,6 +30,12 @@ def parse_args() -> argparse.Namespace:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Log level",
     )
+    parser.add_argument(
+        "--allowed-origins",
+        nargs="+",
+        default=["http://localhost:3000"],
+        help="List of allowed origins for CORS. Defaults to 'http://localhost:3000'",
+    )
     parser.add_argument("--model-name", type=str, default=None, help="Model name")
     parser.add_argument("--init-nodes-num", type=int, default=None, help="Number of initial nodes")
     parser.add_argument(
