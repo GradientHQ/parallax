@@ -34,6 +34,7 @@ MODELS = {
     "zai-org/GLM-4.7-Flash": "mlx-community/GLM-4.7-Flash-4bit",
     "zai-org/GLM-4.7-Flash-FP8": "mlx-community/GLM-4.7-Flash-8bit",
     # Minimax M2 Models
+    "MiniMaxAI/MiniMax-M2.5": "mlx-community/MiniMax-M2.5-4bit",
     "MiniMaxAI/MiniMax-M2.1": "mlx-community/MiniMax-M2.1-4bit",
     "MiniMaxAI/MiniMax-M2": "mlx-community/MiniMax-M2-4bit",
     # ======================================= End ========================================#
