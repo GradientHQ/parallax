@@ -49,6 +49,46 @@ from parallax_utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+def _sampling_params_from_raw(raw: Dict[str, Any]) -> SamplingParams:
+    """Build SamplingParams from raw request dict (e.g. HTTP/API payload)."""
+    kwargs: Dict[str, Any] = {}
+    if "max_new_tokens" in raw:
+        kwargs["max_new_tokens"] = raw["max_new_tokens"]
+    if "min_new_tokens" in raw:
+        kwargs["min_new_tokens"] = raw["min_new_tokens"]
+    if "temperature" in raw:
+        kwargs["temperature"] = raw["temperature"]
+    if "top_p" in raw:
+        kwargs["top_p"] = raw["top_p"]
+    if "min_p" in raw:
+        kwargs["min_p"] = raw["min_p"]
+    if "top_k" in raw:
+        kwargs["top_k"] = raw["top_k"]
+    if "stop_token_ids" in raw:
+        kwargs["stop_token_ids"] = raw["stop_token_ids"]
+    if "ignore_eos" in raw:
+        kwargs["ignore_eos"] = raw["ignore_eos"]
+    if "stop_strs" in raw:
+        kwargs["stop_strs"] = raw["stop_strs"]
+    if "repetition_penalty" in raw:
+        kwargs["repetition_penalty"] = raw["repetition_penalty"]
+    if "presence_penalty" in raw:
+        kwargs["presence_penalty"] = raw["presence_penalty"]
+    if "frequency_penalty" in raw:
+        kwargs["frequency_penalty"] = raw["frequency_penalty"]
+    if "json_schema" in raw:
+        kwargs["json_schema"] = raw["json_schema"]
+    if "logprobs" in raw:
+        kwargs["logprobs"] = raw["logprobs"]
+    if "top_logprobs" in raw:
+        kwargs["top_logprobs"] = raw["top_logprobs"]
+    if "logit_bias" in raw:
+        kwargs["logit_bias"] = raw["logit_bias"]
+    params = SamplingParams(**kwargs)
+    params.verify()
+    return params
+
+
 class BaseExecutor:
     """High-level executor for managing model shards, scheduler, and cache pool on each Peer."""
 
@@ -402,15 +442,14 @@ class BaseExecutor:
         ), f"Expected dict from process_batch, got {type(batch_output)}"
         hidden_states = batch_output["hidden_states"]
         token_probs = batch_output["probs"]
+        logprobs_list = batch_output.get("logprobs")
 
         batched_requests = []
         pre_length = 0
         for i, src_request in enumerate(requests):
             if self.is_last_peer:
-                # Last peer gets a 1D array of token IDs
                 hidden_state_for_req = hidden_states[i : i + 1]
             else:
-                # Other peers get a 3D array of hidden states
                 if src_request.is_prefill:
                     true_length = int(context_lengths[i])
                     if hidden_states.ndim == 3:
@@ -427,15 +466,19 @@ class BaseExecutor:
                         hidden_state_for_req = hidden_states[pre_length : pre_length + 1, :]
                     pre_length += 1
 
-            # Get prob for this request if available
             token_prob = (
                 token_probs[i]
                 if (self.is_last_peer and token_probs and i < len(token_probs))
                 else None
             )
+            token_logprobs = (
+                logprobs_list[i]
+                if (logprobs_list and i < len(logprobs_list))
+                else None
+            )
 
             next_req = self._prepare_next_single_request(
-                src_request, hidden_state_for_req, token_prob
+                src_request, hidden_state_for_req, token_prob, token_logprobs
             )
             batched_requests.append(next_req)
 
@@ -664,16 +707,7 @@ class BaseExecutor:
         if raw_sampling_params is None:
             sampling_params = SamplingParams()
         else:
-            # TODO: Support more sampling params
-            sampling_params = SamplingParams()
-            if "temperature" in raw_sampling_params:
-                sampling_params.temperature = raw_sampling_params["temperature"]
-            if "top_k" in raw_sampling_params:
-                sampling_params.top_k = raw_sampling_params["top_k"]
-            if "top_p" in raw_sampling_params:
-                sampling_params.top_p = raw_sampling_params["top_p"]
-            if "ignore_eos" in raw_sampling_params:
-                sampling_params.ignore_eos = raw_sampling_params["ignore_eos"]
+            sampling_params = _sampling_params_from_raw(raw_sampling_params)
 
         req = InitialRequest(
             request_id=rid,
@@ -718,22 +752,20 @@ class BaseExecutor:
             logger.debug("Failed to send error notification to HTTP handler", exc_info=True)
 
     def _prepare_next_single_request(
-        self, request: Request, hidden_states: Any, token_prob: Optional[float] = None
+        self,
+        request: Request,
+        hidden_states: Any,
+        token_prob: Optional[float] = None,
+        token_logprobs: Optional[Any] = None,
     ) -> Request:
         """Handle request state changes both inter and intra peers.
-
-        This function prepares the request object to be sent to the *next* peer in the
-        pipeline, or back to the first peer if this is the last peer.
 
         Args:
             request: The request that was just processed by this peer.
             hidden_states: The output hidden_states/output_ids from the model for this request.
             token_prob: The probability value for the sampled token (optional).
-
-        Returns:
-            A new Request object ready to be sent to the next destination.
+            token_logprobs: Per-token logprobs result for OpenAI response (optional).
         """
-        # This peer is the last peer or a single node.
         if self.is_last_peer and self.is_first_peer:
             assert isinstance(
                 request, (InitialRequest, IntermediateRequest)
@@ -750,10 +782,9 @@ class BaseExecutor:
                 routing_table=request.routing_table,
                 lora_path=request.lora_path,
                 token_prob=token_prob,
+                token_logprobs=token_logprobs,
             )
         if self.is_last_peer:
-            # Last peer decodes a token and sends it back to the first peer.
-            # The token is wrapped in an IntermediateRequest.
             assert isinstance(
                 request, IntermediateRequest
             ), "Last peer must receive an IntermediateRequest."
@@ -761,7 +792,7 @@ class BaseExecutor:
             next_token_id, hidden_states = self._gen_token_id_from_hidden(hidden_states)
             return IntermediateRequest(
                 request_id=request.request_id,
-                status=RequestStatus.DECODING,  # Last peer always changes status to DECODING
+                status=RequestStatus.DECODING,
                 current_position=request.total_length,
                 input_ids=request.input_ids,
                 hidden_states=hidden_states,
@@ -769,6 +800,7 @@ class BaseExecutor:
                 routing_table=request.routing_table,
                 lora_path=request.lora_path,
                 token_prob=token_prob,
+                token_logprobs=token_logprobs,
             )
         # This peer is the first or an intermediate peer.
         if self.is_first_peer:
