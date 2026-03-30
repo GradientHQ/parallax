@@ -349,8 +349,13 @@ def initialize_sgl_model_runner(
         dtype=dtype,
         quantization=quant_method,
     )
-    # TODO: Fix me
-    model_config.hf_config.tie_word_embeddings = False
+    # Only disable tie_word_embeddings when running a partial layer range
+    # (multi-node PP where this node doesn't have both embed_tokens and lm_head).
+    # For single-node or full-range runs, keep the original setting so that
+    # lm_head correctly shares weights with embed_tokens.
+    num_hidden_layers = model_config.hf_config.num_hidden_layers
+    if start_layer > 0 or end_layer < num_hidden_layers:
+        model_config.hf_config.tie_word_embeddings = False
     model_config.hf_config.start_layer = start_layer
     model_config.hf_config.end_layer = end_layer
 
