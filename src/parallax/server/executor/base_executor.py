@@ -211,7 +211,7 @@ class BaseExecutor:
         )
 
     @abstractmethod
-    def handle_input_requests(self, requests: List[Request]):
+    def handle_input_requests(self, requests: List[Request], from_previous_peer: bool = False):
         """Update requests states and status in scheduler and cache manager."""
 
     @abstractmethod
@@ -299,6 +299,11 @@ class BaseExecutor:
                         if recv_req is not None and len(recv_req) > 0:
                             for req in recv_req:
                                 if req.hidden_states is not None:
+                                    size_attr = getattr(req.hidden_states, "size", None)
+                                    hidden_size = size_attr() if callable(size_attr) else size_attr
+                                    logger.debug(
+                                        f"recv request {req.request_id} hidden_states.length: {hidden_size}"
+                                    )
                                     if req.hidden_states.dtype != self.dtype:
                                         logger.debug(
                                             f"Converting hidden_states dtype from {req.hidden_states.dtype} to {self.dtype} for request {req.request_id}"
@@ -386,8 +391,14 @@ class BaseExecutor:
 
     def prepare_next_batch_requests(
         self, requests: List[Request], batch_output: Any, context_lengths: Any
-    ) -> List[Request]:
+    ) -> Tuple[List[Request], List[Request]]:
         """Prepares a batch of requests for the next stage of the pipeline.
+
+        Returns two lists:
+        - chunked_reqs: requests that still have chunks to complete (e.g. chunked prefill);
+          these should be handled locally via handle_input_requests only, not sent to next peer.
+        - to_forward_reqs: requests to forward (single node: handle_input_requests;
+          multi-node and tp_rank==0: request_to_proto and send to next peer).
 
         Args:
             requests: List of requests in the batch
@@ -403,7 +414,8 @@ class BaseExecutor:
         hidden_states = batch_output["hidden_states"]
         token_probs = batch_output["probs"]
 
-        batched_requests = []
+        chunked_reqs = []
+        to_forward_reqs = []
         pre_length = 0
         for i, src_request in enumerate(requests):
             if self.is_last_peer:
@@ -437,9 +449,9 @@ class BaseExecutor:
             next_req = self._prepare_next_single_request(
                 src_request, hidden_state_for_req, token_prob
             )
-            batched_requests.append(next_req)
+            to_forward_reqs.append(next_req)
 
-        return batched_requests
+        return chunked_reqs, to_forward_reqs
 
     def release_and_evict_request(self, rid: str):
         """Release per-request resources and evict from scheduler. Best-effort, never raises."""
@@ -471,7 +483,7 @@ class BaseExecutor:
             if self.enable_weight_refit:
                 self.check_and_refit_weight(refit_weight_path)
 
-            self.handle_input_requests(received_requests)
+            self.handle_input_requests(received_requests, from_previous_peer=True)
             # Send abort signals to P2P server to broadcast to all nodes
             if len(self.finished_batch) > 0 and self.tp_rank == 0:
                 self.send_to_peer_socket.send_multipart(
@@ -547,28 +559,62 @@ class BaseExecutor:
                             except Exception:
                                 pass
                         # 7. Prepare requests for the next stage in the pipeline
-                        next_batch = self.prepare_next_batch_requests(
+                        chunked_reqs, to_forward_reqs = self.prepare_next_batch_requests(
                             requests=prepared_inputs["requests"],
                             batch_output=output,
                             context_lengths=prepared_inputs.get("context_lengths"),
                         )
-
+                        if chunked_reqs:
+                            logger.debug(f"Handle {len(chunked_reqs)} chunked requests.")
+                            self.handle_input_requests(chunked_reqs)
                         # 8. Dispatch to the appropriate destination
-                        if self.is_last_peer and self.is_first_peer:
-                            # Single node: handle locally
-                            self.handle_input_requests(next_batch)
-                        elif self.tp_rank == 0:
-                            # Send output to next peer
-                            self.send_to_peer_socket.send_multipart(
-                                [
-                                    b"forward",
-                                    request_to_proto(next_batch, self.device).SerializeToString(),
-                                ]
-                            )
-                            logger.debug(
-                                f"Processed batch of type {batch_type} with {len(next_batch)} requests "
-                                f"in {(time.time() - start_time) * 1000:.3f} ms"
-                            )
+                        if to_forward_reqs or chunked_reqs:
+                            logger.debug(f"dispatch to_forward and chunked_reqs to next peer.")
+                            if (
+                                self.is_last_peer
+                                and self.is_first_peer
+                                and (to_forward_reqs is not None and len(to_forward_reqs) > 0)
+                            ):
+                                # Single node: handle to_forward locally
+                                logger.debug(f"Handle {len(to_forward_reqs)} to_forward requests.")
+                                self.handle_input_requests(to_forward_reqs)
+                            elif self.tp_rank == 0:
+                                # Send to_forward to next peer (do not send chunked_reqs if self is last_peer)
+                                logger.debug(
+                                    f"self is last_peer: {self.is_last_peer}, self is first_peer: {self.is_first_peer}"
+                                )
+                                if not self.is_last_peer:
+                                    logger.debug(
+                                        f"Send {len(to_forward_reqs + chunked_reqs)} to_forward and chunked_reqs to next peer."
+                                    )
+                                    self.send_to_peer_socket.send_multipart(
+                                        [
+                                            b"forward",
+                                            request_to_proto(
+                                                to_forward_reqs + chunked_reqs, self.device
+                                            ).SerializeToString(),
+                                        ]
+                                    )
+                                    logger.debug(
+                                        f"Processed batch of with {len(to_forward_reqs + chunked_reqs)} to_forward and chunked_reqs "
+                                        f"in {(time.time() - start_time) * 1000:.3f} ms"
+                                    )
+                                elif to_forward_reqs is not None and len(to_forward_reqs) > 0:
+                                    logger.debug(
+                                        f"Send {len(to_forward_reqs)} to_forward to next peer."
+                                    )
+                                    self.send_to_peer_socket.send_multipart(
+                                        [
+                                            b"forward",
+                                            request_to_proto(
+                                                to_forward_reqs, self.device
+                                            ).SerializeToString(),
+                                        ]
+                                    )
+                                    logger.debug(
+                                        f"Processed batch of with {len(to_forward_reqs)} to_forward "
+                                        f"in {(time.time() - start_time) * 1000:.3f} ms"
+                                    )
 
             except Exception as e:
                 logger.exception(f"Error processing batch: {e}")
@@ -744,7 +790,7 @@ class BaseExecutor:
                 request_id=request.request_id,
                 status=RequestStatus.DECODING,
                 current_position=request.total_length + 1,
-                input_ids=request.input_ids,
+                input_ids=request.origin_input_ids,
                 hidden_states=hidden_states,
                 next_token_id=next_token_id,
                 routing_table=request.routing_table,
@@ -763,7 +809,7 @@ class BaseExecutor:
                 request_id=request.request_id,
                 status=RequestStatus.DECODING,  # Last peer always changes status to DECODING
                 current_position=request.total_length,
-                input_ids=request.input_ids,
+                input_ids=request.origin_input_ids,
                 hidden_states=hidden_states,
                 next_token_id=next_token_id,
                 routing_table=request.routing_table,
