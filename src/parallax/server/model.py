@@ -2,13 +2,17 @@
 Defines the ShardedModel class for distributing MLX models across multiple devices.
 """
 
-from typing import Any, List, Optional, Type
+from typing import Any, List, Optional, Tuple, Type, Union
 
 import mlx.core as mx
 from mlx import nn
 from mlx_lm.models.base import BaseModelArgs
 
-from parallax.server.sampling.sampler import Sampler, SamplingBatchInfo
+from parallax.server.sampling.sampler import (
+    Sampler,
+    SamplerLogprobsResult,
+    SamplingBatchInfo,
+)
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -87,8 +91,8 @@ class ShardedModel(nn.Module):
         logits: mx.array,
         lengths: Optional[mx.array] = None,
         sampling_info: Optional[SamplingBatchInfo] = None,
-    ) -> mx.array:
-        """Convert logits to token IDs with greedy decoding.
+    ) -> Union[mx.array, Tuple[mx.array, List[SamplerLogprobsResult]]]:
+        """Convert logits to token IDs; optionally return logprobs when requested.
 
         Args:
             logits: (batch, target_len_padded, vocab_size), logits from final lm_head
@@ -96,29 +100,30 @@ class ShardedModel(nn.Module):
             sampling_info: sampling info of the batched requests
 
         Return:
-            Generated tokens of shape (batch,).
+            If sampling_info is None or need_logprobs is False: token IDs (batch,).
+            If need_logprobs is True: (token_ids, logprobs_info) where logprobs_info
+            is a list of SamplerLogprobsResult per request.
         """
         if logits.ndim != 3:
             raise ValueError(f"Logits must be 3D, but got shape {logits.shape}")
 
         if lengths is not None:
-            # To select the logit vector for the last valid token of each sequence,
-            # we need to provide indices for both the batch and sequence dimensions.
             batch_indices = mx.arange(logits.shape[0])
             last_token_indices = lengths - 1
             last_token_logits = logits[batch_indices, last_token_indices, :]
         else:
-            # If no lengths are provided, assume all sequences are of max length
-            # and we are interested in the very last token's logits.
             last_token_logits = logits[:, -1, :]
 
-        # last_token_logits now has shape (batch_size, vocab_size)
         if sampling_info is None:
             next_token_ids = mx.argmax(last_token_logits, axis=-1)
-        else:
-            sampler = Sampler()
-            next_token_ids = sampler(last_token_logits, sampling_info)
-        return next_token_ids
+            return next_token_ids
+
+        sampler = Sampler()
+        out = sampler(last_token_logits, sampling_info)
+        if isinstance(out, tuple):
+            next_token_ids, logprobs_info = out
+            return (next_token_ids, logprobs_info)
+        return out
 
     def __call__(
         self,

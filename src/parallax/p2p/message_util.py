@@ -1,4 +1,4 @@
-﻿"""
+"""
 Utility functions for message serialization and deserialization.
 
 This module contains utility functions for serializing and deserializing messages
@@ -158,7 +158,7 @@ def proto_to_sampling_params(proto: forward_pb2.SamplingParams) -> SamplingParam
     """Convert protobuf message to SamplingParams."""
     if proto is None or not proto.ByteSize():
         return SamplingParams()
-    sampling_params = SamplingParams(
+    kwargs = dict(
         max_new_tokens=proto.max_new_tokens,
         min_new_tokens=proto.min_new_tokens,
         temperature=proto.temperature,
@@ -172,7 +172,14 @@ def proto_to_sampling_params(proto: forward_pb2.SamplingParams) -> SamplingParam
         presence_penalty=proto.presence_penalty,
         frequency_penalty=proto.frequency_penalty,
         json_schema=proto.json_schema,
+        logprobs=getattr(proto, "logprobs", False),
     )
+    if getattr(proto, "HasField", lambda _: False)("top_logprobs"):
+        kwargs["top_logprobs"] = proto.top_logprobs
+    logit_bias_map = getattr(proto, "logit_bias", None)
+    if logit_bias_map is not None and len(logit_bias_map) > 0:
+        kwargs["logit_bias"] = dict(logit_bias_map)
+    sampling_params = SamplingParams(**kwargs)
     return sampling_params
 
 
@@ -196,6 +203,12 @@ def sampling_params_to_proto(params: SamplingParams) -> forward_pb2.SamplingPara
     proto.frequency_penalty = params.frequency_penalty
     if params.json_schema is not None:
         proto.json_schema = params.json_schema
+    if hasattr(proto, "logprobs"):
+        proto.logprobs = params.logprobs
+    if hasattr(proto, "top_logprobs") and params.top_logprobs is not None:
+        proto.top_logprobs = params.top_logprobs
+    if hasattr(proto, "logit_bias") and params.logit_bias is not None:
+        proto.logit_bias.update(params.logit_bias)
     return proto
 
 

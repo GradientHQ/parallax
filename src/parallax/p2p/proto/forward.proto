@@ -1,4 +1,4 @@
-﻿// python -m grpc_tools.protoc -I. --python_out=.  src/parallax/p2p/proto/forward.proto
+// python -m grpc_tools.protoc -I. --python_out=.  src/parallax/p2p/proto/forward.proto
 
 syntax = "proto3";
 package gradient;
@@ -54,4 +54,7 @@ message SamplingParams {
   float presence_penalty = 11;
   float frequency_penalty = 12;
   string json_schema = 13;
+  bool logprobs = 14;
+  optional int32 top_logprobs = 15;
+  map<int32, float> logit_bias = 16;
 }

@@ -2,7 +2,16 @@
 Sampling parameters of each request
 """
 
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
+
+
+def _normalize_logit_bias(
+    value: Optional[Union[Dict[int, float], Dict[str, float]]]
+) -> Optional[Dict[int, float]]:
+    """Normalize logit_bias to Dict[int, float], converting string keys to int."""
+    if value is None or len(value) == 0:
+        return None
+    return {int(k): float(v) for k, v in value.items()}
 
 
 class SamplingParams:
@@ -23,6 +32,9 @@ class SamplingParams:
         presence_penalty: float = 0.0,
         frequency_penalty: float = 0.0,
         json_schema: Optional[str] = None,
+        logprobs: bool = False,
+        top_logprobs: Optional[int] = None,
+        logit_bias: Optional[Union[Dict[int, float], Dict[str, float]]] = None,
     ) -> None:
         self.max_new_tokens = max_new_tokens
         self.min_new_tokens = min_new_tokens
@@ -40,6 +52,9 @@ class SamplingParams:
         self.presence_penalty = presence_penalty
         self.frequency_penalty = frequency_penalty
         self.json_schema = json_schema
+        self.logprobs = logprobs
+        self.top_logprobs = top_logprobs
+        self.logit_bias = _normalize_logit_bias(logit_bias)
 
         # Some special cases
         if self.temperature == 0.0:
@@ -63,3 +78,14 @@ class SamplingParams:
             raise ValueError(
                 f"repetition_penalty must be in [0, 2], got {self.repetition_penalty}."
             )
+        if self.logprobs and (self.top_logprobs is None or not 0 <= self.top_logprobs <= 20):
+            raise ValueError(
+                "when logprobs is True, top_logprobs must be in [0, 20], "
+                f"got {self.top_logprobs}."
+            )
+        if self.logit_bias is not None:
+            for token_id, bias in self.logit_bias.items():
+                if not -100.0 <= bias <= 100.0:
+                    raise ValueError(
+                        f"logit_bias values must be in [-100, 100], got {bias} for token {token_id}."
+                    )

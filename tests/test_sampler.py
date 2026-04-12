@@ -4,6 +4,7 @@ Test for the Sampler class
 
 import unittest
 
+import numpy as np
 import mlx.core as mx
 from mlx_lm.sample_utils import apply_min_p, apply_top_k, apply_top_p
 
@@ -32,6 +33,12 @@ class TestSampler(unittest.TestCase):
             min_ps=min_ps,
             is_all_greedy=False,
             need_min_p_sampling=True,
+            logit_biases=[None, None, None],
+            need_logprobs=False,
+            top_logprobs_per_req=[0, 0, 0],
+            output_ids_per_req=[[], [], []],
+            presence_penalties=np.zeros(3, dtype=np.float32),
+            frequency_penalties=np.zeros(3, dtype=np.float32),
         )
         sampler = Sampler()
         batch_next_token_ids = sampler(logits, sampling_info)
