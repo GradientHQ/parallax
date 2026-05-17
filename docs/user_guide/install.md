@@ -73,7 +73,7 @@ parallax --help
 ```
 
 ### Docker
-For Linux+GPU devices, Parallax provides a docker environment for quick setup. Choose the docker image according to the device's GPU architechture.
+For Linux+GPU devices, Parallax provides a docker environment for quick setup. Choose the docker image according to the device's GPU architecture.
 
 |  GPU Architecture  |  GPU Series  | Image Pull Command |
 |:-------------|:----------------------------|:----------------------------|
