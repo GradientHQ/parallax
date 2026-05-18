@@ -7,7 +7,7 @@ Welcome to **Parallax**, we're glad you're interested in contributing! We welcom
 
 We encourage everyone—first-time contributors and experienced developers alike—to follow these best practices for a smooth collaboration process.
 
-If you have any questions, feel free to ask in our [Discord channel](https://discord.gg/parallax).
+If you have any questions, feel free to ask in our [Discord channel](https://discord.gg/parallaxai).
 
 ## How Can I Contribute?
 
