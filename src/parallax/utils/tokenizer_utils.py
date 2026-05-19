@@ -3,11 +3,14 @@ Implements parallax detokenizers for performance.
 """
 
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from functools import partial
 from json import JSONDecodeError
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from mlx_lm.tokenizer_utils import (
     BPEStreamingDetokenizer,
@@ -128,6 +131,36 @@ def load_tokenizer(model_path, trust_remote_code=True, tokenizer_config_extra=No
     return _mlx_load_tokenizer(model_path, tokenizer_config_extra=tokenizer_config_extra, **kwargs)
 
 
+def get_tool_call_stop_token_ids(tokenizer) -> List[int]:
+    """Return token IDs that should act as *stop tokens* for tool call generation.
+
+    When the model generates one of these tokens the scheduler should treat it
+    as end-of-sequence so that the HTTP handler can inspect the generated text
+    and extract tool calls.
+
+    Note: tool call *parsing* (``has_tool_calling``, ``tool_parser``, etc.) is
+    handled automatically by the updated ``mlx-lm`` ``TokenizerWrapper``.
+    This function only provides the stop-token IDs that the parallax scheduler
+    needs to halt generation at tool-call boundaries.
+    """
+    stop_ids: List[int] = []
+    _get_vocab = getattr(tokenizer, "get_vocab", None)
+    vocab = _get_vocab() if _get_vocab else {}
+
+    # Markers whose token IDs should halt generation
+    markers = [
+        "<|tool_calls_section_end|>",  # Kimi K2 / K2.5
+        "<|im_end|>",  # common chat turn-end token
+    ]
+
+    for marker in markers:
+        token_id = vocab.get(marker)
+        if token_id is not None:
+            stop_ids.append(token_id)
+
+    return list(set(stop_ids))
+
+
 @dataclass
 class ToolCallState:
     has_tool_calling: bool
@@ -178,14 +211,51 @@ class ToolCallState:
             self.tool_call_idx += 1
         return out
 
+    def _get_available_tool_names(self) -> Optional[set]:
+        """Extract the set of valid function names from the tools list."""
+        if not self.tools:
+            return None
+        names = set()
+        for t in self.tools:
+            try:
+                names.add(t["function"]["name"])
+            except (KeyError, TypeError):
+                continue
+        return names if names else None
+
+    def _validate_tool_name(self, tool_call: Dict[str, Any], valid_names: Optional[set]) -> bool:
+        """Check if a parsed tool call's function name is in the available tools."""
+        if valid_names is None:
+            return True  # No tools list to validate against
+        name = tool_call.get("name", "")
+        if name not in valid_names:
+            logger.warning(
+                f"Tool call rejected: function '{name}' not in available tools {valid_names}"
+            )
+            return False
+        return True
+
     def _parse_tool_text(self, tool_text: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         try:
             parsed = self.tool_parser(tool_text, self.tools)
         except Exception:
             fallback_text = f"{self.tool_call_start}{tool_text}{self.tool_call_end}"
             return [], fallback_text
+
+        valid_names = self._get_available_tool_names()
+
         if isinstance(parsed, list):
-            return [self._format_tool_call(tc) for tc in parsed], None
+            # Filter out tool calls with hallucinated function names
+            valid_calls = [tc for tc in parsed if self._validate_tool_name(tc, valid_names)]
+            if not valid_calls:
+                fallback_text = f"{self.tool_call_start}{tool_text}{self.tool_call_end}"
+                return [], fallback_text
+            return [self._format_tool_call(tc) for tc in valid_calls], None
+
+        # Single tool call
+        if not self._validate_tool_name(parsed, valid_names):
+            fallback_text = f"{self.tool_call_start}{tool_text}{self.tool_call_end}"
+            return [], fallback_text
         return [self._format_tool_call(parsed)], None
 
     def extract_from_segment(self, segment: str) -> Tuple[str, List[Dict[str, Any]]]:
@@ -203,7 +273,6 @@ class ToolCallState:
                 if start_pos > idx:
                     output_chunks.append(segment[idx:start_pos])
                 self.in_tool_call = True
-                self.made_tool_call = True
                 self.tool_text = ""
                 idx = start_pos + len(self.tool_call_start)
             else:
@@ -215,6 +284,7 @@ class ToolCallState:
                 parsed_calls, fallback_text = self._parse_tool_text(self.tool_text)
                 if parsed_calls:
                     new_tool_calls.extend(parsed_calls)
+                    self.made_tool_call = True
                 if fallback_text:
                     output_chunks.append(fallback_text)
                 self.tool_text = ""

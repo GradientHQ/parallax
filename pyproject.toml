@@ -35,6 +35,7 @@ dependencies = [
   "dijkstar==2.6.0",
   "lattica==1.0.21",
   "orjson",
+
 ]
 
 [project.scripts]
@@ -47,12 +48,16 @@ mac = [
   "torch==2.8.0",
   "mlx-lm==0.30.6",
   "mlx==0.30.4",
+  "mlx-vlm==0.3.10",
+  "torchvision==0.23.0"
 ]
 
 gpu = [
-  "sglang[all]==0.5.7",
+  "sglang[all] @ git+https://github.com/sgl-project/sglang.git@9409c43593f2d6d64595981abf216a15752b0875#subdirectory=python",
   "mlx-lm==0.28.4",
-  "mlx[cpu]==0.30.0",
+  "mlx[cpu]==0.30.4",
+  # due to transformers version conflict, we need to install mlx-lm separately
+  # pip install mlx-lm==0.30.6 --no-deps
 ]
 
 vllm = [

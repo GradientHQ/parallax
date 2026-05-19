@@ -141,6 +141,7 @@ def _build_vllm_request(
     model_runner: Any,
     *,
     include_outputs: bool,
+    multimodal_params: Optional[Dict] = None,
 ) -> VLLMRequest:
     block_hasher = getattr(model_runner, "request_block_hasher", None)
 
@@ -171,6 +172,7 @@ def _build_vllm_request(
         arrival_time=getattr(req, "arrival_time", 0.0),
         block_hasher=block_hasher,
         lora_request=lora_req,
+        multi_modal_data=multimodal_params,
     )
     if include_outputs:
         output_ids = getattr(req, "output_ids", None) or []
@@ -204,8 +206,15 @@ def form_vllm_batch_prefill(
 
     for req in batched_requests:
         sampling_params = transform_sampling_params_to_vllm(req.sampling_params)
+        multimodal_params = getattr(req, "multimodal_params", None)
 
-        vllm_req = _build_vllm_request(req, sampling_params, model_runner, include_outputs=False)
+        vllm_req = _build_vllm_request(
+            req,
+            sampling_params,
+            model_runner,
+            include_outputs=False,
+            multimodal_params=multimodal_params,
+        )
         created_vllm_requests.append(vllm_req)
 
         computed_blocks, num_computed_tokens = kv_cache_manager.get_computed_blocks(vllm_req)
@@ -328,7 +337,14 @@ def form_vllm_batch_decode(
             new_token_ids.append([])
 
         sampling_params = transform_sampling_params_to_vllm(req.sampling_params)
-        vllm_req = _build_vllm_request(req, sampling_params, model_runner, include_outputs=True)
+        multimodal_params = getattr(req, "multimodal_params", None)
+        vllm_req = _build_vllm_request(
+            req,
+            sampling_params,
+            model_runner,
+            include_outputs=True,
+            multimodal_params=multimodal_params,
+        )
 
         prompt_ids = getattr(req, "input_ids", None) or []
         # For decode stage, computed_token_count should be the total number of tokens
