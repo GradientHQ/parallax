@@ -4,7 +4,9 @@ ServerInfo that will be announce to DHT and used for client's routing.
 We haven't used other info, will wait until DHT implemented.
 """
 
+import logging
 import platform
+import re
 import subprocess
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar, Dict, Optional
@@ -23,6 +25,8 @@ try:
     import psutil
 except ImportError:
     psutil = None
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -60,7 +64,12 @@ class HardwareInfo:
 class AppleSiliconHardwareInfo(HardwareInfo):
     """HardwareInfo specialised for Apple silicon (M-series)."""
 
-    # From cpu-monkey.com
+    # Peak GPU-ALU FP16 TFLOPS per chip (cpu-monkey.com for M1-M4). M5 values are
+    # GPU-ALU-only for consistency with M1-M4: max-bin cores (10/20/40) * 0.808,
+    # M5's per-core ALU rate (~flat vs M4's 0.852; M5's gains are in its new
+    # Neural Accelerators, not the ALUs). With those accelerators engaged (what
+    # MLX uses for matmul) effective FP16 is roughly 2x these values (~70 for M5
+    # Max) — a separate metric from the ALU figures tabulated here.
     _APPLE_PEAK_FP16: ClassVar[Dict[str, float]] = {
         "M1": 4.58,
         "M1 Pro": 10.6,
@@ -75,7 +84,31 @@ class AppleSiliconHardwareInfo(HardwareInfo):
         "M4": 8.52,
         "M4 Pro": 17.04,
         "M4 Max": 34.08,
+        "M5": 8.08,
+        "M5 Pro": 16.16,
+        "M5 Max": 32.32,
     }
+
+    # Fallback FP16 for a chip not in the table (e.g. a new generation): scale by
+    # GPU core count at the latest known per-core rate, else a base-chip default.
+    _FALLBACK_FP16_PER_CORE: ClassVar[float] = 0.808  # latest known (M5-era) ALU rate
+    _FALLBACK_FP16_DEFAULT: ClassVar[float] = 8.08  # base-chip default if cores unknown
+
+    @classmethod
+    def _gpu_core_count(cls) -> Optional[int]:
+        """Best-effort Apple GPU core count via system_profiler; None on failure."""
+        try:
+            out = subprocess.check_output(
+                ["system_profiler", "SPDisplaysDataType"], text=True, timeout=10
+            )
+            match = re.search(r"Total Number of Cores:\s*(\d+)", out)
+            if match:
+                return int(match.group(1))
+        except Exception:
+            # system_profiler may be unavailable/slow (e.g. CI, virtualized hosts);
+            # the caller falls back to a conservative default.
+            pass
+        return None
 
     @classmethod
     def detect(cls) -> "AppleSiliconHardwareInfo":
@@ -92,13 +125,28 @@ class AppleSiliconHardwareInfo(HardwareInfo):
         # For github action, we need to remove the "(Virtual)" suffix
         if short_name.endswith(" (Virtual)"):
             short_name = short_name.rsplit(" (Virtual)", maxsplit=1)[0]
-        try:
-            flops = cls._APPLE_PEAK_FP16[short_name]
-        except KeyError as e:
-            raise RuntimeError(
-                f"Unknown Apple silicon chip '{short_name}' detected. "
-                "Please add it to the _APPLE_PEAK_FP16 dictionary."
-            ) from e
+        flops = cls._APPLE_PEAK_FP16.get(short_name)
+        if flops is None:
+            # Unknown chip (likely a newer generation). Estimate from GPU core
+            # count rather than crashing, and warn so it can be added explicitly.
+            cores = cls._gpu_core_count()
+            if cores:
+                flops = round(cores * cls._FALLBACK_FP16_PER_CORE, 2)
+                logger.warning(
+                    "Unknown Apple silicon chip '%s'; estimating %.2f TFLOPS FP16 "
+                    "from %d GPU cores. Add it to _APPLE_PEAK_FP16 for an exact value.",
+                    short_name,
+                    flops,
+                    cores,
+                )
+            else:
+                flops = cls._FALLBACK_FP16_DEFAULT
+                logger.warning(
+                    "Unknown Apple silicon chip '%s' and GPU core count unavailable; "
+                    "falling back to %.2f TFLOPS FP16. Add it to _APPLE_PEAK_FP16.",
+                    short_name,
+                    flops,
+                )
 
         return cls(num_gpus=1, total_ram_gb=round(total_gb, 1), chip=chip, tflops_fp16=flops)
 
