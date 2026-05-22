@@ -125,9 +125,7 @@ class Scheduler:
         """Convert the prompt string to InitialRequest."""
         assert self.is_first_peer, "Only first peer can enqueue InitialRequest."
         input_ids = self.tokenizer.encode(request_str)
-        return InitialRequest.from_prompt_ids(
-            input_ids, self.max_new_tokens, self.max_total_length
-        )
+        return InitialRequest.from_prompt_ids(input_ids, self.max_new_tokens, self.max_total_length)
 
     def enque_request(self, request: Request | str):
         """Enque a request to the scheduler's wait queue."""

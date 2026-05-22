@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from parallax.server.shard_loader import MLXModelLoader, MODEL_CLASS_MAP
+from parallax.server.shard_loader import MODEL_CLASS_MAP, MLXModelLoader
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
