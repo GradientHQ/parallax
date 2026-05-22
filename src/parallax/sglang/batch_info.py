@@ -5,11 +5,13 @@ The following is the flow of data structures for a batch in SGLang:
 ScheduleBatch -> ModelWorkerBatch -> ForwardBatch
 """
 
-from types import SimpleNamespace
 from typing import List, Optional
 
 import torch
 from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
+from sglang.srt.mem_cache.cache_init_params import CacheInitParams
+from sglang.srt.mem_cache.chunk_cache import ChunkCache
+from sglang.srt.mem_cache.radix_cache import RadixCache as PageRadixCache
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_executor.model_runner import ModelRunner
 from sglang.srt.sampling.sampling_batch_info import (
@@ -18,7 +20,6 @@ from sglang.srt.sampling.sampling_batch_info import (
 from sglang.srt.sampling.sampling_params import SamplingParams as SGLSamplingParams
 from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
 
-from parallax.server.executor.sglang_executor import PageRadixCache
 from parallax.server.request import Request
 from parallax.server.sampling.sampling_params import (
     SamplingParams as ParallaxSamplingParams,
@@ -95,23 +96,23 @@ def form_sgl_batch_prefill(
 ) -> ForwardBatch:
     """Initialize a prefill ScheduleBatch -> ModelWorkerBatch -> ForwardBatch workflow"""
 
-    sgl_reqs = transform_requests_to_sglang(requests, page_tree_cache)
+    tree_cache = page_tree_cache
+    if tree_cache is None:
+        cache_params = CacheInitParams(
+            disable=True,
+            req_to_token_pool=model_runner.req_to_token_pool,
+            token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
+            page_size=model_runner.server_args.page_size,
+        )
+        tree_cache = ChunkCache(cache_params)
 
-    def dummy_evict(*args):
-        pass
+    sgl_reqs = transform_requests_to_sglang(requests, tree_cache)
 
-    dummy_tree_cache = SimpleNamespace(
-        page_size=model_runner.server_args.page_size,
-        device=model_runner.device,
-        token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
-        evictable_size=0,
-    )
-    dummy_tree_cache.evict = dummy_evict
     schedule_batch = ScheduleBatch.init_new(
         reqs=sgl_reqs,
         req_to_token_pool=model_runner.req_to_token_pool,
         token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
-        tree_cache=page_tree_cache if page_tree_cache is not None else dummy_tree_cache,
+        tree_cache=tree_cache,
         model_config=model_runner.model_config,
         enable_overlap=False,
         spec_algorithm=SpeculativeAlgorithm.NONE,

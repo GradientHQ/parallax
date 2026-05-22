@@ -21,6 +21,7 @@ from sglang.srt.distributed import (
     init_distributed_environment,
     set_custom_all_reduce,
     set_mscclpp_all_reduce,
+    set_torch_symm_mem_all_reduce,
 )
 from sglang.srt.layers.dp_attention import (
     get_attention_tp_group,
@@ -118,6 +119,8 @@ class ParallaxModelRunner(SGLModelRunner):
             backend = "gloo"
         elif self.device == "npu":
             backend = "hccl"
+        else:
+            backend = "gloo"
 
         before_avail_memory = get_available_gpu_memory(self.device, self.gpu_id)
         if not self.server_args.enable_p2p_check:
@@ -129,6 +132,7 @@ class ParallaxModelRunner(SGLModelRunner):
             dist_init_method = f"tcp://127.0.0.1:{self.dist_port}"
         set_custom_all_reduce(not self.server_args.disable_custom_all_reduce)
         set_mscclpp_all_reduce(self.server_args.enable_mscclpp)
+        set_torch_symm_mem_all_reduce(self.server_args.enable_torch_symm_mem)
 
         if not self.is_draft_worker:
             if self.device == "cpu":
@@ -153,6 +157,8 @@ class ParallaxModelRunner(SGLModelRunner):
                 local_rank=self.gpu_id,
                 distributed_init_method=dist_init_method,
                 timeout=self.server_args.dist_timeout,
+                moe_a2a_backend=self.server_args.moe_a2a_backend,
+                recovered_rank=self.server_args.elastic_ep_rejoin,
             )
 
             # Use monkey patch modified function
@@ -160,7 +166,12 @@ class ParallaxModelRunner(SGLModelRunner):
                 tensor_model_parallel_size=self.tp_size,
                 pipeline_model_parallel_size=self.pp_size,
                 expert_model_parallel_size=self.moe_ep_size,
+                attention_data_parallel_size=self.dp_size,
+                attention_context_model_parallel_size=self.attn_cp_size,
+                moe_data_model_parallel_size=self.moe_dp_size,
                 duplicate_tp_group=self.server_args.enable_pdmux,
+                enable_symm_mem=self.server_args.enable_symm_mem,
+                recovered_rank=self.server_args.elastic_ep_rejoin,
                 pp_start_layer=self.pp_start_layer,
                 pp_end_layer=self.pp_end_layer,
                 hidden_layers=self.model_config.num_hidden_layers,
@@ -225,6 +236,7 @@ def form_sgl_server_args(
     lora_eviction_policy: Optional[str] = "lru",
     lora_backend: Optional[str] = "triton",
     max_lora_chunk_size: Optional[int] = 128,
+    max_num_tokens_per_batch: int = 16384,
 ):
     """Creates a SGL ServerArgs object"""
     sgl_server_args = ServerArgs(
@@ -247,6 +259,7 @@ def form_sgl_server_args(
         lora_backend=lora_backend,
         max_lora_chunk_size=max_lora_chunk_size,
         dp_size=dp_size,
+        max_total_tokens=max_num_tokens_per_batch,
     )
     return sgl_server_args
 
@@ -338,6 +351,7 @@ def initialize_sgl_model_runner(
         lora_eviction_policy,
         lora_backend,
         max_lora_chunk_size,
+        max_num_tokens_per_batch=max_num_tokens_per_batch,
     )
     initialize_moe_config(server_args)
     quant_method = None
