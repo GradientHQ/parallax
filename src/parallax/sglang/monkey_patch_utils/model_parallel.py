@@ -25,16 +25,10 @@ import sglang
 import sglang.srt.distributed
 import sglang.srt.distributed.parallel_state
 import torch
-from sglang.srt.distributed import get_world_group
 from sglang.srt.distributed.parallel_state import (
     GroupCoordinator as SGLGroupCoordinator,
 )
-from sglang.srt.utils import (
-    LayerFn,
-    add_prefix,
-    is_npu,
-    is_xpu,
-)
+from sglang.srt.utils import LayerFn, add_prefix, is_npu, is_xpu
 from torch.distributed import Backend
 
 # from parallax.sglang.monkey_patch.model_runner import ModelRunner as SGLModelRunner
@@ -43,9 +37,7 @@ logger = logging.getLogger(__name__)
 
 _is_npu = is_npu()
 _is_xpu = is_xpu()
-_sgl_initialize_model_parallel = (
-    sglang.srt.distributed.parallel_state.initialize_model_parallel
-)
+_sgl_initialize_model_parallel = sglang.srt.distributed.parallel_state.initialize_model_parallel
 
 
 class ParallaxGroupCoordinator(SGLGroupCoordinator):
@@ -136,9 +128,7 @@ def monkey_patch_init_model_parallel_group(
         local_rank=local_rank,
         torch_distributed_backend=backend,
         use_pynccl=(
-            not (_is_npu or _is_xpu or backend == "mooncake")
-            if use_pynccl is None
-            else use_pynccl
+            not (_is_npu or _is_xpu or backend == "mooncake") if use_pynccl is None else use_pynccl
         ),
         use_pymscclpp=use_mscclpp_allreduce,
         use_custom_allreduce=use_custom_allreduce,
