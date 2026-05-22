@@ -8,8 +8,8 @@ namespace parallax_ext {
 mx::array reshape_and_cache(
     const mx::array& key,           // [num_tokens, num_heads, head_size]
     const mx::array& value,         // [num_tokens, num_heads, head_size]
-    mx::array& key_cache,           // [num_blocks, num_heads, head_size/x, block_size, x]
-    mx::array& value_cache,         // [num_blocks, num_heads, head_size/x, block_size]
+    const mx::array& key_cache,     // [num_blocks, num_heads, head_size/x, block_size, x]
+    const mx::array& value_cache,   // [num_blocks, num_heads, head_size/x, block_size]
     const mx::array& slot_mapping,  // [num_tokens]
     mx::StreamOrDevice s /* = {} */ // Stream on which to schedule the operation
 );

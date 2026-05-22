@@ -43,23 +43,23 @@ parallax = "parallax.cli:main"
 [project.optional-dependencies]
 
 mac = [
-  "nanobind==2.10.2",
+  "nanobind==2.12.0",
   "torch==2.8.0",
-  "mlx-lm==0.30.6",
-  "mlx==0.30.4",
+  "mlx-lm==0.31.3",
+  "mlx==0.31.2",
 ]
 
 gpu = [
   "sglang[all]==0.5.12",
   "accelerate",
-  "mlx-lm==0.28.4",
-  "mlx[cpu]==0.30.0",
+  "mlx-lm==0.31.3",
+  "mlx[cpu]==0.31.2",
 ]
 
 vllm = [
   "vllm==0.14.0",
-  "mlx-lm==0.28.4",
-  "mlx[cpu]==0.30.0",
+  "mlx-lm==0.31.3",
+  "mlx[cpu]==0.31.2",
 ]
 
 benchmark = [
