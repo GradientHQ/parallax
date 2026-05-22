@@ -26,6 +26,7 @@ logger = get_logger(__name__)
 
 MODEL_CLASS_MAP = {
     "kimi_k2": "mlx_lm.models.deepseek_v3",
+    "minimax_m2": "mlx_lm.models.minimax",
 }
 
 

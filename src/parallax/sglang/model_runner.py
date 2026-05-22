@@ -313,7 +313,7 @@ def initialize_sgl_model_runner(
 
     config = load_config(model_path)
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
-    dtype = config.get("torch_dtype", "bfloat16")
+    dtype = config.get("torch_dtype") or "bfloat16"
 
     if nccl_port is None:
         nccl_port = random.randint(4000, 5000)

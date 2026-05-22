@@ -21,7 +21,7 @@ Our scheduler also handles tokenization and pre-processing for the First Peer's 
 
 import time
 from collections import OrderedDict, deque
-from typing import Deque, Dict, List, Optional
+from typing import Deque, Dict, List, Optional, Set
 
 from parallax.server.cache_manager import CacheManager
 from parallax.server.request import InitialRequest, Request, RequestStatus
@@ -29,6 +29,14 @@ from parallax.utils.shared_state import SharedState
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def _normalize_token_ids(token_ids) -> Set[int]:
+    if token_ids is None:
+        return set()
+    if isinstance(token_ids, (list, tuple, set)):
+        return {int(token_id) for token_id in token_ids if token_id is not None}
+    return {int(token_ids)}
 
 
 class Scheduler:
@@ -69,6 +77,15 @@ class Scheduler:
             # Load configs for building InitialRequest
             self.tokenizer = kwargs.get("tokenizer", None)
             self.eos_token_id = kwargs.get("eos_token_id", None)
+            tokenizer_eos_token_id = (
+                getattr(self.tokenizer, "eos_token_id", None)
+                if self.tokenizer is not None
+                else None
+            )
+            if self.eos_token_id is None:
+                self.eos_token_id = tokenizer_eos_token_id
+            self.eos_token_ids = _normalize_token_ids(self.eos_token_id)
+            self.eos_token_ids.update(_normalize_token_ids(tokenizer_eos_token_id))
             self.max_new_tokens = kwargs.get("max_new_tokens", 512)
             self.max_total_length = kwargs.get("max_total_length", 1024)
 
@@ -109,7 +126,7 @@ class Scheduler:
         assert self.is_first_peer, "Only first peer can enqueue InitialRequest."
         input_ids = self.tokenizer.encode(request_str)
         return InitialRequest.from_prompt_ids(
-            input_ids, self.eos_token_id, self.max_new_tokens, self.max_total_length
+            input_ids, self.max_new_tokens, self.max_total_length
         )
 
     def enque_request(self, request: Request | str):
@@ -199,28 +216,14 @@ class Scheduler:
         if not self.is_first_peer:
             return False
 
-        assert (
-            self.eos_token_id is not None
-        ), "EOS token ID must be set for request status checking."
+        assert self.eos_token_ids, "EOS token ID must be set for request status checking."
 
         last_token_id = request.output_ids[-1] if request.output_ids else None
         if (
             not finished
             and not request.sampling_params.ignore_eos
-            and (
-                self.eos_token_id
-                and (
-                    last_token_id == self.eos_token_id
-                    or (isinstance(self.eos_token_id, list) and last_token_id in self.eos_token_id)
-                )
-            )
-        ):
-            request.update_status(RequestStatus.FINISHED_EOS)
-            finished = True
-        elif not request.sampling_params.ignore_eos and (
-            self.tokenizer
-            and self.tokenizer.eos_token_id
-            and last_token_id == self.tokenizer.eos_token_id
+            and last_token_id is not None
+            and last_token_id in self.eos_token_ids
         ):
             request.update_status(RequestStatus.FINISHED_EOS)
             finished = True

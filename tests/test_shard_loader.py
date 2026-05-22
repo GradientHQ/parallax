@@ -7,12 +7,16 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from parallax.server.shard_loader import MLXModelLoader
+from parallax.server.shard_loader import MLXModelLoader, MODEL_CLASS_MAP
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
 class TestMLXModelLoader:
     """Test MLXModelLoader functionality."""
+
+    def test_minimax_m2_uses_mlx_lm_minimax_module(self):
+        """MiniMax M2 configs use model_type=minimax_m2, but MLX-LM exposes minimax."""
+        assert MODEL_CLASS_MAP["minimax_m2"] == "mlx_lm.models.minimax"
 
     def test_register_block_class_success(self):
         """Test successful registration of block classes from models directory."""

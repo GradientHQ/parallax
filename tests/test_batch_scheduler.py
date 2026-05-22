@@ -1,5 +1,7 @@
 from typing import Optional
 
+import pytest
+
 from parallax.server.request import InitialRequest, Request, RequestStatus
 from parallax.server.scheduler import Scheduler
 
@@ -20,6 +22,14 @@ class FakeCacheManager:
             return False, 0
         self._reqs.add(request_id)
         return True, 0
+
+
+class FakeTokenizer:
+    def __init__(self, eos_token_id=None):
+        self.eos_token_id = eos_token_id
+
+    def encode(self, text: str) -> list[int]:
+        return [ord(ch) for ch in text]
 
 
 def make_prefill(rid: str, prompt_len: int) -> InitialRequest:
@@ -110,3 +120,50 @@ def test_kv_cache_admission_guard_blocks_prefill():
     batch = sched.form_batch()
     assert len(batch) == 0
     assert sched.num_running_requests == 0
+
+
+def test_request_status_uses_tokenizer_eos_when_config_eos_missing():
+    sched = Scheduler(
+        max_batch_size=2,
+        is_first_peer=True,
+        tokenizer=FakeTokenizer(eos_token_id=200020),
+        eos_token_id=None,
+    )
+    req = InitialRequest(
+        request_id="minimax",
+        input_ids=[1],
+        output_ids=[200020],
+        status=RequestStatus.DECODING,
+    )
+
+    assert sched.check_and_update_request_status(req) is True
+    assert req.status == RequestStatus.FINISHED_EOS
+
+
+def test_request_status_accepts_zero_eos_token_id():
+    sched = Scheduler(max_batch_size=2, is_first_peer=True, eos_token_id=0)
+    req = InitialRequest(
+        request_id="zero-eos",
+        input_ids=[1],
+        output_ids=[0],
+        status=RequestStatus.DECODING,
+    )
+
+    assert sched.check_and_update_request_status(req) is True
+    assert req.status == RequestStatus.FINISHED_EOS
+
+
+def test_request_status_requires_eos_for_first_peer_status_checks():
+    sched = Scheduler(max_batch_size=2, is_first_peer=True, eos_token_id=None)
+    req = InitialRequest(
+        request_id="no-eos",
+        input_ids=[1],
+        output_ids=[123],
+        status=RequestStatus.DECODING,
+        max_new_tokens=5,
+        max_total_length=10,
+    )
+
+    with pytest.raises(AssertionError, match="EOS token ID must be set"):
+        sched.check_and_update_request_status(req)
+    assert req.status == RequestStatus.DECODING
