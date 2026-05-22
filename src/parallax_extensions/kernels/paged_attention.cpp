@@ -120,7 +120,7 @@ void PagedAttentionV1::eval_gpu(
     auto kernel = d.get_kernel(kname, lib, hash_name, func_consts);
 
     // Prepare to encode kernel
-    auto& compute_encoder = d.get_command_encoder(s.index);
+    auto& compute_encoder = mx::metal::get_command_encoder(s);
     compute_encoder.set_compute_pipeline_state(kernel);
 
     // Shared Memory
