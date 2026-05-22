@@ -138,12 +138,17 @@ class BaseExecutor:
             f"Executor dtype set to {dtype} (resolved={self.dtype}); shard_layers={self.num_shard_layers}"
         )
 
+        self.eos_token_id = self.config.get("eos_token_id", None)
+        if self.eos_token_id is None:
+            self.eos_token_id = getattr(self.tokenizer, "eos_token_id", None)
+
         if self.tokenizer.pad_token_id is None:
-            self.pad_token_id = self.tokenizer.eos_token_id
+            if isinstance(self.eos_token_id, list):
+                self.pad_token_id = self.eos_token_id[0] if self.eos_token_id else None
+            else:
+                self.pad_token_id = self.eos_token_id
         else:
             self.pad_token_id = self.tokenizer.pad_token_id
-
-        self.eos_token_id = self.config.get("eos_token_id", None)
 
         # Scheduler: derive final max_batch_size with KV constraints
         # Remove this for now as it's not working on gpu devices

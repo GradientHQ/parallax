@@ -61,9 +61,15 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]])
         if spec_layer is not None:
             continue  # skip spec decode layers for main model
 
+        _is_kv_scale = name.endswith(".k_scale") or name.endswith(".v_scale")
+
         for param_name, weight_name, shard_id in stacked_params_mapping:
             # Skip non-stacked layers and experts (experts handled below).
             if weight_name not in name:
+                continue
+            # Skip kv cache scales. maybe_remap_kv_scale_name expects the
+            # original checkpoint name, before k_proj/v_proj remapping.
+            if _is_kv_scale:
                 continue
             # We have mlp.experts[0].gate_proj in the checkpoint.
             # Since we handle the experts below in expert_params_mapping,
@@ -75,7 +81,9 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]])
                 continue
             name = name.replace(weight_name, param_name)
             # Skip loading extra bias for GPTQ models.
-            if name.endswith(".bias") and name not in params_dict:
+            if name not in params_dict:
+                continue
+            if name.endswith(".bias"):
                 continue
 
             param = params_dict[name]
@@ -89,6 +97,8 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]])
                     continue
                 name = name.replace(weight_name, param_name)
 
+                if name not in params_dict:
+                    continue
                 param = params_dict[name]
                 weight_loader = param.weight_loader
                 weight_loader(
@@ -109,6 +119,8 @@ def monkey_patch_load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]])
                 if name is None:
                     continue
 
+                if name not in params_dict:
+                    continue
                 param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
