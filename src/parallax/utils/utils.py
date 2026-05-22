@@ -27,10 +27,7 @@ def is_mps_available():
 def is_metal_available():
     """Check if MLX Metal backend is available"""
     try:
-        import mlx.core as mx
-
-        mx.metal.device_info()
-        return True
+        return mx.metal.is_available()
     except (RuntimeError, AttributeError, ImportError):
         return False
 
@@ -43,7 +40,7 @@ def get_current_device():
     device = "cpu"
     if is_cuda_available():
         device = "cuda"
-    if is_mps_available():
+    if is_metal_available():
         device = "mlx"
     return device
 
