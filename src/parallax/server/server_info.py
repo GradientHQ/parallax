@@ -75,6 +75,10 @@ class AppleSiliconHardwareInfo(HardwareInfo):
         "M4": 8.52,
         "M4 Pro": 17.04,
         "M4 Max": 34.08,
+        "M5": 9.37,
+        "M5 Pro": 18.74,
+        "M5 Max": 37.49,
+        "M5 Ultra": 74.98,
     }
 
     @classmethod
