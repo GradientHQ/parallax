@@ -618,10 +618,12 @@ class BaseExecutor:
         if self.tokenizer.chat_template:
             messages = raw_request["messages"]
             process_message_content(messages)
-            chat_template_kwargs = raw_request.get("chat_template_kwargs", {})
+            chat_template_kwargs = dict(raw_request.get("chat_template_kwargs", {}))
             # check extra_body for backward compatibility
             if "extra_body" in raw_request and "chat_template_kwargs" in raw_request["extra_body"]:
                 chat_template_kwargs.update(raw_request["extra_body"]["chat_template_kwargs"])
+            # Transformers 5.x defaults return_dict=True, but Parallax expects list[int].
+            chat_template_kwargs["return_dict"] = False
 
             prompt = self.tokenizer.apply_chat_template(
                 messages,

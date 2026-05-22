@@ -126,7 +126,7 @@ class SGLExecutor(BaseExecutor):
             "dp_rank": dp_rank,
             "dp_size": dp_size,
             "nccl_port": nccl_port,
-            "using_hfcache": use_hfcache,
+            "use_hfcache": use_hfcache,
             "enable_lora": self.enable_lora,
             "max_lora_rank": self.max_lora_rank,
             "lora_target_modules": self.lora_target_modules,
