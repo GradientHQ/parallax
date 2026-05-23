@@ -1,5 +1,9 @@
 import importlib
+import os
+import shutil
+import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 from types import ModuleType
 from typing import Optional
@@ -34,8 +38,93 @@ def _build_import_error(original_error: Exception) -> ImportError:
     return ImportError(msg)
 
 
+def _build_signature() -> str:
+    try:
+        from importlib.metadata import version
+
+        mlx_version = version("mlx")
+        nanobind_version = version("nanobind")
+    except Exception:
+        mlx_version = "unknown"
+        nanobind_version = "unknown"
+
+    return "|".join(
+        [
+            sys.implementation.cache_tag or "",
+            sys.version.split()[0],
+            mx.__file__,
+            mlx_version,
+            nanobind_version,
+        ]
+    )
+
+
+def _ensure_build_tools() -> None:
+    missing = []
+    try:
+        import setuptools  # noqa: F401
+    except Exception:
+        missing.append("setuptools")
+
+    if shutil.which("cmake") is None:
+        missing.append("cmake")
+    if shutil.which("ninja") is None:
+        missing.append("ninja")
+
+    if missing:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", *missing],
+            check=True,
+        )
+
+
+def _rebuild_for_github_actions() -> None:
+    """Build native kernels against the exact Python/MLX used by GitHub macOS CI."""
+    if os.environ.get("GITHUB_ACTIONS") != "true" or sys.platform != "darwin":
+        return
+    if os.environ.get("PARALLAX_SKIP_CI_EXTENSION_REBUILD") == "1":
+        return
+
+    package_dir = Path(__file__).resolve().parent
+    lib_dir = package_dir / "lib"
+    ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
+    expected_ext = lib_dir / f"_ext{ext_suffix}"
+    stamp = lib_dir / f".ci-build-{sys.implementation.cache_tag or 'python'}"
+    signature = _build_signature()
+
+    if expected_ext.exists() and stamp.exists() and stamp.read_text() == signature:
+        return
+
+    _ensure_build_tools()
+
+    env = os.environ.copy()
+    env["DEBUG"] = "0"
+    cmake_args = env.get("CMAKE_ARGS", "")
+    python_arg = f"-DPython_EXECUTABLE={sys.executable}"
+    env["CMAKE_ARGS"] = f"{python_arg} {cmake_args}".strip()
+
+    log_path = Path("/tmp/parallax_ext_build.log")
+    with log_path.open("w") as log:
+        subprocess.run(
+            [sys.executable, "setup.py", "build_ext", "-j8", "--inplace"],
+            cwd=package_dir,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            check=True,
+        )
+
+    stamp.write_text(signature)
+    print(f"Rebuilt parallax_extensions native kernels for CI: {expected_ext}")
+
+
 def load_extension_module() -> ModuleType:
     """Load the compiled extension module for the current Python runtime."""
+    try:
+        _rebuild_for_github_actions()
+    except Exception as exc:  # pragma: no cover - GitHub runner dependent
+        raise _build_import_error(exc) from exc
+
     try:
         # Python's import machinery selects the matching ABI-tagged binary
         # (e.g. _ext.cpython-312-*.so) from parallax_extensions/lib.
