@@ -44,6 +44,7 @@ class ModelInfo:
 
     qk_nope_head_dim: Optional[int] = None
     qk_rope_head_dim: Optional[int] = None
+    v_head_dim: Optional[int] = None
     head_size_k: int = None
     head_size_v: int = None
 
@@ -55,7 +56,8 @@ class ModelInfo:
             self.head_size_k = self.qk_nope_head_dim + self.qk_rope_head_dim
         else:
             self.head_size_k = self.head_size
-        self.head_size_v = self.head_size
+        v_head_dim = getattr(self, "v_head_dim", None)
+        self.head_size_v = v_head_dim if v_head_dim is not None else self.head_size
 
     @property
     def q_dim(self) -> int:

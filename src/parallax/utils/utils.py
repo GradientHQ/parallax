@@ -1,7 +1,9 @@
 """Utility functions."""
 
+import json
 import random
 import socket
+from pathlib import Path
 from typing import List
 
 import mlx.core as mx
@@ -9,9 +11,6 @@ import numpy as np
 import psutil
 import torch
 import zmq
-from mlx_lm.utils import _download, load_config
-
-from parallax.utils.selective_download import download_metadata_only
 
 
 def is_cuda_available():
@@ -281,15 +280,24 @@ def combine_padding_and_causal_masks(
     return causal_mask + padding_mask_float
 
 
-def fetch_model_from_hf(name: str, local_files_only: bool = False):
-    """Fetch model from huggingface and returns model config"""
-
-    if local_files_only:
-        model_path = download_metadata_only(name, local_files_only=local_files_only)
+def load_config_only(name: str, local_files_only: bool = False):
+    """Load only config.json from a local path or Hugging Face repo."""
+    local_path = Path(name)
+    if local_path.exists():
+        config_file = local_path / "config.json"
     else:
-        model_path = _download(name)
-    config = load_config(model_path)
-    return config
+        from huggingface_hub import hf_hub_download
+
+        config_file = Path(
+            hf_hub_download(
+                repo_id=name,
+                filename="config.json",
+                local_files_only=local_files_only,
+            )
+        )
+
+    with open(config_file, "r") as f:
+        return json.load(f)
 
 
 def is_port_available(port: int):

@@ -29,6 +29,10 @@ MODEL_CLASS_MAP = {
     "minimax_m2": "mlx_lm.models.minimax",
 }
 
+ARCHITECTURE_CLASS_ALIASES = {
+    "GlmMoeDsaForCausalLM": "DeepseekV32ForCausalLM",
+}
+
 
 class MLXModelLoader:
     """
@@ -92,6 +96,10 @@ class MLXModelLoader:
 
             except Exception as e:
                 logger.warning(f"Failed to load model from {model_file}: {e}")
+
+        for alias, target in ARCHITECTURE_CLASS_ALIASES.items():
+            if target in self.block_class_map:
+                self.block_class_map[alias] = self.block_class_map[target]
 
     def linear_to_lora_layers(
         self,
