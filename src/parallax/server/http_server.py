@@ -28,7 +28,7 @@ import fastapi
 import uvicorn
 import zmq
 import zmq.asyncio
-from fastapi.responses import ORJSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from mlx_lm.tokenizer_utils import StreamingDetokenizer
 from mlx_lm.utils import load_config
 from pydantic import BaseModel
@@ -101,6 +101,7 @@ class HTTPRequestInfo:
     # tool calling support
     tool_state: Optional[ToolCallState] = None
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    enable_thinking: bool = True
 
 
 class HTTPHandler:
@@ -137,12 +138,29 @@ class HTTPHandler:
         self.tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
         self.detokenizer_class, self.tokenmap = load_detokenizer(model_path, self.tokenizer)
 
+    @staticmethod
+    def _is_thinking_enabled(request: Dict) -> bool:
+        chat_template_kwargs = dict(request.get("chat_template_kwargs", {}))
+        extra_body = request.get("extra_body")
+        if isinstance(extra_body, dict) and "chat_template_kwargs" in extra_body:
+            chat_template_kwargs.update(extra_body["chat_template_kwargs"])
+        return chat_template_kwargs.get("enable_thinking") is not False
+
+    def _get_initial_assistant_content(self, request_info: HTTPRequestInfo) -> str:
+        model_path = self.model_path_str.lower()
+        if "minimax-m2" in model_path:
+            return "<think>"
+        if ("qwen3.6" in model_path or "qwen3.5" in model_path) and request_info.enable_thinking:
+            return "<think>"
+        return ""
+
     def create_request(self, request: Dict):
         """Creates a new request information"""
         rid = request["rid"]
         stream = request.get("stream", False)
         model = request.get("model", "default")
         return_probs = request.get("return_probs", False)  # Check if probs requested
+        enable_thinking = self._is_thinking_enabled(request)
         chat_object = "chat.completion.chunk" if stream else "chat.completion"
         detokenizer = self.detokenizer_class(self.tokenizer, self.tokenmap)
         create_time = time.time()
@@ -156,6 +174,7 @@ class HTTPHandler:
             update_time=update_time,
             detokenizer=detokenizer,
             return_probs=return_probs,
+            enable_thinking=enable_thinking,
         )
         request_info.tool_state = ToolCallState.from_tokenizer(
             self.tokenizer, request.get("tools"), stream
@@ -206,9 +225,7 @@ class HTTPHandler:
 
         if is_first:
             role = "assistant"
-            content = ""
-            if "minimax-m2" in self.model_path_str.lower():
-                content = "<think>"
+            content = self._get_initial_assistant_content(request_info)
             tool_calls = None
         elif is_last:
             role = None
@@ -318,7 +335,7 @@ class HTTPHandler:
         choice = response["choices"][0]
         choice["message"] = {
             "role": "assistant",
-            "content": request_info.text,
+            "content": self._get_initial_assistant_content(request_info) + request_info.text,
             "reasoning_content": None,
             "tool_calls": request_info.tool_calls or None,
         }
@@ -464,7 +481,7 @@ def create_error_response(
 ):
     """Creates a json error response for the frontend."""
     error = ErrorResponse(message=message, type=err_type, code=status_code.value)
-    return ORJSONResponse(content=error.model_dump(), status_code=error.code)
+    return JSONResponse(content=error.model_dump(), status_code=error.code)
 
 
 # Fast API
@@ -548,7 +565,7 @@ async def v1_chat_completions(raw_request: fastapi.Request):
 
             response = app.state.http_handler.generate_non_stream_response(request_id)
             app.state.http_handler.release_request(request_id)
-            return ORJSONResponse(status_code=200, content=response)
+            return JSONResponse(status_code=200, content=response)
         except Exception as e:
             # Handle any unexpected errors during processing
             logger.error(f"Error processing non-streaming request {request_id}: {e}")

@@ -20,6 +20,7 @@ from mlx_lm.utils import _download, load_config
 
 from parallax.server.model import ShardedModel
 from parallax.utils.tokenizer_utils import load_tokenizer
+from parallax.utils.utils import normalize_model_config
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -32,6 +33,8 @@ MODEL_CLASS_MAP = {
 ARCHITECTURE_CLASS_ALIASES = {
     "GlmMoeDsaForCausalLM": "DeepseekV32ForCausalLM",
 }
+
+LANGUAGE_MODEL_PREFIX = "language_model."
 
 
 class MLXModelLoader:
@@ -249,7 +252,7 @@ class MLXModelLoader:
         else:
             model_path = _download(self.model_path_str)
 
-        config = load_config(model_path)
+        config = normalize_model_config(load_config(model_path))
         tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
 
         architectures = config.get("architectures", None)
@@ -279,7 +282,10 @@ class MLXModelLoader:
 
         try:
             arch_module = importlib.import_module(model_class)
-            model_args_class = getattr(arch_module, "ModelArgs")
+            if model_type == "qwen3_5" and hasattr(arch_module, "TextModelArgs"):
+                model_args_class = getattr(arch_module, "TextModelArgs")
+            else:
+                model_args_class = getattr(arch_module, "ModelArgs")
             model_args = model_args_class.from_dict(config)
 
         except (ImportError, AttributeError) as e:
@@ -341,38 +347,43 @@ class MLXModelLoader:
             for key in f.keys():
                 is_needed = False
                 remapped_key = None
+                model_key = (
+                    key[len(LANGUAGE_MODEL_PREFIX) :]
+                    if key.startswith(LANGUAGE_MODEL_PREFIX)
+                    else key
+                )
 
                 # Check if the key belongs to the shard and remap it
                 if (
                     model_shard.is_first_shard
-                    and "embed_tokens" in key
-                    and key.startswith("model.")
+                    and "embed_tokens" in model_key
+                    and model_key.startswith("model.")
                 ):
                     is_needed = True
-                    remapped_key = key.replace("model.", "", 1)
+                    remapped_key = model_key.replace("model.", "", 1)
                     if model_shard.is_last_shard and config.get("tie_word_embeddings", False):
                         # Also add lm_head mapping for tied embeddings
                         lm_head_key = remapped_key.replace("embed_tokens", "lm_head")
                         shard_weights[lm_head_key] = f[key]
                 elif model_shard.is_last_shard:
-                    if "model.norm" in key:
+                    if "model.norm" in model_key:
                         is_needed = True
-                        remapped_key = key.replace("model.", "", 1)
-                    if "lm_head" in key:
+                        remapped_key = model_key.replace("model.", "", 1)
+                    if "lm_head" in model_key:
                         is_needed = True
-                        remapped_key = key
+                        remapped_key = model_key
                     elif (
                         config.get("tie_word_embeddings", False)
-                        and "embed_tokens" in key
-                        and key.startswith("model.embed_tokens")
+                        and "embed_tokens" in model_key
+                        and model_key.startswith("model.embed_tokens")
                     ):
                         is_needed = True
-                        remapped_key = key.replace("model.", "", 1).replace(
+                        remapped_key = model_key.replace("model.", "", 1).replace(
                             "embed_tokens", "lm_head"
                         )
-                if layer_key_prefix in key:
+                if layer_key_prefix in model_key:
                     try:
-                        parts = key.split(".")
+                        parts = model_key.split(".")
                         layer_idx = int(parts[2])
                         if current_start_layer <= layer_idx < current_end_layer:
                             is_needed = True

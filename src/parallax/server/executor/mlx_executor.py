@@ -598,33 +598,34 @@ class MLXExecutor(BaseExecutor):
         else:
             padded_inputs, padding_mask = pad_inputs(0, h_or_tokens_list, self.dtype)
 
-        # Generate slot_mapping for prefill (only for NEW tokens, starting from prefix_len)
-        max_len = padded_inputs.shape[1]
-        slot_mapping_flat = []
+        slot_mapping_tensor = None
+        if self.cache_manager.needs_blocks:
+            # Generate slot_mapping for prefill (only for NEW tokens, starting from prefix_len)
+            max_len = padded_inputs.shape[1]
+            slot_mapping_flat = []
 
-        for i, req in enumerate(batched_requests):
-            block_table = block_tables_list[i]
-            prefix_len = prefix_lens_list[i]
-            total_len = req.total_length
-            new_tokens_len = total_len - prefix_len
+            for i, req in enumerate(batched_requests):
+                block_table = block_tables_list[i]
+                prefix_len = prefix_lens_list[i]
+                total_len = req.total_length
+                new_tokens_len = total_len - prefix_len
 
-            for seq_idx in range(max_len):
-                if seq_idx < new_tokens_len:
-                    # Valid new token - map to position after prefix
-                    actual_pos = prefix_len + seq_idx
-                    block_idx = actual_pos // self.cache_manager.block_size
-                    block_offset = actual_pos % self.cache_manager.block_size
-                    physical_block = block_table[block_idx]
-                    slot = physical_block * self.cache_manager.block_size + block_offset
-                    slot_mapping_flat.append(slot)
-                else:
-                    # Padding token
-                    # Map to -1. The kernel should ignore this.
-                    slot_mapping_flat.append(-1)
+                for seq_idx in range(max_len):
+                    if seq_idx < new_tokens_len:
+                        # Valid new token - map to position after prefix
+                        actual_pos = prefix_len + seq_idx
+                        block_idx = actual_pos // self.cache_manager.block_size
+                        block_offset = actual_pos % self.cache_manager.block_size
+                        physical_block = block_table[block_idx]
+                        slot = physical_block * self.cache_manager.block_size + block_offset
+                        slot_mapping_flat.append(slot)
+                    else:
+                        # Padding token. The kernel should ignore this.
+                        slot_mapping_flat.append(-1)
 
-        slot_mapping_tensor = mx.array(slot_mapping_flat, dtype=mx.int64)
+            slot_mapping_tensor = mx.array(slot_mapping_flat, dtype=mx.int64)
 
-        # Pad block tables
+        # Pad block tables. Linear-only shards do not allocate KV blocks.
         max_blocks = max(len(bt) for bt in block_tables_list)
         padded_block_tables = []
         for bt in block_tables_list:
@@ -737,7 +738,7 @@ class MLXExecutor(BaseExecutor):
             padded_inputs = mx.concatenate(h_or_tokens_list, axis=0)  # (Batch, D)
             padded_inputs = padded_inputs.reshape(batch_size, 1, -1)  # (Batch, 1, D)
 
-        # Pad block tables
+        # Pad block tables. Linear-only shards do not allocate KV blocks.
         max_blocks = max(len(bt) for bt in block_tables_list)
         padded_block_tables = []
         for bt in block_tables_list:

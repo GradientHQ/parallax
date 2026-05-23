@@ -84,6 +84,8 @@ MODELS = {
     "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8": "mlx-community/Qwen3-Next-80B-A3B-Instruct-8bit",
     "Qwen/Qwen3-Next-80B-A3B-Thinking": "mlx-community/Qwen3-Next-80B-A3B-Thinking-4bit",
     "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8": "mlx-community/Qwen3-Next-80B-A3B-Thinking-8bit",
+    # Qwen 3.6 Series
+    "Qwen/Qwen3.6-27B": "mlx-community/Qwen3.6-27B-mxfp4",
     # Qwen 3 Large MoE Models
     "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8": "mlx-community/Qwen3-235B-A22B-Instruct-2507-8bit",
     "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8": "mlx-community/Qwen3-235B-A22B-Thinking-2507-8bit",
@@ -100,34 +102,39 @@ NODE_JOIN_COMMAND_LOCAL_NETWORK = """parallax join"""
 NODE_JOIN_COMMAND_PUBLIC_NETWORK = """parallax join -s {scheduler_addr} """
 
 
-def get_model_info(model_name, use_hfcache: bool = False):
-    config = load_config_only(model_name, local_files_only=use_hfcache)
-
+def get_param_bytes_per_element(config, model_name: str) -> float:
     quant_method = config.get("quant_method", None)
-    quantization_config = config.get("quantization_config", None)
+    quantization_config = config.get("quantization_config") or config.get("quantization")
     if quant_method is None and quantization_config is not None:
-        quant_method = quantization_config.get("quant_method", None)
+        quant_method = quantization_config.get("quant_method") or quantization_config.get("mode")
+
+    if quantization_config is not None and quantization_config.get("bits") is not None:
+        return quantization_config["bits"] / 8
 
     if quant_method is None:
-        param_bytes_per_element = 2
+        return 2
     elif quant_method == "fp8":
-        param_bytes_per_element = 1
+        return 1
     elif quant_method in ("mxfp4", "int4", "awq", "gptq", "compressed-tensors"):
-        param_bytes_per_element = 0.5
+        return 0.5
     else:
-        param_bytes_per_element = 1
         logger.warning(
             f"model_name:{model_name} quant_method {quant_method} not supported in get_model_info method"
         )
+        return 1
+
+
+def get_model_info(model_name, use_hfcache: bool = False):
+    config = load_config_only(model_name, local_files_only=use_hfcache)
+
+    param_bytes_per_element = get_param_bytes_per_element(config, model_name)
 
     mlx_param_bytes_per_element = param_bytes_per_element
     mlx_model_name = MODELS.get(model_name, model_name)
 
     if mlx_model_name != model_name:
         mlx_config = load_config_only(mlx_model_name, local_files_only=use_hfcache)
-        mlx_quant_dict = mlx_config.get("quantization_config", None)
-        if mlx_quant_dict and "bits" in mlx_quant_dict:
-            mlx_param_bytes_per_element = mlx_quant_dict["bits"] / 8
+        mlx_param_bytes_per_element = get_param_bytes_per_element(mlx_config, mlx_model_name)
 
     # get local experts
     num_local_experts = config.get("num_local_experts", None)

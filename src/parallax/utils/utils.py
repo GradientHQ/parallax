@@ -297,7 +297,21 @@ def load_config_only(name: str, local_files_only: bool = False):
         )
 
     with open(config_file, "r") as f:
-        return json.load(f)
+        return normalize_model_config(json.load(f))
+
+
+def normalize_model_config(config: dict) -> dict:
+    """Expose nested text model fields at the top level for VLM-style configs."""
+    text_config = config.get("text_config")
+    if config.get("model_type") == "qwen3_5" and isinstance(text_config, dict):
+        normalized = {**config, **text_config}
+        normalized["model_type"] = config["model_type"]
+        normalized["architectures"] = config.get("architectures", normalized.get("architectures"))
+        normalized["tie_word_embeddings"] = text_config.get(
+            "tie_word_embeddings", config.get("tie_word_embeddings", False)
+        )
+        return normalized
+    return config
 
 
 def is_port_available(port: int):
