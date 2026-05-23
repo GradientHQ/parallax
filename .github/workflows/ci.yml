@@ -6,20 +6,13 @@ on:
 
 jobs:
   test:
-    name: Test on ${{ matrix.os }}
+    name: Test on ${{ matrix.os }} / Python ${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            python-version: '3.11'
-            # Install gpu (sglang) and dev dependencies for Linux
-            extras: 'gpu, dev'
-          - os: macos-latest
-            python-version: '3.11'
-            # Install mac (mlx) and dev dependencies for macOS
-            extras: 'mac, dev'
+        os: [ubuntu-latest, macos-15, macos-26]
+        python-version: ['3.11', '3.12', '3.13']
 
     steps:
     - name: Free Disk Space (Ubuntu)
@@ -43,6 +36,7 @@ jobs:
       with:
         filters: |
           src:
+            - '.github/workflows/ci.yml'
             - 'src/**'
             - 'tests/**'
             - 'pyproject.toml'
@@ -58,17 +52,21 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
+        key: ${{ matrix.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
         restore-keys: |
-          ${{ runner.os }}-pip-${{ matrix.python-version }}-
-          ${{ runner.os }}-pip-
+          ${{ matrix.os }}-pip-${{ matrix.python-version }}-
+          ${{ matrix.os }}-pip-
 
     - name: Install dependencies
       if: steps.changes.outputs.src == 'true'
       run: |
         python -m pip install --upgrade pip
         # Install extras dependencies based on matrix variable
-        pip install -e ".[${{ matrix.extras }}]"
+        if [[ "${{ runner.os }}" == "Linux" ]]; then
+          pip install -e ".[gpu, dev]"
+        else
+          pip install -e ".[mac, dev]"
+        fi
 
     - name: Run Unit Tests
       if: steps.changes.outputs.src == 'true'
@@ -77,7 +75,7 @@ jobs:
         pytest tests/ -v --cov=src/parallax --cov-report=xml
 
     - name: Upload coverage to Codecov
-      if: steps.changes.outputs.src == 'true' && runner.os == 'macOS'
+      if: steps.changes.outputs.src == 'true' && matrix.os == 'macos-15' && matrix.python-version == '3.11'
       uses: codecov/codecov-action@v4
       with:
         file: ./coverage.xml
@@ -85,7 +83,7 @@ jobs:
         token: ${{ secrets.CODECOV_TOKEN }}
 
     - name: Run E2E tests (macOS only)
-      if: steps.changes.outputs.src == 'true' && runner.os == 'macOS'
+      if: steps.changes.outputs.src == 'true' && matrix.os == 'macos-26' && matrix.python-version == '3.12'
       shell: bash
       env:
         TERM: xterm-256color

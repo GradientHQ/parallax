@@ -81,5 +81,13 @@ nanobind_add_module(
 target_link_libraries(_ext PRIVATE parallax_ext)
 
 if(BUILD_SHARED_LIBS)
-  target_link_options(_ext PRIVATE -Wl,-rpath,@loader_path)
+  set(_PARALLAX_MLX_RPATH "@loader_path/../../mlx/lib")
+  set_target_properties(
+    parallax_ext
+    PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE
+               INSTALL_RPATH "${_PARALLAX_MLX_RPATH}")
+  set_target_properties(
+    _ext
+    PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE
+               INSTALL_RPATH "@loader_path;${_PARALLAX_MLX_RPATH}")
 endif()
