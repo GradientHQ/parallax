@@ -1,4 +1,5 @@
 import asyncio
+import json
 from http import HTTPStatus
 
 try:
@@ -24,6 +25,111 @@ except Exception:  # pragma: no cover - torch might be unavailable in CI
     sys.modules.setdefault("torch", torch_stub)
 
 from parallax.server.http_server import HTTPHandler, HTTPRequestInfo
+
+
+def _decode_sse_json(chunk: bytes):
+    line = chunk.decode().strip()
+    assert line.startswith("data: ")
+    return json.loads(line[len("data: ") :])
+
+
+def test_qwen3_6_stream_first_chunk_includes_think_marker():
+    handler = HTTPHandler.__new__(HTTPHandler)
+    handler.model_path_str = "mlx-community/Qwen3.6-27B-mxfp4"
+    handler.processing_requests = {}
+
+    rid = "req-qwen36-stream"
+    handler.processing_requests[rid] = HTTPRequestInfo(
+        id=rid,
+        stream=True,
+        model="test-model",
+    )
+
+    payload = _decode_sse_json(handler._generate_stream_chunk(rid, None, is_first=True))
+
+    assert payload["choices"][0]["delta"]["role"] == "assistant"
+    assert payload["choices"][0]["delta"]["content"] == "<think>"
+
+
+def test_qwen3_6_stream_first_chunk_respects_disable_thinking():
+    handler = HTTPHandler.__new__(HTTPHandler)
+    handler.model_path_str = "mlx-community/Qwen3.6-27B-mxfp4"
+    handler.processing_requests = {}
+
+    rid = "req-qwen36-no-thinking-stream"
+    handler.processing_requests[rid] = HTTPRequestInfo(
+        id=rid,
+        stream=True,
+        model="test-model",
+        enable_thinking=False,
+    )
+
+    payload = _decode_sse_json(handler._generate_stream_chunk(rid, None, is_first=True))
+
+    assert payload["choices"][0]["delta"]["role"] == "assistant"
+    assert payload["choices"][0]["delta"]["content"] == ""
+
+
+def test_http_handler_thinking_enabled_uses_extra_body_chat_template_kwargs():
+    assert (
+        HTTPHandler._is_thinking_enabled(
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "chat_template_kwargs": {"enable_thinking": True},
+                "sampling_params": {"top_k": 3},
+            }
+        )
+        is True
+    )
+    assert (
+        HTTPHandler._is_thinking_enabled(
+            {
+                "chat_template_kwargs": {"enable_thinking": True},
+                "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+            }
+        )
+        is False
+    )
+
+
+def test_qwen3_6_non_stream_response_includes_think_marker_when_enabled():
+    handler = HTTPHandler.__new__(HTTPHandler)
+    handler.model_path_str = "mlx-community/Qwen3.6-27B-mxfp4"
+    handler.processing_requests = {}
+
+    rid = "req-qwen36-non-stream"
+    request_info = HTTPRequestInfo(
+        id=rid,
+        stream=False,
+        model="test-model",
+        enable_thinking=True,
+    )
+    request_info.text = "reasoning"
+    handler.processing_requests[rid] = request_info
+
+    payload = handler.generate_non_stream_response(rid)
+
+    assert payload["choices"][0]["message"]["content"] == "<think>reasoning"
+
+
+def test_qwen3_6_non_stream_response_respects_disable_thinking():
+    handler = HTTPHandler.__new__(HTTPHandler)
+    handler.model_path_str = "mlx-community/Qwen3.6-27B-mxfp4"
+    handler.processing_requests = {}
+
+    rid = "req-qwen36-no-thinking-non-stream"
+    request_info = HTTPRequestInfo(
+        id=rid,
+        stream=False,
+        model="test-model",
+        enable_thinking=False,
+    )
+    request_info.text = "answer"
+    handler.processing_requests[rid] = request_info
+
+    payload = handler.generate_non_stream_response(rid)
+
+    assert payload["choices"][0]["message"]["content"] == "answer"
 
 
 def test_http_handler_marks_non_stream_error():
