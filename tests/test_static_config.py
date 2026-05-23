@@ -8,12 +8,16 @@ def test_glm_5_1_uses_mlx_community_model():
 
 
 def test_qwen3_6_mxfp4_is_scheduler_supported():
-    assert MODELS["mlx-community/Qwen3.6-27B-mxfp4"] == "mlx-community/Qwen3.6-27B-mxfp4"
+    assert MODELS["Qwen/Qwen3.6-27B"] == "mlx-community/Qwen3.6-27B-mxfp4"
+    assert "mlx-community/Qwen3.6-27B-mxfp4" not in MODELS
 
 
 def test_qwen3_6_mxfp4_model_info_uses_text_config(monkeypatch):
     def fake_load_config_only(model_name, local_files_only=False):
-        assert model_name == "mlx-community/Qwen3.6-27B-mxfp4"
+        assert model_name in {
+            "Qwen/Qwen3.6-27B",
+            "mlx-community/Qwen3.6-27B-mxfp4",
+        }
         return normalize_model_config(
             {
                 "model_type": "qwen3_5",
@@ -33,9 +37,10 @@ def test_qwen3_6_mxfp4_model_info_uses_text_config(monkeypatch):
 
     monkeypatch.setattr(static_config, "load_config_only", fake_load_config_only)
 
-    model_info = get_model_info("mlx-community/Qwen3.6-27B-mxfp4")
+    model_info = get_model_info("Qwen/Qwen3.6-27B")
 
     assert model_info.num_layers == 64
+    assert model_info.mlx_model_name == "mlx-community/Qwen3.6-27B-mxfp4"
     assert model_info.head_size == 256
     assert model_info.hidden_dim == 5120
     assert model_info.num_attention_heads == 24
