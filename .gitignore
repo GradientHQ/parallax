@@ -12,3 +12,4 @@ build/
 .cache
 .vscode/
 hosts.json
+uv.lock

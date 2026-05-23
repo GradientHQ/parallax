@@ -7,7 +7,11 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from parallax.server.shard_loader import MODEL_CLASS_MAP, MLXModelLoader
+from parallax.server.shard_loader import (
+    ARCHITECTURE_CLASS_ALIASES,
+    MODEL_CLASS_MAP,
+    MLXModelLoader,
+)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
@@ -27,11 +31,16 @@ class TestMLXModelLoader:
         assert isinstance(loader.block_class_map, dict)
 
         # Check that expected architectures are registered
-        expected_architectures = ["Qwen2ForCausalLM", "Qwen3ForCausalLM"]
+        expected_architectures = [
+            "Qwen2ForCausalLM",
+            "Qwen3ForCausalLM",
+            "GlmMoeDsaForCausalLM",
+        ]
         for architecture in expected_architectures:
             assert architecture in loader.block_class_map
             assert hasattr(loader.block_class_map[architecture], "get_architecture")
-            assert loader.block_class_map[architecture].get_architecture() == architecture
+            target_architecture = ARCHITECTURE_CLASS_ALIASES.get(architecture, architecture)
+            assert loader.block_class_map[architecture].get_architecture() == target_architecture
 
     def test_register_block_class_with_missing_get_architecture(self):
         """Test registration when EntryClass doesn't have get_architecture method."""
@@ -137,7 +146,8 @@ class TestMLXModelLoader:
         # Each registered architecture should have a valid EntryClass
         for architecture, entry_class in loader.block_class_map.items():
             assert hasattr(entry_class, "get_architecture")
-            assert entry_class.get_architecture() == architecture
+            target_architecture = ARCHITECTURE_CLASS_ALIASES.get(architecture, architecture)
+            assert entry_class.get_architecture() == target_architecture
 
     def test_register_block_class_initialization(self):
         """Test that register_block_class is called during initialization."""

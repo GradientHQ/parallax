@@ -102,7 +102,12 @@ class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
             scores = scores * weights
             scores = scores.sum(axis=1)
             if mask is not None:
-                scores = mx.where(mask, scores, -float("inf"))
+                if mask.ndim == 4:
+                    mask = mask[:, 0, :, :]
+                if mask.dtype == mx.bool_:
+                    scores = mx.where(mask, scores, -float("inf"))
+                else:
+                    scores = scores + mask.astype(scores.dtype)
             return mx.argpartition(scores, kth=-self.index_topk, axis=-1)[..., -self.index_topk :]
 
 

@@ -27,7 +27,7 @@ from parallax.server.executor.factory import run_executor_process, stop_executor
 from parallax.server.http_server import launch_http_server, stop_http_server
 from parallax.server.server_args import parse_args
 from parallax.utils.shared_state import SharedState
-from parallax.utils.utils import fetch_model_from_hf, initialize_nccl_port
+from parallax.utils.utils import initialize_nccl_port, load_config_only
 from parallax_utils.ascii_anime import display_parallax_join
 from parallax_utils.logging_config import get_logger, set_log_level
 from parallax_utils.version_check import check_latest_release
@@ -119,7 +119,7 @@ if __name__ == "__main__":
                 display_parallax_join(args.model_path)
             check_latest_release()
 
-            config = fetch_model_from_hf(args.model_path, local_files_only=args.use_hfcache)
+            config = load_config_only(args.model_path, local_files_only=args.use_hfcache)
             if args.start_layer is None:
                 args.start_layer = 0
             if args.end_layer is None:
