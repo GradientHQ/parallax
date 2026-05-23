@@ -142,11 +142,10 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
         compressed_kv = self.kv_a_proj_with_mqa(x)
         compressed_kv, k_pe = mx.split(compressed_kv, [self.kv_lora_rank], axis=-1)
         k_pe = k_pe.reshape(batch, target_len, 1, self.qk_rope_head_dim).transpose(0, 2, 1, 3)
-        kv = self.kv_b_proj(self.kv_a_layernorm(compressed_kv))
-        kv = kv.reshape(batch, target_len, self.num_heads, -1)
-
-        k_nope, values = mx.split(kv, [self.qk_nope_head_dim], axis=-1)
-        k_nope = k_nope.transpose(0, 2, 1, 3)
+        kv_latent = self.kv_a_layernorm(compressed_kv)
+        kv_latent = kv_latent[:, None, :, :]
+        k_nope = self.embed_q(kv_latent, transpose=False)
+        values = self.unembed_out(kv_latent).transpose(0, 2, 1, 3)
         key_cache_global, value_cache_global = cache.get_cache()
         indexer_cache = cache.get_indexer_cache()
 
