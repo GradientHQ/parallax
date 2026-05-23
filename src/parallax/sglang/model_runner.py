@@ -42,6 +42,7 @@ from parallax.sglang.monkey_patch_utils.weight_loader_filter import (
     set_layer_range_for_filtering,
 )
 from parallax.utils.tokenizer_utils import load_tokenizer
+from parallax.utils.utils import normalize_model_config
 
 logger = logging.getLogger(__name__)
 
@@ -311,7 +312,7 @@ def initialize_sgl_model_runner(
         model_repo, start_layer=start_layer, end_layer=end_layer, local_files_only=use_hfcache
     )
 
-    config = load_config(model_path)
+    config = normalize_model_config(load_config(model_path))
     tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
     dtype = config.get("torch_dtype") or "bfloat16"
 
@@ -367,11 +368,17 @@ def initialize_sgl_model_runner(
     # (multi-node PP where this node doesn't have both embed_tokens and lm_head).
     # For single-node or full-range runs, keep the original setting so that
     # lm_head correctly shares weights with embed_tokens.
-    num_hidden_layers = model_config.hf_config.num_hidden_layers
+    normalized_config = normalize_model_config(model_config.hf_config.to_dict())
+    num_hidden_layers = normalized_config["num_hidden_layers"]
+    model_config.hf_config.num_hidden_layers = num_hidden_layers
     if start_layer > 0 or end_layer < num_hidden_layers:
         model_config.hf_config.tie_word_embeddings = False
     model_config.hf_config.start_layer = start_layer
     model_config.hf_config.end_layer = end_layer
+    if hasattr(model_config.hf_config, "text_config"):
+        model_config.hf_config.text_config.num_hidden_layers = num_hidden_layers
+        model_config.hf_config.text_config.start_layer = start_layer
+        model_config.hf_config.text_config.end_layer = end_layer
 
     logger.debug(f"model_start_layer: {model_config.hf_config.start_layer}")
     logger.debug(f"model_end_layer: {model_config.hf_config.end_layer}")
