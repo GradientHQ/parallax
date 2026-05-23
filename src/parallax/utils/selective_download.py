@@ -121,9 +121,6 @@ def selective_model_download(
                     # Check if file already exists in local cache before downloading
                     weight_file_path = model_path / weight_file
                     if weight_file_path.exists():
-                        logger.debug(
-                            f"Weight file {weight_file} already exists locally, skipping download"
-                        )
                         continue
 
                     logger.debug(f"Downloading {weight_file}")
