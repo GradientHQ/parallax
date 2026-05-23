@@ -150,7 +150,7 @@ class HTTPHandler:
         model_path = self.model_path_str.lower()
         if "minimax-m2" in model_path:
             return "<think>"
-        if "qwen3.6" in model_path and request_info.enable_thinking:
+        if ("qwen3.6" in model_path or "qwen3.5" in model_path) and request_info.enable_thinking:
             return "<think>"
         return ""
 
