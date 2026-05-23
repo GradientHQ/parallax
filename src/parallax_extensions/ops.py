@@ -120,10 +120,10 @@ def _rebuild_for_github_actions() -> None:
 
 def load_extension_module() -> ModuleType:
     """Load the compiled extension module for the current Python runtime."""
-    try:
-        _rebuild_for_github_actions()
-    except Exception as exc:  # pragma: no cover - GitHub runner dependent
-        raise _build_import_error(exc) from exc
+    # try:
+    #     _rebuild_for_github_actions()
+    # except Exception as exc:  # pragma: no cover - GitHub runner dependent
+    #     raise _build_import_error(exc) from exc
 
     try:
         # Python's import machinery selects the matching ABI-tagged binary
