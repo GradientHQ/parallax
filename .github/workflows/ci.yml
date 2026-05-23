@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, macos-15, macos-26]
+        os: [ubuntu-latest, macos-15, macos-26]
         python-version: ['3.11', '3.12', '3.13']
 
     steps:
@@ -83,7 +83,7 @@ jobs:
         token: ${{ secrets.CODECOV_TOKEN }}
 
     - name: Run E2E tests (macOS only)
-      if: steps.changes.outputs.src == 'true' && matrix.os == 'macos-15' && matrix.python-version == '3.11'
+      if: steps.changes.outputs.src == 'true' && matrix.os == 'macos-26' && matrix.python-version == '3.12'
       shell: bash
       env:
         TERM: xterm-256color

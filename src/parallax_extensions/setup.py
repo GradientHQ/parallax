@@ -9,7 +9,7 @@ def _set_macos_build_defaults() -> None:
     if sys.platform != "darwin":
         return
 
-    deployment_target = os.environ.setdefault("MACOSX_DEPLOYMENT_TARGET", "14.0")
+    deployment_target = os.environ.setdefault("MACOSX_DEPLOYMENT_TARGET", "15.0")
     cmake_args = os.environ.get("CMAKE_ARGS", "")
     if "CMAKE_OSX_DEPLOYMENT_TARGET" not in cmake_args:
         os.environ["CMAKE_ARGS"] = (
