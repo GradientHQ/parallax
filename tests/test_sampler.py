@@ -5,9 +5,12 @@ Test for the Sampler class
 import unittest
 
 import mlx.core as mx
+import pytest
 from mlx_lm.sample_utils import apply_min_p, apply_top_k, apply_top_p
 
 from parallax.server.sampling.sampler import Sampler, SamplingBatchInfo
+
+pytestmark = pytest.mark.mlx
 
 
 class TestSampler(unittest.TestCase):

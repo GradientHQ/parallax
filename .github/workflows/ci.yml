@@ -76,6 +76,8 @@ jobs:
       if: matrix.os == 'macos-26' && matrix.python-version == '3.12'
       shell: bash
       run: |
+        brew list protobuf >/dev/null 2>&1 || brew install protobuf
+        protoc --version
         ./build_rust.sh --debug
         command -v vllm-rs
 
