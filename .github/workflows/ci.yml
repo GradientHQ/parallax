@@ -132,6 +132,7 @@ jobs:
           'http://localhost:3000/v1/chat/completions' \
           --header 'Content-Type: application/json' \
           --data '{
+            "model": "Qwen/Qwen3-0.6B",
             "messages": [
               {
                 "role": "user",
@@ -141,9 +142,7 @@ jobs:
             "stream": false,
             "max_tokens": 1024,
             "chat_template_kwargs": {"enable_thinking": false},
-            "sampling_params": {
-                "top_k": 3
-            }
+            "top_k": 3
         }')
 
         echo "Response received:"
