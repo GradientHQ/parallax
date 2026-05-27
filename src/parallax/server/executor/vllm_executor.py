@@ -247,9 +247,7 @@ class VLLMExecutor(BaseExecutor):
                     if req.abort:
                         original_req.abort = True
 
-                    routed_experts = None
                     if self.scheduler.check_and_update_request_status(original_req):
-                        routed_experts = self._get_routed_experts_for_request(original_req)
                         logger.debug(f"Releasing resources for finished request {req.request_id}")
                         self.release_and_evict_request(req.request_id)
                         if not self.is_last_peer:
@@ -257,29 +255,12 @@ class VLLMExecutor(BaseExecutor):
                     else:
                         self.scheduler.enque_request(original_req)
 
-                    # detokenize and send to http server
+                    # Send token/terminal update to the Rust frontend.
                     if self.tp_rank == 0:
-                        # Only send token if it's valid
-                        token_to_send = req.next_token_id if req.next_token_id is not None else -1
-                        req_dict = {
-                            "prompt_tokens": len(req.input_ids),
-                            "next_token_id": token_to_send,
-                            "rid": req.request_id,
-                        }
-                        if original_req.status == RequestStatus.FINISHED_EOS:
-                            req_dict["eos"] = True
-                        if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
-                            req_dict["length"] = True
-                        if original_req.status == RequestStatus.FINISHED_ABORT:
-                            req_dict["abort"] = True
-                        if self.enable_weight_refit:
-                            req_dict["weight_version"] = self.weight_version
-                        if original_req.return_probs and req.token_prob is not None:
-                            req_dict["probs"] = req.token_prob
-                        if routed_experts is not None:
-                            req_dict["routed_experts"] = routed_experts
-                        if hasattr(self, "send_to_ipc_socket"):
-                            self.send_to_ipc_socket.send_pyobj(req_dict)
+                        self.send_engine_core_request_output(
+                            request=original_req,
+                            token_id=req.next_token_id,
+                        )
                 else:
                     raise TypeError(f"First peer received unexpected request type: {type(req)}")
         else:
@@ -309,7 +290,7 @@ class VLLMExecutor(BaseExecutor):
         # For vLLM, pp_proxy_tensors is already an IntermediateTensors object
         intermediate_tensors = pp_proxy_tensors if pp_proxy_tensors is not None else None
         if intermediate_tensors is not None:
-            logger.debug(f"vLLM: Using intermediate_tensors for PP (non-first peer)")
+            logger.debug("vLLM: Using intermediate_tensors for PP (non-first peer)")
 
         requests = prepared_inputs.get("requests", [])
 
@@ -385,19 +366,13 @@ class VLLMExecutor(BaseExecutor):
         for req in batched_requests:
             req.update_status(RequestStatus.FINISHED_ABORT)
 
-            # Notify HTTP Server to return partial results
+            # Notify Rust frontend to return partial results.
             if self.is_first_peer and self.tp_rank == 0:
-                req_dict = {
-                    "prompt_tokens": req.prompt_len,
-                    "next_token_id": (
-                        req.output_ids[-1] if hasattr(req, "output_ids") and req.output_ids else -1
-                    ),
-                    "rid": req.request_id,
-                    "abort": True,
-                }
-                if hasattr(self, "send_to_ipc_socket"):
-                    self.send_to_ipc_socket.send_pyobj(req_dict)
-                    time.sleep(0.05)  # Give ZMQ time to flush
+                self.send_engine_core_request_output(
+                    request=req,
+                    token_id=None,
+                )
+                time.sleep(0.05)  # Give ZMQ time to flush
 
             # Add to finished_batch to trigger abort notification to other peers
             self.finished_batch.append(req)

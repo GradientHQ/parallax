@@ -46,7 +46,8 @@ class TestSampler(unittest.TestCase):
         logits = logits / temperatures.reshape(-1, 1)
         next_token_ids_ref = mx.random.categorical(logits)
 
-        mx.allclose(batch_next_token_ids, next_token_ids_ref)
+        self.assertEqual(batch_next_token_ids.shape, (3,))
+        self.assertTrue(mx.allclose(batch_next_token_ids, next_token_ids_ref))
 
 
 if __name__ == "__main__":

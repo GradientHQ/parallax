@@ -161,6 +161,7 @@ class InitialRequest(Request):
         status: RequestStatus = RequestStatus.PREFILLING,
         lora_path: Optional[str] = None,
         return_probs: bool = False,
+        routing_table: Optional[List[str]] = None,
     ):
         if not prompt and not input_ids:
             raise ValueError("prompt or input_ids cannot be empty.")
@@ -169,6 +170,7 @@ class InitialRequest(Request):
             status=status,
             prompt_len=len(input_ids) if input_ids else 0,
             input_ids=input_ids,
+            routing_table=routing_table or [],
             sampling_params=sampling_params,
             lora_path=lora_path,
         )

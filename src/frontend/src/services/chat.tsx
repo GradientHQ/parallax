@@ -12,7 +12,6 @@ import {
 import { API_BASE_URL } from './api';
 import { useConst, useRefCallback } from '../hooks';
 import { useCluster } from './cluster';
-import { parseGenerationGpt, parseGenerationQwen } from './chat-helper';
 
 const debugLog = async (...args: any[]) => {
   if (import.meta.env.DEV) {
@@ -150,66 +149,49 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
         //   usage: null,
         // };
         const {
-          data: { id, object, model, created, choices, usage },
+          data: { id, object, created, choices },
         } = message;
         if (object === 'chat.completion.chunk' && choices?.length > 0) {
-          if (choices[0].delta.content) {
+          if (choices[0].delta?.content || choices[0].delta?.reasoning) {
             setStatus('generating');
           }
           setMessages((prev) => {
             let next = prev;
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            choices.forEach(({ delta: { role, content: rawDelta } = {} }: any) => {
-              if (typeof rawDelta !== 'string' || !rawDelta) {
+            choices.forEach(({ delta: { role, content, reasoning } = {} }: any) => {
+              const contentDelta = typeof content === 'string' ? content : '';
+              const reasoningDelta = typeof reasoning === 'string' ? reasoning : '';
+              if (!contentDelta && !reasoningDelta) {
                 return;
               }
               role = role || 'assistant';
               let lastMessage = next[next.length - 1];
               if (lastMessage && lastMessage.role === role) {
-                const raw = lastMessage.raw + rawDelta;
+                const raw = (lastMessage.raw || '') + reasoningDelta + contentDelta;
+                const nextContent = lastMessage.content + contentDelta;
+                const nextThinking = (lastMessage.thinking || '') + reasoningDelta;
                 lastMessage = {
                   ...lastMessage,
-                  raw: raw,
-                  content: raw,
+                  status: (nextContent && 'generating') || 'thinking',
+                  raw,
+                  thinking: nextThinking,
+                  content: nextContent,
                 };
                 next = [...next.slice(0, -1), lastMessage];
               } else {
                 lastMessage = {
                   id,
                   role,
-                  status: 'thinking',
-                  raw: rawDelta,
-                  content: rawDelta,
+                  status: (contentDelta && 'generating') || 'thinking',
+                  raw: reasoningDelta + contentDelta,
+                  thinking: reasoningDelta,
+                  content: contentDelta,
                   createdAt: created,
                 };
                 next = [...next, lastMessage];
               }
               // debugLog('onMessage', 'update last message', lastMessage.content);
             });
-
-            // Parse generation and extract thinking and content
-            if (next !== prev && typeof model === 'string') {
-              let lastMessage = next[next.length - 1];
-              let thinking = '';
-              let content = '';
-              const modelLowerCase = model.toLowerCase();
-              if (modelLowerCase.includes('gpt-oss')) {
-                ({ analysis: thinking, final: content } = parseGenerationGpt(
-                  lastMessage.raw || '',
-                ));
-              } else if (modelLowerCase.includes('qwen')) {
-                ({ think: thinking, content } = parseGenerationQwen(lastMessage.raw || ''));
-              } else {
-                content = lastMessage.raw || '';
-              }
-              lastMessage = {
-                ...lastMessage,
-                status: (content && 'generating') || 'thinking',
-                thinking,
-                content,
-              };
-              next = [...next.slice(0, -1), lastMessage];
-            }
 
             return next;
           });
@@ -348,9 +330,7 @@ const createSSE = (options: SSEOptions) => {
         model,
         messages,
         max_tokens: 2048,
-        sampling_params: {
-          top_k: 3,
-        },
+        top_k: 3,
       }),
       signal: abortController.signal,
     })

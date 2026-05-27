@@ -116,4 +116,4 @@ def apply_top_k_top_p_min_p_sampling(
     sampled_index = mx.random.categorical(probs_sort, num_samples=1)
     batch_next_token_ids = mx.take_along_axis(probs_idx, indices=sampled_index, axis=1)
 
-    return batch_next_token_ids
+    return batch_next_token_ids.reshape(-1)
