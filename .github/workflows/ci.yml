@@ -72,6 +72,13 @@ jobs:
         fail_ci_if_error: false
         token: ${{ secrets.CODECOV_TOKEN }}
 
+    - name: Install vLLM Rust frontend
+      if: matrix.os == 'macos-26' && matrix.python-version == '3.12'
+      shell: bash
+      run: |
+        ./build_rust.sh --debug
+        command -v vllm-rs
+
     - name: Run E2E tests (macOS only)
       if: matrix.os == 'macos-26' && matrix.python-version == '3.12'
       shell: bash
