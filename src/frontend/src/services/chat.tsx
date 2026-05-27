@@ -13,7 +13,7 @@ import { API_BASE_URL } from './api';
 import { useConst, useRefCallback } from '../hooks';
 import { useCluster } from './cluster';
 
-const debugLog = async (...args: any[]) => {
+const debugLog = async (...args: unknown[]) => {
   if (import.meta.env.DEV) {
     console.log('%c chat.tsx ', 'color: white; background: orange;', ...args);
   }
@@ -43,6 +43,15 @@ export interface ChatMessage {
    */
   readonly thinking?: string;
   readonly createdAt: number;
+  readonly metrics?: ChatResponseMetrics;
+}
+
+export interface ChatResponseMetrics {
+  readonly ttftMs?: number;
+  readonly generationMs?: number;
+  readonly generationThroughputTokensPerSecond?: number;
+  readonly outputTokens?: number;
+  readonly outputTokenSource: 'usage' | 'chunks';
 }
 
 export type ChatStatus = 'closed' | 'opened' | 'generating' | 'error';
@@ -88,10 +97,13 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
         debugLog('SSE OPEN');
         setStatus('opened');
       },
-      onClose: () => {
+      onClose: (metrics) => {
         debugLog('SSE CLOSE');
         setMessages((prev) => {
           const lastMessage = prev[prev.length - 1];
+          if (!lastMessage || lastMessage.role !== 'assistant') {
+            return prev;
+          }
           const { id, raw, thinking, content } = lastMessage;
           debugLog('GENERATING DONE', 'lastMessage:', lastMessage);
           debugLog('GENERATING DONE', 'id:', id);
@@ -103,16 +115,20 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
             {
               ...lastMessage,
               status: 'done',
+              metrics,
             },
           ];
         });
         setStatus('closed');
       },
-      onError: (error) => {
+      onError: (error, metrics) => {
         debugLog('SSE ERROR', error);
         // Set last message to done
         setMessages((prev) => {
           const lastMessage = prev[prev.length - 1];
+          if (!lastMessage || lastMessage.role !== 'assistant') {
+            return prev;
+          }
           const { id, raw, thinking, content } = lastMessage;
           debugLog('GENERATING ERROR', 'lastMessage:', lastMessage);
           debugLog('GENERATING ERROR', 'id:', id);
@@ -124,6 +140,7 @@ export const ChatProvider: FC<PropsWithChildren> = ({ children }) => {
             {
               ...lastMessage,
               status: 'done',
+              metrics,
             },
           ];
         });
@@ -298,11 +315,22 @@ export const useChat = (): readonly [ChatStates, ChatActions] => {
 
 interface SSEOptions {
   onOpen?: () => void;
-  onClose?: () => void;
-  onError?: (error: Error) => void;
+  onClose?: (metrics?: ChatResponseMetrics) => void;
+  onError?: (error: Error, metrics?: ChatResponseMetrics) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onMessage?: (message: { event: string; id?: string; data: any }) => void;
 }
+
+interface SSEMetricsState {
+  requestStartAt: number;
+  firstTokenAt?: number;
+  endAt?: number;
+  outputChunks: number;
+  usageCompletionTokens?: number;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object';
 
 interface RequestMessage {
   readonly id: string;
@@ -316,8 +344,101 @@ const createSSE = (options: SSEOptions) => {
   const decoder = new TextDecoder();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let abortController: AbortController | undefined;
+  let metrics: SSEMetricsState | undefined;
+  let closed = true;
+
+  const resetMetrics = () => {
+    metrics = {
+      requestStartAt: performance.now(),
+      outputChunks: 0,
+    };
+  };
+
+  const finishMetrics = () => {
+    if (!metrics?.endAt) {
+      metrics = {
+        ...(metrics || { requestStartAt: performance.now(), outputChunks: 0 }),
+        endAt: performance.now(),
+      };
+    }
+  };
+
+  const trackMetrics = (data: unknown) => {
+    if (!metrics || !isRecord(data)) {
+      return;
+    }
+
+    const usageTokens = isRecord(data.usage) ? data.usage.completion_tokens : undefined;
+    if (typeof usageTokens === 'number' && Number.isFinite(usageTokens)) {
+      metrics.usageCompletionTokens = Math.max(metrics.usageCompletionTokens || 0, usageTokens);
+    }
+
+    const choices = Array.isArray(data.choices) ? data.choices : [];
+    const contentfulChoices = choices.filter((choice) => {
+      if (!isRecord(choice) || !isRecord(choice.delta)) {
+        return false;
+      }
+      const content = choice.delta.content;
+      const reasoning = choice.delta.reasoning;
+      return (
+        (typeof content === 'string' && content.length > 0) ||
+        (typeof reasoning === 'string' && reasoning.length > 0)
+      );
+    }).length;
+
+    if (contentfulChoices > 0) {
+      metrics.outputChunks += contentfulChoices;
+      metrics.firstTokenAt = metrics.firstTokenAt ?? performance.now();
+    }
+  };
+
+  const getMetrics = (): ChatResponseMetrics | undefined => {
+    finishMetrics();
+    if (!metrics) {
+      return undefined;
+    }
+
+    const outputTokens = metrics.usageCompletionTokens || metrics.outputChunks || undefined;
+    const outputTokenSource = metrics.usageCompletionTokens ? 'usage' : 'chunks';
+    const ttftMs =
+      metrics.firstTokenAt === undefined ? undefined : metrics.firstTokenAt - metrics.requestStartAt;
+    const generationMs =
+      metrics.firstTokenAt === undefined || metrics.endAt === undefined ?
+        undefined
+      : metrics.endAt - metrics.firstTokenAt;
+    const generationThroughputTokensPerSecond =
+      outputTokens === undefined || generationMs === undefined || generationMs <= 0 ?
+        undefined
+      : outputTokens / (generationMs / 1000);
+
+    return {
+      ttftMs,
+      generationMs,
+      generationThroughputTokensPerSecond,
+      outputTokens,
+      outputTokenSource,
+    };
+  };
+
+  const closeOnce = () => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    onClose?.(getMetrics());
+  };
+
+  const errorOnce = (error: Error) => {
+    finishMetrics();
+    if (!closed) {
+      closed = true;
+    }
+    onError?.(error, getMetrics());
+  };
 
   const connect = (model: string, messages: readonly RequestMessage[]) => {
+    closed = false;
+    resetMetrics();
     abortController = new AbortController();
     const url = `${API_BASE_URL}/v1/chat/completions`;
 
@@ -338,17 +459,17 @@ const createSSE = (options: SSEOptions) => {
         const statusCode = response.status;
         const contentType = response.headers.get('Content-Type');
         if (statusCode !== 200) {
-          onError?.(new Error(`[SSE] Failed to connect: ${statusCode}`));
+          errorOnce(new Error(`[SSE] Failed to connect: ${statusCode}`));
           return;
         }
         if (!contentType?.includes('text/event-stream')) {
-          onError?.(new Error(`[SSE] Invalid content type: ${contentType}`));
+          errorOnce(new Error(`[SSE] Invalid content type: ${contentType}`));
           return;
         }
 
         reader = response.body?.getReader();
         if (!reader) {
-          onError?.(new Error(`[SSE] Failed to get reader`));
+          errorOnce(new Error(`[SSE] Failed to get reader`));
           return;
         }
 
@@ -411,6 +532,7 @@ const createSSE = (options: SSEOptions) => {
                   };
                   walk(data);
                   message.data = data;
+                  trackMetrics(data);
                 } catch (error) {
                   // Parse failed, use original data
                   message.data = value;
@@ -427,7 +549,7 @@ const createSSE = (options: SSEOptions) => {
         while (true) {
           const { done, value } = await reader.read();
           if (done) {
-            onClose?.();
+            closeOnce();
             return;
           }
 
@@ -442,10 +564,10 @@ const createSSE = (options: SSEOptions) => {
       })
       .catch((error: Error) => {
         if (error instanceof Error && error.name === 'AbortError') {
-          onClose?.();
+          closeOnce();
           return;
         }
-        onError?.(error);
+        errorOnce(error);
       });
   };
 
@@ -455,7 +577,7 @@ const createSSE = (options: SSEOptions) => {
     abortController?.abort('stop');
     abortController = undefined;
 
-    onClose?.();
+    closeOnce();
   };
 
   return { connect, disconnect };

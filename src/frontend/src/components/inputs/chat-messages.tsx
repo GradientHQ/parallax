@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type FC, type UIEventHandler } from 'react';
 import { useChat, type ChatMessage } from '../../services';
-import { Box, Button, IconButton, Paper, Stack, Tooltip, Typography } from '@mui/material';
+import { Box, IconButton, Stack, Tooltip, Typography } from '@mui/material';
 import { IconArrowDown, IconCopy, IconCopyCheck, IconRefresh } from '@tabler/icons-react';
 import { useRefCallback } from '../../hooks';
 import ChatMarkdown from './chat-markdown';
@@ -139,8 +139,22 @@ export const ChatMessages: FC = () => {
   );
 };
 
+const formatMs = (value?: number) => {
+  if (value === undefined || !Number.isFinite(value)) {
+    return '-';
+  }
+  return `${Math.round(value)} ms`;
+};
+
+const formatThroughput = (value?: number) => {
+  if (value === undefined || !Number.isFinite(value)) {
+    return '-';
+  }
+  return `${value.toFixed(2)} tok/s`;
+};
+
 const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ message, isLast }) => {
-  const { role, status: messageStatus, thinking, content } = message;
+  const { role, status: messageStatus, thinking, content, metrics } = message;
 
   const [, { generate }] = useChat();
 
@@ -184,6 +198,7 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
   const assistantDone = messageStatus === 'done';
   const showCopy = role === 'user' || (role === 'assistant' && assistantDone);
   const showRegenerate = role === 'assistant' && assistantDone;
+  const showMetrics = role === 'assistant' && assistantDone && metrics;
 
   const userHoverRevealSx =
     role === 'user' ?
@@ -199,6 +214,7 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
     <Stack direction='row' sx={{ width: '100%', justifyContent }}>
       <Stack
         sx={{
+          width: role === 'assistant' ? '100%' : undefined,
           maxWidth: role === 'user' ? { xs: '100%', md: '80%' } : '100%',
           alignSelf: role === 'user' ? 'flex-end' : 'flex-start',
           gap: 1,
@@ -206,6 +222,22 @@ const ChatMessage: FC<{ message: ChatMessage; isLast?: boolean }> = memo(({ mess
         }}
       >
         {nodeContent}
+
+        {showMetrics && (
+          <Typography
+            key='metrics'
+            variant='caption'
+            sx={{
+              alignSelf: 'flex-end',
+              color: 'grey.500',
+              fontFamily: 'GeistMono, monospace',
+              textAlign: 'right',
+            }}
+          >
+            Prefill: {formatMs(metrics.ttftMs)}, Generate throughput:{' '}
+            {formatThroughput(metrics.generationThroughputTokensPerSecond)}
+          </Typography>
+        )}
 
         {(showCopy || showRegenerate) && (
           <Stack
