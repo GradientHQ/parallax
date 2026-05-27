@@ -124,14 +124,14 @@ if ! rustup run "$TOOLCHAIN" rustc --version &>/dev/null; then
 fi
 
 if [[ "${1:-}" == "--debug" ]]; then
-    PROFILE_ARGS=()
+    PROFILE_ARGS=""
     PROFILE_DIR="debug"
 else
-    PROFILE_ARGS=(--release)
+    PROFILE_ARGS="--release"
     PROFILE_DIR="release"
 fi
 
-cargo +"$TOOLCHAIN" build "${PROFILE_ARGS[@]}" \
+cargo +"$TOOLCHAIN" build ${PROFILE_ARGS:+$PROFILE_ARGS} \
     --manifest-path "$RUST_DIR/Cargo.toml" \
     --bin vllm-rs \
     --features native-tls-vendored
