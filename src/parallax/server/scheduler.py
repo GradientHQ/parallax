@@ -214,14 +214,26 @@ class Scheduler:
         if not self.is_first_peer:
             return False
 
-        assert self.eos_token_ids, "EOS token ID must be set for request status checking."
+        if not request.sampling_params.ignore_eos:
+            assert self.eos_token_ids, "EOS token ID must be set for request status checking."
 
         last_token_id = request.output_ids[-1] if request.output_ids else None
+        can_stop = request.output_length > request.sampling_params.min_new_tokens
+        explicit_stop_token_ids = _normalize_token_ids(request.sampling_params.stop_token_ids)
         if (
             not finished
+            and can_stop
             and not request.sampling_params.ignore_eos
             and last_token_id is not None
             and last_token_id in self.eos_token_ids
+        ):
+            request.update_status(RequestStatus.FINISHED_EOS)
+            finished = True
+        elif (
+            not finished
+            and can_stop
+            and last_token_id is not None
+            and last_token_id in explicit_stop_token_ids
         ):
             request.update_status(RequestStatus.FINISHED_EOS)
             finished = True

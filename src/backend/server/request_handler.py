@@ -1,6 +1,6 @@
 import asyncio
 import time
-from typing import Dict
+from typing import Dict, List, Optional
 
 import aiohttp
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -13,6 +13,8 @@ from parallax_utils.request_metrics import get_request_metrics
 logger = get_logger(__name__)
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=20 * 60 * 60)
+PARALLAX_ROUTING_TABLE_XARG = "parallax_routing_table"
+PARALLAX_SCHEDULER_REQUEST_ID_XARG = "parallax_scheduler_request_id"
 
 
 class RequestHandler:
@@ -40,6 +42,56 @@ class RequestHandler:
         if node_id not in self.stubs:
             self.stubs[node_id] = self.scheduler_manage.completion_handler.get_stub(node_id)
         return self.stubs[node_id]
+
+    def _get_model_name_for_node(self, node_id: str) -> Optional[str]:
+        try:
+            scheduler = getattr(self.scheduler_manage, "scheduler", None)
+            node = scheduler.get_node(node_id) if scheduler is not None else None
+            if node is not None:
+                if getattr(node.hardware, "device", None) == "mlx":
+                    return node.model_info.mlx_model_name
+                return node.model_info.model_name
+        except Exception as e:
+            logger.debug(f"Unable to resolve model name for node {node_id}: {e}")
+
+        try:
+            return self.scheduler_manage.get_model_name()
+        except Exception:
+            return None
+
+    def _prepare_backend_request(
+        self,
+        request_data: Dict,
+        request_id: str,
+        routing_table: List[str],
+    ) -> Dict:
+        backend_request = dict(request_data)
+        backend_request.pop("rid", None)
+        backend_request.pop("routing_table", None)
+
+        if not backend_request.get("request_id"):
+            backend_request["request_id"] = str(request_id)
+
+        model_name = self._get_model_name_for_node(routing_table[0])
+        backend_request["model"] = model_name
+
+        vllm_xargs = backend_request.get("vllm_xargs")
+        if vllm_xargs is None:
+            vllm_xargs = {}
+        elif isinstance(vllm_xargs, dict):
+            vllm_xargs = dict(vllm_xargs)
+        else:
+            logger.warning(
+                "Ignoring non-object vllm_xargs for request %s; got %s",
+                request_id,
+                type(vllm_xargs).__name__,
+            )
+            vllm_xargs = {}
+
+        vllm_xargs[PARALLAX_ROUTING_TABLE_XARG] = list(routing_table)
+        vllm_xargs[PARALLAX_SCHEDULER_REQUEST_ID_XARG] = str(request_id)
+        backend_request["vllm_xargs"] = vllm_xargs
+        return backend_request
 
     async def _forward_request(self, request_data: Dict, request_id: str, received_ts: int):
         start_time = time.time()
@@ -96,16 +148,18 @@ class RequestHandler:
                     status_code=429,
                 )
 
-            # Add request_id and routing_table to request_data
-            request_data["rid"] = str(request_id)
-            request_data["routing_table"] = routing_table
+            backend_request = self._prepare_backend_request(
+                request_data,
+                str(request_id),
+                routing_table,
+            )
             stub = self.get_stub(routing_table[0])
             is_stream = request_data.get("stream", False)
             try:
                 if is_stream:
 
                     async def stream_generator():
-                        response = stub.chat_completion(request_data)
+                        response = stub.chat_completion(backend_request)
                         first_token_time = None
                         last_chunk = None
                         last_token_time = None
@@ -148,7 +202,7 @@ class RequestHandler:
                     logger.debug(f"Streaming response initiated for {request_id}")
                     return resp
                 else:
-                    response = stub.chat_completion(request_data)
+                    response = stub.chat_completion(backend_request)
                     content = (await anext(iterate_in_threadpool(response))).decode()
                     logger.debug(f"Non-stream response completed for {request_id}")
                     return Response(content=content, media_type="application/json")

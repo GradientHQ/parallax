@@ -54,6 +54,21 @@ The backend architecture:
 - [Getting Started](./docs/user_guide/quick_start.md)
 - [Working with OpenClaw 🦞](./docs/user_guide/work_with_openclaw.md)
 
+## Quick Install
+
+```sh
+git clone https://github.com/GradientHQ/parallax.git
+cd parallax
+./install.sh
+source .venv/bin/activate
+```
+
+The install script installs `uv` if needed, creates `.venv`, installs Parallax,
+and builds the `vllm-rs` frontend binary into `.venv/bin`. Use
+`./install.sh --extras gpu` on Linux/WSL GPU hosts or `./install.sh --extras mac`
+on Apple silicon macOS. For development dependencies, use `--extras gpu,dev` or
+`--extras mac,dev`.
+
 ## Contributing
 
 We warmly welcome contributions of all kinds! For guidelines on how to get involved, please refer to our [Contributing Guide](./docs/CONTRIBUTING.md).

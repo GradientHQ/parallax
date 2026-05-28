@@ -19,12 +19,9 @@ Executor handles
 
 import time
 from abc import abstractmethod
-from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple
 
 import zmq
-from jinja2 import TemplateError
-from mlx_lm.server import convert_chat, process_message_content
 
 from parallax.p2p.message_util import (
     abort_request_to_proto,
@@ -34,13 +31,22 @@ from parallax.p2p.message_util import (
 )
 from parallax.p2p.proto import forward_pb2
 from parallax.p2p.server import ServerState
+from parallax.server.engine_core_protocol import (
+    ENGINE_IDENTITY,
+    EngineCoreFinishReason,
+    UnsupportedEngineCoreField,
+    decode_engine_core_frame,
+    encode_engine_core_outputs,
+    engine_core_ready_payload,
+    engine_core_request_to_initial_request,
+    make_engine_core_output,
+)
 from parallax.server.request import (
     InitialRequest,
     IntermediateRequest,
     Request,
     RequestStatus,
 )
-from parallax.server.sampling.sampling_params import SamplingParams
 from parallax.server.scheduler import Scheduler
 from parallax.utils.shared_state import SharedState
 from parallax.utils.utils import get_current_device, get_device_dtype, get_zmq_socket
@@ -125,7 +131,7 @@ class BaseExecutor:
         self.weight_refit_mode = weight_refit_mode
         if self.enable_weight_refit and self.tp_size > 1 and self.weight_refit_mode == "cpu":
             self.weight_refit_mode = "disk"
-            logger.warning(f"Force weight update from disk for TP > 1")
+            logger.warning("Force weight update from disk for TP > 1")
 
         # Metrics throttling for per-layer latency updates
         self.layer_latency_update_every = int(max(1, layer_latency_update_every))
@@ -180,6 +186,11 @@ class BaseExecutor:
             f"Scheduler initialized (max_batch_size={max_batch_size}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"
         )
 
+        # Store max sequence length before engine-core registration, since the
+        # Rust frontend reads this value from the registration payload.
+        self.max_sequence_length = max_sequence_length
+        self.model_path = None
+
         # Communication Related
         if self.tp_rank == 0:
             self.zmq_context = zmq.Context()
@@ -191,20 +202,18 @@ class BaseExecutor:
                 self.send_to_peer_socket = get_zmq_socket(
                     self.zmq_context, zmq.PUSH, send_to_peer_addr, bind=False
                 )
-            if executor_input_ipc_addr:
-                self.recv_from_ipc_socket = get_zmq_socket(
-                    self.zmq_context, zmq.PULL, executor_input_ipc_addr, bind=False
+            if self.is_first_peer and executor_input_ipc_addr:
+                self.recv_from_ipc_socket = self._connect_engine_core_input_socket(
+                    executor_input_ipc_addr
                 )
-            if executor_output_ipc_addr:
+            if self.is_first_peer and executor_output_ipc_addr:
                 self.send_to_ipc_socket = get_zmq_socket(
                     self.zmq_context, zmq.PUSH, executor_output_ipc_addr, bind=False
                 )
+            if self.is_first_peer and executor_input_ipc_addr:
+                self._send_engine_core_ready_response(dtype)
         if self.shared_state is not None:
             self.shared_state.set_status(ServerState.READY.value)
-
-        # store max_sequence_length
-        self.max_sequence_length = max_sequence_length
-        self.model_path = None
 
         # Log executor ready status
         logger.info(
@@ -256,35 +265,201 @@ class BaseExecutor:
     def _release_request(self, rid: str):
         """Release request in backend frameworks"""
 
+    def _connect_engine_core_input_socket(self, endpoint: str):
+        """Connect the engine DEALER socket with vLLM-compatible identity 0."""
+        socket = self.zmq_context.socket(zmq.DEALER)
+        socket.setsockopt(zmq.IDENTITY, ENGINE_IDENTITY)
+        socket.setsockopt(zmq.SNDHWM, 0)
+        socket.setsockopt(zmq.RCVHWM, 0)
+        socket.connect(endpoint)
+        return socket
+
+    def _resolve_engine_core_max_model_len(self) -> int:
+        if self.max_sequence_length is not None:
+            return int(self.max_sequence_length)
+
+        for key in (
+            "max_position_embeddings",
+            "model_max_length",
+            "max_sequence_length",
+            "seq_length",
+        ):
+            value = self.config.get(key)
+            if value is not None:
+                return int(value)
+
+        return 4096
+
+    def _send_engine_core_ready_response(self, dtype: str):
+        """Register this Parallax engine with the Rust frontend."""
+        payload = engine_core_ready_payload(
+            max_model_len=self._resolve_engine_core_max_model_len(),
+            dtype=dtype,
+            num_gpu_blocks=0,
+            dp_stats_address=None,
+        )
+        self.recv_from_ipc_socket.send(payload)
+        logger.debug("Sent vLLM engine-core ready registration")
+
     def recv_requests_from_http(self) -> List[Request]:
-        """Receives requests from http frontend"""
+        """Receives requests from the vLLM Rust frontend."""
         if self.tp_rank != 0:
             return []
 
         recv_reqs = []
         while True:
+            decoded = None
             try:
-                raw_request = self.recv_from_ipc_socket.recv_pyobj(zmq.NOBLOCK)
+                frames = self.recv_from_ipc_socket.recv_multipart(zmq.NOBLOCK)
+                if len(frames) != 2:
+                    raise ValueError(f"Expected 2 engine-core frames, got {len(frames)}")
 
-                # Check if this is an abort request
-                if isinstance(raw_request, dict) and raw_request.get("type") == "abort":
-                    logger.debug(
-                        f"Received abort request from HTTP for request ID: {raw_request.get('rid')}"
-                    )
-                    self.scheduler.cancel_request(raw_request.get("rid"))
+                frame_type, payload = frames
+                message_type, decoded = decode_engine_core_frame(frame_type, payload)
+
+                if message_type == "abort":
+                    self._abort_engine_core_requests(decoded)
                 else:
-                    # Normal request processing - do tokenization and form InitialRequest
-                    req = self._handle_raw_request(raw_request)
+                    req = engine_core_request_to_initial_request(
+                        decoded,
+                        max_sequence_length=self.max_sequence_length,
+                    )
                     recv_reqs.append(req)
             except zmq.ZMQError:
                 break
             except Exception as e:
-                logger.exception(f"Error receiving http request: {e}")
-                self._notify_http_request_error(raw_request, e)
+                logger.exception(f"Error receiving engine-core request: {e}")
+                request_id = None
+                try:
+                    if isinstance(decoded, dict):
+                        request_id = decoded.get("request_id")
+                except Exception:
+                    request_id = None
+                if request_id is not None:
+                    self._send_engine_core_error(str(request_id), e)
 
         if len(recv_reqs) > 0:
-            logger.debug(f"Received {len(recv_reqs)} HTTP requests")
+            logger.debug(f"Received {len(recv_reqs)} engine-core requests")
         return recv_reqs
+
+    def _abort_engine_core_requests(self, request_ids: List[str]):
+        """Abort requests from vLLM frontend and emit terminal outputs."""
+        for request_id in request_ids:
+            request = self.scheduler.get_running_request(request_id)
+            removed_from_wait_queue = False
+            if request is None:
+                for queued in list(self.scheduler._wait_queue):
+                    if queued.request_id == request_id:
+                        self.scheduler._wait_queue.remove(queued)
+                        request = queued
+                        removed_from_wait_queue = True
+                        break
+
+            if request is not None:
+                request.abort = True
+                request.update_status(RequestStatus.FINISHED_ABORT)
+                self.release_and_evict_request(request_id)
+                if self.is_first_peer and not self.is_last_peer:
+                    self.finished_batch.append(request)
+                logger.debug(
+                    "Aborted engine-core request %s (from_wait_queue=%s)",
+                    request_id,
+                    removed_from_wait_queue,
+                )
+            else:
+                logger.debug("Received abort for inactive engine-core request %s", request_id)
+
+            self._send_engine_core_terminal_output(
+                request_id=request_id,
+                finish_reason=EngineCoreFinishReason.ABORT,
+            )
+
+    def _send_engine_core_error(self, request_id: str, error: Exception):
+        if isinstance(error, UnsupportedEngineCoreField):
+            logger.warning("Rejecting unsupported engine-core request %s: %s", request_id, error)
+        self._send_engine_core_terminal_output(
+            request_id=request_id,
+            finish_reason=EngineCoreFinishReason.ERROR,
+        )
+
+    def _send_engine_core_terminal_output(
+        self,
+        *,
+        request_id: str,
+        finish_reason: EngineCoreFinishReason,
+        new_token_id: Optional[int] = None,
+        stop_reason: Optional[int | str] = None,
+    ):
+        output = make_engine_core_output(
+            request_id=request_id,
+            new_token_ids=[] if new_token_id is None else [new_token_id],
+            finish_reason=finish_reason,
+            stop_reason=stop_reason,
+        )
+        self._send_engine_core_outputs([output], finished_requests=[request_id])
+
+    def _send_engine_core_token_output(
+        self,
+        *,
+        request_id: str,
+        token_id: Optional[int],
+        finish_reason: Optional[EngineCoreFinishReason] = None,
+        stop_reason: Optional[int | str] = None,
+    ):
+        new_token_ids = [] if token_id is None or token_id < 0 else [int(token_id)]
+        output = make_engine_core_output(
+            request_id=request_id,
+            new_token_ids=new_token_ids,
+            finish_reason=finish_reason,
+            stop_reason=stop_reason,
+        )
+        finished_requests = [request_id] if finish_reason is not None else None
+        self._send_engine_core_outputs([output], finished_requests=finished_requests)
+
+    def _send_engine_core_outputs(
+        self,
+        outputs: List[List[Any]],
+        *,
+        finished_requests: Optional[List[str]] = None,
+    ):
+        if not hasattr(self, "send_to_ipc_socket") or self.send_to_ipc_socket is None:
+            return
+        payload = encode_engine_core_outputs(
+            outputs,
+            engine_index=0,
+            finished_requests=finished_requests,
+        )
+        self.send_to_ipc_socket.send(payload)
+
+    def _finish_reason_for_request(
+        self, request: Request
+    ) -> tuple[Optional[EngineCoreFinishReason], Optional[int | str]]:
+        if request.status == RequestStatus.FINISHED_EOS:
+            token_id = None
+            if getattr(request, "output_ids", None):
+                token_id = request.output_ids[-1]
+            return EngineCoreFinishReason.STOP, token_id
+        if request.status == RequestStatus.FINISHED_MAX_LENGTH:
+            return EngineCoreFinishReason.LENGTH, None
+        if request.status in (RequestStatus.FINISHED_ABORT, RequestStatus.CANCELLED):
+            return EngineCoreFinishReason.ABORT, None
+        if request.status == RequestStatus.ERROR:
+            return EngineCoreFinishReason.ERROR, None
+        return None, None
+
+    def send_engine_core_request_output(
+        self,
+        *,
+        request: Request,
+        token_id: Optional[int],
+    ):
+        finish_reason, stop_reason = self._finish_reason_for_request(request)
+        self._send_engine_core_token_output(
+            request_id=request.request_id,
+            token_id=token_id,
+            finish_reason=finish_reason,
+            stop_reason=stop_reason,
+        )
 
     def recv_requests_from_peer(self) -> Tuple[List[Request], str]:
         """Receives requests from the RPC server."""
@@ -466,7 +641,7 @@ class BaseExecutor:
         while not self._should_stop:
             received_requests = []
 
-            # Receive requests from http frontend
+            # Receive requests from the Rust frontend.
             if self.is_first_peer:
                 received_requests = self.recv_requests_from_http()
 
@@ -512,6 +687,11 @@ class BaseExecutor:
                         # Notify downstream peers to abort if this peer is the first peer in a pipeline
                         if self.is_first_peer and not self.is_last_peer:
                             self.finished_batch.append(req)
+                        if self.is_first_peer and self.tp_rank == 0:
+                            self._send_engine_core_terminal_output(
+                                request_id=rid,
+                                finish_reason=EngineCoreFinishReason.ABORT,
+                            )
             except Exception:
                 # Non-fatal; continue serving
                 pass
@@ -580,6 +760,11 @@ class BaseExecutor:
                 # Naive error handling: release and evict all requests in the batch
                 for req in batch_to_process:
                     self.release_and_evict_request(req.request_id)
+                    if self.is_first_peer and self.tp_rank == 0:
+                        self._send_engine_core_terminal_output(
+                            request_id=req.request_id,
+                            finish_reason=EngineCoreFinishReason.ERROR,
+                        )
 
     def run_loop_in_background(self):
         """Run the executor loop in the background."""
@@ -606,123 +791,20 @@ class BaseExecutor:
 
         try:
             if self.tp_rank == 0:
-                self.recv_from_peer_socket.close()
-                self.send_to_peer_socket.close()
-                self.recv_from_ipc_socket.close()
-                self.send_to_ipc_socket.close()
+                for socket_name in (
+                    "recv_from_peer_socket",
+                    "send_to_peer_socket",
+                    "recv_from_ipc_socket",
+                    "send_to_ipc_socket",
+                ):
+                    socket = getattr(self, socket_name, None)
+                    if socket is not None:
+                        socket.close()
                 self.zmq_context.term()
         except Exception as e:
             logger.debug(f"Error closing sockets (may already be closed): {e}")
 
         logger.debug("Executor shutdown complete.")
-
-    def _handle_raw_request(self, raw_request: Dict):
-        assert "messages" in raw_request, "Request did not contain messages"
-
-        rid = raw_request["rid"]
-        if self.tokenizer.chat_template:
-            messages = raw_request["messages"]
-            process_message_content(messages)
-            chat_template_kwargs = dict(raw_request.get("chat_template_kwargs", {}))
-            # check extra_body for backward compatibility
-            if "extra_body" in raw_request and "chat_template_kwargs" in raw_request["extra_body"]:
-                chat_template_kwargs.update(raw_request["extra_body"]["chat_template_kwargs"])
-            # Transformers 5.x defaults return_dict=True, but Parallax expects list[int].
-            chat_template_kwargs["return_dict"] = False
-
-            prompt = self.tokenizer.apply_chat_template(
-                messages,
-                raw_request.get("tools") or None,
-                tokenize=True,
-                add_generation_prompt=True,
-                **chat_template_kwargs,
-            )
-        else:
-            prompt = convert_chat(raw_request["messages"], raw_request.get("role_mapping"))
-            prompt = self.tokenizer.encode(prompt)
-
-        max_seq_len = self.max_sequence_length if self.max_sequence_length is not None else 4096
-        max_seq_len = max(max_seq_len, 4096)
-        max_new_tokens = raw_request.get("max_tokens", 2048)
-        input_token_num = len(prompt)
-        if input_token_num + max_new_tokens >= max_seq_len:
-            logger.warning(
-                f"Input token length {input_token_num} + max_new_tokens {max_new_tokens} exceeds max_sequence_length {max_seq_len}."
-            )
-            if max_new_tokens > 2048:
-                logger.warning(
-                    f"max_new_tokens {max_new_tokens} is too large, reduce to 2048 tokens."
-                )
-                max_new_tokens = 2048
-            if input_token_num + max_new_tokens >= max_seq_len:
-                logger.warning(
-                    f"Trunc input prompt, keep last {max_seq_len - max_new_tokens} tokens"
-                )
-                prompt = prompt[-(max_seq_len - max_new_tokens) :]
-
-        max_total_length = len(prompt) + max_new_tokens
-        logger.debug(f"Final max_new_tokens for request ID {rid}: {max_new_tokens}")
-        logger.debug(f"Final input token length for request ID {rid}: {len(prompt)}")
-
-        lora_path = raw_request.get("lora_path")
-        return_probs = raw_request.get("return_probs", False)  # Get return_probs parameter
-
-        raw_sampling_params = raw_request.get("sampling_params")
-        if raw_sampling_params is None:
-            sampling_params = SamplingParams()
-        else:
-            # TODO: Support more sampling params
-            sampling_params = SamplingParams()
-            if "temperature" in raw_sampling_params:
-                sampling_params.temperature = raw_sampling_params["temperature"]
-            if "top_k" in raw_sampling_params:
-                sampling_params.top_k = raw_sampling_params["top_k"]
-            if "top_p" in raw_sampling_params:
-                sampling_params.top_p = raw_sampling_params["top_p"]
-            if "ignore_eos" in raw_sampling_params:
-                sampling_params.ignore_eos = raw_sampling_params["ignore_eos"]
-
-        req = InitialRequest(
-            request_id=rid,
-            output_ids=None,
-            input_ids=prompt,
-            sampling_params=sampling_params,
-            max_new_tokens=max_new_tokens,
-            max_total_length=max_total_length,
-            lora_path=lora_path,
-            return_probs=return_probs,
-        )
-        if "routing_table" in raw_request:
-            req.routing_table = raw_request["routing_table"]
-        return req
-
-    def _notify_http_request_error(self, raw_request: Optional[Dict], error: Exception):
-        """Best-effort notification to HTTP server when request parsing fails."""
-        if not hasattr(self, "send_to_ipc_socket") or self.send_to_ipc_socket is None:
-            return
-        if not isinstance(raw_request, dict):
-            return
-        rid = raw_request.get("rid")
-        if rid is None:
-            return
-
-        is_template_error = isinstance(error, TemplateError)
-        status = (
-            HTTPStatus.BAD_REQUEST
-            if isinstance(error, ValueError) or is_template_error
-            else HTTPStatus.INTERNAL_SERVER_ERROR
-        )
-        payload = {
-            "type": "error",
-            "rid": rid,
-            "error": str(error),
-            "error_type": error.__class__.__name__,
-            "status_code": status.value,
-        }
-        try:
-            self.send_to_ipc_socket.send_pyobj(payload)
-        except Exception:  # pragma: no cover - best effort notification
-            logger.debug("Failed to send error notification to HTTP handler", exc_info=True)
 
     def _prepare_next_single_request(
         self, request: Request, hidden_states: Any, token_prob: Optional[float] = None

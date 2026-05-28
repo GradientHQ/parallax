@@ -45,9 +45,6 @@ const ChatMarkdownRoot = styled('article', {
 
     ...preStyles,
 
-    '& think': {
-      color: palette.text.disabled,
-    },
     '& ul, & ol': {
       margin: 0,
     },
@@ -58,10 +55,6 @@ interface Props {
   isThinking?: boolean;
   content: string;
 }
-
-const preprocessThink = (input: string) => {
-  return input.replace(/<think>/, '<think>\n\n').replace(/<\/think>/, '\n\n</think>\n\n');
-};
 
 /**
  * Convert MathJax-style \(...\) and \[...\] into KaTeX-compatible $...$ and $$...$$
@@ -103,7 +96,6 @@ const schema = {
 };
 
 const ChatMarkdown = memo<Props>(({ isThinking, content }) => {
-  content = preprocessThink(content);
   content = preprocessMath(content);
 
   return (

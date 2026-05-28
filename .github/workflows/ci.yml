@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - '.github/workflows/ci.yml'
+      - 'install.sh'
       - 'src/**'
       - 'tests/**'
       - 'pyproject.toml'
@@ -72,6 +73,13 @@ jobs:
         fail_ci_if_error: false
         token: ${{ secrets.CODECOV_TOKEN }}
 
+    - name: Install Parallax and vLLM Rust frontend
+      if: matrix.os == 'macos-26' && matrix.python-version == '3.12'
+      shell: bash
+      run: |
+        ./install.sh --extras mac --python "${{ matrix.python-version }}"
+        test -x .venv/bin/vllm-rs
+
     - name: Run E2E tests (macOS only)
       if: matrix.os == 'macos-26' && matrix.python-version == '3.12'
       shell: bash
@@ -79,7 +87,7 @@ jobs:
         TERM: xterm-256color
       run: |
         # Start the server
-        python src/parallax/launch.py \
+        .venv/bin/python src/parallax/launch.py \
           --model-path Qwen/Qwen3-0.6B \
           --max-num-tokens-per-batch 16384 \
           --kv-block-size 32 \
@@ -123,6 +131,7 @@ jobs:
           'http://localhost:3000/v1/chat/completions' \
           --header 'Content-Type: application/json' \
           --data '{
+            "model": "Qwen/Qwen3-0.6B",
             "messages": [
               {
                 "role": "user",
@@ -132,9 +141,7 @@ jobs:
             "stream": false,
             "max_tokens": 1024,
             "chat_template_kwargs": {"enable_thinking": false},
-            "sampling_params": {
-                "top_k": 3
-            }
+            "top_k": 3
         }')
 
         echo "Response received:"

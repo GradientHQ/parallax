@@ -5,9 +5,12 @@ Test for the Sampler class
 import unittest
 
 import mlx.core as mx
+import pytest
 from mlx_lm.sample_utils import apply_min_p, apply_top_k, apply_top_p
 
 from parallax.server.sampling.sampler import Sampler, SamplingBatchInfo
+
+pytestmark = pytest.mark.mlx
 
 
 class TestSampler(unittest.TestCase):
@@ -46,7 +49,8 @@ class TestSampler(unittest.TestCase):
         logits = logits / temperatures.reshape(-1, 1)
         next_token_ids_ref = mx.random.categorical(logits)
 
-        mx.allclose(batch_next_token_ids, next_token_ids_ref)
+        self.assertEqual(batch_next_token_ids.shape, (3,))
+        self.assertTrue(mx.allclose(batch_next_token_ids, next_token_ids_ref))
 
 
 if __name__ == "__main__":

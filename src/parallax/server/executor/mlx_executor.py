@@ -105,7 +105,7 @@ class MLXExecutor(BaseExecutor):
         try:
             mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
         except Exception:
-            logger.warning(f"Using mlx without metal backend.")
+            logger.warning("Using mlx without metal backend.")
 
         self.shard_loader = MLXModelLoader(
             model_repo,
@@ -325,29 +325,12 @@ class MLXExecutor(BaseExecutor):
                     else:
                         self.scheduler.enque_request(original_req)
 
-                    # detokenize and send to http server
+                    # Send token/terminal update to the Rust frontend.
                     if self.tp_rank == 0:
-                        # Only send token if it's valid
-                        token_to_send = req.next_token_id if req.next_token_id is not None else -1
-                        req_dict = {
-                            "prompt_tokens": len(req.input_ids),
-                            "next_token_id": token_to_send,
-                            "rid": req.request_id,
-                        }
-                        if original_req.status == RequestStatus.FINISHED_EOS:
-                            req_dict["eos"] = True
-                        if original_req.status == RequestStatus.FINISHED_MAX_LENGTH:
-                            req_dict["length"] = True
-                        if original_req.status == RequestStatus.FINISHED_ABORT:
-                            req_dict["abort"] = True
-
-                        # Add prob value for the sampled token (if requested and available)
-                        if original_req.return_probs and req.token_prob is not None:
-                            req_dict["probs"] = req.token_prob
-                        if self.enable_weight_refit:
-                            req_dict["weight_version"] = self.weight_version
-                        if hasattr(self, "send_to_ipc_socket"):
-                            self.send_to_ipc_socket.send_pyobj(req_dict)
+                        self.send_engine_core_request_output(
+                            request=original_req,
+                            token_id=req.next_token_id,
+                        )
                 else:
                     raise TypeError(f"First peer received unexpected request type: {type(req)}")
 
@@ -691,18 +674,12 @@ class MLXExecutor(BaseExecutor):
                 # Add to finished_batch to trigger abort notification
                 self.finished_batch.append(req)
 
-                # If this is First Peer, we must also notify HTTP Server immediately
+                # If this is First Peer, notify the Rust frontend immediately.
                 if self.is_first_peer and self.tp_rank == 0:
-                    req_dict = {
-                        "prompt_tokens": req.prompt_len,
-                        "next_token_id": (
-                            req.output_ids[-1] if req.output_ids else -1
-                        ),  # Best effort to return last token
-                        "rid": req.request_id,
-                        "abort": True,
-                    }
-                    if hasattr(self, "send_to_ipc_socket"):
-                        self.send_to_ipc_socket.send_pyobj(req_dict)
+                    self.send_engine_core_request_output(
+                        request=req,
+                        token_id=None,
+                    )
 
                 continue
 
