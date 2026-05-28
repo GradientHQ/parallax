@@ -8,8 +8,11 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
+import sysconfig
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 from parallax_utils.logging_config import get_logger
@@ -35,12 +38,21 @@ class VllmRustFrontendProcess:
 def resolve_vllm_rs_binary() -> str:
     """Resolve the official vLLM Rust frontend binary from PATH."""
     binary = shutil.which("vllm-rs")
-    if binary is None:
-        raise VllmRustFrontendNotFound(
-            "Unable to find `vllm-rs` on PATH. Build it from any official vLLM checkout "
-            "with `./build_rust.sh`, then put the generated `vllm-rs` binary on PATH."
-        )
-    return binary
+    if binary is not None:
+        return binary
+
+    candidates = [
+        Path(sysconfig.get_path("scripts")) / "vllm-rs",
+        Path(sys.executable).parent / "vllm-rs",
+    ]
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+
+    raise VllmRustFrontendNotFound(
+        "Unable to find `vllm-rs` on PATH or next to the active Python interpreter. "
+        "Run `./install.sh`, then activate `.venv` or add `.venv/bin` to PATH."
+    )
 
 
 def _bind_listener_socket(host: str, port: int) -> socket.socket:

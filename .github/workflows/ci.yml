@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - '.github/workflows/ci.yml'
+      - 'install.sh'
       - 'src/**'
       - 'tests/**'
       - 'pyproject.toml'
@@ -72,14 +73,12 @@ jobs:
         fail_ci_if_error: false
         token: ${{ secrets.CODECOV_TOKEN }}
 
-    - name: Install vLLM Rust frontend
+    - name: Install Parallax and vLLM Rust frontend
       if: matrix.os == 'macos-26' && matrix.python-version == '3.12'
       shell: bash
       run: |
-        brew list protobuf >/dev/null 2>&1 || brew install protobuf
-        protoc --version
-        ./build_rust.sh --debug
-        command -v vllm-rs
+        ./install.sh --extras mac --python "${{ matrix.python-version }}"
+        test -x .venv/bin/vllm-rs
 
     - name: Run E2E tests (macOS only)
       if: matrix.os == 'macos-26' && matrix.python-version == '3.12'
@@ -88,7 +87,7 @@ jobs:
         TERM: xterm-256color
       run: |
         # Start the server
-        python src/parallax/launch.py \
+        .venv/bin/python src/parallax/launch.py \
           --model-path Qwen/Qwen3-0.6B \
           --max-num-tokens-per-batch 16384 \
           --kv-block-size 32 \
