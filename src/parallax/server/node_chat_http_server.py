@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from pathlib import Path
 from typing import Dict
 
 import fastapi
@@ -37,6 +38,37 @@ async def v1_chat_completions(request_data: Dict, request_id: str, received_ts: 
 
 async def get_cluster_status():
     return app.state.http_server.get_cluster_status()
+
+
+@app.get("/v1/models")
+async def openai_v1_models():
+    """OpenAI v1/models endpoint - returns the served model info."""
+    model_path = app.state.http_server.model_path
+    if model_path is None:
+        return JSONResponse(
+            content={"object": "list", "data": []},
+        )
+    model_id = _extract_model_id(model_path)
+    return JSONResponse(
+        content={
+            "object": "list",
+            "data": [
+                {
+                    "id": model_id,
+                    "object": "model",
+                    "created": int(time.time()),
+                    "owned_by": model_id.split("/")[0] if "/" in model_id else "local",
+                }
+            ],
+        }
+    )
+
+
+def _extract_model_id(model_path_str: str) -> str:
+    path = Path(model_path_str)
+    if path.exists():
+        return path.name
+    return model_path_str
 
 
 @app.post("/v1/chat/completions")
@@ -83,6 +115,7 @@ class NodeChatHttpServer:
         self.relay_servers = args.relay_servers
         self.announce_maddrs = args.announce_maddrs
         self.initial_peers = args.initial_peers
+        self.model_path = getattr(args, "model_path", None)
         self.host_maddrs = (
             [f"/ip4/0.0.0.0/tcp/{self.tcp_port}", f"/ip4/0.0.0.0/udp/{self.udp_port}/quic-v1"],
         )

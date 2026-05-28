@@ -83,6 +83,25 @@ async def model_list():
     )
 
 
+@app.get("/v1/models")
+async def openai_v1_models():
+    """OpenAI v1/models endpoint - returns all supported models."""
+    models = get_model_list()
+    data = [
+        {
+            "id": m["name"],
+            "object": "model",
+            "created": int(time.time()),
+            "owned_by": m["name"].split("/")[0] if "/" in m["name"] else "local",
+        }
+        for m in models
+    ]
+    return JSONResponse(
+        content={"object": "list", "data": data},
+        status_code=200,
+    )
+
+
 @app.post("/scheduler/init")
 async def scheduler_init(raw_request: Request):
     request_data = await raw_request.json()

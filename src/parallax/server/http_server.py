@@ -576,6 +576,42 @@ async def v1_chat_completions(raw_request: fastapi.Request):
             return create_error_response("Internal server error", "InternalServerError")
 
 
+@app.get("/v1/models")
+async def openai_v1_models():
+    """OpenAI v1/models endpoint - returns the currently served model."""
+    model_path = app.state.http_handler.model_path_str
+    model_id = _extract_model_id(model_path)
+    return JSONResponse(
+        content={
+            "object": "list",
+            "data": [
+                {
+                    "id": model_id,
+                    "object": "model",
+                    "created": int(time.time()),
+                    "owned_by": model_id.split("/")[0] if "/" in model_id else "local",
+                }
+            ],
+        }
+    )
+
+
+def _extract_model_id(model_path_str: str) -> str:
+    """Extract a human-readable model ID from a local path or HuggingFace repo.
+
+    Examples:
+      /Users/foo/models/Qwen3-0.6B  -> Qwen3-0.6B
+      Qwen/Qwen3-0.6B               -> Qwen/Qwen3-0.6B
+      mlx-community/Qwen3-0.6B-4bit -> mlx-community/Qwen3-0.6B-4bit
+    """
+    from pathlib import Path
+
+    path = Path(model_path_str)
+    if path.exists():
+        return path.name
+    return model_path_str
+
+
 @app.post("/v1/chat/completions")
 async def openai_v1_chat_completions(raw_request: fastapi.Request):
     """OpenAI v1/chat/complete post function"""

@@ -795,6 +795,7 @@ async def health() -> JSONResponse:
                 "/unregister",
                 "/endpoints",
                 "/v1/chat/completions",
+                "/v1/models",
                 "/weight/refit",
             ],
         }
@@ -939,6 +940,25 @@ async def weight_refit(raw_request: Request) -> JSONResponse:
             "results": results,
         },
     )
+
+
+@app.get("/v1/models")
+async def v1_models(raw_request: Request):
+    """
+    OpenAI v1/models endpoint - forwards to a downstream node.
+
+    Example:
+      curl -sS http://127.0.0.1:8081/v1/models
+    """
+    ep = await registry.choose_best()
+    url = _join_url(ep.base_url, "/v1/models")
+    headers = _filter_forward_headers(dict(raw_request.headers))
+    client = await registry._get_client()
+    try:
+        resp = await client.get(url, headers=headers)
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Upstream error: {e}") from e
 
 
 @app.post("/v1/chat/completions")
