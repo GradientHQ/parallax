@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXTRAS="${PARALLAX_EXTRAS:-}"
 PYTHON_VERSION="${PARALLAX_PYTHON_VERSION:-3.12}"
 VENV_DIR="$SCRIPT_DIR/.venv"
-VLLM_REF="${VLLM_REF:-main}"
+VLLM_REF="${VLLM_REF:-v0.22.0}"
 
 show_help() {
     cat <<'EOF'
@@ -30,7 +30,7 @@ Options:
 Environment:
   PARALLAX_EXTRAS         Same as --extras.
   PARALLAX_PYTHON_VERSION Same as --python.
-  VLLM_REF                vLLM git branch/tag to clone. Defaults to main.
+  VLLM_REF                vLLM git branch/tag to clone. Defaults to v0.22.0.
 EOF
 }
 
@@ -218,15 +218,28 @@ build_vllm_rust_frontend() {
     local rust_dir
     local parallax_scripts_dir
     local target_path
+    local target_version_path
+    local existing_version
     local toolchain
 
     parallax_scripts_dir="$(resolve_venv_bin_dir)"
     target_path="$parallax_scripts_dir/vllm-rs"
+    target_version_path="$target_path.version"
 
     if [[ -f "$target_path" ]]; then
-        chmod +x "$target_path"
-        echo "vllm-rs already exists at $target_path, skipping Rust build."
-        return
+        existing_version=""
+        if [[ -f "$target_version_path" ]]; then
+            existing_version="$(<"$target_version_path")"
+        fi
+        if [[ "$existing_version" != "$VLLM_REF" ]]; then
+            echo "Existing vllm-rs version (${existing_version:-unknown}) does not match $VLLM_REF, rebuilding."
+            rm -f "$target_path" "$target_version_path"
+        else
+            chmod +x "$target_path"
+            printf '%s\n' "$VLLM_REF" > "$target_version_path"
+            echo "vllm-rs already exists at $target_path, skipping Rust build."
+            return
+        fi
     fi
 
     CLONE_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/parallax-vllm-rs.XXXXXX")"
@@ -264,6 +277,7 @@ build_vllm_rust_frontend() {
     mkdir -p "$(dirname "$target_path")"
     cp "$rust_dir/target/release/vllm-rs" "$target_path"
     chmod +x "$target_path"
+    printf '%s\n' "$VLLM_REF" > "$target_version_path"
     echo "Installed vllm-rs to $target_path"
     cleanup_clone
     trap - EXIT
