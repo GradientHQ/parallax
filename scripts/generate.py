@@ -22,6 +22,7 @@ tensor parallel:
 """
 
 import argparse
+import statistics
 import time
 
 import mlx.core as mx
@@ -78,6 +79,21 @@ def build_prompt(messages, tokenizer):
         full_prompt = convert_chat(messages, None)
         prompt_tokens = tokenizer.encode(full_prompt)
     return full_prompt, prompt_tokens
+
+
+def percentile(values, percentile_value):
+    if not values:
+        return 0
+
+    sorted_values = sorted(values)
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+
+    rank = (len(sorted_values) - 1) * percentile_value / 100
+    lower = int(rank)
+    upper = min(lower + 1, len(sorted_values) - 1)
+    weight = rank - lower
+    return sorted_values[lower] * (1 - weight) + sorted_values[upper] * weight
 
 
 def main():
@@ -226,7 +242,7 @@ def main():
     print_rank(f"Token 1 (Prefill) time: {prefill_time * 1000:.2f} ms")
 
     # 5. Decode Loop
-    total_decode_time = 0
+    decode_step_times = []
     for i in range(args.max_tokens - 1):
         if is_finished:
             break
@@ -260,13 +276,14 @@ def main():
         request.commit_new_token(token_id)
 
         decode_step_time = time.perf_counter() - decode_step_start
-        total_decode_time += decode_step_time
+        decode_step_times.append(decode_step_time)
         print_rank(f"Token {i + 2} time: {decode_step_time * 1000:.2f} ms")
 
     print_rank("\nGenerated Content:")
     print_rank(tokenizer.decode(request.output_ids))
 
     # Summary Statistics
+    total_decode_time = sum(decode_step_times)
     prompt_tps = request.prompt_len / prefill_time
     generation_tps = len(request.output_ids) / total_decode_time if total_decode_time > 0 else 0
     peak_mem = mx.get_peak_memory() / 1024**3
@@ -274,6 +291,22 @@ def main():
     print_rank("-" * 20)
     print_rank(f"Prompt: {request.prompt_len} tokens, {prompt_tps:.3f} tokens-per-sec")
     print_rank(f"Generation: {len(request.output_ids)} tokens, {generation_tps:.3f} tokens-per-sec")
+    if decode_step_times:
+        decode_step_times_ms = [step_time * 1000 for step_time in decode_step_times]
+        decode_step_time_mean = sum(decode_step_times_ms) / len(decode_step_times_ms)
+        print_rank(
+            "Decode step time (ms): "
+            f"min={min(decode_step_times_ms):.2f}, "
+            f"median={percentile(decode_step_times_ms, 50):.2f}, "
+            f"max={max(decode_step_times_ms):.2f}, "
+            f"mean={decode_step_time_mean:.2f}, "
+            f"std={statistics.pstdev(decode_step_times_ms):.2f}, "
+            f"p90={percentile(decode_step_times_ms, 90):.2f}, "
+            f"p95={percentile(decode_step_times_ms, 95):.2f}, "
+            f"p99={percentile(decode_step_times_ms, 99):.2f}"
+        )
+    else:
+        print_rank("Decode step time (ms): n/a")
     print_rank(f"Peak memory: {peak_mem:.3f} GB")
     cache_manager.free_request(request.request_id)
 
