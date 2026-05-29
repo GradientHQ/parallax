@@ -160,6 +160,7 @@ def engine_core_ready_payload(
     dtype: Optional[str],
     num_gpu_blocks: int = 0,
     dp_stats_address: Optional[str] = None,
+    vllm_version: str = "0.0.0+parallax",
 ) -> bytes:
     """Build the registration payload sent by the engine DEALER socket."""
     return _pack_msgpack(
@@ -168,6 +169,7 @@ def engine_core_ready_payload(
             "num_gpu_blocks": int(num_gpu_blocks),
             "dp_stats_address": dp_stats_address,
             "dtype": dtype,
+            "vllm_version": vllm_version,
         }
     )
 
