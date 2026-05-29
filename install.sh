@@ -141,7 +141,7 @@ install_parallax_python() {
     fi
 
     echo "Installing Parallax Python package: $package_spec"
-    uv pip install --python "$venv_python" -e "$package_spec"
+    UV_PRERELEASE=allow uv pip install --python "$venv_python" -e "$package_spec"
 }
 
 resolve_venv_bin_dir() {
