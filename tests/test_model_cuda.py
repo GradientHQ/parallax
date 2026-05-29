@@ -16,11 +16,16 @@ from parallax.utils.utils import is_cuda_available
 # Delay import of SGLExecutor to avoid import errors when sglang is not available
 # This allows test collection to succeed even if sglang is not installed
 SGLExecutor = None
+SGL_EXECUTOR_IMPORT_ERROR = None
 try:
     from parallax.server.executor.sglang_executor import SGLExecutor
-except ImportError:
+except ImportError as exc:
     # sglang not available, tests will be skipped
-    pass
+    SGL_EXECUTOR_IMPORT_ERROR = exc
+except Exception as exc:
+    if is_cuda_available():
+        raise
+    SGL_EXECUTOR_IMPORT_ERROR = exc
 
 CUDA_MODEL_REPO = "Qwen/Qwen3-0.6B"
 TOTAL_LAYERS = 28
@@ -64,7 +69,10 @@ def test_cuda_shard_prefill(layers_config: List[Tuple[int, int]], ref_model_and_
     but uses parallax's SGLExecutor instead of direct model loading.
     """
     if SGLExecutor is None:
-        pytest.skip("sglang not available (install with 'pip install -e .[gpu]')")
+        pytest.skip(
+            "sglang not available or failed to import "
+            f"({type(SGL_EXECUTOR_IMPORT_ERROR).__name__}: {SGL_EXECUTOR_IMPORT_ERROR})"
+        )
     if not is_cuda_available():
         pytest.skip("CUDA not available")
 
@@ -171,7 +179,10 @@ def test_cuda_executor_pipeline(ref_model_and_tokenizer):
     This test creates a 2-stage pipeline and verifies it can process requests.
     """
     if SGLExecutor is None:
-        pytest.skip("sglang not available (install with 'pip install -e .[gpu]')")
+        pytest.skip(
+            "sglang not available or failed to import "
+            f"({type(SGL_EXECUTOR_IMPORT_ERROR).__name__}: {SGL_EXECUTOR_IMPORT_ERROR})"
+        )
     if not is_cuda_available():
         pytest.skip("CUDA not available")
 
