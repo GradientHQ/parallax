@@ -56,6 +56,7 @@ class Scheduler:
         cache_manager: Optional[CacheManager] = None,
         request_timeout_s: Optional[int] = 600,
         shared_state: Optional[SharedState] = None,
+        chunked_prefill_size: Optional[int] = None,
         **kwargs,
     ):
         """
@@ -67,6 +68,7 @@ class Scheduler:
             tokenizer: The tokenizer to use for the model;
             cache_manager: The KV cache manager to use for the scheduler.
             request_timeout_s: timeout for each inflight request (default 10mins).
+            chunked_prefill_size: Max tokens to account for each prefill chunk.
         """
         self.max_batch_size = max_batch_size
         self.max_num_tokens_per_batch = max_num_tokens_per_batch
@@ -95,6 +97,7 @@ class Scheduler:
         self._running_requests: Dict[str, Request] = OrderedDict()
 
         self.cache_manager = cache_manager
+        self.chunked_prefill_size = chunked_prefill_size
         self.shared_state = shared_state
         # Default timeout for requests if not set on request object
         self.request_timeout_s = request_timeout_s
@@ -360,9 +363,7 @@ class Scheduler:
                     decode_candidates.append(req)
 
         # 1) Fill with prefills first
-        chunked_prefill_size = None
-        if self.cache_manager is not None:
-            chunked_prefill_size = getattr(self.cache_manager, "chunked_prefill_size", None)
+        chunked_prefill_size = self.chunked_prefill_size
 
         for req in prefill_candidates:
             if len(batch) >= self.micro_batch_size:

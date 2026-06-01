@@ -3,6 +3,7 @@ from typing import Optional
 
 from parallax.server.cache_manager import CacheManager
 from parallax.server.request import Request
+from parallax.utils.chunked_prefill import set_request_prefill_chunk
 
 
 class AddReqResult(Enum):
@@ -52,8 +53,7 @@ class MACPrefillAdder:
             else:
                 chunked_req_offset = min(self.rem_chunk_tokens, remaining_tokens) + matched_tokens
 
-        chunked_req.input_ids = chunked_req.origin_input_ids[:chunked_req_offset]
-        chunked_req._effective_total_length = chunked_req_offset
+        set_request_prefill_chunk(chunked_req, chunked_req_offset, truncated)
         self.can_run_list.append(chunked_req)
 
         if self.rem_chunk_tokens is not None:
@@ -85,8 +85,7 @@ class MACPrefillAdder:
             if trunc_len <= 0:
                 return AddReqResult.NO_TOKEN
             chunked_req_offset = trunc_len + matched_tokens
-            req.input_ids = req.origin_input_ids[:chunked_req_offset]
-            req._effective_total_length = chunked_req_offset
+            set_request_prefill_chunk(req, chunked_req_offset, True)
             self.can_run_list.append(req)
             self.new_chunked_req = req
             self.rem_chunk_tokens -= trunc_len

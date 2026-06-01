@@ -94,6 +94,7 @@ class BaseExecutor:
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
         weight_refit_mode: Optional[str] = "disk",
+        chunked_prefill_size: Optional[int] = None,
         # Pipe communication
         conn: Optional[List[Any]] = [],
     ):
@@ -108,6 +109,7 @@ class BaseExecutor:
         self.finished_batch = []
         self.start_layer = start_layer
         self.end_layer = end_layer
+        self.max_num_tokens_per_batch = max_num_tokens_per_batch
         self._should_stop = False  # Flag to gracefully stop the executor
         # Reference to shared state for layer reallocation detection (when in subprocess mode)
         if shared_state is not None:
@@ -181,6 +183,7 @@ class BaseExecutor:
             cache_manager=self.cache_manager if self.device == "mlx" else None,
             request_timeout_s=request_timeout_s,
             shared_state=self.shared_state,
+            chunked_prefill_size=chunked_prefill_size,
         )
         logger.debug(
             f"Scheduler initialized (max_batch_size={max_batch_size}, max_tokens={max_num_tokens_per_batch}, wait_ms={scheduler_wait_ms})"

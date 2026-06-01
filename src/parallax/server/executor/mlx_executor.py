@@ -20,6 +20,10 @@ from parallax.server.request import (
 )
 from parallax.server.sampling.sampler import SamplingBatchInfo
 from parallax.server.shard_loader import MLXModelLoader
+from parallax.utils.chunked_prefill import (
+    complete_local_middle_chunk,
+    filter_middle_chunk_next_batch,
+)
 from parallax.utils.mac_prefill_adder import AddReqResult, MACPrefillAdder
 from parallax.utils.utils import (
     combine_padding_and_causal_masks,
@@ -253,6 +257,7 @@ class MLXExecutor(BaseExecutor):
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
             weight_refit_mode=weight_refit_mode,
+            chunked_prefill_size=self.chunked_prefill_size,
             conn=conn,
         )
 
@@ -299,23 +304,11 @@ class MLXExecutor(BaseExecutor):
 
     def _complete_local_middle_chunk(self, request_id: str):
         """Finish local bookkeeping after this peer runs a non-final prefill chunk."""
-        if self.chunked_req is None or self.chunked_req.rid != request_id:
-            return
-
-        self.chunked_req.is_chunked = False
-        self.cache_manager.release_request(request_id)
-
-        if self.is_first_peer:
-            original_req = self.scheduler.get_running_request(request_id)
-            if original_req is None:
-                logger.warning(
-                    f"Completed local chunk for {request_id}, but no running request was found."
-                )
-                return
-            original_req.status = RequestStatus.PREFILLING
-            self.scheduler.enque_request(original_req)
-        else:
-            self.scheduler.evict_request(request_id)
+        complete_local_middle_chunk(
+            self,
+            request_id,
+            release_callback=self.cache_manager.release_request,
+        )
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
@@ -401,24 +394,12 @@ class MLXExecutor(BaseExecutor):
         self, requests: List[Request], batch_output: Any, context_lengths: Any
     ) -> List[Request]:
         next_batch = super().prepare_next_batch_requests(requests, batch_output, context_lengths)
-        if (
-            self.chunked_req is None
-            or not self.chunked_req.is_chunked
-            or self.chunked_req.rid not in [req.request_id for req in requests]
-        ):
-            return next_batch
-
-        chunked_rid = self.chunked_req.rid
-        filtered_next_batch = []
-        for req in next_batch:
-            if req.request_id == chunked_rid:
-                req.status = RequestStatus.PREFILLING
-                if self.is_last_peer:
-                    continue
-            filtered_next_batch.append(req)
-
-        self._complete_local_middle_chunk(chunked_rid)
-        return filtered_next_batch
+        return filter_middle_chunk_next_batch(
+            self,
+            requests,
+            next_batch,
+            release_callback=self.cache_manager.release_request,
+        )
 
     def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """Process a batch of requests in MLX."""

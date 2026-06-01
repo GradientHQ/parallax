@@ -10,6 +10,7 @@ class FakeCacheManager:
     def __init__(self, allow: bool = True):
         self.allow = allow
         self._reqs = set()
+        self.chunked_prefill_size = None
 
     def has_request(self, request_id: str) -> bool:
         return request_id in self._reqs
@@ -102,6 +103,39 @@ def test_token_budget_prefill_skipped_decode_taken():
     assert ids == ["d"]
     # ready flag should be reset after batching
     assert getattr(d, "ready_for_next_step", False) is False
+
+
+def test_token_budget_uses_explicit_chunked_prefill_size_without_cache_manager():
+    sched = Scheduler(
+        max_batch_size=2,
+        max_num_tokens_per_batch=4,
+        micro_batch_ratio=1,
+        chunked_prefill_size=4,
+    )
+    p = make_prefill("chunked", 16)
+    sched.enque_request(p)
+
+    batch = sched.form_batch()
+
+    assert [r.request_id for r in batch] == ["chunked"]
+
+
+def test_token_budget_does_not_read_chunked_prefill_size_from_cache_manager():
+    cache_mgr = FakeCacheManager()
+    cache_mgr.chunked_prefill_size = 4
+    sched = Scheduler(
+        max_batch_size=2,
+        max_num_tokens_per_batch=4,
+        micro_batch_ratio=1,
+        cache_manager=cache_mgr,
+        chunked_prefill_size=None,
+    )
+    p = make_prefill("unchunked", 16)
+    sched.enque_request(p)
+
+    batch = sched.form_batch()
+
+    assert batch == []
 
 
 def test_kv_cache_admission_guard_blocks_prefill():
