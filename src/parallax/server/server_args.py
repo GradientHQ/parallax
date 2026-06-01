@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-sequence-length",
         type=int,
-        default=None,
+        default=32768,
         help="Maximum sequence length for the model",
     )
 
