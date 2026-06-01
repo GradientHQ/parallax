@@ -261,6 +261,32 @@ def join_command(args, passthrough_args: list[str] | None = None):
     _execute_with_graceful_shutdown(cmd, env=env)
 
 
+def serve_command(args, passthrough_args: list[str] | None = None):
+    """Start a standalone Parallax server by launching launch.py directly."""
+    if not args.skip_upload:
+        update_package_info()
+
+    check_python_version()
+
+    project_root = get_project_root()
+    launch_script = project_root / "src" / "parallax" / "launch.py"
+
+    if not launch_script.exists():
+        logger.info(f"Error: Launch script not found at {launch_script}")
+        sys.exit(1)
+
+    env = os.environ.copy()
+    env["SGLANG_ENABLE_JIT_DEEPGEMM"] = "0"
+
+    passthrough_args = passthrough_args or []
+    cmd = [sys.executable, str(launch_script), "--model-path", args.model_path]
+
+    if passthrough_args:
+        cmd.extend(passthrough_args)
+
+    _execute_with_graceful_shutdown(cmd, env=env)
+
+
 def chat_command(args, passthrough_args: list[str] | None = None):
     """Start the Parallax chat server (equivalent to scripts/chat.sh)."""
     check_python_version()
@@ -358,6 +384,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  parallax serve --model-path Qwen/Qwen3-0.6B                         # Start standalone server
   parallax run                                                          # Start scheduler with frontend
   parallax run -m {model-name} -n {number-of-worker-nodes}              # Start scheduler without frontend
   parallax run -m Qwen/Qwen3-0.6B -n 2                                  # example
@@ -368,6 +395,21 @@ Examples:
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # Add 'serve' command parser
+    serve_parser = subparsers.add_parser(
+        "serve", help="Start a standalone Parallax server by launching the model locally"
+    )
+    serve_parser.add_argument(
+        "-m",
+        "--model-path",
+        required=True,
+        type=str,
+        help="Path to the model repository or model name",
+    )
+    serve_parser.add_argument(
+        "-u", "--skip-upload", action="store_true", help="Skip upload package info"
+    )
 
     # Add 'run' command parser
     run_parser = subparsers.add_parser(
@@ -424,6 +466,8 @@ Examples:
 
     if args.command == "run":
         run_command(args, passthrough_args)
+    elif args.command == "serve":
+        serve_command(args, passthrough_args)
     elif args.command == "join":
         join_command(args, passthrough_args)
     elif args.command == "chat":
