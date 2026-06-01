@@ -22,6 +22,7 @@ import httpx
 import zmq
 from lattica import ConnectionHandler, Lattica, rpc_method, rpc_stream, rpc_stream_iter
 
+from backend.server.openai_compat import encode_http_response_envelope
 from backend.server.rpc_connection_handler import RPCConnectionHandler
 from parallax.p2p.proto import forward_pb2
 from parallax.p2p.utils import AsyncWorker
@@ -203,10 +204,21 @@ class TransformerConnectionHandler(ConnectionHandler):
                     response = client.post(
                         f"http://localhost:{self.http_port}/v1/chat/completions", json=request
                     )
-                    yield response.content
+                    yield encode_http_response_envelope(
+                        status_code=response.status_code,
+                        content_type=response.headers.get("content-type"),
+                        body=response.content,
+                    )
         except Exception as e:
             logger.exception(f"Error in chat completion: {e}")
-            yield b"internal server error"
+            yield encode_http_response_envelope(
+                status_code=502,
+                content_type="application/json",
+                body=(
+                    b'{"error":{"message":"Internal server error",'
+                    b'"type":"upstream_error","param":null,"code":"upstream_error"}}'
+                ),
+            )
 
 
 def check_and_run_weight_refit(gradient_server, message):

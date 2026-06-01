@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.server.openai_compat import openai_error_response, openai_models_payload
 from backend.server.request_handler import RequestHandler
 from backend.server.scheduler_manage import SchedulerManage
 from backend.server.server_args import parse_args
@@ -81,6 +82,18 @@ async def model_list():
         },
         status_code=200,
     )
+
+
+@app.get("/v1/models")
+async def openai_v1_models():
+    model_name = None
+    if scheduler_manage is not None:
+        try:
+            model_name = scheduler_manage.get_model_name()
+        except Exception as e:
+            logger.debug(f"Unable to get scheduler model name: {e}")
+
+    return JSONResponse(content=openai_models_payload(model_name), status_code=200)
 
 
 @app.post("/scheduler/init")
@@ -182,7 +195,23 @@ async def cluster_status_json() -> JSONResponse:
 
 @app.post("/v1/chat/completions")
 async def openai_v1_chat_completions(raw_request: Request):
-    request_data = await raw_request.json()
+    try:
+        request_data = await raw_request.json()
+    except Exception:
+        return openai_error_response(
+            "Invalid request body",
+            status_code=400,
+            err_type="invalid_request_error",
+            code="invalid_request_error",
+        )
+    if not isinstance(request_data, dict):
+        return openai_error_response(
+            "Request body must be a JSON object",
+            status_code=400,
+            err_type="invalid_request_error",
+            code="invalid_request_error",
+        )
+
     request_id = uuid.uuid4()
     received_ts = time.time()
     return await request_handler.v1_chat_completions(request_data, request_id, received_ts)
