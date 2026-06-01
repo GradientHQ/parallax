@@ -446,6 +446,14 @@ class CacheManager:
         """Returns the list of layer caches."""
         return self.caches
 
+    def materialize_linear_caches(self):
+        arrays = []
+        for cache in self.caches:
+            if isinstance(cache, LinearCache):
+                arrays.extend(cache.get_state_cache_arrays())
+        if arrays:
+            mx.eval(*arrays)
+
     def match_and_reuse_prefix(self, request_id: str, token_ids: List[int]) -> int:
         """
         Match prefix before prefill and reuse existing blocks.

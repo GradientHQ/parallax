@@ -143,6 +143,26 @@ class TestMessageUtil:
             np.array(original_request.hidden_states.tolist()),
         )
 
+    def test_chunked_prefill_roundtrip_preserves_full_input_and_position(self):
+        hidden_states = mx.array([[1.0, 2.0], [3.0, 4.0]], dtype=mx.float32)
+        original_request = IntermediateRequest(
+            request_id=self.request_id,
+            input_ids=list(range(8)),
+            current_position=4,
+            status=RequestStatus.PREFILLING,
+            hidden_states=hidden_states,
+            sampling_params=self.sampling_params,
+        )
+
+        proto_request = request_to_proto([original_request])
+        assert proto_request.reqs[0].output_length == -4
+
+        converted_request = proto_to_request(proto_request)
+
+        assert converted_request[0].input_ids == list(range(8))
+        assert converted_request[0].origin_input_ids == list(range(8))
+        assert converted_request[0].current_position == 4
+
     def test_multiple_requests(self):
         """Test conversion of multiple requests."""
         req1 = IntermediateRequest(

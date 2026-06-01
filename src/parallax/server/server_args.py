@@ -106,7 +106,18 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--enable-prefix-cache", action="store_true", help="Enable prefix cache reuse"
+        "--disable-prefix-cache",
+        dest="enable_prefix_cache",
+        action="store_false",
+        default=True,
+        help="Disable prefix cache reuse",
+    )
+
+    parser.add_argument(
+        "--chunked-prefill-size",
+        type=int,
+        default=1024,
+        help="Chunk size for MLX chunked prefill processing; set 0 to disable",
     )
 
     # Scheduler configuration
@@ -346,6 +357,13 @@ def validate_args(args: argparse.Namespace) -> None:
 
     if args.kv_block_size <= 0:
         raise ValueError("kv_block_size must be positive")
+
+    chunked_prefill_size = getattr(args, "chunked_prefill_size", None)
+    if chunked_prefill_size is not None:
+        if chunked_prefill_size < 0:
+            raise ValueError("chunked_prefill_size must be non-negative")
+        if chunked_prefill_size == 0:
+            args.chunked_prefill_size = None
 
     if args.micro_batch_ratio <= 0:
         raise ValueError("micro_batch_ratio must be positive")

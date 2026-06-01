@@ -141,7 +141,9 @@ class Scheduler:
 
         request.ready_for_next_step = True
         request.last_updated_time = time.time()
-        # TODO: Handle chunked prefill.
+        if request.is_prefill and getattr(request, "origin_input_ids", None) is not None:
+            request.input_ids = request.origin_input_ids
+
         if request.is_decoding:
             rid = request.request_id
             if rid not in self._running_requests:
@@ -259,11 +261,21 @@ class Scheduler:
         while self._wait_queue and len(self._running_requests) < self.max_batch_size:
             req = self._wait_queue.popleft()
             rid = req.request_id
-            if rid in self._running_requests:
+            running_req = self._running_requests.get(rid)
+            if running_req is not None:
+                if req is running_req:
+                    continue
+                if req.is_prefill and running_req.is_prefill:
+                    self._wait_queue.appendleft(req)
+                    break
+                logger.debug(f"Dropping duplicate request {rid} while status={running_req.status}.")
                 continue
 
-            # Check kv cache pool
-            if self.cache_manager is not None:
+            # Check kv cache pool. Chunked prefill performs allocation after the
+            # request is sliced to the current chunk in the executor.
+            if self.cache_manager is not None and not getattr(
+                self.cache_manager, "defer_prefill_allocation", False
+            ):
                 if not self.cache_manager.has_request(req.request_id):
                     # TODO: Handle chunked prefill, and support preemption.
                     # Pass input_ids for prefix cache matching
@@ -348,10 +360,16 @@ class Scheduler:
                     decode_candidates.append(req)
 
         # 1) Fill with prefills first
+        chunked_prefill_size = None
+        if self.cache_manager is not None:
+            chunked_prefill_size = getattr(self.cache_manager, "chunked_prefill_size", None)
+
         for req in prefill_candidates:
             if len(batch) >= self.micro_batch_size:
                 break
-            cost = req.prompt_len
+            cost = req.prompt_len or req.total_length
+            if chunked_prefill_size is not None:
+                cost = min(cost, chunked_prefill_size)
             if cost + inflight_tokens > self.max_num_tokens_per_batch:
                 continue
             batch.append(req)
