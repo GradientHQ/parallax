@@ -135,22 +135,26 @@ For models such as Qwen3 and gpt-oss, the "reasoning" (or "thinking") feature is
 
 ### Skipping Scheduler
 Developers can start Parallax backend engine without a scheduler. Pipeline parallel start/end layers should be set manually.
+
+For a standalone single-machine server:
+```sh
+parallax serve --m Qwen/Qwen3-0.6B
+```
+
 An example of serving Qwen3-0.6B with 2-nodes:
 - First node:
 ```sh
-python3 ./parallax/src/parallax/launch.py \
+parallax serve \
 --model-path Qwen/Qwen3-0.6B \
 --port 3000 \
---max-batch-size 8 \
 --start-layer 0 \
 --end-layer 14
 ```
 - Second node:
 ```sh
-python3 ./parallax/src/parallax/launch.py \
+parallax serve \
 --model-path Qwen/Qwen3-0.6B \
 --port 3000 \
---max-batch-size 8 \
 --start-layer 14 \
 --end-layer 28
 ```
