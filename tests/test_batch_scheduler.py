@@ -122,6 +122,38 @@ def test_kv_cache_admission_guard_blocks_prefill():
     assert sched.num_running_requests == 0
 
 
+def test_admission_preserves_distinct_prefill_with_running_rid():
+    sched = Scheduler(max_batch_size=2, max_num_tokens_per_batch=10_000, micro_batch_ratio=1)
+    first_chunk = make_prefill("chunked", 4)
+    next_chunk = make_prefill("chunked", 8)
+
+    sched.enque_request(first_chunk)
+    sched.enque_request(next_chunk)
+    sched.admit_requests()
+
+    assert sched.get_running_request("chunked") is first_chunk
+    assert list(sched._wait_queue) == [next_chunk]
+
+    sched.evict_request("chunked")
+    sched.admit_requests()
+
+    assert sched.get_running_request("chunked") is next_chunk
+    assert sched.num_queued_requests == 0
+
+
+def test_admission_drops_same_object_prefill_requeue():
+    sched = Scheduler(max_batch_size=2, max_num_tokens_per_batch=10_000, micro_batch_ratio=1)
+    req = make_prefill("local-chunk", 4)
+
+    sched.enque_request(req)
+    sched.admit_requests()
+    sched.enque_request(req)
+    sched.admit_requests()
+
+    assert sched.get_running_request("local-chunk") is req
+    assert sched.num_queued_requests == 0
+
+
 def test_request_status_uses_tokenizer_eos_when_config_eos_missing():
     sched = Scheduler(
         max_batch_size=2,

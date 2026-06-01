@@ -89,6 +89,7 @@ class SGLExecutor(BaseExecutor):
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
         weight_refit_mode: Optional[str] = "disk",
+        chunked_prefill_size: Optional[int] = None,
         # Pipe communication
         conn: Optional[List[Any]] = [],
     ):

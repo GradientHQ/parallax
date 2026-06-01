@@ -50,6 +50,7 @@ def create_executor_config(args: argparse.Namespace, shared_state=None, conn=Non
         "max_loaded_loras": args.max_loaded_loras,
         "enable_weight_refit": args.enable_weight_refit,
         "weight_refit_mode": args.weight_refit_mode,
+        "chunked_prefill_size": getattr(args, "chunked_prefill_size", None),
     }
 
     if args.gpu_backend == "sglang":

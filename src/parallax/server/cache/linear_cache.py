@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import mlx.core as mx
 
@@ -51,6 +51,14 @@ class LinearCache(BaseCache):
 
     def get_cache(self) -> Tuple[Optional[mx.array], Optional[mx.array]]:
         return self.conv_state_cache, self.linear_state_cache
+
+    def get_state_cache_arrays(self) -> List[mx.array]:
+        arrays = []
+        if self.conv_state_cache is not None:
+            arrays.append(self.conv_state_cache)
+        if self.linear_state_cache is not None:
+            arrays.append(self.linear_state_cache)
+        return arrays
 
     def get_indexer_cache(self) -> Optional[mx.array]:
         return None

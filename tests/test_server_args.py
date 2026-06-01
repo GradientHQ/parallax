@@ -143,6 +143,7 @@ class TestCreateExecutorConfig:
             max_lora_chunk_size=128,
             enable_weight_refit=False,
             weight_refit_mode="cpu",
+            chunked_prefill_size=128,
             gpu_backend="sglang",
         )
 
@@ -153,6 +154,45 @@ class TestCreateExecutorConfig:
         assert config["end_layer"] == 14
         assert config["dtype"] == "bfloat16"
         assert config["kv_cache_memory_fraction"] == 0.8
+        assert config["chunked_prefill_size"] == 128
+
+    def test_chunked_prefill_allows_prefix_cache_auto_enable(self):
+        args = argparse.Namespace(
+            start_layer=0,
+            end_layer=10,
+            dtype="bfloat16",
+            kv_cache_memory_fraction=0.5,
+            max_batch_size=16,
+            max_num_tokens_per_batch=1024,
+            kv_block_size=16,
+            micro_batch_ratio=2,
+            scheduler_wait_ms=500,
+            enable_weight_refit=False,
+            chunked_prefill_size=128,
+            enable_prefix_cache=False,
+        )
+
+        validate_args(args)
+        assert args.chunked_prefill_size == 128
+
+    def test_chunked_prefill_zero_disables(self):
+        args = argparse.Namespace(
+            start_layer=0,
+            end_layer=10,
+            dtype="bfloat16",
+            kv_cache_memory_fraction=0.5,
+            max_batch_size=16,
+            max_num_tokens_per_batch=1024,
+            kv_block_size=16,
+            micro_batch_ratio=2,
+            scheduler_wait_ms=500,
+            enable_weight_refit=False,
+            chunked_prefill_size=0,
+            enable_prefix_cache=False,
+        )
+
+        validate_args(args)
+        assert args.chunked_prefill_size is None
 
 
 class TestParseArgs:
@@ -185,6 +225,25 @@ class TestParseArgs:
         assert args.end_layer == 14
         assert args.dtype == "bfloat16"
         assert args.kv_cache_memory_fraction == 0.8
+        assert args.enable_prefix_cache is True
+        assert args.chunked_prefill_size == 1024
+
+    @patch(
+        "sys.argv",
+        [
+            "test_server_args.py",
+            "--model-path",
+            "mlx-community/Qwen3-0.6B-bf16",
+            "--max-sequence-length",
+            "1024",
+            "--disable-prefix-cache",
+        ],
+    )
+    def test_parse_disable_prefix_cache(self):
+        """Test explicitly disabling prefix cache."""
+        args = parse_args()
+
+        assert args.enable_prefix_cache is False
 
     @patch(
         "sys.argv",

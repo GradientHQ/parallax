@@ -88,6 +88,7 @@ class VLLMExecutor(BaseExecutor):
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
         weight_refit_mode: Optional[str] = "disk",
+        chunked_prefill_size: Optional[int] = None,
         # Routed experts
         enable_return_routed_experts: bool = False,
         # Pipe communication

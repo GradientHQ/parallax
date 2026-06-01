@@ -20,6 +20,7 @@ from parallax.server.request import (
 )
 from parallax.server.sampling.sampler import SamplingBatchInfo
 from parallax.server.shard_loader import MLXModelLoader
+from parallax.utils.mac_prefill_adder import AddReqResult, MACPrefillAdder
 from parallax.utils.utils import (
     combine_padding_and_causal_masks,
     create_causal_mask,
@@ -91,6 +92,7 @@ class MLXExecutor(BaseExecutor):
         # Weight Refit
         enable_weight_refit: Optional[bool] = False,
         weight_refit_mode: Optional[str] = "disk",
+        chunked_prefill_size: Optional[int] = None,
         # Pipe communication
         conn: Optional[List[Any]] = [],
     ):
@@ -187,6 +189,15 @@ class MLXExecutor(BaseExecutor):
             kv_block_size,
             self.num_shard_layers,
         )
+        if chunked_prefill_size is not None:
+            if chunked_prefill_size < 0:
+                raise ValueError("chunked_prefill_size must be non-negative")
+            if chunked_prefill_size == 0:
+                chunked_prefill_size = None
+            elif not enable_prefix_cache:
+                enable_prefix_cache = True
+                logger.info("Prefix cache enabled automatically for MLX chunked prefill")
+
         self.cache_manager = CacheManager(
             num_layers=self.num_shard_layers,
             num_kv_heads=num_key_value_heads // tp_size,
@@ -208,6 +219,18 @@ class MLXExecutor(BaseExecutor):
             enable_prefix_cache=enable_prefix_cache,
             sliding_window=sliding_window,
         )
+
+        if chunked_prefill_size is not None:
+            self.chunked_prefill_size = (
+                (chunked_prefill_size + self.cache_manager.block_size - 1)
+                // self.cache_manager.block_size
+                * self.cache_manager.block_size
+            )
+        else:
+            self.chunked_prefill_size = None
+        self.cache_manager.chunked_prefill_size = self.chunked_prefill_size
+        self.cache_manager.defer_prefill_allocation = self.chunked_prefill_size is not None
+
         super().__init__(
             start_layer=start_layer,
             end_layer=end_layer,
@@ -235,6 +258,7 @@ class MLXExecutor(BaseExecutor):
 
         # Prefix Cache Manager
         self.enable_prefix_cache = enable_prefix_cache
+        self.chunked_req = None
         # self.prefix_cache = RadixCache(
         #     num_kv_heads=num_key_value_heads,
         #     head_dim=head_dim,
@@ -272,6 +296,26 @@ class MLXExecutor(BaseExecutor):
         data_arr = mx.distributed.all_sum(data_arr)
         data = pickle.loads(np.array(data_arr).tobytes())
         return data
+
+    def _complete_local_middle_chunk(self, request_id: str):
+        """Finish local bookkeeping after this peer runs a non-final prefill chunk."""
+        if self.chunked_req is None or self.chunked_req.rid != request_id:
+            return
+
+        self.chunked_req.is_chunked = False
+        self.cache_manager.release_request(request_id)
+
+        if self.is_first_peer:
+            original_req = self.scheduler.get_running_request(request_id)
+            if original_req is None:
+                logger.warning(
+                    f"Completed local chunk for {request_id}, but no running request was found."
+                )
+                return
+            original_req.status = RequestStatus.PREFILLING
+            self.scheduler.enque_request(original_req)
+        else:
+            self.scheduler.evict_request(request_id)
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
@@ -341,11 +385,6 @@ class MLXExecutor(BaseExecutor):
                     req, IntermediateRequest
                 ), "Non-first peers must receive IntermediateRequests."
                 if req.is_finished or req.hidden_states is None:
-                    if self.enable_prefix_cache:
-                        keys, values = self.cache_manager.gather_kv_cache(req.request_id)
-                        self.prefix_cache.cache_finished_request(req, keys, values)
-                        self.prefix_cache.evict_request(req.request_id)
-
                     self.cache_manager.release_request(req.request_id)
                     logger.debug(
                         f"Released resources for finished request {req.request_id}, "
@@ -357,6 +396,29 @@ class MLXExecutor(BaseExecutor):
                 else:
                     # This is an active request, add it to the scheduler queue to be processed.
                     self.scheduler.enque_request(req)
+
+    def prepare_next_batch_requests(
+        self, requests: List[Request], batch_output: Any, context_lengths: Any
+    ) -> List[Request]:
+        next_batch = super().prepare_next_batch_requests(requests, batch_output, context_lengths)
+        if (
+            self.chunked_req is None
+            or not self.chunked_req.is_chunked
+            or self.chunked_req.rid not in [req.request_id for req in requests]
+        ):
+            return next_batch
+
+        chunked_rid = self.chunked_req.rid
+        filtered_next_batch = []
+        for req in next_batch:
+            if req.request_id == chunked_rid:
+                req.status = RequestStatus.PREFILLING
+                if self.is_last_peer:
+                    continue
+            filtered_next_batch.append(req)
+
+        self._complete_local_middle_chunk(chunked_rid)
+        return filtered_next_batch
 
     def process_batch(self, prepared_inputs: Dict[str, Any], return_decoded_tokens: bool = True):
         """Process a batch of requests in MLX."""
@@ -380,6 +442,8 @@ class MLXExecutor(BaseExecutor):
             prefix_lens=prepared_inputs.get("prefix_lens"),  # For RoPE offset in prefix cache
         )
         mx.eval(hidden_states)
+        if is_prefill_batch and self.chunked_prefill_size is not None:
+            self.cache_manager.materialize_linear_caches()
 
         if logger.isEnabledFor(logging.DEBUG):
             forward_time = (time.time() - start_time) * 1000
@@ -507,6 +571,46 @@ class MLXExecutor(BaseExecutor):
         if batch_size == 0:
             return None
 
+        if self.chunked_prefill_size is not None:
+            original_batched_requests = batched_requests
+            adder = MACPrefillAdder(
+                self.cache_manager.block_size, self.chunked_prefill_size, self.cache_manager
+            )
+            chunked_rid = self.chunked_req.rid if self.chunked_req is not None else None
+
+            if self.chunked_req is not None and chunked_rid in [
+                req.request_id for req in original_batched_requests
+            ]:
+                self.chunked_req = [
+                    req for req in original_batched_requests if req.request_id == chunked_rid
+                ][0]
+                self.chunked_req = adder.add_chunked_req(self.chunked_req)
+
+            for old_req in original_batched_requests:
+                if chunked_rid is not None and old_req.request_id == chunked_rid:
+                    continue
+                res = adder.add_one_req(old_req)
+                if res != AddReqResult.CONTINUE:
+                    break
+
+            if adder.new_chunked_req is not None:
+                self.chunked_req = adder.new_chunked_req
+
+            if self.chunked_req is not None and self.chunked_req.rid in [
+                req.request_id for req in original_batched_requests
+            ]:
+                self.chunked_req.is_chunked = True
+
+            can_run_by_id = {req.request_id: req for req in adder.can_run_list}
+            batched_requests = [
+                can_run_by_id[req.request_id]
+                for req in original_batched_requests
+                if req.request_id in can_run_by_id
+            ]
+            batch_size = len(batched_requests)
+            if batch_size == 0:
+                return None
+
         h_or_tokens_list = []
         block_tables_list = []
         context_lengths_list = []
@@ -555,14 +659,14 @@ class MLXExecutor(BaseExecutor):
                     actual_processed_lengths_list.append(len(req.input_ids))
             else:
                 if matched_tokens > 0 and self.enable_prefix_cache:
-                    # Skip the prefix hidden states that correspond to cached tokens
-                    new_hidden = req.hidden_states[matched_tokens:]
-                    if new_hidden.shape[0] == 0:
+                    keep_len = req.total_length - matched_tokens
+                    if keep_len <= 0:
                         # All tokens cached - keep the last hidden state
                         new_hidden = req.hidden_states[-1:]
                         prefix_lens_list[-1] = matched_tokens - 1
                         actual_processed_lengths_list.append(1)
                     else:
+                        new_hidden = req.hidden_states[-keep_len:]
                         actual_processed_lengths_list.append(new_hidden.shape[0])
                     h_or_tokens_list.append(new_hidden)
                 else:
