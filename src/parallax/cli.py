@@ -232,14 +232,6 @@ def join_command(args, passthrough_args: list[str] | None = None):
     passthrough_args = passthrough_args or []
 
     cmd = [sys.executable, str(launch_script)]
-    if not _flag_present(passthrough_args, ["--max-num-tokens-per-batch"]):
-        cmd.extend(["--max-num-tokens-per-batch", "4096"])
-    if not _flag_present(passthrough_args, ["--max-sequence-length"]):
-        cmd.extend(["--max-sequence-length", "7168"])
-    if not _flag_present(passthrough_args, ["--max-batch-size"]):
-        cmd.extend(["--max-batch-size", "8"])
-    if not _flag_present(passthrough_args, ["--kv-block-size"]):
-        cmd.extend(["--kv-block-size", "32"])
 
     # The scheduler address is now taken directly from the parsed arguments.
     cmd.extend(["--scheduler-addr", args.scheduler_addr])

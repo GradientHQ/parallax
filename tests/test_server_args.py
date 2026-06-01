@@ -198,6 +198,13 @@ class TestCreateExecutorConfig:
 class TestParseArgs:
     """Test argument parsing with mocked sys.argv."""
 
+    @patch("sys.argv", ["test_server_args.py", "--model-path", "test"])
+    def test_parse_default_max_sequence_length(self):
+        """Test max sequence length defaults to 32k."""
+        args = parse_args()
+
+        assert args.max_sequence_length == 32768
+
     @patch(
         "sys.argv",
         [
