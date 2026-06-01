@@ -9,6 +9,8 @@ import torch
 from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.managers.schedule_batch import ScheduleBatch
 from sglang.srt.mem_cache.cache_init_params import CacheInitParams
+from sglang.srt.mem_cache.chunk_cache import ChunkCache
+from sglang.srt.mem_cache.common import maybe_cache_unfinished_req, release_kv_cache
 from sglang.srt.mem_cache.radix_cache import RadixCache as PageRadixCache
 from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
 from sglang.srt.utils.common import SUPPORTED_LORA_TARGET_MODULES
@@ -23,9 +25,11 @@ from parallax.server.request import (
 from parallax.sglang.batch_info import (
     form_sgl_batch_decode,
     form_sgl_batch_prefill,
+    form_sgl_chunked_batch_prefill,
     release_sglang_request,
 )
 from parallax.sglang.model_runner import initialize_sgl_model_runner, refit_sgl_model
+from parallax.utils.chunked_prefill import filter_middle_chunk_next_batch
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -153,6 +157,11 @@ class SGLExecutor(BaseExecutor):
         if device is None or device == "cuda":
             device = f"cuda:{tp_rank}"
 
+        self.chunked_prefill_size = self._normalize_chunked_prefill_size(
+            chunked_prefill_size, self.model_runner.page_size
+        )
+        self.model_runner.server_args.chunked_prefill_size = self.chunked_prefill_size
+
         super().__init__(
             start_layer=start_layer,
             end_layer=end_layer,
@@ -177,27 +186,46 @@ class SGLExecutor(BaseExecutor):
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
             weight_refit_mode=weight_refit_mode,
+            chunked_prefill_size=self.chunked_prefill_size,
             conn=conn,
         )
         self.cur_batch = None
         self.running_batch = ScheduleBatch(reqs=[], batch_is_full=False)
+        self.sgl_req_by_rid = {}
+        self.sgl_chunked_req = None
+        self.chunked_req = None
         self.tp_group = self.model_runner.tp_group
         self.tp_cpu_group = self.tp_group.cpu_group
 
-        # create a page tree cache for sglang prefill
+        # Create a persistent SGLang tree cache for prefill. When prefix
+        # caching is disabled, ChunkCache still owns unfinished chunk state.
+        cache_params = CacheInitParams(
+            disable=not enable_prefix_cache,
+            req_to_token_pool=self.model_runner.req_to_token_pool,
+            token_to_kv_pool_allocator=self.model_runner.token_to_kv_pool_allocator,
+            page_size=self.model_runner.page_size,
+        )
         if enable_prefix_cache:
-            cache_params = CacheInitParams(
-                disable=False,
-                req_to_token_pool=self.model_runner.req_to_token_pool,
-                token_to_kv_pool_allocator=self.model_runner.token_to_kv_pool_allocator,
-                page_size=self.model_runner.page_size,
-            )
-            self.page_tree_cache = PageRadixCache(cache_params)
+            self.sgl_tree_cache = PageRadixCache(cache_params)
+            self.page_tree_cache = self.sgl_tree_cache
             logger.info(
                 f"Sglang Page tree cache created with page size {self.model_runner.page_size}"
             )
         else:
+            self.sgl_tree_cache = ChunkCache(cache_params)
             self.page_tree_cache = None
+
+    @staticmethod
+    def _normalize_chunked_prefill_size(
+        chunked_prefill_size: Optional[int], page_size: int
+    ) -> Optional[int]:
+        if chunked_prefill_size is None:
+            return None
+        if chunked_prefill_size < 0:
+            raise ValueError("chunked_prefill_size must be non-negative")
+        if chunked_prefill_size == 0:
+            return None
+        return ((chunked_prefill_size + page_size - 1) // page_size) * page_size
 
     def check_and_refit_weight(self, refit_weight_path: str):
         if self.tp_size > 1:
@@ -393,10 +421,22 @@ class SGLExecutor(BaseExecutor):
         )
         logits_output = out.logits_output
 
-        # Merge prefill batch into running batch
+        # Merge completed prefill batches into the running batch. For middle
+        # chunks, keep the SGLang request outside running_batch and stash its
+        # partial KV through SGLang's own cache lifecycle.
         if self.cur_batch:
             if self.cur_batch.forward_mode.is_extend():
-                # Merge the new batch into the running batch
+                if self.cur_batch.chunked_req is not None:
+                    maybe_cache_unfinished_req(
+                        self.cur_batch.chunked_req,
+                        self.cur_batch.tree_cache,
+                        chunked=True,
+                    )
+                    self.sgl_chunked_req = self.cur_batch.chunked_req
+                    self.cur_batch.filter_batch(chunked_req_to_exclude=self.cur_batch.chunked_req)
+                else:
+                    self.sgl_chunked_req = None
+
                 if not self.cur_batch.is_empty():
                     if self.running_batch.is_empty():
                         self.running_batch = self.cur_batch
@@ -437,10 +477,29 @@ class SGLExecutor(BaseExecutor):
 
     def _release_request(self, rid: str):
         """Release per-request resources in SGLang."""
-        try:
-            release_sglang_request(self.running_batch, rid)
-        except Exception:
-            pass
+        sgl_req = self.sgl_req_by_rid.pop(rid, None)
+        in_running_batch = (
+            self.running_batch is not None
+            and not self.running_batch.is_empty()
+            and any(req.rid == rid for req in self.running_batch.reqs)
+        )
+        if in_running_batch:
+            try:
+                release_sglang_request(self.running_batch, rid)
+            except Exception:
+                logger.debug("Failed to release running SGLang request %s", rid, exc_info=True)
+        elif sgl_req is not None and getattr(sgl_req, "req_pool_idx", None) is not None:
+            try:
+                release_kv_cache(sgl_req, self.sgl_tree_cache, is_insert=False)
+            except Exception:
+                try:
+                    self.sgl_tree_cache.req_to_token_pool.free(sgl_req)
+                except Exception:
+                    logger.debug("Failed to release chunked SGLang request %s", rid, exc_info=True)
+        if self.sgl_chunked_req is not None and self.sgl_chunked_req.rid == rid:
+            self.sgl_chunked_req = None
+        if self.chunked_req is not None and self.chunked_req.rid == rid:
+            self.chunked_req = None
 
     def _check_kv_cache_available(self, num_tokens: int) -> bool:
         """
@@ -510,54 +569,30 @@ class SGLExecutor(BaseExecutor):
 
         return broadcast_result
 
+    def prepare_next_batch_requests(
+        self, requests: List[Request], batch_output: Any, context_lengths: Any
+    ) -> List[Request]:
+        next_batch = super().prepare_next_batch_requests(requests, batch_output, context_lengths)
+        return filter_middle_chunk_next_batch(self, requests, next_batch)
+
+    @staticmethod
+    def _slice_prefill_hidden_states(hidden_states: torch.Tensor, extend_len: int) -> torch.Tensor:
+        if hidden_states.ndim == 1:
+            hidden_states = hidden_states.unsqueeze(0)
+        elif hidden_states.ndim == 3:
+            hidden_states = hidden_states.reshape(-1, hidden_states.shape[-1])
+        if hidden_states.shape[0] > extend_len:
+            return hidden_states[-extend_len:]
+        return hidden_states
+
     def _prepare_prefill_batch(self, batched_requests: List[Request]) -> Dict[str, Any]:
         """
         Prepares inputs for CUDA backends from a batch of prefill requests.
         """
 
-        batch_size = len(batched_requests)
-        if batch_size == 0:
+        if len(batched_requests) == 0:
             return None
 
-        # Pre-check: Verify KV cache has enough space for prefill
-        total_tokens_needed = sum(req.total_length for req in batched_requests)
-        if not self._check_kv_cache_available(total_tokens_needed):
-            self._abort_requests_due_to_kv_cache(
-                batched_requests,
-                f"KV cache insufficient for prefill ({total_tokens_needed} tokens needed)",
-            )
-            return None
-
-        # Prepare PP proxy tensors
-        pp_proxy_tensors = None
-        if not self.is_first_peer:
-            hidden_states = torch.cat(
-                [
-                    (
-                        req.hidden_states
-                        if req.hidden_states.ndim == 2
-                        else req.hidden_states.unsqueeze(0)
-                    )
-                    for req in batched_requests
-                ],
-                dim=0,
-            )
-
-            # Create residual tensor with same shape
-            residual = torch.zeros(
-                hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
-            )
-
-            pp_proxy_tensors = PPProxyTensors(
-                {
-                    "hidden_states": hidden_states,
-                    "residual": residual,
-                }
-            )
-            logger.debug(f"PP Proxy: hidden_states shape: {hidden_states.shape}")
-
-        # Prepare lengths (common for both backends)
-        lengths = []
         for req in batched_requests:
             if req.lora_path is not None and self.lora_paths is not None:
                 for lora_ref in self.lora_paths:
@@ -570,23 +605,75 @@ class SGLExecutor(BaseExecutor):
                     if self.lora_paths and len(self.lora_paths) > 0
                     else None
                 )
-            lengths.append(req.total_length)
-        lengths_tensor = torch.tensor(lengths, device=self.device)
 
-        schedule_batch, forward_batch = form_sgl_batch_prefill(
-            batched_requests,
-            self.model_runner,
-            self.page_tree_cache,
-        )
+        if self.chunked_prefill_size is None:
+            schedule_batch, forward_batch = form_sgl_batch_prefill(
+                batched_requests,
+                self.model_runner,
+                self.sgl_tree_cache,
+            )
+            prefill_requests = batched_requests
+        else:
+            prefill_batch = form_sgl_chunked_batch_prefill(
+                requests=batched_requests,
+                model_runner=self.model_runner,
+                tree_cache=self.sgl_tree_cache,
+                sgl_req_by_rid=self.sgl_req_by_rid,
+                running_batch=self.running_batch,
+                chunked_req=self.sgl_chunked_req,
+                chunked_prefill_size=self.chunked_prefill_size,
+                max_num_tokens_per_batch=self.max_num_tokens_per_batch,
+            )
+            if prefill_batch is None:
+                return None
+            schedule_batch = prefill_batch.schedule_batch
+            forward_batch = prefill_batch.forward_batch
+            prefill_requests = prefill_batch.requests
+            self.sgl_chunked_req = prefill_batch.chunked_req
+            self.chunked_req = (
+                next(
+                    (
+                        req
+                        for req in prefill_requests
+                        if self.sgl_chunked_req is not None
+                        and req.request_id == self.sgl_chunked_req.rid
+                    ),
+                    None,
+                )
+                if self.sgl_chunked_req is not None
+                else None
+            )
+
         self.cur_batch = schedule_batch
+        lengths_tensor = torch.tensor(schedule_batch.extend_lens, device=self.device)
+
+        pp_proxy_tensors = None
+        if not self.is_first_peer:
+            hidden_states = torch.cat(
+                [
+                    self._slice_prefill_hidden_states(req.hidden_states, extend_len)
+                    for req, extend_len in zip(prefill_requests, schedule_batch.extend_lens)
+                ],
+                dim=0,
+            )
+            residual = torch.zeros(
+                hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device
+            )
+            pp_proxy_tensors = PPProxyTensors(
+                {
+                    "hidden_states": hidden_states,
+                    "residual": residual,
+                }
+            )
+            logger.debug(f"PP Proxy: hidden_states shape: {hidden_states.shape}")
 
         ret = {
             "forward_batch": forward_batch,
             "pp_proxy_tensors": pp_proxy_tensors,
             "context_lengths": lengths_tensor,
-            "requests": batched_requests,
+            "requests": prefill_requests,
         }
-        logger.debug(f"Prepared CUDA prefill batch (sglang, size={batch_size})")
+        logger.debug(f"Prepared CUDA prefill batch (sglang, size={len(prefill_requests)})")
         return ret
 
     def _prepare_decode_batch(self, batched_requests: List[Request]) -> Optional[Dict[str, Any]]:

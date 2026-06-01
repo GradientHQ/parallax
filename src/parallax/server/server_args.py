@@ -117,7 +117,7 @@ def parse_args() -> argparse.Namespace:
         "--chunked-prefill-size",
         type=int,
         default=1024,
-        help="Chunk size for MLX chunked prefill processing; set 0 to disable",
+        help="Chunk size for MLX/SGLang chunked prefill processing; set 0 to disable",
     )
 
     # Scheduler configuration

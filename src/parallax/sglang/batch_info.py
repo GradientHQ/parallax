@@ -5,10 +5,12 @@ The following is the flow of data structures for a batch in SGLang:
 ScheduleBatch -> ModelWorkerBatch -> ForwardBatch
 """
 
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 
 import torch
 from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
+from sglang.srt.managers.schedule_policy import AddReqResult, PrefillAdder
 from sglang.srt.mem_cache.cache_init_params import CacheInitParams
 from sglang.srt.mem_cache.chunk_cache import ChunkCache
 from sglang.srt.mem_cache.radix_cache import RadixCache as PageRadixCache
@@ -24,9 +26,18 @@ from parallax.server.request import Request
 from parallax.server.sampling.sampling_params import (
     SamplingParams as ParallaxSamplingParams,
 )
+from parallax.utils.chunked_prefill import set_request_prefill_chunk
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class SGLPrefillBatch:
+    schedule_batch: ScheduleBatch
+    forward_batch: ForwardBatch
+    requests: List[Request]
+    chunked_req: Optional[Req]
 
 
 def transform_sampling_params_to_sglang(old_params: ParallaxSamplingParams) -> SGLSamplingParams:
@@ -58,7 +69,7 @@ def transform_requests_to_sglang(
         req = Req(
             rid=old_req.request_id,
             origin_input_text="",
-            origin_input_ids=old_req.input_ids,
+            origin_input_ids=old_req.origin_input_ids or old_req.input_ids,
             sampling_params=sampling_params,
             lora_id=old_req.lora_id,
         )
@@ -87,6 +98,142 @@ def transform_requests_to_sglang(
 
         reqs.append(req)
     return reqs
+
+
+def _get_or_create_sgl_req(
+    old_req: Request,
+    sgl_req_by_rid: Dict[str, Req],
+) -> Req:
+    req = sgl_req_by_rid.get(old_req.request_id)
+    if req is not None:
+        req.lora_id = old_req.lora_id
+        return req
+
+    sampling_params = transform_sampling_params_to_sglang(old_req.sampling_params)
+    req = Req(
+        rid=old_req.request_id,
+        origin_input_text="",
+        origin_input_ids=old_req.origin_input_ids or old_req.input_ids,
+        sampling_params=sampling_params,
+        lora_id=old_req.lora_id,
+    )
+    sgl_req_by_rid[old_req.request_id] = req
+    return req
+
+
+def _set_dp_token_counts(schedule_batch: ScheduleBatch, model_runner: ModelRunner) -> None:
+    num_tokens = schedule_batch.extend_num_tokens
+    dp_size = model_runner.dp_size
+    if dp_size > 1:
+        schedule_batch.global_num_tokens = [num_tokens] * dp_size
+        schedule_batch.global_num_tokens_for_logprob = [num_tokens] * dp_size
+
+
+def _default_running_batch() -> ScheduleBatch:
+    return ScheduleBatch(reqs=[], batch_is_full=False)
+
+
+def form_sgl_chunked_batch_prefill(
+    requests: List[Request],
+    model_runner: ModelRunner,
+    tree_cache,
+    sgl_req_by_rid: Dict[str, Req],
+    running_batch: Optional[ScheduleBatch],
+    chunked_req: Optional[Req],
+    chunked_prefill_size: Optional[int],
+    max_num_tokens_per_batch: int,
+) -> Optional[SGLPrefillBatch]:
+    """Build a SGLang prefill batch using SGLang's native chunking policy."""
+
+    if not requests:
+        return None
+
+    running_batch = running_batch or _default_running_batch()
+    parallax_req_by_rid = {req.request_id: req for req in requests}
+
+    adder = PrefillAdder(
+        page_size=model_runner.server_args.page_size,
+        tree_cache=tree_cache,
+        token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
+        running_batch=running_batch,
+        new_token_ratio=1.0,
+        rem_input_tokens=max_num_tokens_per_batch,
+        rem_chunk_tokens=chunked_prefill_size,
+        max_running_requests=getattr(model_runner, "max_running_requests", None),
+    )
+
+    active_chunked_rid = (
+        chunked_req.rid
+        if chunked_req is not None and chunked_req.rid in parallax_req_by_rid
+        else None
+    )
+    if active_chunked_rid is not None:
+        chunked_req.init_next_round_input()
+        chunked_req = adder.add_chunked_req(chunked_req)
+
+    for old_req in requests:
+        if old_req.request_id == active_chunked_rid:
+            continue
+        if old_req.request_id not in parallax_req_by_rid:
+            continue
+
+        sgl_req = _get_or_create_sgl_req(old_req, sgl_req_by_rid)
+        if sgl_req is chunked_req:
+            continue
+
+        sgl_req.init_next_round_input(tree_cache)
+        res = adder.add_one_req(
+            sgl_req,
+            has_chunked_req=(chunked_req is not None),
+            truncation_align_size=None,
+        )
+        if res != AddReqResult.CONTINUE:
+            break
+
+    can_run_list = adder.can_run_list
+    if not can_run_list:
+        return None
+
+    if adder.new_chunked_req is not None:
+        chunked_req = adder.new_chunked_req
+
+    selected_requests: List[Request] = []
+    for sgl_req in can_run_list:
+        req = parallax_req_by_rid.get(sgl_req.rid)
+        if req is None:
+            continue
+        is_middle_chunk = chunked_req is not None and sgl_req is chunked_req
+        set_request_prefill_chunk(
+            req,
+            chunk_end=len(sgl_req.fill_ids),
+            is_chunked=is_middle_chunk,
+        )
+        selected_requests.append(req)
+
+    if not selected_requests:
+        return None
+
+    schedule_batch = ScheduleBatch.init_new(
+        reqs=can_run_list,
+        req_to_token_pool=model_runner.req_to_token_pool,
+        token_to_kv_pool_allocator=model_runner.token_to_kv_pool_allocator,
+        tree_cache=tree_cache,
+        model_config=model_runner.model_config,
+        enable_overlap=False,
+        spec_algorithm=SpeculativeAlgorithm.NONE,
+        chunked_req=chunked_req,
+    )
+    schedule_batch.prepare_for_extend()
+    _set_dp_token_counts(schedule_batch, model_runner)
+
+    model_worker_batch = schedule_batch.get_model_worker_batch()
+    forward_batch = ForwardBatch.init_new(model_worker_batch, model_runner)
+    return SGLPrefillBatch(
+        schedule_batch=schedule_batch,
+        forward_batch=forward_batch,
+        requests=selected_requests,
+        chunked_req=chunked_req,
+    )
 
 
 def form_sgl_batch_prefill(
@@ -118,12 +265,7 @@ def form_sgl_batch_prefill(
         spec_algorithm=SpeculativeAlgorithm.NONE,
     )
     schedule_batch.prepare_for_extend()
-
-    num_tokens = schedule_batch.extend_num_tokens
-    dp_size = model_runner.dp_size
-    if dp_size > 1:
-        schedule_batch.global_num_tokens = [num_tokens] * dp_size
-        schedule_batch.global_num_tokens_for_logprob = [num_tokens] * dp_size
+    _set_dp_token_counts(schedule_batch, model_runner)
 
     model_worker_batch = schedule_batch.get_model_worker_batch()
     forward_batch = ForwardBatch.init_new(model_worker_batch, model_runner)
@@ -259,10 +401,6 @@ def release_sglang_request(running_batch: ScheduleBatch, request_id: str):
 
     # use running batch's tree cache to release kv cache
     tree_cache = running_batch.tree_cache
-
-    # for completed requests, is_insert=True to insert into prefix cache
-    # for aborted requests, is_insert=False to not insert into prefix cache
-    is_insert = True  # can be adjusted based on request status
 
     if isinstance(tree_cache, PageRadixCache):
         tree_cache.cache_finished_req(req)
