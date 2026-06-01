@@ -3,10 +3,14 @@ import time
 from typing import Dict, List, Optional
 
 import aiohttp
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from backend.server.constants import NODE_STATUS_AVAILABLE
+from backend.server.openai_compat import (
+    decode_http_response_envelope,
+    openai_error_response,
+)
 from parallax_utils.logging_config import get_logger
 from parallax_utils.request_metrics import get_request_metrics
 
@@ -100,9 +104,11 @@ class RequestHandler:
             self.scheduler_manage is None
             or not self.scheduler_manage.get_schedule_status() == NODE_STATUS_AVAILABLE
         ):
-            return JSONResponse(
-                content={"error": "Server is not ready"},
-                status_code=500,
+            return openai_error_response(
+                "Server is not ready",
+                status_code=503,
+                err_type="server_unavailable",
+                code="server_not_ready",
             )
 
         # Try to get a success response
@@ -119,16 +125,20 @@ class RequestHandler:
                     )
                 except Exception as e:
                     logger.exception(f"get_routing_table error: {e}")
-                    return JSONResponse(
-                        content={"error": "Get routing table error"},
+                    return openai_error_response(
+                        "Get routing table error",
                         status_code=500,
+                        err_type="server_error",
+                        code="routing_table_error",
                     )
 
                 # None -> scheduler has not set yet; treat as hard error (no waiting here)
                 if routing_table is None:
-                    return JSONResponse(
-                        content={"error": "Routing pipelines not ready"},
+                    return openai_error_response(
+                        "Routing pipelines not ready",
                         status_code=503,
+                        err_type="server_unavailable",
+                        code="routing_not_ready",
                     )
 
                 # Non-empty -> proceed
@@ -143,9 +153,11 @@ class RequestHandler:
 
             # If still empty after retries, return 429 Too Many Requests
             if routing_table is not None and len(routing_table) == 0:
-                return JSONResponse(
-                    content={"error": "All pipelines are busy or not ready. Please retry later."},
+                return openai_error_response(
+                    "All pipelines are busy or not ready. Please retry later.",
                     status_code=429,
+                    err_type="rate_limit_error",
+                    code="rate_limit_exceeded",
                 )
 
             backend_request = self._prepare_backend_request(
@@ -203,9 +215,21 @@ class RequestHandler:
                     return resp
                 else:
                     response = stub.chat_completion(backend_request)
-                    content = (await anext(iterate_in_threadpool(response))).decode()
+                    content = await anext(iterate_in_threadpool(response))
+                    decoded_response = decode_http_response_envelope(content)
+                    if decoded_response is None:
+                        status_code = 200
+                        content_type = "application/json"
+                        body = content
+                    else:
+                        status_code, content_type, body = decoded_response
                     logger.debug(f"Non-stream response completed for {request_id}")
-                    return Response(content=content, media_type="application/json")
+                    return Response(
+                        content=body,
+                        status_code=status_code,
+                        headers={"content-type": content_type},
+                        media_type=None,
+                    )
             except Exception as e:
                 forward_attempts += 1
                 if forward_attempts < self.MAX_FORWARD_RETRY:
@@ -213,9 +237,11 @@ class RequestHandler:
                     await asyncio.sleep(self.FORWARD_DELAY_SEC)
                 logger.warning(f"Error in _forward_request: {e}. Retry attemps {forward_attempts}")
 
-        return JSONResponse(
-            content={"error": "Internal server error"},
-            status_code=500,
+        return openai_error_response(
+            "Downstream request failed",
+            status_code=502,
+            err_type="upstream_error",
+            code="upstream_error",
         )
 
     async def v1_chat_completions(self, request_data: Dict, request_id: str, received_ts: int):
