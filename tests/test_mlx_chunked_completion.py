@@ -1,5 +1,5 @@
-import numpy as np
 import mlx.core as mx
+import numpy as np
 
 from parallax.server.executor.mlx_executor import MLXExecutor
 from parallax.server.request import InitialRequest, IntermediateRequest, RequestStatus
