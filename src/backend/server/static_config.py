@@ -84,7 +84,11 @@ MODELS = {
     "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8": "mlx-community/Qwen3-Next-80B-A3B-Instruct-8bit",
     "Qwen/Qwen3-Next-80B-A3B-Thinking": "mlx-community/Qwen3-Next-80B-A3B-Thinking-4bit",
     "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8": "mlx-community/Qwen3-Next-80B-A3B-Thinking-8bit",
+    # Qwen 3.5 MoE Series
+    "Qwen/Qwen3.5-0.8B": "Qwen/Qwen3.5-0.8B",
+    "Qwen/Qwen3.5-35B-A3B": "mlx-community/Qwen3.5-35B-A3B-4bit",
     # Qwen 3.6 Series
+    "Qwen/Qwen3.6-35B-A3B": "mlx-community/Qwen3.6-35B-A3B-4bit",
     "Qwen/Qwen3.6-27B": "mlx-community/Qwen3.6-27B-mxfp4",
     # Qwen 3 Large MoE Models
     "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8": "mlx-community/Qwen3-235B-A22B-Instruct-2507-8bit",

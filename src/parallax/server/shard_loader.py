@@ -33,10 +33,12 @@ logger = get_logger(__name__)
 MODEL_CLASS_MAP = {
     "kimi_k2": "mlx_lm.models.deepseek_v3",
     "minimax_m2": "mlx_lm.models.minimax",
+    "qwen3_5_moe": "mlx_lm.models.qwen3_5",
 }
 
 ARCHITECTURE_CLASS_ALIASES = {
     "GlmMoeDsaForCausalLM": "DeepseekV32ForCausalLM",
+    "Qwen3_5MoeForConditionalGeneration": "Qwen3_5ForConditionalGeneration",
 }
 
 
@@ -310,6 +312,21 @@ class MLXModelLoader:
             return weight_array.astype(dtype)
         return weight_array
 
+    @staticmethod
+    def _load_mlx_lm_module_and_args(model_type: str, config: Dict[str, Any]):
+        if model_type in MODEL_CLASS_MAP:
+            model_class = MODEL_CLASS_MAP[model_type]
+        else:
+            model_class = f"mlx_lm.models.{model_type}"
+
+        arch_module = importlib.import_module(model_class)
+        if hasattr(arch_module, "TextModelArgs"):
+            model_args_class = getattr(arch_module, "TextModelArgs")
+        else:
+            model_args_class = getattr(arch_module, "ModelArgs")
+
+        return arch_module, model_args_class.from_dict(config)
+
     def load(
         self, lazy: bool = False, strict: bool = False, use_selective_download: bool = True
     ) -> Tuple[nn.Module, Dict[str, Any], Any]:
@@ -366,18 +383,8 @@ class MLXModelLoader:
         if not model_type:
             raise ValueError("model_type not found in config.json")
 
-        if model_type in MODEL_CLASS_MAP:
-            model_class = MODEL_CLASS_MAP[model_type]
-        else:
-            model_class = f"mlx_lm.models.{model_type}"
-
         try:
-            arch_module = importlib.import_module(model_class)
-            if model_type == "qwen3_5" and hasattr(arch_module, "TextModelArgs"):
-                model_args_class = getattr(arch_module, "TextModelArgs")
-            else:
-                model_args_class = getattr(arch_module, "ModelArgs")
-            model_args = model_args_class.from_dict(config)
+            arch_module, model_args = self._load_mlx_lm_module_and_args(model_type, config)
             self.arch_module = arch_module
             self.model_args = model_args
 

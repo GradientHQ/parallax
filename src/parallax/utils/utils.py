@@ -303,7 +303,9 @@ def load_config_only(name: str, local_files_only: bool = False):
 def normalize_model_config(config: dict) -> dict:
     """Expose nested text model fields at the top level for VLM-style configs."""
     text_config = config.get("text_config")
-    if config.get("model_type") == "qwen3_5" and isinstance(text_config, dict):
+    if config.get("model_type") in {"qwen3_5", "qwen3_5_moe"} and isinstance(
+        text_config, dict
+    ):
         normalized = {**config, **text_config}
         normalized["model_type"] = config["model_type"]
         normalized["architectures"] = config.get("architectures", normalized.get("architectures"))
