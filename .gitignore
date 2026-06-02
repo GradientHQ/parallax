@@ -13,3 +13,5 @@ build/
 .vscode/
 hosts.json
 uv.lock
+
+AGENTS.md
