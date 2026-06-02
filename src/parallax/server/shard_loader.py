@@ -39,6 +39,7 @@ ARCHITECTURE_CLASS_ALIASES = {
     "GlmMoeDsaForCausalLM": "DeepseekV32ForCausalLM",
 }
 
+
 class MLXModelLoader:
     """
     Handles downloading model assets from Hugging Face (if needed) and loading
