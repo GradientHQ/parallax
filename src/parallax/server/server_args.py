@@ -102,7 +102,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--kv-block-size", type=int, default=32, help="Block size for KV cache management"
+        "--kv-block-size", type=int, default=1, help="Block size for KV cache management"
     )
 
     parser.add_argument(

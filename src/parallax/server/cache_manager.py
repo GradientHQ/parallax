@@ -43,7 +43,7 @@ class CacheManager:
         linear_num_v_heads: Optional[int] = None,
         # Prefix Cache Config
         enable_prefix_cache: bool = False,
-        max_cached_blocks: int = 1000,
+        max_cached_blocks: Optional[int] = None,
         sliding_window: Optional[int] = None,
     ):
         self.num_layers = num_layers
@@ -83,6 +83,9 @@ class CacheManager:
             num_gpu_blocks = 0
 
         self.num_gpu_blocks = num_gpu_blocks
+        self.max_cached_blocks = (
+            self.num_gpu_blocks if max_cached_blocks is None else max_cached_blocks
+        )
 
         # 1. Initialize Allocators
         self.allocator = (
@@ -121,10 +124,10 @@ class CacheManager:
         if enable_prefix_cache and self.needs_blocks:
             self.prefix_cache = BlockRadixCache(
                 block_size=block_size,
-                max_cached_blocks=max_cached_blocks,
+                max_cached_blocks=self.max_cached_blocks,
                 on_block_evict=self._on_prefix_block_evict,
             )
-            logger.info(f"Prefix cache enabled with max_cached_blocks={max_cached_blocks}")
+            logger.info(f"Prefix cache enabled with max_cached_blocks={self.max_cached_blocks}")
 
         # Mapping: request_id -> token_ids (for prefix matching)
         self.request_token_ids: Dict[str, List[int]] = {}
@@ -547,11 +550,6 @@ class CacheManager:
 
             parent_path.append(new_node)
             registered_nodes.append(new_node)
-
-            logger.debug(
-                f"Request {request_id}: Inserted block {block_idx} "
-                f"(block_id={block_id}) to prefix cache"
-            )
 
         if registered_nodes:
             if request_id in self.prefix_cache.request_to_nodes:
