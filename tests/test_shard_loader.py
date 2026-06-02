@@ -155,6 +155,7 @@ def test_qwen35_moe_uses_qwen35_text_args_and_sanitizer_module():
     assert model_args.moe_intermediate_size == 512
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
 def test_register_block_class_includes_qwen35_moe():
     loader = MLXModelLoader("test_model_path")
 
