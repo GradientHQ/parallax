@@ -303,12 +303,12 @@ def initialize_sgl_model_runner(
     use_hfcache = kwargs.get("use_hfcache", False)
     nccl_port = kwargs.get("nccl_port", None)
     # Use selective download for GPU models to save bandwidth and disk space
-    from parallax.utils.selective_download import get_model_path_with_selective_download
+    from parallax.utils.model_download import selective_model_download
 
     logger.info(
         f"Downloading model with selective weight files for layers [{start_layer}, {end_layer})"
     )
-    model_path = get_model_path_with_selective_download(
+    model_path = selective_model_download(
         model_repo, start_layer=start_layer, end_layer=end_layer, local_files_only=use_hfcache
     )
 
