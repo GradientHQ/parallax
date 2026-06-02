@@ -1,7 +1,8 @@
+import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Set
 
 from huggingface_hub import hf_hub_download as _hf_hub_download
 from huggingface_hub import snapshot_download as _snapshot_download
@@ -9,7 +10,8 @@ from modelscope import snapshot_download as _ms_snapshot_download
 from modelscope.hub.file_download import model_file_download as _ms_model_file_download
 
 from parallax.utils.weight_filter_utils import (
-    determine_needed_weight_files_for_download,
+    normalize_language_model_weight_key,
+    should_include_weight_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,7 +98,7 @@ def selective_model_download(
     if start_layer is not None and end_layer is not None:
         logger.debug(f"Determining required weight files for layers [{start_layer}, {end_layer})")
 
-        needed_weight_files = determine_needed_weight_files_for_download(
+        needed_weight_files = _determine_needed_weight_files_for_download(
             model_path=model_path,
             start_layer=start_layer,
             end_layer=end_layer,
@@ -147,6 +149,81 @@ _EXCLUDE_WEIGHT_PATTERNS = [
     "model*.safetensors",
     "weight*.safetensors",
 ]
+
+
+def _determine_needed_weight_files_for_download(
+    model_path: Path,
+    start_layer: int,
+    end_layer: int,
+    config: Optional[Dict] = None,
+) -> List[str]:
+    is_first_shard = start_layer == 0
+
+    is_last_shard = False
+    if config:
+        num_hidden_layers = config.get("num_hidden_layers", 0)
+        is_last_shard = end_layer >= num_hidden_layers
+    else:
+        config_file = model_path / "config.json"
+        if config_file.exists():
+            from parallax.utils.utils import normalize_model_config
+
+            with open(config_file, "r") as f:
+                cfg = normalize_model_config(json.load(f))
+                num_hidden_layers = cfg.get("num_hidden_layers", 0)
+                is_last_shard = end_layer >= num_hidden_layers
+
+    index_file = model_path / "model.safetensors.index.json"
+
+    if not index_file.exists():
+        logger.debug(f"Index file not found at {index_file}, checking for single weight file")
+        # For non-sharded models, look for single weight file
+        single_weight_files = [
+            "model.safetensors",
+            "pytorch_model.bin",
+            "model.bin",
+        ]
+        for weight_file in single_weight_files:
+            if (model_path / weight_file).exists():
+                logger.debug(f"Found single weight file: {weight_file}")
+                return [weight_file]
+
+        logger.debug("No weight files found (neither index nor single file)")
+        return []
+
+    with open(index_file, "r") as f:
+        index_data = json.load(f)
+
+    weight_map = index_data.get("weight_map", {})
+    if not weight_map:
+        logger.debug("weight_map is empty in index file")
+        return []
+
+    tie_word_embeddings = False
+    if config:
+        tie_word_embeddings = config.get("tie_word_embeddings", False)
+
+    needed_files: Set[str] = set()
+
+    for key, filename in weight_map.items():
+        if filename in needed_files:
+            continue
+        key = normalize_language_model_weight_key(key)
+        if should_include_weight_key(
+            key=key,
+            start_layer=start_layer,
+            end_layer=end_layer,
+            is_first_shard=is_first_shard,
+            is_last_shard=is_last_shard,
+            tie_word_embeddings=tie_word_embeddings,
+        ):
+            needed_files.add(filename)
+
+    result = sorted(list(needed_files))
+    logger.debug(
+        f"Determined {len(result)} weight files needed for layers [{start_layer}, {end_layer})"
+    )
+    return result
 
 
 def _use_modelscope() -> bool:

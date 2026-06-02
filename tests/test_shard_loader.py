@@ -2,6 +2,7 @@
 Tests for the shard_loader module.
 """
 
+import json
 import sys
 from unittest.mock import Mock, patch
 
@@ -14,6 +15,8 @@ from parallax.server.shard_loader import (
     MLXModelLoader,
     normalize_language_model_weight_key,
 )
+from parallax.utils.model_download import _determine_needed_weight_files_for_download
+from parallax.utils.utils import normalize_model_config
 from parallax.utils.weight_filter_utils import should_include_weight_key
 
 
@@ -28,7 +31,17 @@ def test_normalize_nested_language_model_weight_keys():
         == "model.layers.12.mlp.up_proj.weight"
     )
     assert (
+        normalize_language_model_weight_key(
+            "language_model.model.layers.12.mlp.switch_mlp.up_proj.weight"
+        )
+        == "model.layers.12.mlp.switch_mlp.up_proj.weight"
+    )
+    assert (
         normalize_language_model_weight_key("model.language_model.norm.weight")
+        == "model.norm.weight"
+    )
+    assert (
+        normalize_language_model_weight_key("language_model.model.norm.weight")
         == "model.norm.weight"
     )
     assert (
@@ -109,6 +122,79 @@ def test_mlx_lm_sanitize_uses_local_layer_keys_for_shards():
         is_last_shard=False,
         tie_word_embeddings=False,
     ) == ["layers.0.linear_attn.conv1d.weight"]
+
+
+def test_qwen35_moe_uses_qwen35_text_args_and_sanitizer_module():
+    loader = MLXModelLoader("test_model_path")
+    config = normalize_model_config(
+        {
+            "model_type": "qwen3_5_moe",
+            "architectures": ["Qwen3_5MoeForConditionalGeneration"],
+            "text_config": {
+                "model_type": "qwen3_5_moe_text",
+                "hidden_size": 2048,
+                "num_hidden_layers": 40,
+                "num_attention_heads": 16,
+                "num_key_value_heads": 2,
+                "vocab_size": 248320,
+                "num_experts": 256,
+                "num_experts_per_tok": 8,
+                "moe_intermediate_size": 512,
+            },
+        }
+    )
+
+    sanitizer_module, model_args = loader._load_mlx_lm_module_and_args("qwen3_5_moe", config)
+
+    assert MODEL_CLASS_MAP["qwen3_5_moe"] == "mlx_lm.models.qwen3_5"
+    assert sanitizer_module.__name__ == "mlx_lm.models.qwen3_5"
+    assert model_args.num_hidden_layers == 40
+    assert model_args.hidden_size == 2048
+    assert model_args.num_experts == 256
+    assert model_args.num_experts_per_tok == 8
+    assert model_args.moe_intermediate_size == 512
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
+def test_register_block_class_includes_qwen35_moe():
+    loader = MLXModelLoader("test_model_path")
+
+    assert "Qwen3_5MoeForConditionalGeneration" in loader.block_class_map
+
+
+def test_selective_download_uses_nested_qwen35_moe_num_layers(tmp_path):
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "model_type": "qwen3_5_moe",
+                "text_config": {
+                    "num_hidden_layers": 40,
+                    "tie_word_embeddings": False,
+                },
+            }
+        )
+    )
+    (tmp_path / "model.safetensors.index.json").write_text(
+        json.dumps(
+            {
+                "weight_map": {
+                    "language_model.model.layers.39.linear_attn.in_proj_qkv.weight": (
+                        "layers-39.safetensors"
+                    ),
+                    "language_model.model.norm.weight": "final.safetensors",
+                    "language_model.lm_head.weight": "final.safetensors",
+                }
+            }
+        )
+    )
+
+    needed_files = _determine_needed_weight_files_for_download(
+        tmp_path,
+        start_layer=39,
+        end_layer=40,
+    )
+
+    assert needed_files == ["final.safetensors", "layers-39.safetensors"]
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
