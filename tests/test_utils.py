@@ -47,7 +47,7 @@ def test_load_config_only_downloads_config_json(tmp_path):
     config_path = tmp_path / "config.json"
     config_path.write_text('{"num_hidden_layers": 78}')
 
-    with patch("huggingface_hub.hf_hub_download", return_value=str(config_path)) as download:
+    with patch("parallax.utils.utils.download_model_file", return_value=config_path) as download:
         config = utils.load_config_only("mlx-community/GLM-5.1", local_files_only=True)
 
     assert config == {"num_hidden_layers": 78}

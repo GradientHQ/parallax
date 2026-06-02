@@ -6,7 +6,8 @@ from pathlib import Path
 
 import mlx.core as mx
 import transformers
-from huggingface_hub import hf_hub_download, snapshot_download
+
+from parallax.utils.model_download import download_model_file, download_model_snapshot
 
 
 def process_adapter_config(model_id):
@@ -22,8 +23,9 @@ def process_adapter_config(model_id):
         print(f"Model directory does not exist: {local_dir}")
         print(f"Downloading model from Hugging Face: {model_id} -> {local_dir}")
         try:
-            snapshot_download(
-                repo_id=model_id, local_dir=local_dir, local_dir_use_symlinks=False, revision="main"
+            download_model_snapshot(
+                repo_id=model_id,
+                local_dir=local_dir,
             )
             print(f"Model downloaded to: {local_dir}")
         except Exception as e:
@@ -103,7 +105,7 @@ def fetch_from_hub(path_or_hf_repo: str):
     if not model_path.exists():
         print(f"[INFO] Downloading {path_or_hf_repo} from Hugging Face...")
         model_path = Path(
-            snapshot_download(
+            download_model_snapshot(
                 repo_id=path_or_hf_repo,
                 allow_patterns=["*.json", "*.safetensors", "tokenizer.model"],
             )
@@ -150,7 +152,7 @@ def trans_safetensors(model_path: str):
 
 
 def download_adapter_config(repo_id):
-    adapter_config_path = hf_hub_download(repo_id=repo_id, filename="adapter_config.json")
+    adapter_config_path = download_model_file(repo_id=repo_id, filename="adapter_config.json")
     output_path = os.path.join(os.getcwd(), "adapter_config.json")
     if os.path.isfile(adapter_config_path):
         shutil.copy(adapter_config_path, output_path)

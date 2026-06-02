@@ -375,13 +375,13 @@ def initialize_vllm_model_runner(
     instance_id: Optional[str] = None,
     **kwargs,
 ) -> Tuple[ParallaxVLLMModelRunner, Dict, Any]:
-    from parallax.utils.selective_download import get_model_path_with_selective_download
+    from parallax.utils.model_download import selective_model_download
 
     logger.info(
         f"Initializing vLLM model runner for {model_repo}, " f"layers=[{start_layer}, {end_layer})"
     )
 
-    model_path = get_model_path_with_selective_download(
+    model_path = selective_model_download(
         model_repo,
         start_layer=start_layer,
         end_layer=end_layer,

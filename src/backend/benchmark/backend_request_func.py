@@ -11,10 +11,10 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
 import aiohttp
-import huggingface_hub.constants
-from huggingface_hub import snapshot_download
 from tqdm.asyncio import tqdm
 from transformers import AutoTokenizer, PreTrainedTokenizer, PreTrainedTokenizerFast
+
+from parallax.utils.model_download import download_model_snapshot
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 
@@ -268,12 +268,11 @@ async def async_request_openai_chat_completions(
 
 def get_model(pretrained_model_name_or_path: str) -> str:
 
-    model_path = snapshot_download(
+    model_path = download_model_snapshot(
         repo_id=pretrained_model_name_or_path,
-        local_files_only=huggingface_hub.constants.HF_HUB_OFFLINE,
         ignore_patterns=[".*.pt", ".*.safetensors", ".*.bin"],
     )
-    return model_path
+    return str(model_path)
 
 
 def get_tokenizer(

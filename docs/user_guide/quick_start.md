@@ -88,6 +88,18 @@ To allow the API to be accessible from other machines, add the argument `--host 
 parallax chat --host 0.0.0.0
 ```
 
+### Downloading from ModelScope
+
+Parallax downloads models from Hugging Face by default. To download from ModelScope instead, set `USE_MODELSCOPE` before starting any Parallax process that resolves or loads the model:
+
+```sh
+USE_MODELSCOPE=1 parallax run -m Qwen/Qwen3-0.6B -n 2
+USE_MODELSCOPE=1 parallax join -s {scheduler-address}
+USE_MODELSCOPE=1 parallax serve --model-path Qwen/Qwen3-0.6B
+```
+
+Use a model ID that exists on ModelScope. To switch back to Hugging Face, run the same commands without `USE_MODELSCOPE`.
+
 ### Without frontend
 #### Step 1: Launch scheduler
 First launch our scheduler on the main node.

@@ -12,6 +12,8 @@ import psutil
 import torch
 import zmq
 
+from parallax.utils.model_download import download_model_file
+
 
 def is_cuda_available():
     """Check backend supports cuda"""
@@ -286,10 +288,8 @@ def load_config_only(name: str, local_files_only: bool = False):
     if local_path.exists():
         config_file = local_path / "config.json"
     else:
-        from huggingface_hub import hf_hub_download
-
         config_file = Path(
-            hf_hub_download(
+            download_model_file(
                 repo_id=name,
                 filename="config.json",
                 local_files_only=local_files_only,

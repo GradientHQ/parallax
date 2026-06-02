@@ -10,7 +10,6 @@ import types
 from typing import Any, Dict, Optional, Tuple
 
 import mlx.core as mx
-from huggingface_hub import snapshot_download
 from mlx import nn
 from mlx.utils import tree_unflatten
 from mlx_lm.models.switch_layers import QuantizedSwitchLinear, SwitchLinear
@@ -19,6 +18,7 @@ from mlx_lm.tuner.lora import LoRAEmbedding, LoRALinear, LoRASwitchLinear
 from mlx_lm.utils import _download, load_config
 
 from parallax.server.model import ShardedModel
+from parallax.utils.model_download import download_model_snapshot
 from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.utils.utils import normalize_model_config
 from parallax_utils.logging_config import get_logger
@@ -195,7 +195,7 @@ class MLXModelLoader:
                 logger.info(
                     f"Adapter path {adapter_path} not found locally. Attempting to download from Hugging Face..."
                 )
-                downloaded_path = snapshot_download(
+                downloaded_path = download_model_snapshot(
                     repo_id=str(adapter_path), local_dir=str(adapter_path)
                 )
                 adapter_path = pathlib.Path(downloaded_path)
@@ -236,14 +236,12 @@ class MLXModelLoader:
             A tuple containing the loaded sharded MLX model and its configuration dictionary.
         """
         if use_selective_download and self.start_layer is not None and self.end_layer is not None:
-            from parallax.utils.selective_download import (
-                get_model_path_with_selective_download,
-            )
+            from parallax.utils.model_download import selective_model_download
 
             logger.info(
                 f"Using selective download for layers [{self.start_layer}, {self.end_layer})"
             )
-            model_path = get_model_path_with_selective_download(
+            model_path = selective_model_download(
                 self.model_path_str,
                 start_layer=self.start_layer,
                 end_layer=self.end_layer,
