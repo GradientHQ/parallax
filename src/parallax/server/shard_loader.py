@@ -236,9 +236,7 @@ class MLXModelLoader:
             A tuple containing the loaded sharded MLX model and its configuration dictionary.
         """
         if use_selective_download and self.start_layer is not None and self.end_layer is not None:
-            from parallax.utils.model_download import (
-                selective_model_download,
-            )
+            from parallax.utils.model_download import selective_model_download
 
             logger.info(
                 f"Using selective download for layers [{self.start_layer}, {self.end_layer})"
