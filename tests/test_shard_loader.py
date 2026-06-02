@@ -5,13 +5,110 @@ Tests for the shard_loader module.
 import sys
 from unittest.mock import Mock, patch
 
+import mlx.core as mx
 import pytest
 
 from parallax.server.shard_loader import (
     ARCHITECTURE_CLASS_ALIASES,
     MODEL_CLASS_MAP,
     MLXModelLoader,
+    normalize_language_model_weight_key,
 )
+from parallax.utils.weight_filter_utils import should_include_weight_key
+
+
+def test_normalize_nested_language_model_weight_keys():
+    """Qwen3.5 VLM checkpoints nest the text tower under model.language_model."""
+    assert (
+        normalize_language_model_weight_key("model.language_model.embed_tokens.weight")
+        == "model.embed_tokens.weight"
+    )
+    assert (
+        normalize_language_model_weight_key("model.language_model.layers.12.mlp.up_proj.weight")
+        == "model.layers.12.mlp.up_proj.weight"
+    )
+    assert (
+        normalize_language_model_weight_key("model.language_model.norm.weight")
+        == "model.norm.weight"
+    )
+    assert (
+        normalize_language_model_weight_key("model.language_model.lm_head.weight")
+        == "lm_head.weight"
+    )
+    assert (
+        normalize_language_model_weight_key("language_model.model.lm_head.weight")
+        == "lm_head.weight"
+    )
+    assert normalize_language_model_weight_key("model.visual.patch_embed.weight") == (
+        "model.visual.patch_embed.weight"
+    )
+
+
+def test_weight_filter_includes_nested_qwen35_text_keys():
+    assert should_include_weight_key(
+        normalize_language_model_weight_key("model.language_model.layers.12.mlp.up_proj.weight"),
+        start_layer=12,
+        end_layer=13,
+        is_first_shard=False,
+        is_last_shard=False,
+    )
+    assert not should_include_weight_key(
+        normalize_language_model_weight_key("model.language_model.layers.12.mlp.up_proj.weight"),
+        start_layer=13,
+        end_layer=14,
+        is_first_shard=False,
+        is_last_shard=False,
+    )
+    assert should_include_weight_key(
+        normalize_language_model_weight_key("model.language_model.norm.weight"),
+        start_layer=0,
+        end_layer=24,
+        is_first_shard=False,
+        is_last_shard=True,
+    )
+    assert should_include_weight_key(
+        normalize_language_model_weight_key("model.language_model.embed_tokens.weight"),
+        start_layer=0,
+        end_layer=24,
+        is_first_shard=False,
+        is_last_shard=True,
+        tie_word_embeddings=True,
+    )
+
+
+def test_mlx_lm_sanitize_uses_local_layer_keys_for_shards():
+    import mlx_lm.models.qwen3_5 as qwen35
+
+    loader = MLXModelLoader("test_model_path")
+    args = qwen35.TextModelArgs(num_hidden_layers=24, tie_word_embeddings=True)
+    weights = {
+        "model.layers.12.linear_attn.conv1d.weight": mx.zeros((4, 1, 3)),
+        "model.layers.12.input_layernorm.weight": mx.zeros((2,)),
+        "model.norm.weight": mx.zeros((2,)),
+    }
+
+    local_weights = {
+        loader._to_local_shard_model_key(key, start_layer=12): value
+        for key, value in weights.items()
+    }
+
+    sanitized = loader._apply_mlx_lm_sanitize(
+        qwen35,
+        args,
+        local_weights,
+        num_layers=1,
+    )
+
+    assert sanitized["model.layers.0.linear_attn.conv1d.weight"].shape == (4, 3, 1)
+    assert float(sanitized["model.layers.0.input_layernorm.weight"][0]) == 1.0
+    assert float(sanitized["model.norm.weight"][0]) == 1.0
+    assert loader._remap_sanitized_key_to_shard(
+        "model.layers.0.linear_attn.conv1d.weight",
+        end_layer=1,
+        is_first_shard=False,
+        is_last_shard=False,
+        tie_word_embeddings=False,
+    ) == ["layers.0.linear_attn.conv1d.weight"]
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")

@@ -199,8 +199,9 @@ class MLXExecutor(BaseExecutor):
             if chunked_prefill_size == 0:
                 chunked_prefill_size = None
             elif not enable_prefix_cache:
-                enable_prefix_cache = True
-                logger.info("Prefix cache enabled automatically for MLX chunked prefill")
+                raise ValueError(
+                    "Chunked prefill is not supported when disable prefix cache, please enable prefix cache or set --chunked-prefill-size 0"
+                )
 
         self.cache_manager = CacheManager(
             num_layers=self.num_shard_layers,
