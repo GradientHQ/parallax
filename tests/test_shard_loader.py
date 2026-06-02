@@ -144,9 +144,7 @@ def test_qwen35_moe_uses_qwen35_text_args_and_sanitizer_module():
         }
     )
 
-    sanitizer_module, model_args = loader._load_mlx_lm_module_and_args(
-        "qwen3_5_moe", config
-    )
+    sanitizer_module, model_args = loader._load_mlx_lm_module_and_args("qwen3_5_moe", config)
 
     assert MODEL_CLASS_MAP["qwen3_5_moe"] == "mlx_lm.models.qwen3_5"
     assert sanitizer_module.__name__ == "mlx_lm.models.qwen3_5"
