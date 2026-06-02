@@ -1456,6 +1456,8 @@ template <typename T, int HEAD_SIZE, int NUM_THREADS, int NUM_SIMD_LANES,
 
 #define instantiate_paged_attention_block_size(type, cache_type, num_threads,  \
                                                num_simd_lanes, partition_size) \
+  instantiate_paged_attention_heads(type, cache_type, 1, num_threads,          \
+                                    num_simd_lanes, partition_size);           \
   instantiate_paged_attention_heads(type, cache_type, 8, num_threads,          \
                                     num_simd_lanes, partition_size);           \
   instantiate_paged_attention_heads(type, cache_type, 16, num_threads,         \

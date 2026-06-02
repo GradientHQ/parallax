@@ -164,11 +164,6 @@ class BlockRadixCache:
 
         self.num_cached_blocks += 1
 
-        logger.debug(
-            f"Inserted new block: block_id={block_id}, "
-            f"tokens={token_ids[:5]}..., total_cached={self.num_cached_blocks}"
-        )
-
         if self.num_cached_blocks > self.max_cached_blocks:
             self._evict_lru_blocks(self.num_cached_blocks - self.max_cached_blocks)
 
@@ -189,11 +184,6 @@ class BlockRadixCache:
                 continue
             if node.lock_ref > 0:
                 node.lock_ref -= 1
-
-            if node.lock_ref == 0:
-                logger.debug(
-                    f"Node {node.node_id} (block_id={node.block_id}) ref count = 0, evictable"
-                )
 
     def register_request(self, request_id: str, nodes: List[BlockTreeNode]):
         """Register nodes used by request."""
