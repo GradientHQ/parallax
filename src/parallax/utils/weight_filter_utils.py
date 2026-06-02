@@ -5,6 +5,22 @@ from typing import Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
+LANGUAGE_MODEL_PREFIXES = ("model.language_model.", "language_model.")
+
+
+def normalize_language_model_weight_key(key: str) -> str:
+    """Map nested VLM text tower keys to the text-only key layout."""
+    for prefix in LANGUAGE_MODEL_PREFIXES:
+        if not key.startswith(prefix):
+            continue
+        suffix = key[len(prefix) :]
+        if suffix.startswith("model.lm_head."):
+            return suffix.replace("model.", "", 1)
+        if suffix.startswith("model.") or suffix.startswith("lm_head."):
+            return suffix
+        return f"model.{suffix}"
+    return key
+
 
 def should_include_weight_key(
     key: str,
@@ -71,6 +87,7 @@ def filter_weight_files_by_layer_range_for_load(
     for key, filename in weight_map.items():
         if filename in needed_files:
             continue
+        key = normalize_language_model_weight_key(key)
         if should_include_weight_key(
             key=key,
             start_layer=start_layer,
@@ -156,6 +173,7 @@ def determine_needed_weight_files_for_download(
     for key, filename in weight_map.items():
         if filename in needed_files:
             continue
+        key = normalize_language_model_weight_key(key)
         if should_include_weight_key(
             key=key,
             start_layer=start_layer,

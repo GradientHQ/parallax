@@ -7,6 +7,7 @@ import importlib
 import json
 import pathlib
 import types
+from copy import copy
 from typing import Any, Dict, Optional, Tuple
 
 import mlx.core as mx
@@ -21,6 +22,10 @@ from parallax.server.model import ShardedModel
 from parallax.utils.model_download import download_model_snapshot
 from parallax.utils.tokenizer_utils import load_tokenizer
 from parallax.utils.utils import normalize_model_config
+from parallax.utils.weight_filter_utils import (
+    normalize_language_model_weight_key,
+    should_include_weight_key,
+)
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -33,9 +38,6 @@ MODEL_CLASS_MAP = {
 ARCHITECTURE_CLASS_ALIASES = {
     "GlmMoeDsaForCausalLM": "DeepseekV32ForCausalLM",
 }
-
-LANGUAGE_MODEL_PREFIX = "language_model."
-
 
 class MLXModelLoader:
     """
@@ -218,6 +220,95 @@ class MLXModelLoader:
         base_model.load_weights(str(adapter_path / "adapters.safetensors"), strict=False)
         return base_model
 
+    @staticmethod
+    def _to_local_shard_model_key(key: str, start_layer: int) -> str:
+        """Convert a global model weight key to the shard-local model key layout."""
+        if key.startswith("model.layers."):
+            parts = key.split(".")
+            if len(parts) > 2 and parts[2].isdigit():
+                parts[2] = str(int(parts[2]) - start_layer)
+                return ".".join(parts)
+        return key
+
+    @staticmethod
+    def _remap_sanitized_key_to_shard(
+        key: str,
+        *,
+        end_layer: int,
+        is_first_shard: bool,
+        is_last_shard: bool,
+        tie_word_embeddings: bool,
+    ) -> list[str]:
+        if key.startswith("model.layers."):
+            parts = key.split(".")
+            if len(parts) <= 3 or not parts[2].isdigit():
+                return []
+            local_layer_idx = int(parts[2])
+            if 0 <= local_layer_idx < end_layer:
+                return [f"layers.{local_layer_idx}.{'.'.join(parts[3:])}"]
+            return []
+
+        remapped_keys = []
+        if key.startswith("model.embed_tokens"):
+            if is_first_shard:
+                remapped_keys.append(key.replace("model.", "", 1))
+            if is_last_shard and tie_word_embeddings:
+                remapped_keys.append(
+                    key.replace("model.", "", 1).replace("embed_tokens", "lm_head", 1)
+                )
+            return remapped_keys
+
+        if is_last_shard:
+            if key.startswith("model.norm"):
+                return [key.replace("model.", "", 1)]
+            if key.startswith("lm_head"):
+                return [key]
+        return []
+
+    @staticmethod
+    def _make_mlx_lm_sanitizer(arch_module, model_args):
+        sanitizer_cls = getattr(arch_module, "TextModel", None)
+        if sanitizer_cls is None or not hasattr(sanitizer_cls, "sanitize"):
+            sanitizer_cls = getattr(arch_module, "Model", None)
+        if sanitizer_cls is None or not hasattr(sanitizer_cls, "sanitize"):
+            return None
+
+        sanitizer = sanitizer_cls.__new__(sanitizer_cls)
+        sanitizer.args = model_args
+        return sanitizer.sanitize
+
+    def _apply_mlx_lm_sanitize(
+        self,
+        arch_module,
+        model_args,
+        local_weights: Dict[str, mx.array],
+        *,
+        num_layers: int,
+    ) -> Dict[str, mx.array]:
+        if not local_weights:
+            return local_weights
+
+        sanitizer_args = copy(model_args)
+        if hasattr(sanitizer_args, "num_hidden_layers"):
+            sanitizer_args.num_hidden_layers = num_layers
+
+        sanitizer = self._make_mlx_lm_sanitizer(arch_module, sanitizer_args)
+        if sanitizer is None:
+            return local_weights
+
+        try:
+            return sanitizer(local_weights)
+        except Exception as e:
+            logger.warning("Failed to apply MLX-LM weight sanitize: %s", e)
+            return local_weights
+
+    @staticmethod
+    def _cast_weight_array(weight_array: mx.array, dtype: mx.Dtype) -> mx.array:
+        is_quantized_param = weight_array.dtype in (mx.uint32, mx.int32, mx.uint8)
+        if not is_quantized_param and weight_array.dtype != dtype:
+            return weight_array.astype(dtype)
+        return weight_array
+
     def load(
         self, lazy: bool = False, strict: bool = False, use_selective_download: bool = True
     ) -> Tuple[nn.Module, Dict[str, Any], Any]:
@@ -251,6 +342,7 @@ class MLXModelLoader:
             model_path = _download(self.model_path_str)
 
         config = normalize_model_config(load_config(model_path))
+        self.config = config
         tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id", None))
 
         architectures = config.get("architectures", None)
@@ -285,6 +377,8 @@ class MLXModelLoader:
             else:
                 model_args_class = getattr(arch_module, "ModelArgs")
             model_args = model_args_class.from_dict(config)
+            self.arch_module = arch_module
+            self.model_args = model_args
 
         except (ImportError, AttributeError) as e:
             raise ValueError(f"Failed to load architecture for model_type '{model_type}'.") from e
@@ -334,7 +428,6 @@ class MLXModelLoader:
         # Instead of loading all weights, we iterate through files and keys,
         # loading only what we need.
         shard_weights = {}
-        layer_key_prefix = "model.layers"  # Common prefix
 
         for file_idx, wf in enumerate(weight_files):
             logger.debug(
@@ -343,66 +436,38 @@ class MLXModelLoader:
 
             f = mx.load(wf)
             for key in f.keys():
-                is_needed = False
-                remapped_key = None
-                model_key = (
-                    key[len(LANGUAGE_MODEL_PREFIX) :]
-                    if key.startswith(LANGUAGE_MODEL_PREFIX)
-                    else key
-                )
-
-                # Check if the key belongs to the shard and remap it
-                if (
-                    model_shard.is_first_shard
-                    and "embed_tokens" in model_key
-                    and model_key.startswith("model.")
+                model_key = normalize_language_model_weight_key(key)
+                if should_include_weight_key(
+                    model_key,
+                    start_layer=current_start_layer,
+                    end_layer=current_end_layer,
+                    is_first_shard=model_shard.is_first_shard,
+                    is_last_shard=model_shard.is_last_shard,
+                    tie_word_embeddings=config.get("tie_word_embeddings", False),
                 ):
-                    is_needed = True
-                    remapped_key = model_key.replace("model.", "", 1)
-                    if model_shard.is_last_shard and config.get("tie_word_embeddings", False):
-                        # Also add lm_head mapping for tied embeddings
-                        lm_head_key = remapped_key.replace("embed_tokens", "lm_head")
-                        shard_weights[lm_head_key] = f[key]
-                elif model_shard.is_last_shard:
-                    if "model.norm" in model_key:
-                        is_needed = True
-                        remapped_key = model_key.replace("model.", "", 1)
-                    if "lm_head" in model_key:
-                        is_needed = True
-                        remapped_key = model_key
-                    elif (
-                        config.get("tie_word_embeddings", False)
-                        and "embed_tokens" in model_key
-                        and model_key.startswith("model.embed_tokens")
-                    ):
-                        is_needed = True
-                        remapped_key = model_key.replace("model.", "", 1).replace(
-                            "embed_tokens", "lm_head"
-                        )
-                if layer_key_prefix in model_key:
-                    try:
-                        parts = model_key.split(".")
-                        layer_idx = int(parts[2])
-                        if current_start_layer <= layer_idx < current_end_layer:
-                            is_needed = True
-                            local_layer_idx = layer_idx - current_start_layer
-                            remapped_key = f"layers.{local_layer_idx}.{'.'.join(parts[3:])}"
-                    except (ValueError, IndexError):
-                        continue
+                    local_key = self._to_local_shard_model_key(model_key, current_start_layer)
+                    shard_weights[local_key] = f[key]
 
-                # If the key is needed, load only that tensor from the file
-                if is_needed:
-                    # Load tensor (Lazy in MLX)
-                    weight_array = f[key]
+        sanitized_weights = self._apply_mlx_lm_sanitize(
+            arch_module,
+            model_args,
+            shard_weights,
+            num_layers=current_end_layer - current_start_layer,
+        )
+        shard_weights.clear()
 
-                    # Only convert dtype for non-quantized weights
-                    # Quantized weights (uint32, int32) and their scales/biases should keep their original dtype
-                    # Scales are typically float32 and should not be downcast to bfloat16
-                    is_quantized_param = weight_array.dtype in (mx.uint32, mx.int32, mx.uint8)
-                    if not is_quantized_param and weight_array.dtype != dtype:
-                        weight_array = weight_array.astype(dtype)
-
-                    shard_weights[remapped_key] = weight_array
+        remapped_shard_weights = {}
+        for key, weight_array in sanitized_weights.items():
+            remapped_keys = self._remap_sanitized_key_to_shard(
+                key,
+                end_layer=current_end_layer - current_start_layer,
+                is_first_shard=model_shard.is_first_shard,
+                is_last_shard=model_shard.is_last_shard,
+                tie_word_embeddings=config.get("tie_word_embeddings", False),
+            )
+            for remapped_key in remapped_keys:
+                remapped_shard_weights[remapped_key] = self._cast_weight_array(weight_array, dtype)
+        sanitized_weights.clear()
 
         if (quantization := config.get("quantization", None)) is not None:
             logger.debug("Model is quantized. Applying quantization parameters...")
@@ -439,7 +504,7 @@ class MLXModelLoader:
                 if not hasattr(m, "to_quantized"):
                     return False
                 # Handle legacy models by checking if quantized weights exist
-                return f"{p}.scales" in shard_weights
+                return f"{p}.scales" in remapped_shard_weights
 
             nn.quantize(
                 model_shard,
@@ -449,10 +514,10 @@ class MLXModelLoader:
                 class_predicate=class_predicate,
             )
 
-        model_shard.load_weights(list(shard_weights.items()), strict=strict)
+        model_shard.load_weights(list(remapped_shard_weights.items()), strict=strict)
         model_shard.shard_layers()
 
-        shard_weights.clear()
+        remapped_shard_weights.clear()
 
         mx.eval(model_shard.parameters())
         # Synchronize processes to avoid timeout
@@ -474,56 +539,50 @@ class MLXModelLoader:
 
         logger.info(f"Begin refit weight from path: {refit_weight_path}")
         shard_weights = {}
-        layer_key_prefix = "model.layers"  # Common prefix
+        start_layer = model_shard.start_layer
+        end_layer = model_shard.end_layer
 
         for wf in weight_files:
             # Use mx.load for lazy loading
             f = mx.load(wf)
             for key in f.keys():
-                is_needed = False
-                remapped_key = None
-
-                # Check if the key belongs to the shard and remap it
-                if (
-                    model_shard.is_first_shard
-                    and "embed_tokens" in key
-                    and key.startswith("model.")
+                model_key = normalize_language_model_weight_key(key)
+                if should_include_weight_key(
+                    model_key,
+                    start_layer=start_layer,
+                    end_layer=end_layer,
+                    is_first_shard=model_shard.is_first_shard,
+                    is_last_shard=model_shard.is_last_shard,
+                    tie_word_embeddings=self.config.get("tie_word_embeddings", False),
                 ):
-                    is_needed = True
-                    remapped_key = key.replace("model.", "", 1)
-                    if model_shard.is_last_shard and self.config.get("tie_word_embeddings", False):
-                        shard_weights["lm_head.weight"] = f[key]
-                elif model_shard.is_last_shard:
-                    if "model.norm" in key:
-                        is_needed = True
-                        remapped_key = key.replace("model.", "", 1)
-                    if "lm_head" in key:
-                        is_needed = True
-                        remapped_key = key
-                    elif (
-                        self.config.get("tie_word_embeddings", False)
-                        and "embed" in key
-                        and key.startswith("model.embed_tokens")
-                    ):
-                        # TODO: we don't need load lm_head in this case
-                        # as we will pass hidden_states to FirstPeer
-                        # see request.py for details
-                        is_needed = True
-                        remapped_key = "lm_head.weight"
-                if layer_key_prefix in key:
-                    try:
-                        parts = key.split(".")
-                        layer_idx = int(parts[2])
-                        if self.start_layer <= layer_idx < self.end_layer:
-                            is_needed = True
-                            local_layer_idx = layer_idx - self.start_layer
-                            remapped_key = f"layers.{local_layer_idx}.{'.'.join(parts[3:])}"
-                    except (ValueError, IndexError):
-                        continue
+                    local_key = self._to_local_shard_model_key(model_key, start_layer)
+                    shard_weights[local_key] = f[key]
 
-                # If the key is needed, load only that tensor from the file
-                if is_needed:
-                    shard_weights[remapped_key] = f[key]
+        arch_module = getattr(self, "arch_module", None)
+        model_args = getattr(self, "model_args", getattr(model_shard, "config", None))
+        if arch_module is None:
+            model_type = self.config.get("model_type")
+            model_class = MODEL_CLASS_MAP.get(model_type, f"mlx_lm.models.{model_type}")
+            arch_module = importlib.import_module(model_class)
+
+        sanitized_weights = self._apply_mlx_lm_sanitize(
+            arch_module,
+            model_args,
+            shard_weights,
+            num_layers=end_layer - start_layer,
+        )
+        dtype = getattr(model_shard, "dtype", mx.bfloat16)
+        remapped_shard_weights = {}
+        for key, weight_array in sanitized_weights.items():
+            remapped_keys = self._remap_sanitized_key_to_shard(
+                key,
+                end_layer=end_layer - start_layer,
+                is_first_shard=model_shard.is_first_shard,
+                is_last_shard=model_shard.is_last_shard,
+                tie_word_embeddings=self.config.get("tie_word_embeddings", False),
+            )
+            for remapped_key in remapped_keys:
+                remapped_shard_weights[remapped_key] = self._cast_weight_array(weight_array, dtype)
 
         if (quantization := self.config.get("quantization", None)) is not None:
             logger.info("Model is quantized. Applying quantization parameters...")
@@ -551,7 +610,7 @@ class MLXModelLoader:
                 if not hasattr(m, "to_quantized"):
                     return False
                 # Handle legacy models by checking if quantized weights exist
-                return f"{p}.scales" in shard_weights
+                return f"{p}.scales" in remapped_shard_weights
 
             nn.quantize(
                 model_shard,
@@ -561,7 +620,7 @@ class MLXModelLoader:
                 class_predicate=class_predicate,
             )
 
-        model_shard.load_weights(list(shard_weights.items()), strict=False)
+        model_shard.load_weights(list(remapped_shard_weights.items()), strict=False)
         mx.eval(model_shard.parameters())
         model_shard.eval()
         logger.info(
