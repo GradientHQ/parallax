@@ -462,7 +462,8 @@ class MLXModelLoader:
             shard_weights,
             num_layers=current_end_layer - current_start_layer,
         )
-        shard_weights.clear()
+        if sanitized_weights is not shard_weights:
+            shard_weights.clear()
 
         remapped_shard_weights = {}
         for key, weight_array in sanitized_weights.items():
