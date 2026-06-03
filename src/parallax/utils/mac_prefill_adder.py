@@ -31,8 +31,7 @@ class MACPrefillAdder:
         token_ids = req.origin_input_ids
         if token_ids is None or self.cache_manager.prefix_cache is None:
             return 0
-        _, matched_tokens = self.cache_manager.prefix_cache.match_prefix(token_ids)
-        return matched_tokens
+        return self.cache_manager.get_reusable_prefix_len(token_ids)
 
     def add_chunked_req(self, chunked_req: Request) -> Optional[Request]:
         if chunked_req is None or chunked_req.origin_input_ids is None:

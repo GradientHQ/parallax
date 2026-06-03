@@ -21,16 +21,24 @@ class ParallaxQwen35GatedDeltaNet(MLXQwen35GatedDeltaNet):
         x: mx.array,
         cache: Optional[BaseCache] = None,
         state_slot_mapping: Optional[mx.array] = None,
+        prefix_lens: Optional[mx.array] = None,
+        context_lengths: Optional[mx.array] = None,
         **kwargs,
     ):
         batch, target_len, _ = x.shape
+
+        assert cache is not None
+        assert state_slot_mapping is not None
 
         qkv = self.in_proj_qkv(x)
         z = self.in_proj_z(x).reshape(batch, target_len, self.num_v_heads, self.head_v_dim)
         b = self.in_proj_b(x)
         a = self.in_proj_a(x)
+        input_lengths = None
+        if prefix_lens is not None and context_lengths is not None:
+            input_lengths = context_lengths - prefix_lens
 
-        if target_len == 1:
+        if target_len == 1 or (prefix_lens is not None and bool(mx.any(prefix_lens > 0))):
             conv_state, state = cache.read_states(state_slot_mapping)
         else:
             conv_state = mx.zeros(
@@ -39,8 +47,19 @@ class ParallaxQwen35GatedDeltaNet(MLXQwen35GatedDeltaNet):
             )
             state = None
 
+        linear_mask = None
+        if input_lengths is not None:
+            linear_mask = mx.arange(target_len)[None, :] < input_lengths[:, None]
+            qkv = mx.where(linear_mask[..., None], qkv, 0)
+
         conv_input = mx.concatenate([conv_state, qkv], axis=1)
-        next_conv_state = conv_input[:, -(self.conv_kernel_size - 1) :]
+        if input_lengths is not None:
+            n_keep = self.conv_kernel_size - 1
+            ends = mx.clip(input_lengths, 0, target_len)
+            positions = (ends[:, None] + mx.arange(n_keep))[..., None]
+            next_conv_state = mx.take_along_axis(conv_input, positions, axis=1)
+        else:
+            next_conv_state = conv_input[:, -(self.conv_kernel_size - 1) :]
         conv_out = nn.silu(self.conv1d(conv_input))
 
         q, k, v = [
@@ -65,6 +84,7 @@ class ParallaxQwen35GatedDeltaNet(MLXQwen35GatedDeltaNet):
             self.A_log,
             self.dt_bias,
             state,
+            linear_mask,
             use_kernel=not self.training,
         )
 
@@ -100,6 +120,7 @@ class ParallaxQwen35Block(MLXQwen35Block):
                 self.input_layernorm(x),
                 cache[self.local_layer_idx],
                 state_slot_mapping,
+                context_lengths=context_lengths,
                 **kwargs,
             )
         else:

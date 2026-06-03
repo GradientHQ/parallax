@@ -3,6 +3,10 @@ name: Pre-commit Checks
 on:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pre-commit:
     runs-on: macos-15

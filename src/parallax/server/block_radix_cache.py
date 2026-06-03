@@ -4,7 +4,7 @@ Block-based Prefix Cache implementation using Radix Tree.
 
 import heapq
 import time
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from parallax_utils.logging_config import get_logger
 
@@ -16,9 +16,16 @@ class BlockTreeNode:
 
     counter = 0
 
-    def __init__(self, block_id: Optional[int] = None, token_ids: Optional[List[int]] = None):
+    def __init__(
+        self,
+        block_id: Optional[int] = None,
+        token_ids: Optional[List[int]] = None,
+        prefix_len: int = 0,
+    ):
         self.block_id = block_id
         self.token_ids = token_ids or []
+        self.prefix_len = prefix_len
+        self.linear_snapshot: Optional[Any] = None
         self.children: Dict[int, "BlockTreeNode"] = {}
         self.parent: Optional["BlockTreeNode"] = None
         self.lock_ref = 0
@@ -44,16 +51,19 @@ class BlockRadixCache:
         block_size: int,
         max_cached_blocks: int = 1000,
         on_block_evict: Optional[Callable[[int], None]] = None,
+        has_linear_cache: bool = False,
     ):
         """
         Args:
             block_size: Number of tokens per block
             max_cached_blocks: Maximum number of blocks to cache
             on_block_evict: Callback function when a block is evicted, receives block_id
+            has_linear_cache: Whether reusable nodes must also carry linear snapshots
         """
         self.block_size = block_size
         self.max_cached_blocks = max_cached_blocks
         self.on_block_evict = on_block_evict
+        self.has_linear_cache = has_linear_cache
 
         self.root = BlockTreeNode(block_id=None, token_ids=[])
         self.root.lock_ref = 1
@@ -78,6 +88,8 @@ class BlockRadixCache:
         """
         matched_blocks = []
         matched_tokens = 0
+        reusable_blocks = []
+        reusable_tokens = 0
 
         current_node = self.root
 
@@ -109,12 +121,60 @@ class BlockRadixCache:
             current_node = child_node
             current_node.last_access_time = time.monotonic()
 
+            if not self.has_linear_cache or child_node.linear_snapshot is not None:
+                reusable_blocks = matched_blocks.copy()
+                reusable_tokens = matched_tokens
+
         logger.debug(
-            f"Prefix match: {matched_tokens}/{len(token_ids)} tokens, "
-            f"{len(matched_blocks)} blocks reused"
+            f"Prefix match: {reusable_tokens}/{len(token_ids)} tokens, "
+            f"{len(reusable_blocks)} blocks reused"
         )
 
-        return matched_blocks, matched_tokens
+        return reusable_blocks, reusable_tokens
+
+    def get_path(self, token_ids: List[int]) -> List[BlockTreeNode]:
+        """Return the matched node path for the full-block prefix in token_ids."""
+        path = []
+        current_node = self.root
+
+        num_full_blocks = len(token_ids) // self.block_size
+
+        for block_idx in range(num_full_blocks):
+            block_start = block_idx * self.block_size
+            block_end = block_start + self.block_size
+            block_tokens = token_ids[block_start:block_end]
+            if len(block_tokens) != self.block_size:
+                break
+
+            first_token = block_tokens[0]
+            child_node = current_node.children.get(first_token)
+            if child_node is None or child_node.token_ids != block_tokens:
+                break
+
+            path.append(child_node)
+            current_node = child_node
+
+        return path
+
+    def get_node_for_token_ids(self, token_ids: List[int]) -> Optional[BlockTreeNode]:
+        """Return the node for an exact full-block token prefix, if present."""
+        if not token_ids or len(token_ids) % self.block_size != 0:
+            return None
+
+        num_blocks = len(token_ids) // self.block_size
+        path = self.get_path(token_ids)
+        if len(path) != num_blocks:
+            return None
+        return path[-1]
+
+    def attach_linear_snapshot(self, token_ids: List[int], snapshot: Any) -> bool:
+        """Attach a linear state snapshot to the exact prefix represented by token_ids."""
+        node = self.get_node_for_token_ids(token_ids)
+        if node is None:
+            return False
+        node.linear_snapshot = snapshot
+        node.last_access_time = time.monotonic()
+        return True
 
     def insert_block(
         self,
@@ -155,7 +215,11 @@ class BlockRadixCache:
                     existing_node.last_access_time = time.monotonic()
                 return existing_node
 
-        new_node = BlockTreeNode(block_id=block_id, token_ids=token_ids)
+        new_node = BlockTreeNode(
+            block_id=block_id,
+            token_ids=token_ids,
+            prefix_len=parent_node.prefix_len + self.block_size,
+        )
         new_node.parent = parent_node
         if lock:
             new_node.lock_ref += 1
@@ -240,6 +304,8 @@ class BlockRadixCache:
 
     def _delete_leaf(self, node: BlockTreeNode):
         """Delete a leaf node and free the physical block."""
+        node.linear_snapshot = None
+
         if node.parent:
             for key, child in list(node.parent.children.items()):
                 if child == node:
