@@ -66,17 +66,13 @@ class LinearCache(BaseCache):
     def zero_slot(self, slot_idx: int):
         """Reset a request slot to an empty recurrent state."""
         if self.conv_state_cache is not None:
-            self.conv_state_cache[0, slot_idx] = mx.zeros_like(
-                self.conv_state_cache[0, slot_idx]
-            )
+            self.conv_state_cache[0, slot_idx] = mx.zeros_like(self.conv_state_cache[0, slot_idx])
         if self.linear_state_cache is not None:
             self.linear_state_cache[0, slot_idx] = mx.zeros_like(
                 self.linear_state_cache[0, slot_idx]
             )
 
-    def snapshot_slot(
-        self, slot_idx: int
-    ) -> Tuple[Optional[mx.array], Optional[mx.array]]:
+    def snapshot_slot(self, slot_idx: int) -> Tuple[Optional[mx.array], Optional[mx.array]]:
         """Copy the recurrent state currently stored in a request slot."""
         conv_state = None
         linear_state = None

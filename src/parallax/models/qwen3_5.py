@@ -38,9 +38,7 @@ class ParallaxQwen35GatedDeltaNet(MLXQwen35GatedDeltaNet):
         if prefix_lens is not None and context_lengths is not None:
             input_lengths = context_lengths - prefix_lens
 
-        if target_len == 1 or (
-            prefix_lens is not None and bool(mx.any(prefix_lens > 0))
-        ):
+        if target_len == 1 or (prefix_lens is not None and bool(mx.any(prefix_lens > 0))):
             conv_state, state = cache.read_states(state_slot_mapping)
         else:
             conv_state = mx.zeros(
