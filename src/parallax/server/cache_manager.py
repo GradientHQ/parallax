@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import mlx.core as mx
 
@@ -126,6 +126,7 @@ class CacheManager:
                 block_size=block_size,
                 max_cached_blocks=self.max_cached_blocks,
                 on_block_evict=self._on_prefix_block_evict,
+                has_linear_cache=self.needs_slots,
             )
             logger.info(f"Prefix cache enabled with max_cached_blocks={self.max_cached_blocks}")
 
@@ -277,8 +278,43 @@ class CacheManager:
 
         return blocks_ok and slots_ok
 
+    def _zero_linear_slot(self, slot: int):
+        for cache in self.caches:
+            if isinstance(cache, LinearCache):
+                cache.zero_slot(slot)
+
+    def _snapshot_linear_slot(self, slot: int) -> Optional[List[Any]]:
+        snapshots = []
+        for cache in self.caches:
+            if isinstance(cache, LinearCache):
+                snapshots.append(cache.snapshot_slot(slot))
+        return snapshots or None
+
+    def _restore_linear_slot(self, slot: int, snapshot: List[Any]):
+        linear_idx = 0
+        for cache in self.caches:
+            if isinstance(cache, LinearCache):
+                cache.restore_slot(slot, snapshot[linear_idx])
+                linear_idx += 1
+
+    def _match_token_ids(self, token_ids: List[int]) -> List[int]:
+        if token_ids:
+            return token_ids[:-1]
+        return token_ids
+
+    def get_reusable_prefix_len(self, token_ids: List[int]) -> int:
+        """Return the prefix length that can be safely skipped for this model."""
+        if not self.prefix_cache or not self.needs_blocks:
+            return 0
+
+        _, matched_tokens = self.prefix_cache.match_prefix(self._match_token_ids(token_ids))
+        return matched_tokens
+
     def allocate_request(
-        self, request_id: str, prompt_len: int, token_ids: Optional[List[int]] = None
+        self,
+        request_id: str,
+        prompt_len: int,
+        token_ids: Optional[List[int]] = None,
     ) -> Tuple[bool, int]:
         """Allocate KV cache blocks for a request.
 
@@ -294,10 +330,12 @@ class CacheManager:
 
         # 1. Try to match prefix from cache first
         matched_blocks = []
+        matched_nodes = []
+        matched_snapshot = None
         matched_tokens = 0
         if self.prefix_cache and token_ids is not None and self.needs_blocks:
             # Always save token_ids for later insertion to prefix cache
-            self.request_token_ids[request_id] = token_ids
+            self.request_token_ids[request_id] = list(token_ids)
 
             # Debug: Log token_ids to understand prefix cache behavior
             logger.debug(
@@ -306,18 +344,22 @@ class CacheManager:
                 f"last 20 tokens={token_ids[-20:]}"
             )
 
-            matched_blocks, matched_tokens = self.prefix_cache.match_prefix(token_ids)
+            match_token_ids = self._match_token_ids(token_ids)
+            matched_blocks, matched_tokens = self.prefix_cache.match_prefix(match_token_ids)
             if matched_tokens > 0:
-                matched_nodes = []
-                temp_node = self.prefix_cache.root
-                for i, block_id in enumerate(matched_blocks):
-                    block_start = i * self.block_size
-                    block_end = block_start + self.block_size
-                    block_tokens = token_ids[block_start:block_end]
-                    first_token = block_tokens[0]
-                    temp_node = temp_node.children[first_token]
-                    matched_nodes.append(temp_node)
+                matched_nodes = self.prefix_cache.get_path(match_token_ids[:matched_tokens])
+                if len(matched_nodes) != len(matched_blocks):
+                    matched_blocks = []
+                    matched_nodes = []
+                    matched_tokens = 0
+                elif self.needs_slots:
+                    matched_snapshot = matched_nodes[-1].linear_snapshot
+                    if matched_snapshot is None:
+                        matched_blocks = []
+                        matched_nodes = []
+                        matched_tokens = 0
 
+            if matched_tokens > 0:
                 self.prefix_cache.register_request(request_id, matched_nodes)
 
                 logger.info(
@@ -330,7 +372,9 @@ class CacheManager:
         if self.needs_slots:
             slot = self.slot_allocator.allocate()
             if slot == -1:
-                return False
+                if self.prefix_cache and request_id in self.prefix_cache.request_to_nodes:
+                    self.prefix_cache.release_request(request_id)
+                return False, 0
 
         # 3. Allocate Blocks (if needed)
         blocks = matched_blocks.copy()
@@ -359,14 +403,10 @@ class CacheManager:
 
         if self.needs_slots:
             self.request_slots[request_id] = slot
-            # Zero out state caches for this slot
-            for cache in self.caches:
-                if isinstance(cache, LinearCache):
-                    # Zero out conv and linear states
-                    if cache.conv_state_cache is not None:
-                        cache.conv_state_cache[..., slot, :, :] = 0
-                    if cache.linear_state_cache is not None:
-                        cache.linear_state_cache[..., slot, :, :, :] = 0
+            if matched_snapshot is not None:
+                self._restore_linear_slot(slot, matched_snapshot)
+            else:
+                self._zero_linear_slot(slot)
 
         return True, matched_tokens
 
@@ -473,20 +513,15 @@ class CacheManager:
 
         self.request_token_ids[request_id] = token_ids
 
-        matched_blocks, matched_tokens = self.prefix_cache.match_prefix(token_ids)
+        match_token_ids = self._match_token_ids(token_ids)
+        matched_blocks, matched_tokens = self.prefix_cache.match_prefix(match_token_ids)
 
         if matched_tokens == 0:
             return 0
 
-        matched_nodes = []
-        temp_node = self.prefix_cache.root
-        for block_id in matched_blocks:
-            block_start = len(matched_nodes) * self.block_size
-            block_end = block_start + self.block_size
-            block_tokens = token_ids[block_start:block_end]
-            first_token = block_tokens[0]
-            temp_node = temp_node.children[first_token]
-            matched_nodes.append(temp_node)
+        matched_nodes = self.prefix_cache.get_path(match_token_ids[:matched_tokens])
+        if len(matched_nodes) != len(matched_blocks):
+            return 0
 
         self.prefix_cache.register_request(request_id, matched_nodes)
 
@@ -558,6 +593,26 @@ class CacheManager:
 
             self.prefix_cache.request_to_nodes[request_id] = registered_nodes
             self.prefix_cache.increase_lock_ref(registered_nodes)
+
+        if (
+            self.needs_slots
+            and context_len % self.block_size == 0
+            and request_id in self.request_slots
+            and num_full_blocks > 0
+            and len(registered_nodes) >= num_full_blocks
+        ):
+            slot = self.request_slots[request_id]
+            snapshot = self._snapshot_linear_slot(slot)
+            if snapshot is not None:
+                attached = self.prefix_cache.attach_linear_snapshot(
+                    token_ids[:context_len], snapshot
+                )
+                if attached:
+                    logger.debug(
+                        "Attached linear snapshot for request %s at prefix_len=%d",
+                        request_id,
+                        context_len,
+                    )
 
     def update_request_tokens(self, request_id: str, new_token_ids: List[int]):
         """

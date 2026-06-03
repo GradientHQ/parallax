@@ -4,10 +4,6 @@ hidden_dimefines the Qwen3 model.
 
 from typing import Any, List, Optional
 
-from parallax_utils.logging_config import get_logger
-
-logger = get_logger(__name__)
-
 import mlx.core as mx
 import mlx.nn as nn
 from mlx_lm.models.base import scaled_dot_product_attention
@@ -19,7 +15,10 @@ from mlx_lm.models.qwen3_next import Qwen3NextGatedDeltaNet as MLXQwen3NextGated
 
 from parallax.server.cache.base import BaseCache
 from parallax.utils.prefix_cache_utils import compute_attention_with_prefix_cache
+from parallax_utils.logging_config import get_logger
 from parallax_extensions.ops import paged_attention_v1, reshape_and_cache
+
+logger = get_logger(__name__)
 
 
 class ParallaxQwen3NextAttention(MLXQwen3NextAttention):
@@ -153,14 +152,24 @@ class ParallaxQwen3NextGatedDeltaNet(MLXQwen3NextGatedDeltaNet):
         x: mx.array,
         cache: Optional[BaseCache] = None,
         state_slot_mapping: Optional[mx.array] = None,
+        prefix_lens: Optional[mx.array] = None,
+        context_lengths: Optional[mx.array] = None,
         **kwargs,
     ):
         batch, target_len, _ = x.shape
+        assert cache is not None
+        assert state_slot_mapping is not None
+
         q, k, v, z, b, a = self.fix_query_key_value_ordering(
             self.in_proj_qkvz(x), self.in_proj_ba(x)
         )
+        input_lengths = None
+        if prefix_lens is not None and context_lengths is not None:
+            input_lengths = context_lengths - prefix_lens
 
-        if target_len == 1:
+        if target_len == 1 or (
+            prefix_lens is not None and bool(mx.any(prefix_lens > 0))
+        ):
             conv_state, state1 = cache.read_states(state_slot_mapping)
         else:
             conv_state = mx.zeros(
@@ -177,9 +186,20 @@ class ParallaxQwen3NextGatedDeltaNet(MLXQwen3NextGatedDeltaNet):
             ],
             axis=-1,
         )
+        linear_mask = None
+        if input_lengths is not None:
+            linear_mask = mx.arange(target_len)[None, :] < input_lengths[:, None]
+            mixed_qkv = mx.where(linear_mask[..., None], mixed_qkv, 0)
+
         conv_input = mx.concatenate([conv_state, mixed_qkv], axis=1)
 
-        state0 = conv_input[:, -(self.conv_kernel_size - 1) :]
+        if input_lengths is not None:
+            n_keep = self.conv_kernel_size - 1
+            ends = mx.clip(input_lengths, 0, target_len)
+            positions = (ends[:, None] + mx.arange(n_keep))[..., None]
+            state0 = mx.take_along_axis(conv_input, positions, axis=1)
+        else:
+            state0 = conv_input[:, -(self.conv_kernel_size - 1) :]
         conv_out = nn.silu(self.conv1d(conv_input))
 
         q, k, v = [
@@ -194,7 +214,17 @@ class ParallaxQwen3NextGatedDeltaNet(MLXQwen3NextGatedDeltaNet):
         inv_scale = k.shape[-1] ** -0.5
         q = (inv_scale**2) * mx.fast.rms_norm(q, None, 1e-6)
         k = inv_scale * mx.fast.rms_norm(k, None, 1e-6)
-        out, state1 = gated_delta_update(q, k, v, a, b, self.A_log, self.dt_bias, state1)
+        out, state1 = gated_delta_update(
+            q,
+            k,
+            v,
+            a,
+            b,
+            self.A_log,
+            self.dt_bias,
+            state1,
+            linear_mask,
+        )
         out = self.norm(out, z)
 
         cache.write_states(state_slot_mapping, state0, state1)
@@ -226,7 +256,11 @@ class ParallaxQwen3NextBlock(MLXQwen3NextBlock):
         if self.is_linear:
             state_slot_mapping = kwargs.pop("state_slot_mapping", None)
             r = self.linear_attn(
-                self.input_layernorm(x), cache[self.local_layer_idx], state_slot_mapping, **kwargs
+                self.input_layernorm(x),
+                cache[self.local_layer_idx],
+                state_slot_mapping,
+                context_lengths=context_lengths,
+                **kwargs,
             )
         else:
             r = self.self_attn(

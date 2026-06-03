@@ -479,6 +479,8 @@ class MLXExecutor(BaseExecutor):
 
         # Update prefix cache: insert full blocks after prefill
         if self.enable_prefix_cache:
+            if is_prefill_batch:
+                mx.synchronize()
             for req in requests:
                 if req.is_prefill:
                     # Insert all full blocks from this prefill into the prefix cache
@@ -609,7 +611,9 @@ class MLXExecutor(BaseExecutor):
                 token_ids = req.input_ids
 
             success, matched_tokens = self.cache_manager.allocate_request(
-                req.request_id, req.total_length, token_ids=token_ids
+                req.request_id,
+                req.total_length,
+                token_ids=token_ids,
             )
             if not success:
                 raise RuntimeError(f"OOM during prefill allocation for {req.request_id}")
