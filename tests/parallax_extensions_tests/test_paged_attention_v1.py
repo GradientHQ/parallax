@@ -227,6 +227,52 @@ def _bench_new(
 
 class TestPagedAttentionV1:
 
+    def test_long_context_matches_sdpa_at_32k(self):
+        mx.random.seed(42)
+        np.random.seed(42)
+
+        batch_size = 1
+        num_heads = 16
+        num_kv_heads = 2
+        head_dim = 256
+        seq_len = 32768
+        block_size = 1
+        dtype = mx.bfloat16
+        scale = 1.0 / math.sqrt(head_dim)
+        packing = get_packing_factor(dtype)
+
+        q = mx.random.normal((batch_size, num_heads, head_dim)).astype(dtype)
+        key_cache = mx.random.normal(
+            (seq_len, num_kv_heads, head_dim // packing, block_size, packing)
+        ).astype(dtype)
+        value_cache = mx.random.normal(
+            (seq_len, num_kv_heads, head_dim, block_size)
+        ).astype(dtype)
+        block_tables = mx.array(np.arange(seq_len, dtype=np.int32).reshape(1, seq_len))
+        context_lengths = mx.array([seq_len], dtype=mx.int32)
+
+        out = paged_attention_v1(
+            queries=q,
+            key_cache=key_cache,
+            value_cache=value_cache,
+            block_tables=block_tables,
+            context_lengths=context_lengths,
+            block_size=block_size,
+            scale=scale,
+            num_kv_heads=num_kv_heads,
+        )
+
+        dense_q = q[:, :, None, :]
+        dense_k = key_cache[:, :, :, 0, :].reshape(
+            seq_len, num_kv_heads, head_dim
+        ).transpose(1, 0, 2)[None, :, :, :]
+        dense_v = value_cache[:, :, :, 0].transpose(1, 0, 2)[None, :, :, :]
+        ref = mx.fast.scaled_dot_product_attention(dense_q, dense_k, dense_v, scale=scale)
+        mx.eval(out, ref)
+
+        assert not bool(mx.any(mx.isnan(out)).item())
+        assert float(mx.max(mx.abs(out - ref)).item()) < 0.001
+
     @pytest.mark.parametrize("dtype", [mx.float32, mx.float16])
     def test_basic_functionality(self, dtype):
         mx.random.seed(42)
