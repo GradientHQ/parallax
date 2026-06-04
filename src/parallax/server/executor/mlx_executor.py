@@ -193,6 +193,7 @@ class MLXExecutor(BaseExecutor):
             kv_block_size,
             self.num_shard_layers,
         )
+        normalized_chunked_prefill_size = None
         if chunked_prefill_size is not None:
             if chunked_prefill_size < 0:
                 raise ValueError("chunked_prefill_size must be non-negative")
@@ -201,6 +202,10 @@ class MLXExecutor(BaseExecutor):
             elif not enable_prefix_cache:
                 raise ValueError(
                     "Chunked prefill is not supported when disable prefix cache, please enable prefix cache or set --chunked-prefill-size 0"
+                )
+            else:
+                normalized_chunked_prefill_size = (
+                    (chunked_prefill_size + kv_block_size - 1) // kv_block_size * kv_block_size
                 )
 
         self.cache_manager = CacheManager(
@@ -223,16 +228,10 @@ class MLXExecutor(BaseExecutor):
             linear_num_v_heads=linear_num_value_heads,
             enable_prefix_cache=enable_prefix_cache,
             sliding_window=sliding_window,
+            chunked_prefill_size=normalized_chunked_prefill_size,
         )
 
-        if chunked_prefill_size is not None:
-            self.chunked_prefill_size = (
-                (chunked_prefill_size + self.cache_manager.block_size - 1)
-                // self.cache_manager.block_size
-                * self.cache_manager.block_size
-            )
-        else:
-            self.chunked_prefill_size = None
+        self.chunked_prefill_size = normalized_chunked_prefill_size
         self.cache_manager.chunked_prefill_size = self.chunked_prefill_size
         self.cache_manager.defer_prefill_allocation = self.chunked_prefill_size is not None
 

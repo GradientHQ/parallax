@@ -30,7 +30,7 @@ ref_tokenizer = load_tokenizer(model_path, eos_token_ids=ref_config.get("eos_tok
         [(0, 8), (8, 16), (16, TOTAL_LAYERS)],
     ],
 )
-def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
+def test_shard_prefill(monkeypatch, layers_config: List[Tuple[int, int]]) -> None:
     """Load sharded model based on layers_config and
     compare its forward pass with a full reference model.
     """
@@ -90,18 +90,20 @@ def test_shard_prefill(layers_config: List[Tuple[int, int]]) -> None:
         "num_attention_heads"
     )
 
+    def fixed_cache_allocation(self, cache_memory_fraction, dtype):
+        return 200, 0
+
+    monkeypatch.setattr(CacheManager, "_calculate_cache_allocation", fixed_cache_allocation)
+
     cache_managers = []
-    cache_memory_fraction = 0
     for shard in model_shards:
         num_shard_layers = shard.end_layer - shard.start_layer
-        cache_memory_fraction += 0.1
         cache_mgr = CacheManager(
             num_layers=num_shard_layers,
             num_kv_heads=num_kv_heads,
             head_dim=head_dim,
             dtype=dtype,
             block_size=64,
-            num_gpu_blocks=200,
         )
         cache_managers.append(cache_mgr)
 

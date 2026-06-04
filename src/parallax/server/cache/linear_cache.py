@@ -116,6 +116,25 @@ class LinearCache(BaseCache):
             else:
                 self.linear_state_cache[0, slot_idx] = linear_state
 
+    def copy_slot(self, dst_slot_idx: int, src_slot_idx: int):
+        """Copy recurrent state between two slots in the shared state cache."""
+        arrays = []
+
+        if self.conv_state_cache is not None:
+            conv_state = self.conv_state_cache[0, src_slot_idx]
+            conv_state = conv_state + mx.zeros_like(conv_state)
+            self.conv_state_cache[0, dst_slot_idx] = conv_state
+            arrays.append(self.conv_state_cache)
+
+        if self.linear_state_cache is not None:
+            linear_state = self.linear_state_cache[0, src_slot_idx]
+            linear_state = linear_state + mx.zeros_like(linear_state)
+            self.linear_state_cache[0, dst_slot_idx] = linear_state
+            arrays.append(self.linear_state_cache)
+
+        if arrays:
+            mx.eval(*arrays)
+
     def read_states(self, slot_mapping: mx.array) -> Tuple[Optional[mx.array], Optional[mx.array]]:
         conv_state_list = []
         linear_state_list = []

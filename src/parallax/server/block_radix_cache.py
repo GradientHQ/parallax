@@ -4,7 +4,7 @@ Block-based Prefix Cache implementation using Radix Tree.
 
 import heapq
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from parallax_utils.logging_config import get_logger
 
@@ -25,7 +25,7 @@ class BlockTreeNode:
         self.block_id = block_id
         self.token_ids = token_ids or []
         self.prefix_len = prefix_len
-        self.linear_snapshot: Optional[Any] = None
+        self.linear_slot: Optional[int] = None
         self.children: Dict[int, "BlockTreeNode"] = {}
         self.parent: Optional["BlockTreeNode"] = None
         self.lock_ref = 0
@@ -49,20 +49,20 @@ class BlockRadixCache:
     def __init__(
         self,
         block_size: int,
-        max_cached_blocks: int = 1000,
         on_block_evict: Optional[Callable[[int], None]] = None,
+        on_linear_slot_evict: Optional[Callable[[int], None]] = None,
         has_linear_cache: bool = False,
     ):
         """
         Args:
             block_size: Number of tokens per block
-            max_cached_blocks: Maximum number of blocks to cache
             on_block_evict: Callback function when a block is evicted, receives block_id
-            has_linear_cache: Whether reusable nodes must also carry linear snapshots
+            on_linear_slot_evict: Callback function when a linear slot is evicted
+            has_linear_cache: Whether reusable nodes must also carry linear slots
         """
         self.block_size = block_size
-        self.max_cached_blocks = max_cached_blocks
         self.on_block_evict = on_block_evict
+        self.on_linear_slot_evict = on_linear_slot_evict
         self.has_linear_cache = has_linear_cache
 
         self.root = BlockTreeNode(block_id=None, token_ids=[])
@@ -70,10 +70,6 @@ class BlockRadixCache:
 
         self.num_cached_blocks = 0
         self.request_to_nodes: Dict[str, List[BlockTreeNode]] = {}
-
-        logger.info(
-            f"BlockRadixCache initialized: block_size={block_size}, max_cached_blocks={max_cached_blocks}"
-        )
 
     def match_prefix(self, token_ids: List[int]) -> Tuple[List[int], int]:
         """
@@ -121,7 +117,7 @@ class BlockRadixCache:
             current_node = child_node
             current_node.last_access_time = time.monotonic()
 
-            if not self.has_linear_cache or child_node.linear_snapshot is not None:
+            if not self.has_linear_cache or child_node.linear_slot is not None:
                 reusable_blocks = matched_blocks.copy()
                 reusable_tokens = matched_tokens
 
@@ -166,15 +162,6 @@ class BlockRadixCache:
         if len(path) != num_blocks:
             return None
         return path[-1]
-
-    def attach_linear_snapshot(self, token_ids: List[int], snapshot: Any) -> bool:
-        """Attach a linear state snapshot to the exact prefix represented by token_ids."""
-        node = self.get_node_for_token_ids(token_ids)
-        if node is None:
-            return False
-        node.linear_snapshot = snapshot
-        node.last_access_time = time.monotonic()
-        return True
 
     def insert_block(
         self,
@@ -228,9 +215,6 @@ class BlockRadixCache:
 
         self.num_cached_blocks += 1
 
-        if self.num_cached_blocks > self.max_cached_blocks:
-            self._evict_lru_blocks(self.num_cached_blocks - self.max_cached_blocks)
-
         return new_node
 
     def increase_lock_ref(self, nodes: List[BlockTreeNode]):
@@ -265,8 +249,11 @@ class BlockRadixCache:
 
         logger.debug(f"Released request {request_id}, decreased ref count for {len(nodes)} nodes")
 
-    def _evict_lru_blocks(self, num_blocks: int):
+    def evict_lru_blocks(self, num_blocks: int) -> int:
         """Evict LRU blocks."""
+        if num_blocks <= 0:
+            return 0
+
         leaves = self._collect_leaves()
         heapq.heapify(leaves)
 
@@ -287,6 +274,7 @@ class BlockRadixCache:
                 heapq.heappush(leaves, node.parent)
 
         logger.info(f"Evicted {num_evicted} blocks from cache")
+        return num_evicted
 
     def _collect_leaves(self) -> List[BlockTreeNode]:
         """Collect all leaf nodes."""
@@ -304,7 +292,9 @@ class BlockRadixCache:
 
     def _delete_leaf(self, node: BlockTreeNode):
         """Delete a leaf node and free the physical block."""
-        node.linear_snapshot = None
+        if self.on_linear_slot_evict and node.linear_slot is not None:
+            self.on_linear_slot_evict(node.linear_slot)
+        node.linear_slot = None
 
         if node.parent:
             for key, child in list(node.parent.children.items()):
@@ -339,6 +329,5 @@ class BlockRadixCache:
         """Get cache statistics."""
         return {
             "num_cached_blocks": self.num_cached_blocks,
-            "max_cached_blocks": self.max_cached_blocks,
             "num_requests": len(self.request_to_nodes),
         }

@@ -46,9 +46,10 @@ class BlockAllocator:
 class SlotAllocator:
     """Manages allocation of request slots (indices)."""
 
-    def __init__(self, num_slots: int):
+    def __init__(self, num_slots: int, start_idx: int = 0):
         self.num_slots = num_slots
-        self.free_slots: List[int] = list(range(num_slots))
+        self.start_idx = start_idx
+        self.free_slots: List[int] = list(range(start_idx, start_idx + num_slots))
         self.used_slots: Set[int] = set()
 
     def allocate(self) -> int:
