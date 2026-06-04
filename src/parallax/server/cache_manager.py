@@ -217,10 +217,7 @@ class CacheManager:
             and self.linear_num_v_heads is not None
         ):
             one_layer_bytes += (
-                self.linear_num_v_heads
-                * self.linear_v_dim
-                * self.linear_k_dim
-                * dtype_size
+                self.linear_num_v_heads * self.linear_v_dim * self.linear_k_dim * dtype_size
             )
 
         return one_layer_bytes * num_linear_layers
