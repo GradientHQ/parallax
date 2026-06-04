@@ -245,9 +245,7 @@ class TestPagedAttentionV1:
         key_cache = mx.random.normal(
             (seq_len, num_kv_heads, head_dim // packing, block_size, packing)
         ).astype(dtype)
-        value_cache = mx.random.normal(
-            (seq_len, num_kv_heads, head_dim, block_size)
-        ).astype(dtype)
+        value_cache = mx.random.normal((seq_len, num_kv_heads, head_dim, block_size)).astype(dtype)
         block_tables = mx.array(np.arange(seq_len, dtype=np.int32).reshape(1, seq_len))
         context_lengths = mx.array([seq_len], dtype=mx.int32)
 
@@ -263,9 +261,11 @@ class TestPagedAttentionV1:
         )
 
         dense_q = q[:, :, None, :]
-        dense_k = key_cache[:, :, :, 0, :].reshape(
-            seq_len, num_kv_heads, head_dim
-        ).transpose(1, 0, 2)[None, :, :, :]
+        dense_k = (
+            key_cache[:, :, :, 0, :]
+            .reshape(seq_len, num_kv_heads, head_dim)
+            .transpose(1, 0, 2)[None, :, :, :]
+        )
         dense_v = value_cache[:, :, :, 0].transpose(1, 0, 2)[None, :, :, :]
         ref = mx.fast.scaled_dot_product_attention(dense_q, dense_k, dense_v, scale=scale)
         mx.eval(out, ref)
