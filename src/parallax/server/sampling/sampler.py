@@ -41,7 +41,7 @@ class SamplingBatchInfo:
             if r.sampling_params is None:
                 r.sampling_params = SamplingParams()
 
-        is_all_greedy = all(r.sampling_params.top_k <= 1 for r in reqs)
+        is_all_greedy = all(r.sampling_params.top_k == 1 for r in reqs)
         need_min_p_sampling = any(r.sampling_params.min_p > 0 for r in reqs)
 
         temperatures = mx.array(
@@ -103,7 +103,8 @@ def apply_top_k_top_p_min_p_sampling(
     probs_idx = mx.argsort(-logits, axis=-1)
     probs_sort = mx.take_along_axis(logits, probs_idx, axis=-1)
     probs_sum = mx.cumsum(probs_sort, axis=-1)
-    top_k_mask = mx.arange(0, logits.shape[-1]).reshape(1, -1) < top_ks.reshape(-1, 1)
+    token_ranks = mx.arange(0, logits.shape[-1]).reshape(1, -1)
+    top_k_mask = (top_ks.reshape(-1, 1) <= 0) | (token_ranks < top_ks.reshape(-1, 1))
     probs_sort = probs_sort * top_k_mask
     top_p_mask = (probs_sum - probs_sort) <= top_ps.reshape(-1, 1)
     probs_sort = probs_sort * top_p_mask

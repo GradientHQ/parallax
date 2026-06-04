@@ -424,7 +424,8 @@ class MLXExecutor(BaseExecutor):
             prefix_lens=prepared_inputs.get("prefix_lens"),  # For RoPE offset in prefix cache
         )
         mx.eval(hidden_states)
-        if is_prefill_batch and self.chunked_prefill_size is not None:
+
+        if self.cache_manager.needs_slots:
             self.cache_manager.materialize_linear_caches()
 
         if logger.isEnabledFor(logging.DEBUG):

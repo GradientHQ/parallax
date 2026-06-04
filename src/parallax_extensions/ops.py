@@ -46,7 +46,10 @@ def load_extension_module() -> ModuleType:
 
 _ext = load_extension_module()
 _ext_paged_attention_v1 = _ext.paged_attention_v1
+_ext_paged_attention_v2 = _ext.paged_attention_v2
 _ext_reshape_and_cache = _ext.reshape_and_cache
+
+_PAGED_ATTENTION_V1_MAX_LENGTH = 8192
 
 
 def reshape_and_cache(
@@ -109,7 +112,7 @@ def reshape_and_cache(
     return
 
 
-def paged_attention_v1(
+def _prepare_paged_attention_inputs(
     queries: mx.array,
     key_cache: mx.array,
     value_cache: mx.array,
@@ -123,10 +126,8 @@ def paged_attention_v1(
     top_k_indices: Optional[mx.array] = None,
     window_size: Optional[int] = None,
     sinks: Optional[mx.array] = None,
-) -> mx.array:
-    """
-    Wrapper for paged_attention_v1 kernel in parallax_extensions
-    """
+):
+    """Normalize inputs shared by paged attention wrappers."""
 
     #  (B, H, 1, D) -> (B, H, D)
     if queries.ndim == 4:
@@ -153,6 +154,122 @@ def paged_attention_v1(
             sinks = sinks.astype(mx.float32)
 
     max_seq_len = block_tables.shape[1] * block_size
+
+    return queries, sinks, has_sink, window_size, max_seq_len
+
+
+def paged_attention_v2(
+    queries: mx.array,
+    key_cache: mx.array,
+    value_cache: mx.array,
+    block_tables: mx.array,
+    context_lengths: mx.array,
+    block_size: int,
+    scale: float,
+    num_kv_heads: int,
+    v_head_dim: Optional[int] = None,
+    # NOTE: The following parameters are not yet supported by this Kernel.
+    top_k_indices: Optional[mx.array] = None,
+    window_size: Optional[int] = None,
+    sinks: Optional[mx.array] = None,
+) -> mx.array:
+    """Wrapper for partitioned paged_attention_v2 kernel in parallax_extensions."""
+
+    queries, sinks, has_sink, window_size, max_seq_len = _prepare_paged_attention_inputs(
+        queries,
+        key_cache,
+        value_cache,
+        block_tables,
+        context_lengths,
+        block_size,
+        scale,
+        num_kv_heads,
+        v_head_dim,
+        top_k_indices,
+        window_size,
+        sinks,
+    )
+    if has_sink and max_seq_len > 512:
+        raise NotImplementedError(
+            "paged_attention_v2 does not yet support attention sinks across multiple partitions"
+        )
+
+    output = _ext_paged_attention_v2(
+        queries,
+        key_cache,
+        value_cache,
+        block_tables,
+        context_lengths,
+        num_kv_heads,
+        block_size,
+        max_seq_len,
+        scale,
+        window_size,
+        sinks,
+        has_sink,
+    )
+
+    #  (B, H, D) -> (B, H, 1, D)
+    return output[:, :, None, :]
+
+
+def paged_attention_v1(
+    queries: mx.array,
+    key_cache: mx.array,
+    value_cache: mx.array,
+    block_tables: mx.array,
+    context_lengths: mx.array,
+    block_size: int,
+    scale: float,
+    num_kv_heads: int,
+    v_head_dim: Optional[int] = None,
+    # NOTE: The following parameters are not yet supported by this Kernel.
+    top_k_indices: Optional[mx.array] = None,
+    window_size: Optional[int] = None,
+    sinks: Optional[mx.array] = None,
+) -> mx.array:
+    """
+    Wrapper for paged_attention_v1 kernel in parallax_extensions.
+
+    Long decode contexts are dispatched to the partitioned v2 kernel to avoid
+    v1's context-length-sized threadgroup logits buffer.
+    """
+
+    queries, sinks, has_sink, window_size, max_seq_len = _prepare_paged_attention_inputs(
+        queries,
+        key_cache,
+        value_cache,
+        block_tables,
+        context_lengths,
+        block_size,
+        scale,
+        num_kv_heads,
+        v_head_dim,
+        top_k_indices,
+        window_size,
+        sinks,
+    )
+
+    effective_logits_len = max_seq_len
+    if window_size > 0:
+        effective_logits_len = min(max_seq_len, window_size + block_size)
+
+    if has_sink == 0 and effective_logits_len > _PAGED_ATTENTION_V1_MAX_LENGTH:
+        output = _ext_paged_attention_v2(
+            queries,
+            key_cache,
+            value_cache,
+            block_tables,
+            context_lengths,
+            num_kv_heads,
+            block_size,
+            max_seq_len,
+            scale,
+            window_size,
+            sinks,
+            has_sink,
+        )
+        return output[:, :, None, :]
 
     output = _ext_paged_attention_v1(
         queries,
