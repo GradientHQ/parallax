@@ -46,7 +46,7 @@ def load_extension_module() -> ModuleType:
 
 _ext = load_extension_module()
 _ext_paged_attention_v1 = _ext.paged_attention_v1
-_ext_paged_attention_v2 = getattr(_ext, "paged_attention_v2", None)
+_ext_paged_attention_v2 = _ext.paged_attention_v2
 _ext_reshape_and_cache = _ext.reshape_and_cache
 
 _PAGED_ATTENTION_V1_MAX_LENGTH = 8192
@@ -108,7 +108,7 @@ def reshape_and_cache(
             slot_mapping = slot_mapping.astype(mx.int64)
 
     op = _ext_reshape_and_cache(key, value, key_cache, value_cache, slot_mapping)
-    mx.eval(op)
+    mx.async_eval(op)
     return
 
 
@@ -174,12 +174,6 @@ def paged_attention_v2(
     sinks: Optional[mx.array] = None,
 ) -> mx.array:
     """Wrapper for partitioned paged_attention_v2 kernel in parallax_extensions."""
-
-    if _ext_paged_attention_v2 is None:
-        raise ImportError(
-            "paged_attention_v2 is not available in the loaded native extension. "
-            "Rebuild with: python src/parallax_extensions/setup.py build_ext -j8 --inplace"
-        )
 
     queries, sinks, has_sink, window_size, max_seq_len = _prepare_paged_attention_inputs(
         queries,
@@ -261,11 +255,6 @@ def paged_attention_v1(
         effective_logits_len = min(max_seq_len, window_size + block_size)
 
     if has_sink == 0 and effective_logits_len > _PAGED_ATTENTION_V1_MAX_LENGTH:
-        if _ext_paged_attention_v2 is None:
-            raise ImportError(
-                "Long-context paged attention requires paged_attention_v2. "
-                "Rebuild with: python src/parallax_extensions/setup.py build_ext -j8 --inplace"
-            )
         output = _ext_paged_attention_v2(
             queries,
             key_cache,
