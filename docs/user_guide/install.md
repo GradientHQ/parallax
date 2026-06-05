@@ -4,7 +4,7 @@
 ### Prerequisites
 - Python>=3.11.0,<3.14.0
 - Git and curl
-- Ubuntu-24.04 for Blackwell GPUs
+- Ubuntu-24.04 is required when running on Blackwell GPUs (B100/B200/RTX 50 series) from source; for other GPUs and Docker, see the [Docker section](#docker) below.
 
 Below are installation methods for different operating systems.
 
@@ -18,6 +18,11 @@ Below are installation methods for different operating systems.
 
 The source install script installs `uv` if needed, creates `.venv`, installs
 Parallax, and builds the `vllm-rs` frontend binary into `.venv/bin`.
+
+The bundled `vllm-rs` Rust HTTP frontend is built from vLLM source at
+`v0.22.0` by default (controlled by the `VLLM_REF` env var in `install.sh`).
+This is independent of the optional `vllm` Python extras (`vllm==0.14.0`),
+which only apply when using the vLLM GPU backend.
 
 ```sh
 git clone https://github.com/GradientHQ/parallax.git
