@@ -162,6 +162,7 @@ def main():
         dtype=model.dtype,
         block_size=32,
         cache_memory_fraction=0.1,
+        max_num_seqs=1,
         head_dim_v=v_head_dim,
         layer_types=layer_types,
         conv_dim=conv_dim,
@@ -230,8 +231,9 @@ def main():
     )
 
     sampling_info = SamplingBatchInfo.from_reqs([request])
+    token_sampling_info = None if sampling_info.is_all_greedy else sampling_info
 
-    next_token_id = model.logits_to_tokens(logits, context_lengths, sampling_info)
+    next_token_id = model.logits_to_tokens(logits, context_lengths, token_sampling_info)
 
     token_id = int(next_token_id[0])
     is_finished = token_id in eos_token_ids
@@ -267,7 +269,7 @@ def main():
             state_slot_mapping=state_slot_mapping,
         )
 
-        next_token_id = model.logits_to_tokens(logits, mx.array([1]), sampling_info)
+        next_token_id = model.logits_to_tokens(logits, sampling_info=token_sampling_info)
 
         token_id = int(next_token_id[0])
         is_finished = token_id in eos_token_ids

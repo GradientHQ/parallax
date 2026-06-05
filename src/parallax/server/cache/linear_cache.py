@@ -136,22 +136,14 @@ class LinearCache(BaseCache):
             mx.eval(*arrays)
 
     def read_states(self, slot_mapping: mx.array) -> Tuple[Optional[mx.array], Optional[mx.array]]:
-        conv_state_list = []
-        linear_state_list = []
-
-        for slot_idx in slot_mapping:
-            slot_idx = int(slot_idx)
-            if self.conv_state_cache is not None:
-                conv_state_slice = self.conv_state_cache[0, slot_idx]
-                conv_state_list.append(conv_state_slice[None, :, :])
-
-            if self.linear_state_cache is not None:
-                linear_state_slice = self.linear_state_cache[0, slot_idx]
-                linear_state_list.append(linear_state_slice[None, :, :, :])
-
-        conv_states = mx.concatenate(conv_state_list, axis=0) if conv_state_list else None
-        linear_states = mx.concatenate(linear_state_list, axis=0) if linear_state_list else None
-
+        conv_states = (
+            self.conv_state_cache[0, slot_mapping] if self.conv_state_cache is not None else None
+        )
+        linear_states = (
+            self.linear_state_cache[0, slot_mapping]
+            if self.linear_state_cache is not None
+            else None
+        )
         return conv_states, linear_states
 
     def write_states(
@@ -160,13 +152,11 @@ class LinearCache(BaseCache):
         conv_states: Optional[mx.array],
         linear_states: Optional[mx.array],
     ):
-        for i, slot_idx in enumerate(slot_mapping):
-            slot_idx = int(slot_idx)
-            if self.conv_state_cache is not None and conv_states is not None:
-                self.conv_state_cache[0, slot_idx] = conv_states[i]
+        if self.conv_state_cache is not None and conv_states is not None:
+            self.conv_state_cache[0, slot_mapping] = conv_states
 
-            if self.linear_state_cache is not None and linear_states is not None:
-                self.linear_state_cache[0, slot_idx] = linear_states[i]
+        if self.linear_state_cache is not None and linear_states is not None:
+            self.linear_state_cache[0, slot_mapping] = linear_states
 
     def is_packed(self) -> bool:
         """LinearCache doesn't use packed format."""
