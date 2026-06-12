@@ -1,0 +1,12 @@
+python3 ./src/parallax/launch.py \
+--model-path  /Users/alizen/study_files/Dev/yuhao/models/Qwen3-VL-2B \
+--port 3210 \
+--start-layer 0 \
+--end-layer 28 \
+--kv-block-size 16 \
+--max-sequence-length 1000 \
+--max-num-tokens-per-batch 4096 \
+--kv-cache-memory-fraction 0.3 \
+--max-batch-size 4 \
+--log-level DEBUG \
+--use-hfcache

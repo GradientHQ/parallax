@@ -21,6 +21,7 @@ def compute_attention_with_prefix_cache(
     mask: Optional[mx.array] = None,
     sinks: Optional[mx.array] = None,
     window_size: Optional[int] = None,
+    unembed_out: Optional[bool] = False,
 ) -> mx.array:
     """
     Compute attention with prefix cache support.
@@ -57,13 +58,14 @@ def compute_attention_with_prefix_cache(
 
     if max_prefix_len > 0:
         # Initialize prefix KV arrays with zeros for padding
-        head_dim = k_new.shape[-1]
+        k_head_dim = k_new.shape[-1]
+        v_head_dim = v_new.shape[-1]
         prefix_k_batch = mx.zeros(
-            (batch, num_kv_heads, max_prefix_len, head_dim), dtype=k_new.dtype
-        )  # (batch, n_kv_heads, max_prefix_len, head_dim)
+            (batch, num_kv_heads, max_prefix_len, k_head_dim), dtype=k_new.dtype
+        )  # (batch, n_kv_heads, max_prefix_len, k_head_dim)
         prefix_v_batch = mx.zeros(
-            (batch, num_kv_heads, max_prefix_len, head_dim), dtype=v_new.dtype
-        )  # (batch, n_kv_heads, max_prefix_len, head_dim)
+            (batch, num_kv_heads, max_prefix_len, v_head_dim), dtype=v_new.dtype
+        )  # (batch, n_kv_heads, max_prefix_len, v_head_dim)
 
         # Batch read prefix KV for all requests
         for i in range(batch):
@@ -150,5 +152,6 @@ def compute_attention_with_prefix_cache(
         cache=None,
         **attention_kwargs,
     )
-    output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
+    if not unembed_out:
+        output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
     return output
