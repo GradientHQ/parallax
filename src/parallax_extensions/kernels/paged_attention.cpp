@@ -289,8 +289,9 @@ void SparsePagedAttention::eval_gpu(
 
     out.set_data(mlx::core::allocator::malloc(out.nbytes()));
 
-    constexpr int num_threads = 32;
+    constexpr int num_threads = 256;
     constexpr int num_simd_lanes = 32;
+    constexpr int num_simds = num_threads / num_simd_lanes;
     const int64_t num_seqs = q.shape(0);
     const int64_t num_heads = q.shape(1);
     const int64_t max_num_blocks_per_seq = block_tables.shape(1);
@@ -303,6 +304,11 @@ void SparsePagedAttention::eval_gpu(
 
     auto kernel = d.get_kernel(kname, lib);
     compute_encoder.set_compute_pipeline_state(kernel);
+
+    const int logits_size = (max_num_positions_ + head_size) * sizeof(float);
+    const int outputs_size = (num_simds / 2) * head_size * sizeof(float);
+    const size_t shared_memory_size = std::max(logits_size, outputs_size);
+    compute_encoder.set_threadgroup_memory_length(shared_memory_size, 0);
 
     int32_t num_kv_heads_32 = static_cast<int32_t>(num_kv_heads_);
     float scale_32 = static_cast<float>(scale_);

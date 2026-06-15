@@ -579,19 +579,31 @@ class MiniMaxAttention(nn.Module):
         else:
             qpos = q_positions[:, -1:]
 
+        invalid_block = mx.full(
+            sparse_block_indices.shape,
+            2_000_000_000 // max(self.sparse_block_size, 1),
+            dtype=mx.int32,
+        )
+        sparse_block_indices = mx.sort(
+            mx.where(sparse_block_valid != 0, sparse_block_indices, invalid_block),
+            axis=-1,
+        )
+
         offsets = mx.arange(self.sparse_block_size, dtype=mx.int32)
         token_positions = (
             sparse_block_indices[..., None] * self.sparse_block_size
             + offsets[None, None, None, :]
         )
-        token_valid = (sparse_block_valid[..., None] != 0) & (
-            token_positions <= qpos[:, :, None, None]
-        )
+        token_positions = token_positions.reshape(B, -1).astype(mx.int32)
+        token_valid = token_positions <= qpos
 
-        return (
-            token_positions.reshape(B, -1).astype(mx.int32),
-            token_valid.reshape(B, -1).astype(mx.int32),
-        )
+        valid_counts = mx.sum(token_valid.astype(mx.int32), axis=-1)
+        max_valid_count = max(1, int(mx.max(valid_counts)))
+        token_positions = token_positions[:, :max_valid_count]
+        token_valid = token_valid[:, :max_valid_count]
+        token_positions = mx.where(token_valid, token_positions, mx.zeros_like(token_positions))
+
+        return token_positions, token_valid.astype(mx.int32)
 
     def _read_prefix_index_keys(
         self,
@@ -702,27 +714,18 @@ class MiniMaxAttention(nn.Module):
 
         key_cache_global, value_cache_global = cache.get_cache()
         block_size = key_cache_global.shape[3]
-        try:
-            output = sparse_paged_attention(
-                queries,
-                key_cache_global,
-                value_cache_global,
-                block_tables,
-                context_lengths,
-                token_positions,
-                token_positions_valid,
-                block_size=block_size,
-                scale=self.scale,
-                num_kv_heads=self.num_key_value_heads,
-            )
-        except (NotImplementedError, RuntimeError, ValueError):
-            return self._sparse_decode_from_cache_dense(
-                queries,
-                idx_queries,
-                cache,
-                block_tables,
-                context_lengths,
-            )
+        output = sparse_paged_attention(
+            queries,
+            key_cache_global,
+            value_cache_global,
+            block_tables,
+            context_lengths,
+            token_positions,
+            token_positions_valid,
+            block_size=block_size,
+            scale=self.scale,
+            num_kv_heads=self.num_key_value_heads,
+        )
         return output.transpose(0, 2, 1, 3).reshape(B, 1, -1)
 
     def __call__(

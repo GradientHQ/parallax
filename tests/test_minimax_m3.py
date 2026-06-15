@@ -137,6 +137,25 @@ def test_sparse_index_blocks_expand_to_token_positions(m3_deps):
     assert m3_deps.np.array(token_valid[0]).tolist() == [1, 1]
 
 
+def test_sparse_token_positions_do_not_include_context_tail_padding(m3_deps):
+    mx = m3_deps.mx
+    args = _tiny_args(m3_deps)
+    attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
+
+    idx_queries = mx.ones((1, 2, 1, 4), dtype=mx.float32)
+    idx_keys = mx.ones((1, 1, 1, 4), dtype=mx.float32)
+
+    token_positions, token_valid = attention._build_sparse_token_positions(
+        idx_queries,
+        idx_keys,
+        q_positions=mx.array([0], dtype=mx.int32),
+    )
+    mx.eval(token_positions, token_valid)
+
+    assert m3_deps.np.array(token_positions[0]).tolist() == [0]
+    assert m3_deps.np.array(token_valid[0]).tolist() == [1]
+
+
 def test_sparse_mask_uses_real_key_positions_for_prefix_blocks(m3_deps):
     mx = m3_deps.mx
     args = _tiny_args(m3_deps)
