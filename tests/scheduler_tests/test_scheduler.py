@@ -113,6 +113,22 @@ def test_scheduler_bootstrap_wait_and_dynamic_events():
     sched._process_leaves()  # type: ignore[attr-defined]
 
 
+def test_scheduler_snapshot_handles_unallocated_standby_nodes():
+    """A joined standby node has no layer allocation yet; snapshot must not divide by zero."""
+    model = build_model_info(12)
+    n1 = build_node("standby-0", model, tflops=312.0, mem_gb=80.0, x=0, y=0)
+    sched = Scheduler(model, [], strategy="dp", routing_strategy="rr", min_nodes_bootstrapping=2)
+
+    sched.enqueue_join(n1)
+    sched._process_joins()  # type: ignore[attr-defined]
+
+    snapshot = sched.alloc_log_snapshot
+    assert "failed to build allocation snapshot" not in snapshot
+    assert "Standby nodes (1)" in snapshot
+    assert "standby-0" in snapshot
+    assert "latency     inf ms" in snapshot
+
+
 def test_scheduler_single_node_leave_then_rejoin_reassigns_layers():
     """With one node, after leave then re-join, layers should be re-assigned.
 
