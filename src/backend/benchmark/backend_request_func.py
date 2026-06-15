@@ -40,6 +40,8 @@ class RequestFuncOutput:
     success: bool = False
     latency: float = 0.0
     output_tokens: int = 0
+    stream_chunks: int = 0
+    content_chunks: int = 0
     ttft: float = 0.0  # Time to first token
     itl: List[float] = field(default_factory=list)  # List of inter-token latencies
     tpot: float = 0.0  # avg next-token latencies
@@ -94,6 +96,7 @@ async def async_request_openai_completions(
                         if not chunk_bytes:
                             continue
 
+                        output.stream_chunks += 1
                         chunk = chunk_bytes.decode("utf-8").removeprefix("data: ")
                         if chunk != "[DONE]":
                             data = json.loads(chunk)
@@ -106,6 +109,7 @@ async def async_request_openai_completions(
                                 # e.g. for special tokens
                                 text = choices[0].get("text")
                                 timestamp = time.perf_counter()
+                                output.content_chunks += 1
                                 # First token
                                 if not first_chunk_received:
                                     first_chunk_received = True
@@ -187,12 +191,10 @@ async def async_request_openai_chat_completions(
             "stream_options": {
                 "include_usage": True,
             },
-            "sampling_params": {
-                "top_k": 3,
-            },
+            "top_k": 3,
         }
         if request_func_input.ignore_eos:
-            payload["sampling_params"]["ignore_eos"] = request_func_input.ignore_eos
+            payload["ignore_eos"] = request_func_input.ignore_eos
         if request_func_input.extra_body:
             payload.update(request_func_input.extra_body)
         headers = {
@@ -217,6 +219,7 @@ async def async_request_openai_chat_completions(
                         if not chunk_bytes:
                             continue
 
+                        output.stream_chunks += 1
                         chunk = chunk_bytes.decode("utf-8").removeprefix("data: ")
                         if chunk != "[DONE]":
                             timestamp = time.perf_counter()
@@ -229,6 +232,7 @@ async def async_request_openai_chat_completions(
 
                                 # Only act on non-empty content tokens
                                 if content_str:
+                                    output.content_chunks += 1
                                     if not first_content_received:
                                         first_content_received = True
                                         output.ttft = timestamp - st

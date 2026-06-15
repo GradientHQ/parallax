@@ -116,6 +116,9 @@ class BenchmarkMetrics:
     completed: int
     total_input: int
     total_output: int
+    total_stream_chunks: int
+    total_content_chunks: int
+    mean_output_tokens_per_content_chunk: float
     request_throughput: float
     request_goodput: float
     output_throughput: float
@@ -375,6 +378,8 @@ def calculate_metrics(
     all_tpots: List[float] = []
     ttfts: List[float] = []
     e2els: List[float] = []
+    total_stream_chunks = 0
+    total_content_chunks = 0
     for i in range(len(outputs)):
         if outputs[i].success:
             output_len = outputs[i].output_tokens
@@ -390,6 +395,8 @@ def calculate_metrics(
                 )
             actual_output_lens.append(output_len)
             total_input += input_requests[i][1]
+            total_stream_chunks += outputs[i].stream_chunks
+            total_content_chunks += outputs[i].content_chunks
             tpot = 0
             if output_len > 1:
                 latency_minus_ttft = outputs[i].latency - outputs[i].ttft
@@ -433,6 +440,11 @@ def calculate_metrics(
         completed=completed,
         total_input=total_input,
         total_output=sum(actual_output_lens),
+        total_stream_chunks=total_stream_chunks,
+        total_content_chunks=total_content_chunks,
+        mean_output_tokens_per_content_chunk=(
+            sum(actual_output_lens) / total_content_chunks if total_content_chunks else 0
+        ),
         request_throughput=completed / dur_s,
         request_goodput=good_completed / dur_s,
         output_throughput=np.mean([1.0 / x for x in tpots]),
@@ -763,6 +775,14 @@ async def benchmark(
     print("{:<40} {:<10.2f}".format("Benchmark duration (s):", benchmark_duration))
     print("{:<40} {:<10}".format("Total input tokens:", metrics.total_input))
     print("{:<40} {:<10}".format("Total generated tokens:", metrics.total_output))
+    print("{:<40} {:<10}".format("Total stream chunks:", metrics.total_stream_chunks))
+    print("{:<40} {:<10}".format("Total content chunks:", metrics.total_content_chunks))
+    print(
+        "{:<40} {:<10.2f}".format(
+            "Output tokens per content chunk:",
+            metrics.mean_output_tokens_per_content_chunk,
+        )
+    )
     print("{:<40} {:<10.2f}".format("Request throughput (req/s):", metrics.request_throughput))
     if goodput_config_dict:
         print("{:<40} {:<10.2f}".format("Request goodput (req/s):", metrics.request_goodput))
@@ -776,12 +796,17 @@ async def benchmark(
         "completed": metrics.completed,
         "total_input_tokens": metrics.total_input,
         "total_output_tokens": metrics.total_output,
+        "total_stream_chunks": metrics.total_stream_chunks,
+        "total_content_chunks": metrics.total_content_chunks,
+        "mean_output_tokens_per_content_chunk": metrics.mean_output_tokens_per_content_chunk,
         "request_throughput": metrics.request_throughput,
         "request_goodput:": metrics.request_goodput if goodput_config_dict else None,
         "output_throughput": metrics.output_throughput,
         "total_token_throughput": metrics.total_token_throughput,
         "input_lens": [output.prompt_len for output in outputs],
         "output_lens": actual_output_lens,
+        "stream_chunk_counts": [output.stream_chunks for output in outputs],
+        "content_chunk_counts": [output.content_chunks for output in outputs],
         "ttfts": [output.ttft for output in outputs],
         "itls": [output.itl for output in outputs],
         "generated_texts": [output.generated_text for output in outputs],
