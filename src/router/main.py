@@ -440,7 +440,7 @@ class EndpointRegistry:
 
     async def probe_endpoint_status(
         self, base_url: str
-    ) -> Tuple[bool, Optional[str], Optional[str]]:
+    ) -> Tuple[bool, Optional[str], Optional[int], Optional[str]]:
         """
         Probe downstream readiness via GET {base_url}{status_check_path}.
 
@@ -453,7 +453,7 @@ class EndpointRegistry:
         try:
             resp = await client.get(url, timeout=httpx.Timeout(cfg.status_check_timeout_sec))
             if resp.status_code != 200:
-                return False, None, f"Non-200 status: {resp.status_code}"
+                return False, None, 0, f"Non-200 status: {resp.status_code}"
             data = resp.json()
             status_val = data.get("data", {}).get("status") if isinstance(data, dict) else None
             max_running_request = (
