@@ -90,9 +90,9 @@ class ModelArgs(BaseModelArgs):
                 "sparse_disable_index_value": sparse_freq.copy(),
                 "sparse_score_type": "max",
                 "sparse_init_block": 0,
-                "sparse_local_block": self.index_local_blocks
-                if self.index_local_blocks is not None
-                else 1,
+                "sparse_local_block": (
+                    self.index_local_blocks if self.index_local_blocks is not None else 1
+                ),
                 "sparse_attention_freq": sparse_freq,
             }
         else:
@@ -100,11 +100,8 @@ class ModelArgs(BaseModelArgs):
             if sparse_freq is not None:
                 self.sparse_attention_config.setdefault("sparse_attention_freq", sparse_freq)
                 self.sparse_attention_config.setdefault("use_sparse_attention", True)
-            if (
-                self.sparse_attention_config.get("sparse_attention_freq") is None
-                and isinstance(
-                    self.sparse_attention_config.get("sparse_disable_index_value"), list
-                )
+            if self.sparse_attention_config.get("sparse_attention_freq") is None and isinstance(
+                self.sparse_attention_config.get("sparse_disable_index_value"), list
             ):
                 self.sparse_attention_config["sparse_attention_freq"] = list(
                     self.sparse_attention_config["sparse_disable_index_value"]
@@ -439,8 +436,7 @@ class MiniMaxAttention(nn.Module):
             blocks = mx.arange(num_blocks)
             key_blocks_for_scores = (kpos // self.sparse_block_size).astype(mx.int32)
             block_members = (
-                key_blocks_for_scores[:, None, None, :, None]
-                == blocks[None, None, None, None, :]
+                key_blocks_for_scores[:, None, None, :, None] == blocks[None, None, None, None, :]
             )
             expanded_scores = mx.where(
                 block_members,
@@ -546,9 +542,7 @@ class MiniMaxAttention(nn.Module):
         values = mx.zeros(
             (B, self.num_key_value_heads, max_len, cache.head_dim_v), dtype=queries.dtype
         )
-        idx_keys = mx.zeros(
-            (B, cache.index_n_heads, max_len, self.index_dim), dtype=queries.dtype
-        )
+        idx_keys = mx.zeros((B, cache.index_n_heads, max_len, self.index_dim), dtype=queries.dtype)
 
         for i in range(B):
             context_len = int(context_lengths[i])

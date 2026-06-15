@@ -4,7 +4,11 @@ import mlx.core as mx
 import numpy as np
 import pytest
 
-from parallax.models.minimax_m3 import MiniMaxAttention, ModelArgs, ParallaxMiniMaxM3Block
+from parallax.models.minimax_m3 import (
+    MiniMaxAttention,
+    ModelArgs,
+    ParallaxMiniMaxM3Block,
+)
 from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
 from parallax.utils.utils import combine_padding_and_causal_masks, create_causal_mask
 

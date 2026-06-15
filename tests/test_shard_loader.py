@@ -286,13 +286,15 @@ def test_minimax_m3_sanitizer_strips_language_model_prefix_and_stacks_experts():
         num_layers=1,
     )
 
-    assert (
-        sanitized["model.layers.0.block_sparse_moe.switch_mlp.gate_proj.weight"].shape
-        == (2, 2, 4)
+    assert sanitized["model.layers.0.block_sparse_moe.switch_mlp.gate_proj.weight"].shape == (
+        2,
+        2,
+        4,
     )
-    assert (
-        sanitized["model.layers.0.block_sparse_moe.switch_mlp.down_proj.weight"].shape
-        == (2, 4, 2)
+    assert sanitized["model.layers.0.block_sparse_moe.switch_mlp.down_proj.weight"].shape == (
+        2,
+        4,
+        2,
     )
     assert "language_model.model.norm.weight" not in sanitized
     assert sanitized["model.norm.weight"].shape == (4,)

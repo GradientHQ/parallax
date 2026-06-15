@@ -373,9 +373,10 @@ def normalize_model_config(config: dict) -> dict:
                 "sparse_local_block", normalized.get("index_local_blocks")
             )
 
-        if normalized.get("moe_intermediate_size") is None and normalized.get(
-            "intermediate_size"
-        ) is not None:
+        if (
+            normalized.get("moe_intermediate_size") is None
+            and normalized.get("intermediate_size") is not None
+        ):
             normalized["moe_intermediate_size"] = normalized["intermediate_size"]
 
         for quantization_key in ("quantization", "quantization_config"):
