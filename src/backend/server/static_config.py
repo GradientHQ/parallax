@@ -31,7 +31,6 @@ MODELS = {
     "zai-org/GLM-4.5-Air": "lmstudio-community/GLM-4.5-Air-MLX-8bit",
     "zai-org/GLM-4.7": "mlx-community/GLM-4.7-4bit",
     "zai-org/GLM-4.7-Flash": "mlx-community/GLM-4.7-Flash-4bit",
-    "zai-org/GLM-4.7-Flash-FP8": "mlx-community/GLM-4.7-Flash-8bit",
     "zai-org/GLM-5.1": "mlx-community/GLM-5.1",
     "zai-org/GLM-5.1-FP8": "mlx-community/GLM-5.1",
     # Minimax M2 Models
