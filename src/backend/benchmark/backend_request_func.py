@@ -235,10 +235,9 @@ async def async_request_openai_chat_completions(
                                     if isinstance(text, str)
                                 ]
                                 text = "".join(text_parts)
-                                text_str = text.strip()
 
                                 # Treat reasoning as normal content for metrics.
-                                if text_str:
+                                if text:
                                     output.content_chunks += 1
                                     if not first_content_received:
                                         first_content_received = True
