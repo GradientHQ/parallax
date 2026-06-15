@@ -30,7 +30,6 @@ from parallax.utils.utils import (
     create_causal_mask,
     get_device_dtype,
     get_layer_types,
-    load_config_only,
     pad_inputs,
 )
 from parallax_utils.logging_config import get_logger
@@ -39,25 +38,6 @@ logger = get_logger(__name__)
 
 
 class MLXExecutor(BaseExecutor):
-    @staticmethod
-    def _validate_minimax_m3_cache_options(
-        config: Dict[str, Any],
-        enable_prefix_cache: Optional[bool],
-        chunked_prefill_size: Optional[int],
-    ):
-        if config.get("model_type") != "minimax_m3":
-            return
-        if enable_prefix_cache:
-            raise ValueError(
-                "MiniMax-M3 MLX basic support does not implement prefix cache. "
-                "Disable --enable-prefix-cache for this model."
-            )
-        if chunked_prefill_size not in (None, 0):
-            raise ValueError(
-                "MiniMax-M3 MLX basic support does not implement chunked prefill. "
-                "Set --chunked-prefill-size 0 for this model."
-            )
-
     def __init__(
         self,
         # Model Configs
@@ -133,19 +113,6 @@ class MLXExecutor(BaseExecutor):
         except Exception:
             logger.warning("Using mlx without metal backend.")
 
-        if enable_prefix_cache or chunked_prefill_size not in (None, 0):
-            try:
-                preflight_config = load_config_only(model_repo, local_files_only=use_hfcache)
-                self._validate_minimax_m3_cache_options(
-                    preflight_config,
-                    enable_prefix_cache,
-                    chunked_prefill_size,
-                )
-            except ValueError:
-                raise
-            except Exception:
-                logger.debug("Could not preflight model config for cache options", exc_info=True)
-
         self.shard_loader = MLXModelLoader(
             model_repo,
             start_layer=start_layer,
@@ -165,11 +132,6 @@ class MLXExecutor(BaseExecutor):
         )
 
         is_minimax_m3 = self.config.get("model_type") == "minimax_m3"
-        self._validate_minimax_m3_cache_options(
-            self.config,
-            enable_prefix_cache,
-            chunked_prefill_size,
-        )
 
         # TODO: Duplicate code to BaseExecutor since num_shard_layers and dtype are needed for initializing kv cache
         self.num_shard_layers = end_layer - start_layer

@@ -6,7 +6,7 @@ import pytest
 
 from parallax.models.minimax_m3 import MiniMaxAttention, ModelArgs, ParallaxMiniMaxM3Block
 from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
-from parallax.utils.utils import create_causal_mask
+from parallax.utils.utils import combine_padding_and_causal_masks, create_causal_mask
 
 pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
 
@@ -84,6 +84,37 @@ def test_sparse_mask_selects_topk_blocks_not_topk_tokens():
     assert allowed == [False, False, True, True, False, False]
 
 
+def test_sparse_mask_uses_real_key_positions_for_prefix_blocks():
+    args = _tiny_args()
+    attention = MiniMaxAttention(args, layer_idx=0)
+
+    idx_queries = mx.ones((1, 2, 1, 4), dtype=mx.float32)
+    idx_keys = mx.array(
+        [
+            [
+                [
+                    [0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0],
+                    [10.0, 0.0, 0.0, 0.0],
+                    [9.0, 0.0, 0.0, 0.0],
+                ]
+            ]
+        ],
+        dtype=mx.float32,
+    )
+
+    sparse_mask = attention._build_sparse_mask(
+        idx_queries,
+        idx_keys,
+        q_positions=mx.array([[5]], dtype=mx.int32),
+        key_positions=mx.array([[0, 1, 4, 5]], dtype=mx.int32),
+    )
+    mx.eval(sparse_mask)
+    allowed = np.array(sparse_mask[0, 0, 0]).tolist()
+
+    assert allowed == [False, False, True, True]
+
+
 def test_attention_prefill_and_decode_write_kv_and_index_cache():
     args = _tiny_args()
     attention = MiniMaxAttention(args, layer_idx=0)
@@ -116,6 +147,77 @@ def test_attention_prefill_and_decode_write_kv_and_index_cache():
     assert cache.read_index_k(mx.array([0], dtype=mx.int32), 6).shape == (1, 6, 4)
 
 
+def test_attention_prefill_reads_prefix_kv_and_index_cache_for_chunked_path():
+    args = _tiny_args()
+    attention = MiniMaxAttention(args, layer_idx=0)
+    cache = _cache(args)
+    block_tables = mx.array([[0]], dtype=mx.int32)
+
+    prefix = attention(
+        mx.ones((1, 4, args.hidden_size), dtype=mx.float32),
+        mask=create_causal_mask(4, 4, mx.float32),
+        cache=cache,
+        block_tables=block_tables,
+        context_lengths=mx.array([4], dtype=mx.int32),
+        slot_mapping=mx.array([0, 1, 2, 3], dtype=mx.int64),
+    )
+    mx.eval(prefix, cache.get_indexer_cache())
+
+    chunk = attention(
+        mx.full((1, 2, args.hidden_size), 2.0, dtype=mx.float32),
+        mask=create_causal_mask(2, 2, mx.float32),
+        cache=cache,
+        block_tables=block_tables,
+        context_lengths=mx.array([6], dtype=mx.int32),
+        slot_mapping=mx.array([4, 5], dtype=mx.int64),
+        prefix_lens=mx.array([4], dtype=mx.int32),
+    )
+    mx.eval(chunk, cache.get_cache()[0], cache.get_indexer_cache())
+
+    assert prefix.shape == (1, 4, args.hidden_size)
+    assert chunk.shape == (1, 2, args.hidden_size)
+    assert cache.read_kv(mx.array([0], dtype=mx.int32), 6)[0].shape == (2, 6, 4)
+    assert cache.read_index_k(mx.array([0], dtype=mx.int32), 6).shape == (1, 6, 4)
+
+
+def test_attention_prefix_prefill_handles_mixed_prefix_lengths():
+    args = _tiny_args()
+    attention = MiniMaxAttention(args, layer_idx=0)
+    cache = _cache(args, num_blocks=2)
+    block_tables = mx.array([[0], [1]], dtype=mx.int32)
+
+    padding = mx.array([[1, 1, 0, 0], [1, 1, 1, 1]], dtype=mx.float32)[:, None, None, :]
+    prefix_mask = combine_padding_and_causal_masks(
+        padding,
+        create_causal_mask(4, 4, mx.float32),
+        mx.float32,
+    )
+    prefix = attention(
+        mx.ones((2, 4, args.hidden_size), dtype=mx.float32),
+        mask=prefix_mask,
+        cache=cache,
+        block_tables=block_tables,
+        context_lengths=mx.array([2, 4], dtype=mx.int32),
+        slot_mapping=mx.array([0, 1, -1, -1, 8, 9, 10, 11], dtype=mx.int64),
+    )
+    mx.eval(prefix, cache.get_indexer_cache())
+
+    chunk = attention(
+        mx.full((2, 2, args.hidden_size), 2.0, dtype=mx.float32),
+        mask=create_causal_mask(2, 2, mx.float32),
+        cache=cache,
+        block_tables=block_tables,
+        context_lengths=mx.array([4, 6], dtype=mx.int32),
+        slot_mapping=mx.array([2, 3, 12, 13], dtype=mx.int64),
+        prefix_lens=mx.array([2, 4], dtype=mx.int32),
+    )
+    mx.eval(chunk)
+
+    assert chunk.shape == (2, 2, args.hidden_size)
+    assert cache.read_index_k(mx.array([0], dtype=mx.int32), 4).shape == (1, 4, 4)
+    assert cache.read_index_k(mx.array([1], dtype=mx.int32), 6).shape == (1, 6, 4)
+
+
 def test_block_forward_runs_attention_and_moe():
     args = _tiny_args()
     block = ParallaxMiniMaxM3Block(args, layer_idx=0, local_layer_idx=0)
@@ -132,82 +234,3 @@ def test_block_forward_runs_attention_and_moe():
     mx.eval(out)
 
     assert out.shape == (1, 5, args.hidden_size)
-
-
-def test_attention_rejects_prefix_cache_inputs():
-    args = _tiny_args()
-    attention = MiniMaxAttention(args, layer_idx=0)
-
-    with pytest.raises(ValueError, match="prefix cache"):
-        attention(
-            mx.ones((1, 1, args.hidden_size), dtype=mx.float32),
-            prefix_lens=mx.array([1], dtype=mx.int32),
-        )
-
-
-def test_executor_rejects_minimax_m3_prefix_cache(monkeypatch):
-    from parallax.server.executor import mlx_executor
-
-    class FakeGroup:
-        def size(self):
-            return 1
-
-        def rank(self):
-            return 0
-
-    class FakeLoader:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def load(self):
-            raise AssertionError("MiniMax-M3 prefix validation should run before model load")
-
-    monkeypatch.setattr(mlx_executor.mx.distributed, "init", lambda: FakeGroup())
-    monkeypatch.setattr(
-        mlx_executor,
-        "load_config_only",
-        lambda *args, **kwargs: {"model_type": "minimax_m3"},
-    )
-    monkeypatch.setattr(mlx_executor, "MLXModelLoader", FakeLoader)
-
-    with pytest.raises(ValueError, match="prefix cache"):
-        mlx_executor.MLXExecutor(
-            model_repo="dummy",
-            start_layer=0,
-            end_layer=1,
-            enable_prefix_cache=True,
-        )
-
-
-def test_executor_rejects_minimax_m3_chunked_prefill(monkeypatch):
-    from parallax.server.executor import mlx_executor
-
-    class FakeGroup:
-        def size(self):
-            return 1
-
-        def rank(self):
-            return 0
-
-    class FakeLoader:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def load(self):
-            raise AssertionError("MiniMax-M3 chunked validation should run before model load")
-
-    monkeypatch.setattr(mlx_executor.mx.distributed, "init", lambda: FakeGroup())
-    monkeypatch.setattr(
-        mlx_executor,
-        "load_config_only",
-        lambda *args, **kwargs: {"model_type": "minimax_m3"},
-    )
-    monkeypatch.setattr(mlx_executor, "MLXModelLoader", FakeLoader)
-
-    with pytest.raises(ValueError, match="chunked prefill"):
-        mlx_executor.MLXExecutor(
-            model_repo="dummy",
-            start_layer=0,
-            end_layer=1,
-            chunked_prefill_size=128,
-        )

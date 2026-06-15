@@ -11,6 +11,7 @@ from mlx_lm.models.switch_layers import SwitchGLU
 from parallax.metal.indexer.kernel import store_indexer_cache
 from parallax.server.cache.base import BaseCache
 from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
+from parallax.utils.prefix_cache_utils import prepare_attention_with_prefix_cache
 from parallax_extensions.ops import paged_attention_v1, reshape_and_cache
 
 
@@ -380,6 +381,7 @@ class MiniMaxAttention(nn.Module):
         idx_keys: mx.array,
         q_positions: mx.array,
         mask: Optional[mx.array] = None,
+        key_positions: Optional[mx.array] = None,
     ) -> mx.array:
         B, H_idx, L, _ = idx_queries.shape
         total_len = idx_keys.shape[2]
@@ -401,27 +403,51 @@ class MiniMaxAttention(nn.Module):
             if qpos.shape[-1] != L:
                 qpos = qpos[:, -L:]
 
-        kpos = mx.arange(total_len)
-        causal = kpos[None, None, :] <= qpos[:, :, None]
+        if key_positions is None:
+            kpos = mx.arange(total_len)
+            causal = kpos[None, None, :] <= qpos[:, :, None]
+        else:
+            if key_positions.ndim == 1:
+                key_positions = mx.broadcast_to(key_positions[None, :], (B, total_len))
+            kpos = key_positions.astype(mx.int32)
+            causal = kpos[:, None, :] <= qpos[:, :, None]
         scores = mx.where(causal[:, None], scores, -float("inf"))
 
         valid = _mask_to_valid(mask, B, L, total_len)
         if valid is not None:
             scores = mx.where(valid, scores, -float("inf"))
 
-        num_blocks = (total_len + self.sparse_block_size - 1) // self.sparse_block_size
-        pad = num_blocks * self.sparse_block_size - total_len
-        if pad:
-            scores = mx.concatenate(
-                [
-                    scores,
-                    mx.full((*scores.shape[:-1], pad), -float("inf"), dtype=scores.dtype),
-                ],
-                axis=-1,
-            )
+        if key_positions is None:
+            num_blocks = (total_len + self.sparse_block_size - 1) // self.sparse_block_size
+            pad = num_blocks * self.sparse_block_size - total_len
+            if pad:
+                scores = mx.concatenate(
+                    [
+                        scores,
+                        mx.full((*scores.shape[:-1], pad), -float("inf"), dtype=scores.dtype),
+                    ],
+                    axis=-1,
+                )
 
-        scores = scores.reshape(B, H_idx, L, num_blocks, self.sparse_block_size)
-        block_scores = mx.max(mx.max(scores, axis=-1), axis=1)
+            scores_by_block = scores.reshape(B, H_idx, L, num_blocks, self.sparse_block_size)
+            block_scores = mx.max(mx.max(scores_by_block, axis=-1), axis=1)
+        else:
+            max_position = int(mx.max(kpos)) + 1
+            num_blocks = max(
+                1, (max_position + self.sparse_block_size - 1) // self.sparse_block_size
+            )
+            blocks = mx.arange(num_blocks)
+            key_blocks_for_scores = (kpos // self.sparse_block_size).astype(mx.int32)
+            block_members = (
+                key_blocks_for_scores[:, None, None, :, None]
+                == blocks[None, None, None, None, :]
+            )
+            expanded_scores = mx.where(
+                block_members,
+                scores[..., None],
+                mx.full((*scores.shape, num_blocks), -float("inf"), dtype=scores.dtype),
+            )
+            block_scores = mx.max(mx.max(expanded_scores, axis=3), axis=1)
         block_scores = mx.where(block_scores == block_scores, block_scores, -float("inf"))
 
         blocks = mx.arange(num_blocks)
@@ -449,13 +475,41 @@ class MiniMaxAttention(nn.Module):
         topk_idx = mx.argpartition(-selected_scores, kth=topk - 1, axis=-1)[..., :topk]
         block_selected = mx.any(topk_idx[..., None] == blocks, axis=-2) & causal_block
 
-        key_blocks = (kpos // self.sparse_block_size).astype(mx.int32)
-        key_blocks = mx.broadcast_to(key_blocks[None, None, :], (B, L, total_len))
+        if key_positions is None:
+            key_blocks = (kpos // self.sparse_block_size).astype(mx.int32)
+            key_blocks = mx.broadcast_to(key_blocks[None, None, :], (B, L, total_len))
+        else:
+            key_blocks = (kpos // self.sparse_block_size).astype(mx.int32)
+            key_blocks = mx.broadcast_to(key_blocks[:, None, :], (B, L, total_len))
         key_selected = mx.take_along_axis(block_selected, key_blocks, axis=-1)
         sparse_mask = key_selected[:, None] & causal[:, None]
         if valid is not None:
             sparse_mask = sparse_mask & valid
         return sparse_mask
+
+    def _read_prefix_index_keys(
+        self,
+        idx_keys_new: mx.array,
+        cache: MiniMaxM3SparseCache,
+        block_tables: mx.array,
+        prefix_lens: mx.array,
+    ) -> mx.array:
+        B = idx_keys_new.shape[0]
+        max_prefix_len = int(mx.max(prefix_lens))
+        if max_prefix_len <= 0:
+            return idx_keys_new
+
+        prefix_idx = mx.zeros(
+            (B, cache.index_n_heads, max_prefix_len, self.index_dim),
+            dtype=idx_keys_new.dtype,
+        )
+        for i in range(B):
+            prefix_len = int(prefix_lens[i])
+            if prefix_len <= 0:
+                continue
+            idx_i = cache.read_index_k(block_tables[i], prefix_len)
+            prefix_idx[i, :, :prefix_len, :] = idx_i
+        return mx.concatenate([prefix_idx, idx_keys_new], axis=2)
 
     def _dense_decode_from_cache(
         self,
@@ -529,9 +583,6 @@ class MiniMaxAttention(nn.Module):
         prefix_lens: Optional[mx.array] = None,
         **kwargs,
     ) -> mx.array:
-        if prefix_lens is not None and bool(mx.any(prefix_lens > 0)):
-            raise ValueError("MiniMax-M3 MLX basic support does not implement prefix cache.")
-
         B, L, _ = x.shape
         queries = self.q_proj(x).reshape(B, L, self.num_attention_heads, self.head_dim)
         keys = self.k_proj(x).reshape(B, L, self.num_key_value_heads, self.head_dim)
@@ -543,6 +594,8 @@ class MiniMaxAttention(nn.Module):
 
         if L == 1:
             current_pos = context_lengths - 1
+        elif prefix_lens is not None:
+            current_pos = prefix_lens
         else:
             current_pos = 0
 
@@ -594,18 +647,66 @@ class MiniMaxAttention(nn.Module):
                     queries, cache, block_tables, context_lengths
                 )
         else:
-            attn_mask = mask
-            if self.has_sparse_index and L > self.sparse_block_size * self.sparse_topk_blocks:
-                q_positions = mx.arange(L, dtype=mx.int32)
-                attn_mask = self._build_sparse_mask(idx_queries, idx_keys, q_positions, mask)
-            output = scaled_dot_product_attention(
-                queries,
-                keys,
-                values.transpose(0, 2, 1, 3),
-                cache=None,
-                scale=self.scale,
-                mask=attn_mask,
-            )
+            has_prefix_cache = prefix_lens is not None and bool(mx.any(prefix_lens > 0))
+            if has_prefix_cache:
+                if not isinstance(cache, MiniMaxM3SparseCache):
+                    raise TypeError("MiniMax-M3 prefix cache requires MiniMaxM3SparseCache.")
+                (
+                    keys_full,
+                    values_full,
+                    prefix_mask,
+                    q_positions,
+                    key_positions,
+                ) = prepare_attention_with_prefix_cache(
+                    queries,
+                    keys,
+                    values.transpose(0, 2, 1, 3),
+                    cache,
+                    block_tables,
+                    prefix_lens,
+                    L,
+                    self.num_key_value_heads,
+                    context_lengths=context_lengths,
+                )
+                attn_mask = prefix_mask
+                if self.has_sparse_index:
+                    idx_keys_full = self._read_prefix_index_keys(
+                        idx_keys,
+                        cache,
+                        block_tables,
+                        prefix_lens,
+                    )
+                    sparse_key_positions = key_positions
+                    if bool(mx.all(prefix_lens == int(mx.max(prefix_lens)))):
+                        sparse_key_positions = None
+                    attn_mask = self._build_sparse_mask(
+                        idx_queries,
+                        idx_keys_full,
+                        q_positions,
+                        prefix_mask,
+                        key_positions=sparse_key_positions,
+                    )
+                output = scaled_dot_product_attention(
+                    queries,
+                    keys_full,
+                    values_full,
+                    cache=None,
+                    scale=self.scale,
+                    mask=attn_mask,
+                )
+            else:
+                attn_mask = mask
+                if self.has_sparse_index and L > self.sparse_block_size * self.sparse_topk_blocks:
+                    q_positions = mx.arange(L, dtype=mx.int32)
+                    attn_mask = self._build_sparse_mask(idx_queries, idx_keys, q_positions, mask)
+                output = scaled_dot_product_attention(
+                    queries,
+                    keys,
+                    values.transpose(0, 2, 1, 3),
+                    cache=None,
+                    scale=self.scale,
+                    mask=attn_mask,
+                )
             output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
 
         return self.o_proj(output)
