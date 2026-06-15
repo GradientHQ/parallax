@@ -1,3 +1,6 @@
+import json
+from types import SimpleNamespace
+
 import pytest
 
 from parallax.server import vllm_rust_frontend
@@ -61,3 +64,26 @@ def test_resolve_vllm_rs_binary_raises_when_missing(monkeypatch, tmp_path):
 
     with pytest.raises(vllm_rust_frontend.VllmRustFrontendNotFound, match="./install.sh"):
         vllm_rust_frontend.resolve_vllm_rs_binary()
+
+
+def test_runtime_args_default_to_language_model_only():
+    args = SimpleNamespace(model_path="mlx-community/MiniMax-M3-4bit", max_sequence_length=None)
+
+    runtime_args = json.loads(vllm_rust_frontend._runtime_args_json(args))
+
+    assert runtime_args == {
+        "model_tag": "mlx-community/MiniMax-M3-4bit",
+        "language_model_only": True,
+    }
+
+
+def test_runtime_args_include_max_model_len_when_configured():
+    args = SimpleNamespace(model_path="Qwen/Qwen3-0.6B", max_sequence_length=4096)
+
+    runtime_args = json.loads(vllm_rust_frontend._runtime_args_json(args))
+
+    assert runtime_args == {
+        "model_tag": "Qwen/Qwen3-0.6B",
+        "language_model_only": True,
+        "max_model_len": 4096,
+    }

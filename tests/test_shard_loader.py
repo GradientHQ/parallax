@@ -55,6 +55,12 @@ def test_normalize_nested_language_model_weight_keys():
     assert normalize_language_model_weight_key("model.visual.patch_embed.weight") == (
         "model.visual.patch_embed.weight"
     )
+    assert (
+        normalize_language_model_weight_key(
+            "language_model.model.layers.3.self_attn.index_k_proj.weight"
+        )
+        == "model.layers.3.self_attn.index_k_proj.weight"
+    )
 
 
 def test_weight_filter_includes_nested_qwen35_text_keys():
@@ -155,11 +161,156 @@ def test_qwen35_moe_uses_qwen35_text_args_and_sanitizer_module():
     assert model_args.moe_intermediate_size == 512
 
 
+def _minimax_m3_vl_config():
+    return {
+        "model_type": "minimax_m3_vl",
+        "architectures": ["MiniMaxM3SparseForConditionalGeneration"],
+        "tie_word_embeddings": True,
+        "quantization": {
+            "bits": 4,
+            "group_size": 64,
+            "mode": "affine",
+            "language_model.model.layers.3.block_sparse_moe.gate": {
+                "bits": 8,
+                "group_size": 64,
+                "mode": "affine",
+            },
+            "ignored_layers": ["language_model.model.embed_tokens"],
+        },
+        "text_config": {
+            "model_type": "minimax_m3",
+            "architectures": ["MiniMaxM3SparseForCausalLM"],
+            "hidden_size": 16,
+            "intermediate_size": 8,
+            "dense_intermediate_size": 32,
+            "shared_intermediate_size": 8,
+            "num_hidden_layers": 4,
+            "num_attention_heads": 4,
+            "num_key_value_heads": 1,
+            "head_dim": 4,
+            "vocab_size": 32,
+            "tie_word_embeddings": False,
+            "num_local_experts": 2,
+            "num_experts_per_tok": 1,
+            "sparse_attention_config": {
+                "use_sparse_attention": True,
+                "sparse_index_dim": 4,
+                "sparse_num_index_heads": 2,
+                "sparse_topk_blocks": 1,
+                "sparse_block_size": 2,
+                "sparse_local_block": 1,
+                "sparse_attention_freq": [0, 0, 0, 1],
+            },
+        },
+    }
+
+
+def test_minimax_m3_vlm_config_is_flattened_to_text_model():
+    config = normalize_model_config(_minimax_m3_vl_config())
+
+    assert config["model_type"] == "minimax_m3"
+    assert config["original_model_type"] == "minimax_m3_vl"
+    assert config["architectures"] == ["MiniMaxM3SparseForCausalLM"]
+    assert config["tie_word_embeddings"] is False
+    assert config["num_hidden_layers"] == 4
+    assert config["index_head_dim"] == 4
+    assert config["index_n_heads"] == 1
+    assert config["index_block_size"] == 2
+    assert config["index_topk_blocks"] == 1
+    assert config["moe_intermediate_size"] == 8
+    assert "model.layers.3.block_sparse_moe.gate" in config["quantization"]
+    assert "language_model.model.layers.3.block_sparse_moe.gate" not in config["quantization"]
+    assert config["quantization"]["ignored_layers"] == ["model.embed_tokens"]
+
+
+def test_minimax_m3_loader_registry_uses_local_module():
+    assert MODEL_CLASS_MAP["minimax_m3"] == "parallax.models.minimax_m3"
+    assert (
+        ARCHITECTURE_CLASS_ALIASES["MiniMaxM3SparseForConditionalGeneration"]
+        == "MiniMaxM3SparseForCausalLM"
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
+def test_minimax_m3_uses_parallax_args_module():
+    loader = MLXModelLoader("test_model_path")
+    config = normalize_model_config(_minimax_m3_vl_config())
+
+    sanitizer_module, model_args = loader._load_mlx_lm_module_and_args("minimax_m3", config)
+
+    assert sanitizer_module.__name__ == "parallax.models.minimax_m3"
+    assert model_args.hidden_size == 16
+    assert model_args.sparse_attention_config["sparse_num_index_heads"] == 2
+    assert model_args.index_n_heads == 2
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
+def test_minimax_m3_sanitizer_strips_language_model_prefix_and_stacks_experts():
+    import parallax.models.minimax_m3 as minimax_m3
+
+    loader = MLXModelLoader("test_model_path")
+    args = minimax_m3.ModelArgs(
+        hidden_size=4,
+        intermediate_size=2,
+        dense_intermediate_size=8,
+        shared_intermediate_size=2,
+        num_attention_heads=1,
+        num_key_value_heads=1,
+        head_dim=4,
+        num_hidden_layers=1,
+        num_local_experts=2,
+        num_experts_per_tok=1,
+        sparse_attention_config={
+            "use_sparse_attention": True,
+            "sparse_index_dim": 4,
+            "sparse_num_index_heads": 1,
+            "sparse_topk_blocks": 1,
+            "sparse_block_size": 2,
+            "sparse_attention_freq": [1],
+        },
+    )
+    weights = {
+        "language_model.model.layers.0.block_sparse_moe.experts.0.w1.weight": mx.ones((2, 4)),
+        "language_model.model.layers.0.block_sparse_moe.experts.1.w1.weight": mx.ones((2, 4)),
+        "language_model.model.layers.0.block_sparse_moe.experts.0.w2.weight": mx.ones((4, 2)),
+        "language_model.model.layers.0.block_sparse_moe.experts.1.w2.weight": mx.ones((4, 2)),
+        "language_model.model.layers.0.block_sparse_moe.experts.0.w3.weight": mx.ones((2, 4)),
+        "language_model.model.layers.0.block_sparse_moe.experts.1.w3.weight": mx.ones((2, 4)),
+        "language_model.model.norm.weight": mx.zeros((4,)),
+    }
+
+    sanitized = loader._apply_mlx_lm_sanitize(
+        minimax_m3,
+        args,
+        weights,
+        num_layers=1,
+    )
+
+    assert (
+        sanitized["model.layers.0.block_sparse_moe.switch_mlp.gate_proj.weight"].shape
+        == (2, 2, 4)
+    )
+    assert (
+        sanitized["model.layers.0.block_sparse_moe.switch_mlp.down_proj.weight"].shape
+        == (2, 4, 2)
+    )
+    assert "language_model.model.norm.weight" not in sanitized
+    assert sanitized["model.norm.weight"].shape == (4,)
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
 def test_register_block_class_includes_qwen35_moe():
     loader = MLXModelLoader("test_model_path")
 
     assert "Qwen3_5MoeForConditionalGeneration" in loader.block_class_map
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
+def test_register_block_class_includes_minimax_m3_aliases():
+    loader = MLXModelLoader("test_model_path")
+
+    assert "MiniMaxM3SparseForCausalLM" in loader.block_class_map
+    assert "MiniMaxM3SparseForConditionalGeneration" in loader.block_class_map
 
 
 def test_selective_download_uses_nested_qwen35_moe_num_layers(tmp_path):
@@ -195,6 +346,37 @@ def test_selective_download_uses_nested_qwen35_moe_num_layers(tmp_path):
     )
 
     assert needed_files == ["final.safetensors", "layers-39.safetensors"]
+
+
+def test_selective_download_uses_minimax_m3_text_config_and_language_model_keys(tmp_path):
+    config = _minimax_m3_vl_config()
+    config["text_config"]["num_hidden_layers"] = 4
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    (tmp_path / "model.safetensors.index.json").write_text(
+        json.dumps(
+            {
+                "weight_map": {
+                    "language_model.model.layers.3.self_attn.index_k_proj.weight": (
+                        "layers-3.safetensors"
+                    ),
+                    "language_model.model.layers.2.self_attn.index_k_proj.weight": (
+                        "layers-2.safetensors"
+                    ),
+                    "language_model.model.norm.weight": "final.safetensors",
+                    "language_model.lm_head.weight": "final.safetensors",
+                    "vision_tower.patch_embed.weight": "vision.safetensors",
+                }
+            }
+        )
+    )
+
+    needed_files = _determine_needed_weight_files_for_download(
+        tmp_path,
+        start_layer=3,
+        end_layer=4,
+    )
+
+    assert needed_files == ["final.safetensors", "layers-3.safetensors"]
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")

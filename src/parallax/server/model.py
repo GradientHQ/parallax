@@ -63,7 +63,10 @@ class ShardedModel(nn.Module):
         ]
 
         if self.is_last_shard:
-            self.norm = nn.RMSNorm(self.hidden_size, eps=config.rms_norm_eps)
+            if hasattr(block_class, "make_final_norm"):
+                self.norm = block_class.make_final_norm(config)
+            else:
+                self.norm = nn.RMSNorm(self.hidden_size, eps=config.rms_norm_eps)
             self.lm_head = nn.Linear(self.hidden_size, self.vocab_size, bias=False)
         else:
             self.norm = None

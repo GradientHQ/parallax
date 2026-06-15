@@ -38,6 +38,7 @@ MODELS = {
     "MiniMaxAI/MiniMax-M2.7": "mlx-community/MiniMax-M2.7-4bit",
     "MiniMaxAI/MiniMax-M2.1": "mlx-community/MiniMax-M2.1-4bit",
     "MiniMaxAI/MiniMax-M2": "mlx-community/MiniMax-M2-4bit",
+    "MiniMaxAI/MiniMax-M3": "mlx-community/MiniMax-M3-4bit",
     # ======================================= End ========================================#
     #
     #

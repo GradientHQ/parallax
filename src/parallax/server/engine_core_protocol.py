@@ -83,6 +83,7 @@ ENGINE_CORE_OUTPUT_FIELD_COUNT = 13
 ENGINE_CORE_OUTPUTS_FIELD_COUNT = 8
 PARALLAX_ROUTING_TABLE_EXTRA_ARG = "parallax_routing_table"
 PARALLAX_SCHEDULER_REQUEST_ID_EXTRA_ARG = "parallax_scheduler_request_id"
+PARALLAX_ENGINE_CORE_VERSION = "parallax"
 
 
 def _unpack_msgpack(payload: bytes) -> Any:
@@ -168,6 +169,7 @@ def engine_core_ready_payload(
             "num_gpu_blocks": int(num_gpu_blocks),
             "dp_stats_address": dp_stats_address,
             "dtype": dtype,
+            "vllm_version": PARALLAX_ENGINE_CORE_VERSION,
         }
     )
 

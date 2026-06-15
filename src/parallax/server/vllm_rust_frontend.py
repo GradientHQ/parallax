@@ -75,6 +75,7 @@ def _bind_listener_socket(host: str, port: int) -> socket.socket:
 def _runtime_args_json(args) -> str:
     runtime_args = {
         "model_tag": args.model_path,
+        "language_model_only": True,
     }
     if getattr(args, "max_sequence_length", None) is not None:
         runtime_args["max_model_len"] = int(args.max_sequence_length)

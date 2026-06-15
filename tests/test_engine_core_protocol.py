@@ -2,6 +2,7 @@ import msgpack
 import pytest
 
 from parallax.server.engine_core_protocol import (
+    PARALLAX_ENGINE_CORE_VERSION,
     REQUEST_TYPE_ABORT,
     REQUEST_TYPE_ADD,
     EngineCoreFinishReason,
@@ -10,6 +11,7 @@ from parallax.server.engine_core_protocol import (
     encode_engine_core_abort,
     encode_engine_core_outputs,
     encode_engine_core_request,
+    engine_core_ready_payload,
     engine_core_request_to_initial_request,
     make_engine_core_output,
 )
@@ -90,6 +92,25 @@ def test_vllm_abort_frame_decodes_request_id_list():
 
     assert message_type == "abort"
     assert request_ids == ["req-1", "req-2"]
+
+
+def test_engine_core_ready_payload_matches_vllm_0_23_schema():
+    payload = engine_core_ready_payload(
+        max_model_len=32768,
+        num_gpu_blocks=0,
+        dp_stats_address=None,
+        dtype="bfloat16",
+    )
+
+    decoded = msgpack.unpackb(payload, raw=False)
+
+    assert decoded == {
+        "max_model_len": 32768,
+        "num_gpu_blocks": 0,
+        "dp_stats_address": None,
+        "dtype": "bfloat16",
+        "vllm_version": PARALLAX_ENGINE_CORE_VERSION,
+    }
 
 
 def test_engine_core_request_maps_to_initial_request():
