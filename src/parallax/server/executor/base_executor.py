@@ -95,6 +95,7 @@ class BaseExecutor:
         enable_weight_refit: Optional[bool] = False,
         weight_refit_mode: Optional[str] = "disk",
         chunked_prefill_size: Optional[int] = None,
+        kv_block_size: int = 16,
         # Pipe communication
         conn: Optional[List[Any]] = [],
     ):
@@ -192,6 +193,7 @@ class BaseExecutor:
         # Store max sequence length before engine-core registration, since the
         # Rust frontend reads this value from the registration payload.
         self.max_sequence_length = max_sequence_length
+        self.kv_block_size = int(kv_block_size)
         self.model_path = None
 
         # Communication Related
@@ -297,6 +299,7 @@ class BaseExecutor:
         """Register this Parallax engine with the Rust frontend."""
         payload = engine_core_ready_payload(
             max_model_len=self._resolve_engine_core_max_model_len(),
+            block_size=self.kv_block_size,
             dtype=dtype,
             num_gpu_blocks=0,
             dp_stats_address=None,

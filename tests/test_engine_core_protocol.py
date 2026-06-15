@@ -94,9 +94,10 @@ def test_vllm_abort_frame_decodes_request_id_list():
     assert request_ids == ["req-1", "req-2"]
 
 
-def test_engine_core_ready_payload_matches_vllm_0_23_schema():
+def test_engine_core_ready_payload_matches_m3_release_schema():
     payload = engine_core_ready_payload(
         max_model_len=32768,
+        block_size=64,
         num_gpu_blocks=0,
         dp_stats_address=None,
         dtype="bfloat16",
@@ -107,6 +108,7 @@ def test_engine_core_ready_payload_matches_vllm_0_23_schema():
     assert decoded == {
         "max_model_len": 32768,
         "num_gpu_blocks": 0,
+        "block_size": 64,
         "dp_stats_address": None,
         "dtype": "bfloat16",
         "vllm_version": PARALLAX_ENGINE_CORE_VERSION,

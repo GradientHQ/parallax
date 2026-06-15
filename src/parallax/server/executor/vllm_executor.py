@@ -170,6 +170,7 @@ class VLLMExecutor(BaseExecutor):
             shared_state=shared_state,
             enable_weight_refit=enable_weight_refit,
             weight_refit_mode=weight_refit_mode,
+            kv_block_size=kv_block_size,
             conn=conn,
         )
         if self.enable_return_routed_experts:

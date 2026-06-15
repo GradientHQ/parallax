@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXTRAS="${PARALLAX_EXTRAS:-}"
 PYTHON_VERSION="${PARALLAX_PYTHON_VERSION:-3.12}"
 VENV_DIR="$SCRIPT_DIR/.venv"
-VLLM_REF="${VLLM_REF:-v0.23.0}"
+VLLM_REF="${VLLM_REF:-m3_release}"
 
 show_help() {
     cat <<'EOF'
@@ -30,7 +30,7 @@ Options:
 Environment:
   PARALLAX_EXTRAS         Same as --extras.
   PARALLAX_PYTHON_VERSION Same as --python.
-  VLLM_REF                vLLM git branch/tag to clone. Defaults to v0.23.0.
+  VLLM_REF                vLLM git branch/tag to clone. Defaults to m3_release.
 EOF
 }
 

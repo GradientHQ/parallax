@@ -299,6 +299,7 @@ class MLXExecutor(BaseExecutor):
             enable_weight_refit=enable_weight_refit,
             weight_refit_mode=weight_refit_mode,
             chunked_prefill_size=self.chunked_prefill_size,
+            kv_block_size=kv_block_size,
             conn=conn,
         )
 
