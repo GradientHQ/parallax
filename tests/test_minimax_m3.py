@@ -17,6 +17,7 @@ def m3_deps():
     )
     from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
     from parallax.utils.utils import combine_padding_and_causal_masks, create_causal_mask
+    from parallax_extensions.ops import sparse_block_indexer
 
     return SimpleNamespace(
         mx=mx,
@@ -27,6 +28,7 @@ def m3_deps():
         MiniMaxM3SparseCache=MiniMaxM3SparseCache,
         combine_padding_and_causal_masks=combine_padding_and_causal_masks,
         create_causal_mask=create_causal_mask,
+        sparse_block_indexer=sparse_block_indexer,
     )
 
 
@@ -135,6 +137,62 @@ def test_sparse_index_blocks_expand_to_token_positions(m3_deps):
 
     assert m3_deps.np.array(token_positions[0]).tolist() == [2, 3]
     assert m3_deps.np.array(token_valid[0]).tolist() == [1, 1]
+
+
+def test_native_sparse_block_indexer_returns_sparse_blocks(m3_deps):
+    mx = m3_deps.mx
+    args = _tiny_args(m3_deps)
+    args.sparse_attention_config["sparse_topk_blocks"] = 2
+    attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
+    cache = _cache(m3_deps, args, num_blocks=2, block_size=4)
+    block_tables = mx.array([[0, 1]], dtype=mx.int32)
+    context_lengths = mx.array([6], dtype=mx.int32)
+
+    index_cache = m3_deps.np.zeros((1, 2, 1, 4, 4), dtype=m3_deps.np.float32)
+    index_cache[0, 0, 0, 2, 0] = 10.0
+    index_cache[0, 0, 0, 3, 0] = 9.0
+    index_cache[0, 1, 0, 0, 0] = 2.0
+    index_cache[0, 1, 0, 1, 0] = 1.0
+    cache.index_key_cache = mx.array(index_cache, dtype=mx.float32)
+
+    idx_queries = mx.ones((1, attention.index_heads, 1, attention.index_dim), dtype=mx.float32)
+    native_blocks, native_valid = m3_deps.sparse_block_indexer(
+        idx_queries,
+        cache.get_indexer_cache(),
+        block_tables,
+        context_lengths,
+        max_context_len=6,
+        sparse_block_size=attention.sparse_block_size,
+        sparse_topk_blocks=attention.sparse_topk_blocks,
+        sparse_init_blocks=attention.sparse_init_blocks,
+        sparse_local_blocks=attention.sparse_local_blocks,
+        scale=attention.scale,
+    )
+
+    idx_keys = cache.read_index_k(block_tables[0], 6)[None]
+    expected_blocks, expected_valid = attention._build_sparse_block_indices(
+        idx_queries,
+        idx_keys,
+        q_positions=context_lengths - 1,
+    )
+    mx.eval(native_blocks, native_valid, expected_blocks, expected_valid)
+
+    assert sorted(m3_deps.np.array(native_blocks[0]).tolist()) == sorted(
+        m3_deps.np.array(expected_blocks[0, 0]).tolist()
+    )
+    assert m3_deps.np.array(native_valid[0]).tolist() == m3_deps.np.array(
+        expected_valid[0, 0]
+    ).tolist()
+
+    token_positions, token_valid = attention._sparse_blocks_to_token_positions(
+        native_blocks,
+        native_valid,
+        q_positions=context_lengths - 1,
+    )
+    mx.eval(token_positions, token_valid)
+
+    assert m3_deps.np.array(token_positions[0]).tolist() == [2, 3, 4, 5]
+    assert m3_deps.np.array(token_valid[0]).tolist() == [1, 1, 1, 1]
 
 
 def test_sparse_token_positions_do_not_include_context_tail_padding(m3_deps):

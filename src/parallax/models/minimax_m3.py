@@ -12,7 +12,12 @@ from parallax.metal.indexer.kernel import store_indexer_cache
 from parallax.server.cache.base import BaseCache
 from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
 from parallax.utils.prefix_cache_utils import prepare_attention_with_prefix_cache
-from parallax_extensions.ops import sparse_paged_attention, paged_attention_v1, reshape_and_cache
+from parallax_extensions.ops import (
+    sparse_block_indexer,
+    sparse_paged_attention,
+    paged_attention_v1,
+    reshape_and_cache,
+)
 
 
 @dataclass
@@ -561,13 +566,24 @@ class MiniMaxAttention(nn.Module):
         idx_keys: mx.array,
         q_positions: mx.array,
     ) -> tuple[mx.array, mx.array]:
-        B = idx_queries.shape[0]
         sparse_block_indices, sparse_block_valid = self._build_sparse_block_indices(
             idx_queries,
             idx_keys,
             q_positions,
         )
+        return self._sparse_blocks_to_token_positions(
+            sparse_block_indices,
+            sparse_block_valid,
+            q_positions,
+        )
 
+    def _sparse_blocks_to_token_positions(
+        self,
+        sparse_block_indices: mx.array,
+        sparse_block_valid: mx.array,
+        q_positions: mx.array,
+    ) -> tuple[mx.array, mx.array]:
+        B = sparse_block_indices.shape[0]
         if q_positions.ndim == 0:
             qpos = mx.broadcast_to(q_positions.reshape(1, 1), (B, 1))
         elif q_positions.ndim == 1:
@@ -698,17 +714,23 @@ class MiniMaxAttention(nn.Module):
     ) -> mx.array:
         B = queries.shape[0]
         max_len = int(mx.max(context_lengths))
-        idx_keys = mx.zeros((B, cache.index_n_heads, max_len, self.index_dim), dtype=queries.dtype)
-
-        for i in range(B):
-            context_len = int(context_lengths[i])
-            idx_i = cache.read_index_k(block_tables[i], context_len)
-            idx_keys[i, :, :context_len, :] = idx_i
 
         q_positions = context_lengths - 1
-        token_positions, token_positions_valid = self._build_sparse_token_positions(
+        sparse_block_indices, sparse_block_valid = sparse_block_indexer(
             idx_queries,
-            idx_keys,
+            cache.get_indexer_cache(),
+            block_tables,
+            context_lengths,
+            max_len,
+            self.sparse_block_size,
+            self.sparse_topk_blocks,
+            self.sparse_init_blocks,
+            self.sparse_local_blocks,
+            self.scale,
+        )
+        token_positions, token_positions_valid = self._sparse_blocks_to_token_positions(
+            sparse_block_indices,
+            sparse_block_valid,
             q_positions,
         )
 

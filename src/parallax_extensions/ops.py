@@ -49,6 +49,7 @@ _ext_paged_attention_v1 = _ext.paged_attention_v1
 _ext_paged_attention_v2 = _ext.paged_attention_v2
 _ext_reshape_and_cache = _ext.reshape_and_cache
 _ext_sparse_paged_attention = getattr(_ext, "sparse_paged_attention", None)
+_ext_sparse_block_indexer = getattr(_ext, "sparse_block_indexer", None)
 
 _PAGED_ATTENTION_V1_MAX_LENGTH = 8192
 
@@ -364,3 +365,75 @@ def sparse_paged_attention(
         scale,
     )
     return output[:, :, None, :]
+
+
+def sparse_block_indexer(
+    index_queries: mx.array,
+    index_key_cache: mx.array,
+    block_tables: mx.array,
+    context_lengths: mx.array,
+    max_context_len: int,
+    sparse_block_size: int,
+    sparse_topk_blocks: int,
+    sparse_init_blocks: int,
+    sparse_local_blocks: int,
+    scale: float,
+) -> tuple[mx.array, mx.array]:
+    """
+    Select sparse index blocks directly from the paged MiniMax-M3 index cache.
+
+    Returns sparse block ids and a matching int32 validity mask. Invalid block
+    ids are zeroed before returning; callers should use the validity mask.
+    """
+    if _ext_sparse_block_indexer is None:
+        raise NotImplementedError(
+            "sparse_block_indexer is not available in the loaded parallax_extensions binary. "
+            "Rebuild parallax_extensions to use this kernel."
+        )
+
+    if index_queries.ndim == 4:
+        if index_queries.shape[2] != 1:
+            raise ValueError("sparse_block_indexer only supports one query token.")
+        index_queries = index_queries.squeeze(2)
+    if index_queries.ndim != 3:
+        raise ValueError(
+            "index_queries must be shaped (batch, index_heads, dim) or "
+            "(batch, index_heads, 1, dim)."
+        )
+    if index_key_cache.ndim != 5:
+        raise ValueError(
+            "index_key_cache must be shaped "
+            "(1, num_blocks, index_key_heads, block_size, index_dim)."
+        )
+    if index_key_cache.shape[-1] != index_queries.shape[-1]:
+        raise ValueError("index_key_cache dim must match index_queries dim.")
+    if sparse_topk_blocks <= 0:
+        raise ValueError("sparse_topk_blocks must be positive.")
+    if sparse_block_size <= 0:
+        raise ValueError("sparse_block_size must be positive.")
+    if max_context_len <= 0:
+        raise ValueError("max_context_len must be positive.")
+
+    index_queries = mx.contiguous(index_queries)
+    block_tables = mx.contiguous(block_tables.astype(mx.int32))
+    context_lengths = mx.contiguous(context_lengths.astype(mx.int32))
+
+    block_indices = _ext_sparse_block_indexer(
+        index_queries,
+        index_key_cache,
+        block_tables,
+        context_lengths,
+        max_context_len,
+        sparse_block_size,
+        sparse_topk_blocks,
+        sparse_init_blocks,
+        sparse_local_blocks,
+        scale,
+    )
+    block_valid = block_indices >= 0
+    block_indices = mx.where(
+        block_valid,
+        block_indices,
+        mx.zeros_like(block_indices),
+    )
+    return block_indices, block_valid.astype(mx.int32)
