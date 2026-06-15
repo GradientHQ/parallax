@@ -48,6 +48,7 @@ _ext = load_extension_module()
 _ext_paged_attention_v1 = _ext.paged_attention_v1
 _ext_paged_attention_v2 = _ext.paged_attention_v2
 _ext_reshape_and_cache = _ext.reshape_and_cache
+_ext_sparse_paged_attention = getattr(_ext, "sparse_paged_attention", None)
 
 _PAGED_ATTENTION_V1_MAX_LENGTH = 8192
 
@@ -287,4 +288,79 @@ def paged_attention_v1(
     )
 
     #  (B, H, D) -> (B, H, 1, D)
+    return output[:, :, None, :]
+
+
+def sparse_paged_attention(
+    queries: mx.array,
+    key_cache: mx.array,
+    value_cache: mx.array,
+    block_tables: mx.array,
+    context_lengths: mx.array,
+    token_positions: mx.array,
+    token_positions_valid: Optional[mx.array],
+    block_size: int,
+    scale: float,
+    num_kv_heads: int,
+) -> mx.array:
+    """
+    Token-sparse paged attention in parallax_extensions.
+
+    The sparse pattern is expressed directly as logical token positions. The
+    native kernel maps those positions through block_tables into the packed KV
+    cache and computes exact token-level attention over the selected tokens.
+    """
+    if _ext_sparse_paged_attention is None:
+        raise NotImplementedError(
+            "sparse_paged_attention is not available in the loaded parallax_extensions binary. "
+            "Rebuild parallax_extensions to use this kernel."
+        )
+
+    if queries.ndim == 4:
+        if queries.shape[2] != 1:
+            raise ValueError("sparse_paged_attention only supports one query token.")
+        queries = queries.squeeze(2)
+    if queries.ndim != 3:
+        raise ValueError("queries must be shaped (batch, heads, dim) or (batch, heads, 1, dim).")
+    if key_cache.ndim != 5 or value_cache.ndim != 4:
+        raise ValueError("sparse_paged_attention requires packed paged KV cache tensors.")
+    if value_cache.shape[2] != queries.shape[2]:
+        raise ValueError("sparse_paged_attention requires value head dim to match query head dim.")
+
+    if token_positions.ndim == 3:
+        if token_positions.shape[1] != 1:
+            raise ValueError("token_positions must have singleton query dimension for decode.")
+        token_positions = token_positions.squeeze(1)
+    if token_positions.ndim != 2:
+        raise ValueError("token_positions must be shaped (batch, positions).")
+
+    if token_positions_valid is None:
+        token_positions_valid = mx.ones(token_positions.shape, dtype=mx.int32)
+    elif token_positions_valid.ndim == 3:
+        if token_positions_valid.shape[1] != 1:
+            raise ValueError("token_positions_valid must have singleton query dimension for decode.")
+        token_positions_valid = token_positions_valid.squeeze(1)
+    if token_positions_valid.shape != token_positions.shape:
+        raise ValueError("token_positions_valid must match token_positions shape.")
+
+    queries = mx.contiguous(queries)
+    block_tables = mx.contiguous(block_tables.astype(mx.int32))
+    context_lengths = mx.contiguous(context_lengths.astype(mx.int32))
+    token_positions = mx.contiguous(token_positions.astype(mx.int32))
+    token_positions_valid = mx.contiguous(token_positions_valid.astype(mx.int32))
+    max_num_positions = token_positions.shape[1]
+
+    output = _ext_sparse_paged_attention(
+        queries,
+        key_cache,
+        value_cache,
+        block_tables,
+        context_lengths,
+        token_positions,
+        token_positions_valid,
+        num_kv_heads,
+        block_size,
+        max_num_positions,
+        scale,
+    )
     return output[:, :, None, :]

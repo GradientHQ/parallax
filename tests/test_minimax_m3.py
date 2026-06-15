@@ -104,6 +104,39 @@ def test_sparse_mask_selects_topk_blocks_not_topk_tokens(m3_deps):
     assert allowed == [False, False, True, True, False, False]
 
 
+def test_sparse_index_blocks_expand_to_token_positions(m3_deps):
+    mx = m3_deps.mx
+    args = _tiny_args(m3_deps)
+    attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
+
+    idx_queries = mx.ones((1, 2, 1, 4), dtype=mx.float32)
+    idx_keys = mx.array(
+        [
+            [
+                [
+                    [0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0],
+                    [10.0, 0.0, 0.0, 0.0],
+                    [9.0, 0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0, 0.0],
+                ]
+            ]
+        ],
+        dtype=mx.float32,
+    )
+
+    token_positions, token_valid = attention._build_sparse_token_positions(
+        idx_queries,
+        idx_keys,
+        q_positions=mx.array([5], dtype=mx.int32),
+    )
+    mx.eval(token_positions, token_valid)
+
+    assert m3_deps.np.array(token_positions[0]).tolist() == [2, 3]
+    assert m3_deps.np.array(token_valid[0]).tolist() == [1, 1]
+
+
 def test_sparse_mask_uses_real_key_positions_for_prefix_blocks(m3_deps):
     mx = m3_deps.mx
     args = _tiny_args(m3_deps)
@@ -134,6 +167,51 @@ def test_sparse_mask_uses_real_key_positions_for_prefix_blocks(m3_deps):
     allowed = m3_deps.np.array(sparse_mask[0, 0, 0]).tolist()
 
     assert allowed == [False, False, True, True]
+
+
+def test_sparse_decode_kernel_matches_dense_reference(m3_deps):
+    mx = m3_deps.mx
+    args = _tiny_args(m3_deps)
+    attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
+    cache = _cache(m3_deps, args, num_blocks=2, block_size=4)
+    block_tables = mx.array([[0, 1]], dtype=mx.int32)
+
+    x = mx.random.normal((1, 6, args.hidden_size)).astype(mx.float32)
+    prefill = attention(
+        x,
+        mask=m3_deps.create_causal_mask(6, 6, mx.float32),
+        cache=cache,
+        block_tables=block_tables,
+        context_lengths=mx.array([6], dtype=mx.int32),
+        slot_mapping=mx.array([0, 1, 2, 3, 4, 5], dtype=mx.int64),
+    )
+    mx.eval(prefill, cache.get_cache()[0], cache.get_cache()[1], cache.get_indexer_cache())
+
+    q = mx.random.normal(
+        (1, attention.num_attention_heads, 1, attention.head_dim),
+        dtype=mx.float32,
+    )
+    idx_q = mx.random.normal((1, attention.index_heads, 1, attention.index_dim), dtype=mx.float32)
+    context_lengths = mx.array([6], dtype=mx.int32)
+
+    fast = attention._sparse_decode_from_cache(
+        q,
+        idx_q,
+        cache,
+        block_tables,
+        context_lengths,
+    )
+    dense = attention._sparse_decode_from_cache_dense(
+        q,
+        idx_q,
+        cache,
+        block_tables,
+        context_lengths,
+    )
+    mx.eval(fast, dense)
+
+    assert fast.shape == dense.shape == (1, 1, args.hidden_size)
+    assert mx.allclose(fast, dense, atol=1e-4).item()
 
 
 def test_attention_prefill_and_decode_write_kv_and_index_cache(m3_deps):

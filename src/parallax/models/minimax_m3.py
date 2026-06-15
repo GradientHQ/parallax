@@ -12,7 +12,7 @@ from parallax.metal.indexer.kernel import store_indexer_cache
 from parallax.server.cache.base import BaseCache
 from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
 from parallax.utils.prefix_cache_utils import prepare_attention_with_prefix_cache
-from parallax_extensions.ops import paged_attention_v1, reshape_and_cache
+from parallax_extensions.ops import sparse_paged_attention, paged_attention_v1, reshape_and_cache
 
 
 @dataclass
@@ -483,6 +483,116 @@ class MiniMaxAttention(nn.Module):
             sparse_mask = sparse_mask & valid
         return sparse_mask
 
+    def _build_sparse_block_indices(
+        self,
+        idx_queries: mx.array,
+        idx_keys: mx.array,
+        q_positions: mx.array,
+    ) -> tuple[mx.array, mx.array]:
+        B, H_idx, L, _ = idx_queries.shape
+        if L != 1:
+            raise ValueError("MiniMax-M3 sparse block indices are only used for decode.")
+
+        total_len = idx_keys.shape[2]
+        scores = mx.matmul(
+            idx_queries.astype(mx.float32),
+            idx_keys.astype(mx.float32).swapaxes(-1, -2),
+        )
+        scores = scores * self.scale
+
+        if q_positions.ndim == 0:
+            qpos = mx.broadcast_to(q_positions.reshape(1, 1), (B, L))
+        elif q_positions.ndim == 1:
+            qpos = q_positions[:, None] if q_positions.shape[0] == B else q_positions[None, :]
+        else:
+            qpos = q_positions
+            if qpos.shape[-1] != L:
+                qpos = qpos[:, -L:]
+
+        kpos = mx.arange(total_len)
+        causal = kpos[None, None, :] <= qpos[:, :, None]
+        scores = mx.where(causal[:, None], scores, -float("inf"))
+
+        num_blocks = max(1, (total_len + self.sparse_block_size - 1) // self.sparse_block_size)
+        pad = num_blocks * self.sparse_block_size - total_len
+        if pad:
+            scores = mx.concatenate(
+                [
+                    scores,
+                    mx.full((*scores.shape[:-1], pad), -float("inf"), dtype=scores.dtype),
+                ],
+                axis=-1,
+            )
+
+        scores_by_block = scores.reshape(B, H_idx, L, num_blocks, self.sparse_block_size)
+        block_scores = mx.max(mx.max(scores_by_block, axis=-1), axis=1)
+        block_scores = mx.where(block_scores == block_scores, block_scores, -float("inf"))
+
+        blocks = mx.arange(num_blocks)
+        cur_block = qpos // self.sparse_block_size
+        causal_block = blocks[None, None, :] <= cur_block[:, :, None]
+        selected_scores = mx.where(causal_block, block_scores, -float("inf"))
+
+        if self.sparse_init_blocks > 0:
+            init_blocks = blocks[None, None, :] < self.sparse_init_blocks
+            selected_scores = mx.where(
+                init_blocks & causal_block,
+                mx.array(1e30, dtype=selected_scores.dtype),
+                selected_scores,
+            )
+        if self.sparse_local_blocks > 0:
+            local_start = mx.maximum(cur_block - self.sparse_local_blocks + 1, 0)
+            local_blocks = (blocks[None, None, :] >= local_start[:, :, None]) & causal_block
+            selected_scores = mx.where(
+                local_blocks,
+                mx.array(1e29, dtype=selected_scores.dtype),
+                selected_scores,
+            )
+
+        topk = max(1, min(self.sparse_topk_blocks, num_blocks))
+        topk_idx = mx.argpartition(-selected_scores, kth=topk - 1, axis=-1)[..., :topk]
+        topk_scores = mx.take_along_axis(selected_scores, topk_idx, axis=-1)
+        topk_valid = topk_scores > mx.array(-float("inf"), dtype=topk_scores.dtype)
+        return topk_idx.astype(mx.int32), topk_valid.astype(mx.int32)
+
+    def _build_sparse_token_positions(
+        self,
+        idx_queries: mx.array,
+        idx_keys: mx.array,
+        q_positions: mx.array,
+    ) -> tuple[mx.array, mx.array]:
+        B = idx_queries.shape[0]
+        sparse_block_indices, sparse_block_valid = self._build_sparse_block_indices(
+            idx_queries,
+            idx_keys,
+            q_positions,
+        )
+
+        if q_positions.ndim == 0:
+            qpos = mx.broadcast_to(q_positions.reshape(1, 1), (B, 1))
+        elif q_positions.ndim == 1:
+            qpos = (
+                q_positions[:, None]
+                if q_positions.shape[0] == B
+                else mx.broadcast_to(q_positions[None, -1:], (B, 1))
+            )
+        else:
+            qpos = q_positions[:, -1:]
+
+        offsets = mx.arange(self.sparse_block_size, dtype=mx.int32)
+        token_positions = (
+            sparse_block_indices[..., None] * self.sparse_block_size
+            + offsets[None, None, None, :]
+        )
+        token_valid = (sparse_block_valid[..., None] != 0) & (
+            token_positions <= qpos[:, :, None, None]
+        )
+
+        return (
+            token_positions.reshape(B, -1).astype(mx.int32),
+            token_valid.reshape(B, -1).astype(mx.int32),
+        )
+
     def _read_prefix_index_keys(
         self,
         idx_keys_new: mx.array,
@@ -528,7 +638,7 @@ class MiniMaxAttention(nn.Module):
         )
         return output.transpose(0, 2, 1, 3).reshape(queries.shape[0], 1, -1)
 
-    def _sparse_decode_from_cache(
+    def _sparse_decode_from_cache_dense(
         self,
         queries: mx.array,
         idx_queries: mx.array,
@@ -564,6 +674,55 @@ class MiniMaxAttention(nn.Module):
             scale=self.scale,
             mask=sparse_mask,
         )
+        return output.transpose(0, 2, 1, 3).reshape(B, 1, -1)
+
+    def _sparse_decode_from_cache(
+        self,
+        queries: mx.array,
+        idx_queries: mx.array,
+        cache: MiniMaxM3SparseCache,
+        block_tables: mx.array,
+        context_lengths: mx.array,
+    ) -> mx.array:
+        B = queries.shape[0]
+        max_len = int(mx.max(context_lengths))
+        idx_keys = mx.zeros((B, cache.index_n_heads, max_len, self.index_dim), dtype=queries.dtype)
+
+        for i in range(B):
+            context_len = int(context_lengths[i])
+            idx_i = cache.read_index_k(block_tables[i], context_len)
+            idx_keys[i, :, :context_len, :] = idx_i
+
+        q_positions = context_lengths - 1
+        token_positions, token_positions_valid = self._build_sparse_token_positions(
+            idx_queries,
+            idx_keys,
+            q_positions,
+        )
+
+        key_cache_global, value_cache_global = cache.get_cache()
+        block_size = key_cache_global.shape[3]
+        try:
+            output = sparse_paged_attention(
+                queries,
+                key_cache_global,
+                value_cache_global,
+                block_tables,
+                context_lengths,
+                token_positions,
+                token_positions_valid,
+                block_size=block_size,
+                scale=self.scale,
+                num_kv_heads=self.num_key_value_heads,
+            )
+        except (NotImplementedError, RuntimeError, ValueError):
+            return self._sparse_decode_from_cache_dense(
+                queries,
+                idx_queries,
+                cache,
+                block_tables,
+                context_lengths,
+            )
         return output.transpose(0, 2, 1, 3).reshape(B, 1, -1)
 
     def __call__(

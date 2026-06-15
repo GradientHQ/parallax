@@ -1346,6 +1346,118 @@ template <typename T, int HEAD_SIZE, int NUM_THREADS, int NUM_SIMD_LANES,
   }
 }
 
+template <typename T, typename CACHE_T, int HEAD_SIZE, int NUM_THREADS,
+          int NUM_SIMD_LANES>
+[[kernel]] void sparse_paged_attention(
+    device T *out [[buffer(0)]], device const T *q [[buffer(1)]],
+    device const CACHE_T *k_cache [[buffer(2)]],
+    device const CACHE_T *v_cache [[buffer(3)]],
+    device const uint32_t *block_tables [[buffer(4)]],
+    device const uint32_t *context_lens [[buffer(5)]],
+    device const int32_t *token_positions [[buffer(6)]],
+    device const int32_t *token_positions_valid [[buffer(7)]],
+    const constant int &num_kv_heads [[buffer(8)]],
+    const constant float &scale [[buffer(9)]],
+    const constant int &block_size [[buffer(10)]],
+    const constant int &max_num_blocks_per_seq [[buffer(11)]],
+    const constant int &max_num_positions [[buffer(12)]],
+    const constant int &q_stride [[buffer(13)]],
+    const constant int &kv_block_stride [[buffer(14)]],
+    const constant int &kv_head_stride [[buffer(15)]],
+    uint3 threadgroup_position_in_grid [[threadgroup_position_in_grid]],
+    uint3 threadgroups_per_grid [[threadgroups_per_grid]],
+    uint3 thread_position_in_threadgroup [[thread_position_in_threadgroup]]) {
+  const int seq_idx = threadgroup_position_in_grid.y;
+  const int head_idx = threadgroup_position_in_grid.x;
+  const int lane = thread_position_in_threadgroup.x;
+  const int num_heads = threadgroups_per_grid.x;
+  const int num_queries_per_kv = num_heads / num_kv_heads;
+  const int kv_head_idx = head_idx / num_queries_per_kv;
+  const int context_len = context_lens[seq_idx];
+
+  float q_vec[8];
+#pragma unroll
+  for (int i = 0; i < 8; i++) {
+    q_vec[i] = 0.f;
+  }
+
+  const device T *q_ptr = q + seq_idx * q_stride + head_idx * HEAD_SIZE;
+  for (int i = lane; i < HEAD_SIZE; i += NUM_SIMD_LANES) {
+    q_vec[i / NUM_SIMD_LANES] = (float)q_ptr[i];
+  }
+
+  float qk_max = -FLT_MAX;
+  float exp_sum = 0.f;
+  float acc_vec[8];
+#pragma unroll
+  for (int i = 0; i < 8; i++) {
+    acc_vec[i] = 0.f;
+  }
+
+  constexpr int x = 16 / sizeof(CACHE_T);
+  const device uint32_t *block_table =
+      block_tables + seq_idx * max_num_blocks_per_seq;
+  const int position_base = seq_idx * max_num_positions;
+
+  for (int p = 0; p < max_num_positions; p++) {
+    const int pos_offset = position_base + p;
+    if (token_positions_valid[pos_offset] == 0) {
+      continue;
+    }
+
+    const int token_pos = token_positions[pos_offset];
+    if (token_pos < 0 || token_pos >= context_len) {
+      continue;
+    }
+
+    const int logical_block_idx = token_pos / block_size;
+    if (logical_block_idx < 0 || logical_block_idx >= max_num_blocks_per_seq) {
+      continue;
+    }
+    const int block_offset = token_pos - logical_block_idx * block_size;
+    const int64_t physical_block_number =
+        static_cast<int64_t>(block_table[logical_block_idx]);
+
+    const device CACHE_T *k_ptr =
+        k_cache + physical_block_number * kv_block_stride +
+        kv_head_idx * kv_head_stride;
+    float qk = 0.f;
+    for (int i = lane; i < HEAD_SIZE; i += NUM_SIMD_LANES) {
+      const int x_idx = i / x;
+      const int x_offset = i % x;
+      const int64_t k_offset = x_idx * block_size * x + block_offset * x + x_offset;
+      qk += q_vec[i / NUM_SIMD_LANES] * (float)k_ptr[k_offset];
+    }
+
+#pragma unroll
+    for (int mask = NUM_SIMD_LANES / 2; mask >= 1; mask /= 2) {
+      qk += simd_shuffle_xor(qk, mask);
+    }
+    qk = simd_shuffle(qk, 0) * scale;
+
+    const float old_qk_max = qk_max;
+    qk_max = max(qk_max, qk);
+    const float alpha = exp(old_qk_max - qk_max);
+    const float beta = exp(qk - qk_max);
+    exp_sum = exp_sum * alpha + beta;
+
+    const device CACHE_T *v_ptr =
+        v_cache + physical_block_number * kv_block_stride +
+        kv_head_idx * kv_head_stride;
+    for (int i = lane; i < HEAD_SIZE; i += NUM_SIMD_LANES) {
+      const int64_t v_offset = i * block_size + block_offset;
+      acc_vec[i / NUM_SIMD_LANES] =
+          acc_vec[i / NUM_SIMD_LANES] * alpha + (float)v_ptr[v_offset] * beta;
+    }
+  }
+
+  const float inv_sum = exp_sum > 0.f ? 1.f / exp_sum : 0.f;
+  device T *out_ptr = out + seq_idx * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE;
+  for (int i = lane; i < HEAD_SIZE; i += NUM_SIMD_LANES) {
+    out_ptr[i] = T(acc_vec[i / NUM_SIMD_LANES] * inv_sum);
+  }
+}
+
 #define instantiate_paged_attention_inner(type, cache_type, head_size,         \
                                           block_size, num_threads,             \
                                           num_simd_lanes, partition_size)      \
@@ -1490,6 +1602,63 @@ template <typename T, int HEAD_SIZE, int NUM_THREADS, int NUM_SIMD_LANES,
 #define instantiate_paged_attention_v2_reduce(type, num_simd_lanes)            \
   instantiate_paged_attention_v2_reduce_heads(type, 256, num_simd_lanes, 512);
 
+#define instantiate_sparse_paged_attention_inner(                             \
+    type, cache_type, head_size, num_threads, num_simd_lanes)                  \
+  template [[host_name("sparse_paged_attention_" #type "_cache_" #cache_type  \
+                       "_hs" #head_size "_nt" #num_threads                    \
+                       "_nsl" #num_simd_lanes)]] [[kernel]] void               \
+  sparse_paged_attention<type, cache_type, head_size, num_threads,            \
+                          num_simd_lanes>(                                    \
+      device type *out [[buffer(0)]], device const type *q [[buffer(1)]],      \
+      device const cache_type *k_cache [[buffer(2)]],                          \
+      device const cache_type *v_cache [[buffer(3)]],                          \
+      device const uint32_t *block_tables [[buffer(4)]],                       \
+      device const uint32_t *context_lens [[buffer(5)]],                       \
+      device const int32_t *token_positions [[buffer(6)]],                     \
+      device const int32_t *token_positions_valid [[buffer(7)]],               \
+      const constant int &num_kv_heads [[buffer(8)]],                          \
+      const constant float &scale [[buffer(9)]],                               \
+      const constant int &block_size [[buffer(10)]],                           \
+      const constant int &max_num_blocks_per_seq [[buffer(11)]],               \
+      const constant int &max_num_positions [[buffer(12)]],                    \
+      const constant int &q_stride [[buffer(13)]],                             \
+      const constant int &kv_block_stride [[buffer(14)]],                      \
+      const constant int &kv_head_stride [[buffer(15)]],                       \
+      uint3 threadgroup_position_in_grid [[threadgroup_position_in_grid]],     \
+      uint3 threadgroups_per_grid [[threadgroups_per_grid]],                   \
+      uint3 thread_position_in_threadgroup [[thread_position_in_threadgroup]]);
+
+#define instantiate_sparse_paged_attention_heads(type, cache_type,            \
+                                                  num_threads, num_simd_lanes) \
+  instantiate_sparse_paged_attention_inner(type, cache_type, 4, num_threads,  \
+                                            num_simd_lanes);                   \
+  instantiate_sparse_paged_attention_inner(type, cache_type, 8, num_threads,  \
+                                            num_simd_lanes);                   \
+  instantiate_sparse_paged_attention_inner(type, cache_type, 16, num_threads, \
+                                            num_simd_lanes);                   \
+  instantiate_sparse_paged_attention_inner(type, cache_type, 32, num_threads, \
+                                            num_simd_lanes);                   \
+  instantiate_sparse_paged_attention_inner(type, cache_type, 64, num_threads, \
+                                            num_simd_lanes);                   \
+  instantiate_sparse_paged_attention_inner(type, cache_type, 80, num_threads, \
+                                            num_simd_lanes);                   \
+  instantiate_sparse_paged_attention_inner(type, cache_type, 96, num_threads, \
+                                            num_simd_lanes);                   \
+  instantiate_sparse_paged_attention_inner(type, cache_type, 112, num_threads,\
+                                            num_simd_lanes);                   \
+  instantiate_sparse_paged_attention_inner(type, cache_type, 120, num_threads,\
+                                            num_simd_lanes);                   \
+  instantiate_sparse_paged_attention_inner(type, cache_type, 128, num_threads,\
+                                            num_simd_lanes);                   \
+  instantiate_sparse_paged_attention_inner(type, cache_type, 192, num_threads,\
+                                            num_simd_lanes);                   \
+  instantiate_sparse_paged_attention_inner(type, cache_type, 256, num_threads,\
+                                            num_simd_lanes);
+
+#define instantiate_sparse_paged_attention(type, cache_type, num_simd_lanes)  \
+  instantiate_sparse_paged_attention_heads(type, cache_type, 32,              \
+                                            num_simd_lanes);
+
 instantiate_paged_attention_v1(float, float, 32);
 instantiate_paged_attention_v1(bfloat16_t, bfloat16_t, 32);
 instantiate_paged_attention_v1(half, half, 32);
@@ -1509,3 +1678,7 @@ instantiate_paged_attention_v2(half, half, 32);
 instantiate_paged_attention_v2(float, uchar, 32);
 instantiate_paged_attention_v2(bfloat16_t, uchar, 32);
 instantiate_paged_attention_v2(half, uchar, 32);
+
+instantiate_sparse_paged_attention(float, float, 32);
+instantiate_sparse_paged_attention(bfloat16_t, bfloat16_t, 32);
+instantiate_sparse_paged_attention(half, half, 32);
