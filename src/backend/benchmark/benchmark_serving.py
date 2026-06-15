@@ -40,7 +40,7 @@ from argparse import ArgumentParser as FlexibleArgumentParser
 from dataclasses import dataclass
 from datetime import datetime
 from json import JSONDecodeError
-from typing import Any, AsyncGenerator, Collection, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 import numpy as np
 import requests
@@ -149,7 +149,7 @@ def sample_sharegpt_requests(
     num_requests: int,
     tokenizer: PreTrainedTokenizerBase,
     fixed_output_len: Optional[int] = None,
-) -> List[Tuple[str, int, int, None]]:
+) -> List[Tuple[str, int, int, Optional[dict]]]:
     # Load the dataset.
     with open(dataset_path, encoding="utf-8") as f:
         dataset = json.load(f)
@@ -164,7 +164,7 @@ def sample_sharegpt_requests(
     random.shuffle(dataset)
 
     # Filter out sequences that are too long or too short
-    filtered_dataset: List[Tuple[str, int, int]] = []
+    filtered_dataset: List[Tuple[str, int, int, Optional[dict]]] = []
     for i in range(len(dataset)):
         if len(filtered_dataset) == num_requests:
             break
@@ -193,11 +193,11 @@ def sample_wildchat_requests(
     tokenizer: PreTrainedTokenizerBase,
     random_seed: int,
     fixed_output_len: Optional[int] = None,
-) -> List[Tuple[str, int, int, None]]:
+) -> List[Tuple[str, int, int, Optional[dict]]]:
     dataset = load_dataset(dataset_path, split="train")
     filter_func = lambda x: len(x["conversation"]) >= 2
     filtered_dataset = dataset.shuffle(seed=random_seed).filter(filter_func)
-    sampled_requests: List[Tuple[str, int, int, Dict[str, Collection[str]]]] = []
+    sampled_requests: List[Tuple[str, int, int, Optional[dict]]] = []
     for data in filtered_dataset:
         if len(sampled_requests) == num_requests:
             break
@@ -231,13 +231,13 @@ def sample_hf_requests(
     tokenizer: PreTrainedTokenizerBase,
     random_seed: int,
     fixed_output_len: Optional[int] = None,
-) -> List[Tuple[str, str, int, Optional[Dict[str, Collection[str]]]]]:
+) -> List[Tuple[str, int, int, Optional[dict]]]:
 
     dataset = load_dataset(dataset_path, name=dataset_subset, split=dataset_split, streaming=True)
     assert "conversations" in dataset.features, "HF Dataset must have 'conversations' column."
     filter_func = lambda x: len(x["conversations"]) >= 2
     filtered_dataset = dataset.shuffle(seed=random_seed).filter(filter_func)
-    sampled_requests: List[Tuple[str, int, int, Dict[str, Collection[str]]]] = []
+    sampled_requests: List[Tuple[str, int, int, Optional[dict]]] = []
     for data in filtered_dataset:
         if len(sampled_requests) == num_requests:
             break
@@ -291,7 +291,7 @@ def sample_random_requests(
     num_prompts: int,
     range_ratio: float,
     tokenizer: PreTrainedTokenizerBase,
-) -> List[Tuple[str, int, int]]:
+) -> List[Tuple[str, int, int, Optional[dict]]]:
     prefix_token_ids = np.random.randint(0, tokenizer.vocab_size, size=prefix_len).tolist()
 
     input_lens = np.random.randint(
@@ -305,7 +305,7 @@ def sample_random_requests(
         size=num_prompts,
     )
     offsets = np.random.randint(0, tokenizer.vocab_size, size=num_prompts)
-    input_requests = []
+    input_requests: List[Tuple[str, int, int, Optional[dict]]] = []
     for i in range(num_prompts):
         prompt = tokenizer.decode(
             prefix_token_ids
@@ -318,10 +318,10 @@ def sample_random_requests(
 
 
 async def get_request(
-    input_requests: List[Tuple[str, int, int]],
+    input_requests: List[Tuple[str, int, int, Optional[dict]]],
     request_rate: float,
     burstiness: float = 1.0,
-) -> AsyncGenerator[Tuple[str, int, int], None]:
+) -> AsyncGenerator[Tuple[str, int, int, Optional[dict]], None]:
     """
     Asynchronously generates requests at a specified rate
     with OPTIONAL burstiness.
@@ -361,7 +361,7 @@ async def get_request(
 
 
 def calculate_metrics(
-    input_requests: List[Tuple[str, int, int]],
+    input_requests: List[Tuple[str, int, int, Optional[dict]]],
     outputs: List[RequestFuncOutput],
     dur_s: float,
     tokenizer: PreTrainedTokenizerBase,
@@ -484,7 +484,8 @@ async def benchmark(
     model_id: str,
     model_name: str,
     tokenizer: PreTrainedTokenizerBase,
-    input_requests: List[Tuple[str, int, int]],
+    input_requests: List[Tuple[str, int, int, Optional[dict]]],
+    initial_test_request: Optional[Tuple[str, int, int, Optional[dict]]],
     logprobs: Optional[int],
     best_of: int,
     request_rate: float,
@@ -507,7 +508,7 @@ async def benchmark(
 
     if not skip_test:
         print("Starting initial single prompt test run...")
-        test_prompt, test_prompt_len, test_output_len, test_mm_content = input_requests[0]
+        test_prompt, test_prompt_len, test_output_len, test_mm_content = initial_test_request
         if backend != "openai-chat" and test_mm_content is not None:
             # multi-modal benchmark is only available on OpenAI Chat backend.
             raise ValueError("Multi-modal content is only supported on 'openai-chat' backend.")
@@ -900,6 +901,8 @@ def parse_goodput(slo_pairs):
 
 
 def main(args: argparse.Namespace):
+    if args.seed is None:
+        args.seed = time.time_ns() % (2**32)
     print(args)
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -921,6 +924,10 @@ def main(args: argparse.Namespace):
         tokenizer_id, tokenizer_mode=tokenizer_mode, trust_remote_code=args.trust_remote_code
     )
 
+    initial_test_request = None
+    needs_initial_request = not args.skip_test
+    num_sample_requests = args.num_prompts + int(needs_initial_request)
+
     if args.dataset is not None:
         warnings.warn(
             "The '--dataset' argument will be deprecated in the next "
@@ -930,7 +937,7 @@ def main(args: argparse.Namespace):
         )
         input_requests = sample_sharegpt_requests(
             dataset_path=args.dataset,
-            num_requests=args.num_prompts,
+            num_requests=num_sample_requests,
             tokenizer=tokenizer,
             fixed_output_len=args.sharegpt_output_len,
         )
@@ -942,7 +949,7 @@ def main(args: argparse.Namespace):
             sharegpt_path = download_and_cache_file(SHAREGPT_URL)
         input_requests = sample_sharegpt_requests(
             dataset_path=sharegpt_path,
-            num_requests=args.num_prompts,
+            num_requests=num_sample_requests,
             tokenizer=tokenizer,
             fixed_output_len=args.sharegpt_output_len,
         )
@@ -950,7 +957,7 @@ def main(args: argparse.Namespace):
     elif args.dataset_name == "wildchat":
         input_requests = sample_wildchat_requests(
             dataset_path="allenai/WildChat",
-            num_requests=args.num_prompts,
+            num_requests=num_sample_requests,
             tokenizer=tokenizer,
             random_seed=args.seed,
             fixed_output_len=args.sharegpt_output_len,
@@ -961,7 +968,7 @@ def main(args: argparse.Namespace):
         if args.backend == "openai-chat":
             input_requests = sample_sonnet_requests(
                 dataset_path=args.dataset_path,
-                num_requests=args.num_prompts,
+                num_requests=num_sample_requests,
                 input_len=args.sonnet_input_len,
                 output_len=args.sonnet_output_len,
                 prefix_len=args.sonnet_prefix_len,
@@ -977,7 +984,7 @@ def main(args: argparse.Namespace):
             ), "Tokenizer/model must have chat template for sonnet dataset."
             input_requests = sample_sonnet_requests(
                 dataset_path=args.dataset_path,
-                num_requests=args.num_prompts,
+                num_requests=num_sample_requests,
                 input_len=args.sonnet_input_len,
                 output_len=args.sonnet_output_len,
                 prefix_len=args.sonnet_prefix_len,
@@ -993,7 +1000,7 @@ def main(args: argparse.Namespace):
             dataset_path=args.dataset_path,
             dataset_subset=args.hf_subset,
             dataset_split=args.hf_split,
-            num_requests=args.num_prompts,
+            num_requests=num_sample_requests,
             tokenizer=tokenizer,
             random_seed=args.seed,
             fixed_output_len=args.hf_output_len,
@@ -1004,13 +1011,17 @@ def main(args: argparse.Namespace):
             prefix_len=args.random_prefix_len,
             input_len=args.random_input_len,
             output_len=args.random_output_len,
-            num_prompts=args.num_prompts,
+            num_prompts=num_sample_requests,
             range_ratio=args.random_range_ratio,
             tokenizer=tokenizer,
         )
 
     else:
         raise ValueError(f"Unknown dataset: {args.dataset_name}")
+
+    if needs_initial_request:
+        initial_test_request = input_requests[0]
+        input_requests = input_requests[1:]
 
     goodput_config_dict = check_goodput_args(args)
 
@@ -1027,6 +1038,7 @@ def main(args: argparse.Namespace):
             model_name=model_name,
             tokenizer=tokenizer,
             input_requests=input_requests,
+            initial_test_request=initial_test_request,
             logprobs=args.logprobs,
             best_of=args.best_of,
             request_rate=args.request_rate,
@@ -1203,7 +1215,12 @@ if __name__ == "__main__":
         "bursty requests. A higher burstiness value (burstiness > 1) "
         "results in a more uniform arrival of requests.",
     )
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed. Defaults to current time.",
+    )
     parser.add_argument(
         "--trust-remote-code",
         action="store_true",
