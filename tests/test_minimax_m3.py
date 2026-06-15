@@ -1,22 +1,37 @@
-import sys
+from types import SimpleNamespace
 
-import mlx.core as mx
-import numpy as np
 import pytest
 
-from parallax.models.minimax_m3 import (
-    MiniMaxAttention,
-    ModelArgs,
-    ParallaxMiniMaxM3Block,
-)
-from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
-from parallax.utils.utils import combine_padding_and_causal_masks, create_causal_mask
-
-pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
+pytestmark = pytest.mark.mlx
 
 
-def _tiny_args():
-    return ModelArgs(
+@pytest.fixture(scope="module")
+def m3_deps():
+    import mlx.core as mx
+    import numpy as np
+
+    from parallax.models.minimax_m3 import (
+        MiniMaxAttention,
+        ModelArgs,
+        ParallaxMiniMaxM3Block,
+    )
+    from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
+    from parallax.utils.utils import combine_padding_and_causal_masks, create_causal_mask
+
+    return SimpleNamespace(
+        mx=mx,
+        np=np,
+        MiniMaxAttention=MiniMaxAttention,
+        ModelArgs=ModelArgs,
+        ParallaxMiniMaxM3Block=ParallaxMiniMaxM3Block,
+        MiniMaxM3SparseCache=MiniMaxM3SparseCache,
+        combine_padding_and_causal_masks=combine_padding_and_causal_masks,
+        create_causal_mask=create_causal_mask,
+    )
+
+
+def _tiny_args(deps):
+    return deps.ModelArgs(
         hidden_size=16,
         intermediate_size=8,
         dense_intermediate_size=32,
@@ -43,22 +58,23 @@ def _tiny_args():
     )
 
 
-def _cache(args, num_blocks=2, block_size=8):
-    return MiniMaxM3SparseCache(
+def _cache(deps, args, num_blocks=2, block_size=8):
+    return deps.MiniMaxM3SparseCache(
         num_blocks=num_blocks,
         block_size=block_size,
         num_kv_heads=args.num_key_value_heads,
         head_dim=args.head_dim,
         head_dim_v=args.head_dim,
-        dtype=mx.float32,
+        dtype=deps.mx.float32,
         index_head_dim=args.sparse_attention_config["sparse_index_dim"],
         index_n_heads=1,
     )
 
 
-def test_sparse_mask_selects_topk_blocks_not_topk_tokens():
-    args = _tiny_args()
-    attention = MiniMaxAttention(args, layer_idx=0)
+def test_sparse_mask_selects_topk_blocks_not_topk_tokens(m3_deps):
+    mx = m3_deps.mx
+    args = _tiny_args(m3_deps)
+    attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
 
     idx_queries = mx.ones((1, 2, 1, 4), dtype=mx.float32)
     idx_keys = mx.array(
@@ -83,14 +99,15 @@ def test_sparse_mask_selects_topk_blocks_not_topk_tokens():
         q_positions=mx.array([5], dtype=mx.int32),
     )
     mx.eval(sparse_mask)
-    allowed = np.array(sparse_mask[0, 0, 0]).tolist()
+    allowed = m3_deps.np.array(sparse_mask[0, 0, 0]).tolist()
 
     assert allowed == [False, False, True, True, False, False]
 
 
-def test_sparse_mask_uses_real_key_positions_for_prefix_blocks():
-    args = _tiny_args()
-    attention = MiniMaxAttention(args, layer_idx=0)
+def test_sparse_mask_uses_real_key_positions_for_prefix_blocks(m3_deps):
+    mx = m3_deps.mx
+    args = _tiny_args(m3_deps)
+    attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
 
     idx_queries = mx.ones((1, 2, 1, 4), dtype=mx.float32)
     idx_keys = mx.array(
@@ -114,20 +131,21 @@ def test_sparse_mask_uses_real_key_positions_for_prefix_blocks():
         key_positions=mx.array([[0, 1, 4, 5]], dtype=mx.int32),
     )
     mx.eval(sparse_mask)
-    allowed = np.array(sparse_mask[0, 0, 0]).tolist()
+    allowed = m3_deps.np.array(sparse_mask[0, 0, 0]).tolist()
 
     assert allowed == [False, False, True, True]
 
 
-def test_attention_prefill_and_decode_write_kv_and_index_cache():
-    args = _tiny_args()
-    attention = MiniMaxAttention(args, layer_idx=0)
-    cache = _cache(args)
+def test_attention_prefill_and_decode_write_kv_and_index_cache(m3_deps):
+    mx = m3_deps.mx
+    args = _tiny_args(m3_deps)
+    attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
+    cache = _cache(m3_deps, args)
 
     x = mx.ones((1, 5, args.hidden_size), dtype=mx.float32)
     out = attention(
         x,
-        mask=create_causal_mask(5, 5, mx.float32),
+        mask=m3_deps.create_causal_mask(5, 5, mx.float32),
         cache=cache,
         block_tables=mx.array([[0]], dtype=mx.int32),
         context_lengths=mx.array([5], dtype=mx.int32),
@@ -151,15 +169,16 @@ def test_attention_prefill_and_decode_write_kv_and_index_cache():
     assert cache.read_index_k(mx.array([0], dtype=mx.int32), 6).shape == (1, 6, 4)
 
 
-def test_attention_prefill_reads_prefix_kv_and_index_cache_for_chunked_path():
-    args = _tiny_args()
-    attention = MiniMaxAttention(args, layer_idx=0)
-    cache = _cache(args)
+def test_attention_prefill_reads_prefix_kv_and_index_cache_for_chunked_path(m3_deps):
+    mx = m3_deps.mx
+    args = _tiny_args(m3_deps)
+    attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
+    cache = _cache(m3_deps, args)
     block_tables = mx.array([[0]], dtype=mx.int32)
 
     prefix = attention(
         mx.ones((1, 4, args.hidden_size), dtype=mx.float32),
-        mask=create_causal_mask(4, 4, mx.float32),
+        mask=m3_deps.create_causal_mask(4, 4, mx.float32),
         cache=cache,
         block_tables=block_tables,
         context_lengths=mx.array([4], dtype=mx.int32),
@@ -169,7 +188,7 @@ def test_attention_prefill_reads_prefix_kv_and_index_cache_for_chunked_path():
 
     chunk = attention(
         mx.full((1, 2, args.hidden_size), 2.0, dtype=mx.float32),
-        mask=create_causal_mask(2, 2, mx.float32),
+        mask=m3_deps.create_causal_mask(2, 2, mx.float32),
         cache=cache,
         block_tables=block_tables,
         context_lengths=mx.array([6], dtype=mx.int32),
@@ -184,16 +203,17 @@ def test_attention_prefill_reads_prefix_kv_and_index_cache_for_chunked_path():
     assert cache.read_index_k(mx.array([0], dtype=mx.int32), 6).shape == (1, 6, 4)
 
 
-def test_attention_prefix_prefill_handles_mixed_prefix_lengths():
-    args = _tiny_args()
-    attention = MiniMaxAttention(args, layer_idx=0)
-    cache = _cache(args, num_blocks=2)
+def test_attention_prefix_prefill_handles_mixed_prefix_lengths(m3_deps):
+    mx = m3_deps.mx
+    args = _tiny_args(m3_deps)
+    attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
+    cache = _cache(m3_deps, args, num_blocks=2)
     block_tables = mx.array([[0], [1]], dtype=mx.int32)
 
     padding = mx.array([[1, 1, 0, 0], [1, 1, 1, 1]], dtype=mx.float32)[:, None, None, :]
-    prefix_mask = combine_padding_and_causal_masks(
+    prefix_mask = m3_deps.combine_padding_and_causal_masks(
         padding,
-        create_causal_mask(4, 4, mx.float32),
+        m3_deps.create_causal_mask(4, 4, mx.float32),
         mx.float32,
     )
     prefix = attention(
@@ -208,7 +228,7 @@ def test_attention_prefix_prefill_handles_mixed_prefix_lengths():
 
     chunk = attention(
         mx.full((2, 2, args.hidden_size), 2.0, dtype=mx.float32),
-        mask=create_causal_mask(2, 2, mx.float32),
+        mask=m3_deps.create_causal_mask(2, 2, mx.float32),
         cache=cache,
         block_tables=block_tables,
         context_lengths=mx.array([4, 6], dtype=mx.int32),
@@ -222,14 +242,15 @@ def test_attention_prefix_prefill_handles_mixed_prefix_lengths():
     assert cache.read_index_k(mx.array([1], dtype=mx.int32), 6).shape == (1, 6, 4)
 
 
-def test_block_forward_runs_attention_and_moe():
-    args = _tiny_args()
-    block = ParallaxMiniMaxM3Block(args, layer_idx=0, local_layer_idx=0)
-    cache = _cache(args)
+def test_block_forward_runs_attention_and_moe(m3_deps):
+    mx = m3_deps.mx
+    args = _tiny_args(m3_deps)
+    block = m3_deps.ParallaxMiniMaxM3Block(args, layer_idx=0, local_layer_idx=0)
+    cache = _cache(m3_deps, args)
 
     out = block(
         mx.ones((1, 5, args.hidden_size), dtype=mx.float32),
-        mask=create_causal_mask(5, 5, mx.float32),
+        mask=m3_deps.create_causal_mask(5, 5, mx.float32),
         cache=[cache],
         block_tables=mx.array([[0]], dtype=mx.int32),
         context_lengths=mx.array([5], dtype=mx.int32),
