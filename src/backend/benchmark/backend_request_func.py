@@ -230,9 +230,7 @@ async def async_request_openai_chat_completions(
                                 content = delta.get("content")
                                 reasoning = delta.get("reasoning")
                                 text_parts = [
-                                    text
-                                    for text in (reasoning, content)
-                                    if isinstance(text, str)
+                                    text for text in (reasoning, content) if isinstance(text, str)
                                 ]
                                 text = "".join(text_parts)
 

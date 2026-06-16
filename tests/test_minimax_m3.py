@@ -9,16 +9,22 @@ pytestmark = pytest.mark.mlx
 def m3_deps():
     import mlx.core as mx
     import numpy as np
+    from mlx_lm.models.base import scaled_dot_product_attention
 
     from parallax.models.minimax_m3 import (
         MiniMaxAttention,
         ModelArgs,
         ParallaxMiniMaxM3Block,
     )
-    from mlx_lm.models.base import scaled_dot_product_attention
     from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
-    from parallax.utils.utils import combine_padding_and_causal_masks, create_causal_mask
-    from parallax_extensions.ops import sparse_token_indexer, sparse_token_indexer_with_update
+    from parallax.utils.utils import (
+        combine_padding_and_causal_masks,
+        create_causal_mask,
+    )
+    from parallax_extensions.ops import (
+        sparse_token_indexer,
+        sparse_token_indexer_with_update,
+    )
 
     return SimpleNamespace(
         mx=mx,

@@ -334,7 +334,9 @@ def sparse_paged_attention(
         token_positions_valid = mx.ones(token_positions.shape, dtype=mx.int32)
     elif token_positions_valid.ndim == 3:
         if token_positions_valid.shape[1] != 1:
-            raise ValueError("token_positions_valid must have singleton query dimension for decode.")
+            raise ValueError(
+                "token_positions_valid must have singleton query dimension for decode."
+            )
         token_positions_valid = token_positions_valid.squeeze(1)
     if token_positions_valid.shape != token_positions.shape:
         raise ValueError("token_positions_valid must match token_positions shape.")
@@ -454,9 +456,7 @@ def sparse_token_indexer_with_update(
         elif index_key_update.shape[1] == 1:
             index_key_update = index_key_update.squeeze(1)
         else:
-            raise ValueError(
-                "index_key_update must have a singleton decode dimension."
-            )
+            raise ValueError("index_key_update must have a singleton decode dimension.")
     if index_key_update.ndim != 3:
         raise ValueError(
             "index_key_update must be shaped (batch, index_key_heads, dim) or "

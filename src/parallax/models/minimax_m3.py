@@ -13,10 +13,10 @@ from parallax.server.cache.base import BaseCache
 from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
 from parallax.utils.prefix_cache_utils import prepare_attention_with_prefix_cache
 from parallax_extensions.ops import (
-    sparse_paged_attention,
-    sparse_token_indexer_with_update,
     paged_attention_v1,
     reshape_and_cache,
+    sparse_paged_attention,
+    sparse_token_indexer_with_update,
 )
 
 
@@ -285,8 +285,7 @@ class MiniMaxSparseMoeBlock(nn.Module):
         self.scoring_func = args.scoring_func
         self.shared_expert_index = args.num_local_experts
         self.pack_shared_expert = (
-            args.n_shared_experts == 1
-            and args.shared_intermediate_size == args.intermediate_size
+            args.n_shared_experts == 1 and args.shared_intermediate_size == args.intermediate_size
         )
 
         self.gate = nn.Linear(args.hidden_size, args.num_local_experts, bias=False)
@@ -923,8 +922,7 @@ def _pack_uint8_weight(weight: mx.array) -> mx.array:
 def _sanitize_moe_weights(weights: Dict[str, mx.array], args: ModelArgs):
     mapping = {"w1": "gate_proj", "w2": "down_proj", "w3": "up_proj"}
     pack_shared = (
-        args.n_shared_experts == 1
-        and args.shared_intermediate_size == args.intermediate_size
+        args.n_shared_experts == 1 and args.shared_intermediate_size == args.intermediate_size
     )
 
     for layer_idx in range(args.num_hidden_layers):

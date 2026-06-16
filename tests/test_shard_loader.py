@@ -290,9 +290,11 @@ def test_minimax_m3_sanitizer_strips_language_model_prefix_and_packs_experts():
         num_layers=1,
     )
 
-    assert sanitized[
-        "model.layers.0.block_sparse_moe.switch_mlp.gate_up_proj.weight"
-    ].shape == (3, 4, 4)
+    assert sanitized["model.layers.0.block_sparse_moe.switch_mlp.gate_up_proj.weight"].shape == (
+        3,
+        4,
+        4,
+    )
     assert sanitized["model.layers.0.block_sparse_moe.switch_mlp.down_proj.weight"].shape == (
         3,
         4,
