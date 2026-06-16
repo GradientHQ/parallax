@@ -127,8 +127,8 @@ NB_MODULE(_ext, m) {
       )");
 
   m.def(
-      "sparse_block_indexer",
-      &parallax_ext::sparse_block_indexer,
+      "sparse_token_indexer",
+      &parallax_ext::sparse_token_indexer,
       "index_query"_a,
       "index_key_cache"_a,
       "block_tables"_a,
@@ -142,7 +142,7 @@ NB_MODULE(_ext, m) {
       nb::kw_only(),
       "stream"_a = nb::none(),
       R"(
-        Sparse block indexer operation
+        Sparse token indexer operation
 
         Args:
             index_query (array): Index query [num_seqs, index_heads, index_dim].
@@ -158,7 +158,44 @@ NB_MODULE(_ext, m) {
             stream (Stream or Device): Stream on which to schedule the operation.
 
         Returns:
-            array: ``Sparse block ids, with -1 for invalid slots``
+            array: ``Sparse token positions, with -1 for invalid slots``
+      )");
+
+  m.def(
+      "sparse_token_indexer_with_update",
+      &parallax_ext::sparse_token_indexer_with_update,
+      "index_query"_a,
+      "index_key_update"_a,
+      "index_key_cache"_a,
+      "block_tables"_a,
+      "seq_lens"_a,
+      "max_context_len"_a,
+      "sparse_block_size"_a,
+      "sparse_topk_blocks"_a,
+      "sparse_init_blocks"_a,
+      "sparse_local_blocks"_a,
+      "scale"_a,
+      nb::kw_only(),
+      "stream"_a = nb::none(),
+      R"(
+        Sparse token indexer operation with decode index-cache update
+
+        Args:
+            index_query (array): Index query [num_seqs, index_heads, index_dim].
+            index_key_update (array): Current index key [num_seqs, index_key_heads, index_dim].
+            index_key_cache (array): Paged index-key cache [1, num_blocks, index_key_heads, block_size, index_dim].
+            block_tables (array): Input array [num_seqs, max_num_blocks_per_seq].
+            seq_lens (array): Input array [num_seqs].
+            max_context_len (int): Maximum context length in this batch.
+            sparse_block_size (int): Sparse index block size.
+            sparse_topk_blocks (int): Number of sparse index blocks to select.
+            sparse_init_blocks (int): Initial sparse blocks to force include.
+            sparse_local_blocks (int): Local tail sparse blocks to force include.
+            scale (float): Index attention scale.
+            stream (Stream or Device): Stream on which to schedule the operation.
+
+        Returns:
+            array: ``Sparse token positions, with -1 for invalid slots``
       )");
 
   m.def(

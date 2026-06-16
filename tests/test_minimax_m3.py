@@ -15,9 +15,10 @@ def m3_deps():
         ModelArgs,
         ParallaxMiniMaxM3Block,
     )
+    from mlx_lm.models.base import scaled_dot_product_attention
     from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
     from parallax.utils.utils import combine_padding_and_causal_masks, create_causal_mask
-    from parallax_extensions.ops import sparse_block_indexer
+    from parallax_extensions.ops import sparse_token_indexer, sparse_token_indexer_with_update
 
     return SimpleNamespace(
         mx=mx,
@@ -28,7 +29,9 @@ def m3_deps():
         MiniMaxM3SparseCache=MiniMaxM3SparseCache,
         combine_padding_and_causal_masks=combine_padding_and_causal_masks,
         create_causal_mask=create_causal_mask,
-        sparse_block_indexer=sparse_block_indexer,
+        scaled_dot_product_attention=scaled_dot_product_attention,
+        sparse_token_indexer=sparse_token_indexer,
+        sparse_token_indexer_with_update=sparse_token_indexer_with_update,
     )
 
 
@@ -73,6 +76,53 @@ def _cache(deps, args, num_blocks=2, block_size=8):
     )
 
 
+def _sparse_decode_dense_reference(
+    deps,
+    attention,
+    queries,
+    idx_queries,
+    cache,
+    block_tables,
+    context_lengths,
+):
+    mx = deps.mx
+    B = queries.shape[0]
+    max_len = int(mx.max(context_lengths))
+    keys = mx.zeros(
+        (B, attention.num_key_value_heads, max_len, attention.head_dim),
+        dtype=queries.dtype,
+    )
+    values = mx.zeros(
+        (B, attention.num_key_value_heads, max_len, cache.head_dim_v),
+        dtype=queries.dtype,
+    )
+    idx_keys = mx.zeros(
+        (B, cache.index_n_heads, max_len, attention.index_dim),
+        dtype=queries.dtype,
+    )
+
+    for i in range(B):
+        context_len = int(context_lengths[i])
+        k_i, v_i = cache.read_kv(block_tables[i], context_len)
+        idx_i = cache.read_index_k(block_tables[i], context_len)
+        keys[i, :, :context_len, :] = k_i
+        values[i, :, :context_len, :] = v_i
+        idx_keys[i, :, :context_len, :] = idx_i
+
+    q_positions = context_lengths - 1
+    sparse_mask = attention._build_sparse_mask(idx_queries, idx_keys, q_positions)
+    valid = mx.arange(max_len)[None, None, None, :] < context_lengths[:, None, None, None]
+    output = deps.scaled_dot_product_attention(
+        queries,
+        keys,
+        values,
+        cache=None,
+        scale=attention.scale,
+        mask=sparse_mask & valid,
+    )
+    return output.transpose(0, 2, 1, 3).reshape(B, 1, -1)
+
+
 def test_sparse_mask_selects_topk_blocks_not_topk_tokens(m3_deps):
     mx = m3_deps.mx
     args = _tiny_args(m3_deps)
@@ -106,43 +156,9 @@ def test_sparse_mask_selects_topk_blocks_not_topk_tokens(m3_deps):
     assert allowed == [False, False, True, True, False, False]
 
 
-def test_sparse_index_blocks_expand_to_token_positions(m3_deps):
+def test_sparse_token_indexer_expands_selected_blocks_to_token_positions(m3_deps):
     mx = m3_deps.mx
     args = _tiny_args(m3_deps)
-    attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
-
-    idx_queries = mx.ones((1, 2, 1, 4), dtype=mx.float32)
-    idx_keys = mx.array(
-        [
-            [
-                [
-                    [0.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0, 0.0],
-                    [10.0, 0.0, 0.0, 0.0],
-                    [9.0, 0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0, 0.0],
-                ]
-            ]
-        ],
-        dtype=mx.float32,
-    )
-
-    token_positions, token_valid = attention._build_sparse_token_positions(
-        idx_queries,
-        idx_keys,
-        q_positions=mx.array([5], dtype=mx.int32),
-    )
-    mx.eval(token_positions, token_valid)
-
-    assert m3_deps.np.array(token_positions[0]).tolist() == [2, 3]
-    assert m3_deps.np.array(token_valid[0]).tolist() == [1, 1]
-
-
-def test_native_sparse_block_indexer_returns_sparse_blocks(m3_deps):
-    mx = m3_deps.mx
-    args = _tiny_args(m3_deps)
-    args.sparse_attention_config["sparse_topk_blocks"] = 2
     attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
     cache = _cache(m3_deps, args, num_blocks=2, block_size=4)
     block_tables = mx.array([[0, 1]], dtype=mx.int32)
@@ -151,12 +167,12 @@ def test_native_sparse_block_indexer_returns_sparse_blocks(m3_deps):
     index_cache = m3_deps.np.zeros((1, 2, 1, 4, 4), dtype=m3_deps.np.float32)
     index_cache[0, 0, 0, 2, 0] = 10.0
     index_cache[0, 0, 0, 3, 0] = 9.0
-    index_cache[0, 1, 0, 0, 0] = 2.0
+    index_cache[0, 1, 0, 0, 0] = 1.0
     index_cache[0, 1, 0, 1, 0] = 1.0
     cache.index_key_cache = mx.array(index_cache, dtype=mx.float32)
 
     idx_queries = mx.ones((1, attention.index_heads, 1, attention.index_dim), dtype=mx.float32)
-    native_blocks, native_valid = m3_deps.sparse_block_indexer(
+    token_positions = m3_deps.sparse_token_indexer(
         idx_queries,
         cache.get_indexer_cache(),
         block_tables,
@@ -168,50 +184,72 @@ def test_native_sparse_block_indexer_returns_sparse_blocks(m3_deps):
         sparse_local_blocks=attention.sparse_local_blocks,
         scale=attention.scale,
     )
+    mx.eval(token_positions)
 
-    idx_keys = cache.read_index_k(block_tables[0], 6)[None]
-    expected_blocks, expected_valid = attention._build_sparse_block_indices(
-        idx_queries,
-        idx_keys,
-        q_positions=context_lengths - 1,
-    )
-    mx.eval(native_blocks, native_valid, expected_blocks, expected_valid)
-
-    assert sorted(m3_deps.np.array(native_blocks[0]).tolist()) == sorted(
-        m3_deps.np.array(expected_blocks[0, 0]).tolist()
-    )
-    assert m3_deps.np.array(native_valid[0]).tolist() == m3_deps.np.array(
-        expected_valid[0, 0]
-    ).tolist()
-
-    token_positions, token_valid = attention._sparse_blocks_to_token_positions(
-        native_blocks,
-        native_valid,
-        q_positions=context_lengths - 1,
-    )
-    mx.eval(token_positions, token_valid)
-
-    assert m3_deps.np.array(token_positions[0]).tolist() == [2, 3, 4, 5]
-    assert m3_deps.np.array(token_valid[0]).tolist() == [1, 1, 1, 1]
+    assert m3_deps.np.array(token_positions[0]).tolist() == [2, 3]
 
 
-def test_sparse_token_positions_do_not_include_context_tail_padding(m3_deps):
+def test_sparse_token_indexer_with_update_stores_current_index_key(m3_deps):
     mx = m3_deps.mx
     args = _tiny_args(m3_deps)
     attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
+    cache = _cache(m3_deps, args, num_blocks=2, block_size=4)
+    block_tables = mx.array([[0, 1]], dtype=mx.int32)
+    context_lengths = mx.array([6], dtype=mx.int32)
 
-    idx_queries = mx.ones((1, 2, 1, 4), dtype=mx.float32)
-    idx_keys = mx.ones((1, 1, 1, 4), dtype=mx.float32)
+    index_cache = m3_deps.np.zeros((1, 2, 1, 4, 4), dtype=m3_deps.np.float32)
+    index_cache[0, 0, 0, 2, 0] = 10.0
+    index_cache[0, 0, 0, 3, 0] = 9.0
+    cache.index_key_cache = mx.array(index_cache, dtype=mx.float32)
 
-    token_positions, token_valid = attention._build_sparse_token_positions(
+    idx_queries = mx.ones((1, attention.index_heads, 1, attention.index_dim), dtype=mx.float32)
+    idx_key_update = mx.array([[[12.0, 0.0, 0.0, 0.0]]], dtype=mx.float32)
+    token_positions = m3_deps.sparse_token_indexer_with_update(
         idx_queries,
-        idx_keys,
-        q_positions=mx.array([0], dtype=mx.int32),
+        idx_key_update,
+        cache.get_indexer_cache(),
+        block_tables,
+        context_lengths,
+        max_context_len=6,
+        sparse_block_size=attention.sparse_block_size,
+        sparse_topk_blocks=attention.sparse_topk_blocks,
+        sparse_init_blocks=attention.sparse_init_blocks,
+        sparse_local_blocks=attention.sparse_local_blocks,
+        scale=attention.scale,
     )
-    mx.eval(token_positions, token_valid)
+    written = cache.read_index_k(block_tables[0], 6)
+    mx.eval(token_positions, written)
 
-    assert m3_deps.np.array(token_positions[0]).tolist() == [0]
-    assert m3_deps.np.array(token_valid[0]).tolist() == [1]
+    assert m3_deps.np.array(token_positions[0]).tolist() == [4, 5]
+    assert m3_deps.np.array(written[0, 5]).tolist() == [12.0, 0.0, 0.0, 0.0]
+
+
+def test_sparse_token_positions_marks_context_tail_padding_invalid(m3_deps):
+    mx = m3_deps.mx
+    args = _tiny_args(m3_deps)
+    attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
+    cache = _cache(m3_deps, args, num_blocks=1, block_size=4)
+    block_tables = mx.array([[0]], dtype=mx.int32)
+    context_lengths = mx.array([1], dtype=mx.int32)
+
+    cache.index_key_cache = mx.ones(cache.index_key_cache.shape, dtype=mx.float32)
+    idx_queries = mx.ones((1, attention.index_heads, 1, attention.index_dim), dtype=mx.float32)
+
+    token_positions = m3_deps.sparse_token_indexer(
+        idx_queries,
+        cache.get_indexer_cache(),
+        block_tables,
+        context_lengths,
+        max_context_len=1,
+        sparse_block_size=attention.sparse_block_size,
+        sparse_topk_blocks=attention.sparse_topk_blocks,
+        sparse_init_blocks=attention.sparse_init_blocks,
+        sparse_local_blocks=attention.sparse_local_blocks,
+        scale=attention.scale,
+    )
+    mx.eval(token_positions)
+
+    assert m3_deps.np.array(token_positions[0]).tolist() == [0, -1]
 
 
 def test_sparse_mask_uses_real_key_positions_for_prefix_blocks(m3_deps):
@@ -269,16 +307,20 @@ def test_sparse_decode_kernel_matches_dense_reference(m3_deps):
         dtype=mx.float32,
     )
     idx_q = mx.random.normal((1, attention.index_heads, 1, attention.index_dim), dtype=mx.float32)
+    idx_k = cache.read_index_k(block_tables[0], 6)[None, :, -1:, :]
     context_lengths = mx.array([6], dtype=mx.int32)
 
     fast = attention._sparse_decode_from_cache(
         q,
         idx_q,
+        idx_k,
         cache,
         block_tables,
         context_lengths,
     )
-    dense = attention._sparse_decode_from_cache_dense(
+    dense = _sparse_decode_dense_reference(
+        m3_deps,
+        attention,
         q,
         idx_q,
         cache,

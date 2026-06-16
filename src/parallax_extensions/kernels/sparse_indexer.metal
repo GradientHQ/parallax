@@ -4,6 +4,50 @@
 
 using namespace metal;
 
+template <typename T>
+[[kernel]] void store_sparse_index_key(
+    device const T *index_key [[buffer(0)]],
+    device T *index_key_cache [[buffer(1)]],
+    device const uint32_t *block_tables [[buffer(2)]],
+    device const uint32_t *context_lens [[buffer(3)]],
+    const constant int &index_key_heads [[buffer(4)]],
+    const constant int &head_size [[buffer(5)]],
+    const constant int &cache_block_size [[buffer(6)]],
+    const constant int &max_num_blocks_per_seq [[buffer(7)]],
+    const constant int &update_stride [[buffer(8)]],
+    const constant int &update_head_stride [[buffer(9)]],
+    const constant int &cache_block_stride [[buffer(10)]],
+    const constant int &cache_head_stride [[buffer(11)]],
+    const constant int &cache_token_stride [[buffer(12)]],
+    uint seq_idx [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint threads_per_threadgroup [[threads_per_threadgroup]]) {
+  const int context_len = context_lens[seq_idx];
+  if (context_len <= 0) {
+    return;
+  }
+  const int token_pos = context_len - 1;
+  const int logical_block_idx = token_pos / cache_block_size;
+  if (logical_block_idx < 0 || logical_block_idx >= max_num_blocks_per_seq) {
+    return;
+  }
+  const int block_offset = token_pos - logical_block_idx * cache_block_size;
+  const int64_t physical_block =
+      static_cast<int64_t>(block_tables[seq_idx * max_num_blocks_per_seq +
+                                        logical_block_idx]);
+  const int total = index_key_heads * head_size;
+  for (int i = tid; i < total; i += threads_per_threadgroup) {
+    const int head_idx = i / head_size;
+    const int dim_idx = i - head_idx * head_size;
+    const int64_t src_idx =
+        seq_idx * update_stride + head_idx * update_head_stride + dim_idx;
+    const int64_t dst_idx =
+        physical_block * cache_block_stride + head_idx * cache_head_stride +
+        block_offset * cache_token_stride + dim_idx;
+    index_key_cache[dst_idx] = index_key[src_idx];
+  }
+}
+
 template <typename T, int HEAD_SIZE, int NUM_THREADS, int NUM_SIMD_LANES>
 [[kernel]] void sparse_block_scores(
     device float *block_scores [[buffer(0)]],
@@ -108,11 +152,13 @@ template <typename T, int HEAD_SIZE, int NUM_THREADS, int NUM_SIMD_LANES>
   }
 }
 
-[[kernel]] void sparse_block_topk(
-    device int32_t *out_blocks [[buffer(0)]],
+[[kernel]] void sparse_block_topk_tokens(
+    device int32_t *out_positions [[buffer(0)]],
     device const float *block_scores [[buffer(1)]],
-    const constant int &max_num_sparse_blocks [[buffer(2)]],
-    const constant int &max_topk_blocks [[buffer(3)]],
+    device const uint32_t *context_lens [[buffer(2)]],
+    const constant int &max_num_sparse_blocks [[buffer(3)]],
+    const constant int &max_topk_blocks [[buffer(4)]],
+    const constant int &sparse_block_size [[buffer(5)]],
     uint3 threadgroup_position_in_grid [[threadgroup_position_in_grid]]) {
   const int seq_idx = threadgroup_position_in_grid.x;
   float best_scores[32];
@@ -143,9 +189,28 @@ template <typename T, int HEAD_SIZE, int NUM_THREADS, int NUM_SIMD_LANES>
     }
   }
 
-  device int32_t *out = out_blocks + seq_idx * max_topk_blocks;
   for (int i = 0; i < max_topk_blocks; ++i) {
-    out[i] = best_blocks[i];
+    for (int j = i + 1; j < max_topk_blocks; ++j) {
+      if (best_blocks[j] >= 0 &&
+          (best_blocks[i] < 0 || best_blocks[j] < best_blocks[i])) {
+        const int tmp_block = best_blocks[i];
+        best_blocks[i] = best_blocks[j];
+        best_blocks[j] = tmp_block;
+      }
+    }
+  }
+
+  const int context_len = context_lens[seq_idx];
+  device int32_t *out =
+      out_positions + seq_idx * max_topk_blocks * sparse_block_size;
+  for (int rank = 0; rank < max_topk_blocks; ++rank) {
+    const int block_idx = best_blocks[rank];
+    for (int offset = 0; offset < sparse_block_size; ++offset) {
+      const int out_idx = rank * sparse_block_size + offset;
+      const int token_pos = block_idx * sparse_block_size + offset;
+      out[out_idx] =
+          (block_idx >= 0 && token_pos < context_len) ? token_pos : -1;
+    }
   }
 }
 
@@ -209,3 +274,27 @@ template <typename T, int HEAD_SIZE, int NUM_THREADS, int NUM_SIMD_LANES>
 instantiate_sparse_block_scores(float, 32);
 instantiate_sparse_block_scores(bfloat16_t, 32);
 instantiate_sparse_block_scores(half, 32);
+
+#define instantiate_store_sparse_index_key(type)                              \
+  template [[host_name("store_sparse_index_key_" #type)]] [[kernel]] void     \
+  store_sparse_index_key<type>(                                               \
+      device const type *index_key [[buffer(0)]],                             \
+      device type *index_key_cache [[buffer(1)]],                             \
+      device const uint32_t *block_tables [[buffer(2)]],                      \
+      device const uint32_t *context_lens [[buffer(3)]],                      \
+      const constant int &index_key_heads [[buffer(4)]],                      \
+      const constant int &head_size [[buffer(5)]],                            \
+      const constant int &cache_block_size [[buffer(6)]],                     \
+      const constant int &max_num_blocks_per_seq [[buffer(7)]],               \
+      const constant int &update_stride [[buffer(8)]],                        \
+      const constant int &update_head_stride [[buffer(9)]],                   \
+      const constant int &cache_block_stride [[buffer(10)]],                  \
+      const constant int &cache_head_stride [[buffer(11)]],                   \
+      const constant int &cache_token_stride [[buffer(12)]],                  \
+      uint seq_idx [[threadgroup_position_in_grid]],                          \
+      uint tid [[thread_position_in_threadgroup]],                            \
+      uint threads_per_threadgroup [[threads_per_threadgroup]]);
+
+instantiate_store_sparse_index_key(float);
+instantiate_store_sparse_index_key(bfloat16_t);
+instantiate_store_sparse_index_key(half);

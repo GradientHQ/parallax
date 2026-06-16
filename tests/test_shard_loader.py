@@ -245,7 +245,7 @@ def test_minimax_m3_uses_parallax_args_module():
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
-def test_minimax_m3_sanitizer_strips_language_model_prefix_and_stacks_experts():
+def test_minimax_m3_sanitizer_strips_language_model_prefix_and_packs_experts():
     import parallax.models.minimax_m3 as minimax_m3
 
     loader = MLXModelLoader("test_model_path")
@@ -269,13 +269,17 @@ def test_minimax_m3_sanitizer_strips_language_model_prefix_and_stacks_experts():
             "sparse_attention_freq": [1],
         },
     )
+    prefix = "language_model.model.layers.0.block_sparse_moe"
     weights = {
-        "language_model.model.layers.0.block_sparse_moe.experts.0.w1.weight": mx.ones((2, 4)),
-        "language_model.model.layers.0.block_sparse_moe.experts.1.w1.weight": mx.ones((2, 4)),
-        "language_model.model.layers.0.block_sparse_moe.experts.0.w2.weight": mx.ones((4, 2)),
-        "language_model.model.layers.0.block_sparse_moe.experts.1.w2.weight": mx.ones((4, 2)),
-        "language_model.model.layers.0.block_sparse_moe.experts.0.w3.weight": mx.ones((2, 4)),
-        "language_model.model.layers.0.block_sparse_moe.experts.1.w3.weight": mx.ones((2, 4)),
+        f"{prefix}.experts.0.w1.weight": mx.ones((2, 4)),
+        f"{prefix}.experts.1.w1.weight": mx.ones((2, 4)),
+        f"{prefix}.experts.0.w2.weight": mx.ones((4, 2)),
+        f"{prefix}.experts.1.w2.weight": mx.ones((4, 2)),
+        f"{prefix}.experts.0.w3.weight": mx.ones((2, 4)),
+        f"{prefix}.experts.1.w3.weight": mx.ones((2, 4)),
+        f"{prefix}.shared_experts.gate_proj.weight": mx.ones((2, 4)),
+        f"{prefix}.shared_experts.up_proj.weight": mx.ones((2, 4)),
+        f"{prefix}.shared_experts.down_proj.weight": mx.ones((4, 2)),
         "language_model.model.norm.weight": mx.zeros((4,)),
     }
 
@@ -286,18 +290,17 @@ def test_minimax_m3_sanitizer_strips_language_model_prefix_and_stacks_experts():
         num_layers=1,
     )
 
-    assert sanitized["model.layers.0.block_sparse_moe.switch_mlp.gate_proj.weight"].shape == (
-        2,
-        2,
-        4,
-    )
+    assert sanitized[
+        "model.layers.0.block_sparse_moe.switch_mlp.gate_up_proj.weight"
+    ].shape == (3, 4, 4)
     assert sanitized["model.layers.0.block_sparse_moe.switch_mlp.down_proj.weight"].shape == (
-        2,
+        3,
         4,
         2,
     )
     assert "language_model.model.norm.weight" not in sanitized
     assert sanitized["model.norm.weight"].shape == (4,)
+    assert "model.layers.0.block_sparse_moe.shared_experts.gate_proj.weight" not in sanitized
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")

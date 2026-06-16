@@ -9,7 +9,7 @@
 
 namespace parallax_ext {
 
-mx::array sparse_block_indexer(
+mx::array sparse_token_indexer(
     const mx::array& index_query,
     const mx::array& index_key_cache,
     const mx::array& block_tables,
@@ -28,28 +28,60 @@ mx::array sparse_block_indexer(
         std::max<int64_t>(1, std::min<int64_t>(sparse_topk_blocks, max_num_sparse_blocks));
     mx::Shape out_shape{
         index_query.shape(0),
-        static_cast<mx::ShapeElem>(max_topk_blocks)};
+        static_cast<mx::ShapeElem>(max_topk_blocks * sparse_block_size)};
     const std::vector<mx::array> inputs = {
         index_query, index_key_cache, block_tables, seq_lens};
     return mx::array(
         out_shape,
         mx::int32,
-        std::make_shared<SparseBlockIndexer>(
+        std::make_shared<SparseTokenIndexer>(
             to_stream(s), max_context_len, sparse_block_size, sparse_topk_blocks,
             sparse_init_blocks, sparse_local_blocks, scale),
         inputs);
 }
 
-void SparseBlockIndexer::eval_cpu(
+mx::array sparse_token_indexer_with_update(
+    const mx::array& index_query,
+    const mx::array& index_key_update,
+    const mx::array& index_key_cache,
+    const mx::array& block_tables,
+    const mx::array& seq_lens,
+    const int64_t max_context_len,
+    const int64_t sparse_block_size,
+    const int64_t sparse_topk_blocks,
+    const int64_t sparse_init_blocks,
+    const int64_t sparse_local_blocks,
+    const float scale,
+    mx::StreamOrDevice s /* = {} */
+) {
+    const int64_t max_num_sparse_blocks =
+        std::max<int64_t>(1, (max_context_len + sparse_block_size - 1) / sparse_block_size);
+    const int64_t max_topk_blocks =
+        std::max<int64_t>(1, std::min<int64_t>(sparse_topk_blocks, max_num_sparse_blocks));
+    mx::Shape out_shape{
+        index_query.shape(0),
+        static_cast<mx::ShapeElem>(max_topk_blocks * sparse_block_size)};
+    const std::vector<mx::array> inputs = {
+        index_query, index_key_cache, block_tables, seq_lens, index_key_update};
+    return mx::array(
+        out_shape,
+        mx::int32,
+        std::make_shared<SparseTokenIndexer>(
+            to_stream(s), max_context_len, sparse_block_size, sparse_topk_blocks,
+            sparse_init_blocks, sparse_local_blocks, scale, true),
+        inputs);
+}
+
+void SparseTokenIndexer::eval_cpu(
   const std::vector<mx::array>& inputs,
   std::vector<mx::array>& outputs) {
     return;
 }
 
-void SparseBlockIndexer::eval_gpu(
+void SparseTokenIndexer::eval_gpu(
   const std::vector<mx::array>& inputs,
   std::vector<mx::array>& outputs) {
-    assert(inputs.size() == 4);
+    assert(inputs.size() == 4 || inputs.size() == 5);
     auto& index_query = inputs[0];
     auto& index_key_cache = inputs[1];
     auto& block_tables = inputs[2];
@@ -59,16 +91,16 @@ void SparseBlockIndexer::eval_gpu(
     const int head_size = index_query.shape(2);
     if (head_size > 256) {
       std::ostringstream msg;
-      msg << "SparseBlockIndexer supports head_size <= 256, got " << head_size;
+      msg << "SparseTokenIndexer supports head_size <= 256, got " << head_size;
       throw std::runtime_error(msg.str());
     }
     if (index_key_cache.dtype() != index_query.dtype()) {
       throw std::runtime_error(
-          "SparseBlockIndexer requires index_query and index_key_cache to share dtype");
+          "SparseTokenIndexer requires index_query and index_key_cache to share dtype");
     }
     if (sparse_topk_blocks_ > 32) {
       std::ostringstream msg;
-      msg << "SparseBlockIndexer supports sparse_topk_blocks <= 32, got "
+      msg << "SparseTokenIndexer supports sparse_topk_blocks <= 32, got "
           << sparse_topk_blocks_;
       throw std::runtime_error(msg.str());
     }
@@ -88,7 +120,8 @@ void SparseBlockIndexer::eval_gpu(
     const int64_t cache_block_size = index_key_cache.shape(3);
     const int64_t max_num_sparse_blocks =
         std::max<int64_t>(1, (max_context_len_ + sparse_block_size_ - 1) / sparse_block_size_);
-    const int64_t max_topk_blocks = out.shape(1);
+    const int64_t max_topk_blocks =
+        std::max<int64_t>(1, out.shape(1) / sparse_block_size_);
     const int64_t max_num_blocks_per_seq = block_tables.shape(1);
 
     mx::Shape score_shape{
@@ -102,6 +135,60 @@ void SparseBlockIndexer::eval_gpu(
     score_name += "_hs" + std::to_string(head_size);
     score_name += "_nt" + std::to_string(num_threads);
     score_name += "_nsl" + std::to_string(num_simd_lanes);
+
+    if (store_current_index_key_) {
+      auto& index_key_update = inputs[4];
+      if (index_key_update.dtype() != index_key_cache.dtype()) {
+        throw std::runtime_error(
+            "SparseTokenIndexer index key update and cache must share dtype");
+      }
+      if (index_key_update.shape(0) != num_seqs ||
+          index_key_update.shape(2) != head_size) {
+        throw std::runtime_error(
+            "SparseTokenIndexer index key update must be shaped "
+            "[num_seqs, index_key_heads, head_size]");
+      }
+      std::string store_name =
+          "store_sparse_index_key_" + get_type_string(index_key_cache.dtype());
+      auto store_kernel = d.get_kernel(store_name, lib);
+      compute_encoder.set_compute_pipeline_state(store_kernel);
+
+      int32_t index_key_heads_32 = static_cast<int32_t>(index_key_update.shape(1));
+      int32_t head_size_32 = static_cast<int32_t>(head_size);
+      int32_t cache_block_size_32 = static_cast<int32_t>(cache_block_size);
+      int32_t max_num_blocks_per_seq_32 =
+          static_cast<int32_t>(max_num_blocks_per_seq);
+      int32_t update_stride_32 = static_cast<int32_t>(index_key_update.strides(0));
+      int32_t update_head_stride_32 =
+          static_cast<int32_t>(index_key_update.strides(1));
+      int32_t cache_block_stride_32 =
+          static_cast<int32_t>(index_key_cache.strides(1));
+      int32_t cache_head_stride_32 =
+          static_cast<int32_t>(index_key_cache.strides(2));
+      int32_t cache_token_stride_32 =
+          static_cast<int32_t>(index_key_cache.strides(3));
+
+      compute_encoder.set_input_array(index_key_update, 0);
+      compute_encoder.set_input_array(index_key_cache, 1);
+      compute_encoder.set_input_array(block_tables, 2);
+      compute_encoder.set_input_array(seq_lens, 3);
+      compute_encoder.set_bytes(index_key_heads_32, 4);
+      compute_encoder.set_bytes(head_size_32, 5);
+      compute_encoder.set_bytes(cache_block_size_32, 6);
+      compute_encoder.set_bytes(max_num_blocks_per_seq_32, 7);
+      compute_encoder.set_bytes(update_stride_32, 8);
+      compute_encoder.set_bytes(update_head_stride_32, 9);
+      compute_encoder.set_bytes(cache_block_stride_32, 10);
+      compute_encoder.set_bytes(cache_head_stride_32, 11);
+      compute_encoder.set_bytes(cache_token_stride_32, 12);
+
+      const uint64_t store_threads =
+          std::min<uint64_t>(512, index_key_update.shape(1) * head_size);
+      MTL::Size store_grid = MTL::Size(num_seqs, 1, 1);
+      MTL::Size store_threadgroup = MTL::Size(store_threads, 1, 1);
+      compute_encoder.dispatch_threadgroups(store_grid, store_threadgroup);
+    }
+
     auto score_kernel = d.get_kernel(score_name, lib);
     compute_encoder.set_compute_pipeline_state(score_kernel);
 
@@ -144,29 +231,32 @@ void SparseBlockIndexer::eval_gpu(
     MTL::Size score_threadgroup = MTL::Size(num_threads, 1, 1);
     compute_encoder.dispatch_threadgroups(score_grid, score_threadgroup);
 
-    auto topk_kernel = d.get_kernel("sparse_block_topk", lib);
+    auto topk_kernel = d.get_kernel("sparse_block_topk_tokens", lib);
     compute_encoder.set_compute_pipeline_state(topk_kernel);
 
     int32_t max_topk_blocks_32 = static_cast<int32_t>(max_topk_blocks);
 
     compute_encoder.set_output_array(out, 0);
     compute_encoder.set_input_array(block_scores, 1);
-    compute_encoder.set_bytes(max_num_sparse_blocks_32, 2);
-    compute_encoder.set_bytes(max_topk_blocks_32, 3);
+    compute_encoder.set_input_array(seq_lens, 2);
+    compute_encoder.set_bytes(max_num_sparse_blocks_32, 3);
+    compute_encoder.set_bytes(max_topk_blocks_32, 4);
+    compute_encoder.set_bytes(sparse_block_size_32, 5);
 
     MTL::Size topk_grid = MTL::Size(num_seqs, 1, 1);
     MTL::Size topk_threadgroup = MTL::Size(1, 1, 1);
     compute_encoder.dispatch_threadgroups(topk_grid, topk_threadgroup);
 }
 
-bool SparseBlockIndexer::is_equivalent(const mx::Primitive& other) const {
-  const SparseBlockIndexer& r_other = static_cast<const SparseBlockIndexer&>(other);
+bool SparseTokenIndexer::is_equivalent(const mx::Primitive& other) const {
+  const SparseTokenIndexer& r_other = static_cast<const SparseTokenIndexer&>(other);
   return max_context_len_ == r_other.max_context_len_ &&
          sparse_block_size_ == r_other.sparse_block_size_ &&
          sparse_topk_blocks_ == r_other.sparse_topk_blocks_ &&
          sparse_init_blocks_ == r_other.sparse_init_blocks_ &&
          sparse_local_blocks_ == r_other.sparse_local_blocks_ &&
-         scale_ == r_other.scale_;
+         scale_ == r_other.scale_ &&
+         store_current_index_key_ == r_other.store_current_index_key_;
 }
 
 } // namespace parallax_ext
