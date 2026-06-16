@@ -9,7 +9,11 @@ from parallax.metal.paged_attention.kernel import paged_attention as old_paged_a
 from parallax.metal.paged_attention.kernel import (
     reshape_and_cache as old_reshape_and_cache,
 )
-from parallax_extensions.ops import paged_attention_v1, reshape_and_cache
+from parallax_extensions.ops import (
+    paged_attention_v1,
+    reshape_and_cache,
+    sparse_paged_attention,
+)
 
 
 def get_packing_factor(dtype):
@@ -226,6 +230,79 @@ def _bench_new(
 
 
 class TestPagedAttentionV1:
+
+    def test_sparse_paged_attention_matches_selected_token_reference(self):
+        mx.random.seed(7)
+        np.random.seed(7)
+
+        batch_size = 1
+        num_heads = 4
+        num_kv_heads = 2
+        head_dim = 32
+        seq_len = 10
+        block_size = 4
+        dtype = mx.float32
+        scale = 1.0 / math.sqrt(head_dim)
+
+        q = mx.random.normal((batch_size, num_heads, 1, head_dim)).astype(dtype)
+        k_seq = mx.random.normal((batch_size, num_kv_heads, seq_len, head_dim)).astype(dtype)
+        v_seq = mx.random.normal((batch_size, num_kv_heads, seq_len, head_dim)).astype(dtype)
+
+        num_blocks = (seq_len + block_size - 1) // block_size
+        block_tables = mx.arange(num_blocks, dtype=mx.int32)[None, :]
+        context_lengths = mx.array([seq_len], dtype=mx.int32)
+        slot_mapping = mx.array(np.arange(seq_len, dtype=np.int64))
+
+        x = get_packing_factor(dtype)
+        key_cache = mx.zeros((num_blocks, num_kv_heads, head_dim // x, block_size, x), dtype=dtype)
+        value_cache = mx.zeros((num_blocks, num_kv_heads, head_dim, block_size), dtype=dtype)
+
+        reshape_and_cache(
+            k_seq.transpose(0, 2, 1, 3),
+            v_seq.transpose(0, 2, 1, 3),
+            key_cache,
+            value_cache,
+            block_tables,
+            context_lengths,
+            block_size,
+            slot_mapping=slot_mapping,
+        )
+        mx.eval(key_cache, value_cache)
+
+        token_positions = mx.array([[0, 2, 7, 9, 0]], dtype=mx.int32)
+        token_valid = mx.array([[1, 1, 1, 1, 0]], dtype=mx.int32)
+        try:
+            out = sparse_paged_attention(
+                q,
+                key_cache,
+                value_cache,
+                block_tables,
+                context_lengths,
+                token_positions,
+                token_valid,
+                block_size,
+                scale,
+                num_kv_heads,
+            )
+        except NotImplementedError as exc:
+            pytest.skip(str(exc))
+
+        n_rep = num_heads // num_kv_heads
+        k_full = mx.repeat(k_seq[:, :, None, :, :], n_rep, axis=2).reshape(
+            batch_size, num_heads, seq_len, head_dim
+        )
+        v_full = mx.repeat(v_seq[:, :, None, :, :], n_rep, axis=2).reshape(
+            batch_size, num_heads, seq_len, head_dim
+        )
+        selected = mx.array([0, 2, 7, 9], dtype=mx.int32)
+        k_selected = k_full[:, :, selected, :]
+        v_selected = v_full[:, :, selected, :]
+        scores = (q.astype(mx.float32) @ k_selected.astype(mx.float32).swapaxes(-1, -2)) * scale
+        probs = mx.softmax(scores, axis=-1)
+        ref = probs @ v_selected.astype(mx.float32)
+        mx.eval(out, ref)
+
+        assert mx.allclose(out.astype(mx.float32), ref, atol=1e-4).item()
 
     def test_long_context_matches_sdpa_at_32k(self):
         mx.random.seed(42)

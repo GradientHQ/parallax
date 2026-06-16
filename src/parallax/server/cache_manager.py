@@ -8,6 +8,7 @@ from parallax.server.cache.base import BaseCache
 from parallax.server.cache.dsa_cache import DeepSeekSparseCache
 from parallax.server.cache.kv_cache import KVCachePacked
 from parallax.server.cache.linear_cache import LinearCache
+from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -31,6 +32,7 @@ class CacheManager:
         head_dim_v: Optional[int] = None,
         index_head_dim: Optional[int] = None,
         index_n_heads: Optional[int] = None,
+        sparse_cache_type: Optional[str] = None,
         # Hybrid Config: List of 'attention' or 'linear' or None (default 'attention')
         layer_types: Optional[List[str]] = None,
         # Linear Model / State Cache Params
@@ -51,6 +53,7 @@ class CacheManager:
         self.head_dim_v = head_dim_v if head_dim_v is not None else head_dim
         self.index_head_dim = index_head_dim
         self.index_n_heads = index_n_heads
+        self.sparse_cache_type = sparse_cache_type
         self.dtype = dtype
         self.block_size = block_size
         self.max_num_seqs = max_num_seqs
@@ -156,6 +159,17 @@ class CacheManager:
     def _create_cache(self, layer_type: str) -> BaseCache:
         if layer_type == "attention":
             if self.index_head_dim is not None and self.index_n_heads is not None:
+                if self.sparse_cache_type == "minimax_m3":
+                    return MiniMaxM3SparseCache(
+                        num_blocks=self.num_gpu_blocks,
+                        block_size=self.block_size,
+                        num_kv_heads=self.num_kv_heads,
+                        head_dim=self.head_dim,
+                        head_dim_v=self.head_dim_v,
+                        dtype=self.dtype,
+                        index_head_dim=self.index_head_dim,
+                        index_n_heads=self.index_n_heads,
+                    )
                 return DeepSeekSparseCache(
                     num_blocks=self.num_gpu_blocks,
                     block_size=self.block_size,

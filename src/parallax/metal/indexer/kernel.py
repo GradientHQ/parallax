@@ -148,7 +148,7 @@ def store_indexer_cache(
         output_dtypes=[mx.float32],
         verbose=False,
     )
-    mx.eval(outputs)
+    mx.async_eval(outputs)
 
 
 def q_dot_k(

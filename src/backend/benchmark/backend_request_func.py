@@ -40,6 +40,8 @@ class RequestFuncOutput:
     success: bool = False
     latency: float = 0.0
     output_tokens: int = 0
+    stream_chunks: int = 0
+    content_chunks: int = 0
     ttft: float = 0.0  # Time to first token
     itl: List[float] = field(default_factory=list)  # List of inter-token latencies
     tpot: float = 0.0  # avg next-token latencies
@@ -94,6 +96,7 @@ async def async_request_openai_completions(
                         if not chunk_bytes:
                             continue
 
+                        output.stream_chunks += 1
                         chunk = chunk_bytes.decode("utf-8").removeprefix("data: ")
                         if chunk != "[DONE]":
                             data = json.loads(chunk)
@@ -106,6 +109,7 @@ async def async_request_openai_completions(
                                 # e.g. for special tokens
                                 text = choices[0].get("text")
                                 timestamp = time.perf_counter()
+                                output.content_chunks += 1
                                 # First token
                                 if not first_chunk_received:
                                     first_chunk_received = True
@@ -149,11 +153,11 @@ async def async_request_openai_chat_completions(
 
     This implementation measures client-side latencies consistently:
     - TTFT (time-to-first-token) is recorded at the arrival time of the first
-      non-empty content delta.
+      non-empty content or reasoning delta.
     - ITL (inter-token latencies) are measured between subsequent non-empty
-      content deltas.
-    - Overall latency is measured up to the last non-empty content delta, not
-      the trailing usage summary event. This aligns TPOT and ITL.
+      content or reasoning deltas.
+    - Overall latency is measured up to the last non-empty content or
+      reasoning delta, not the trailing usage summary event.
 
     Args:
         request_func_input: Request parameters and payload settings.
@@ -187,12 +191,10 @@ async def async_request_openai_chat_completions(
             "stream_options": {
                 "include_usage": True,
             },
-            "sampling_params": {
-                "top_k": 3,
-            },
+            "top_k": 3,
         }
         if request_func_input.ignore_eos:
-            payload["sampling_params"]["ignore_eos"] = request_func_input.ignore_eos
+            payload["ignore_eos"] = request_func_input.ignore_eos
         if request_func_input.extra_body:
             payload.update(request_func_input.extra_body)
         headers = {
@@ -205,7 +207,7 @@ async def async_request_openai_chat_completions(
 
         generated_text = ""
         st = time.perf_counter()
-        # Timestamp of last non-empty content token we observed
+        # Timestamp of last non-empty text token we observed
         last_token_timestamp = st
         # Timestamp of last received event (used as a fallback if no tokens arrive)
         first_content_received = False
@@ -217,6 +219,7 @@ async def async_request_openai_chat_completions(
                         if not chunk_bytes:
                             continue
 
+                        output.stream_chunks += 1
                         chunk = chunk_bytes.decode("utf-8").removeprefix("data: ")
                         if chunk != "[DONE]":
                             timestamp = time.perf_counter()
@@ -225,10 +228,15 @@ async def async_request_openai_chat_completions(
                             if choices := data.get("choices"):
                                 delta = choices[0].get("delta", {})
                                 content = delta.get("content")
-                                content_str = content.strip() if isinstance(content, str) else ""
+                                reasoning = delta.get("reasoning")
+                                text_parts = [
+                                    text for text in (reasoning, content) if isinstance(text, str)
+                                ]
+                                text = "".join(text_parts)
 
-                                # Only act on non-empty content tokens
-                                if content_str:
+                                # Treat reasoning as normal content for metrics.
+                                if text:
+                                    output.content_chunks += 1
                                     if not first_content_received:
                                         first_content_received = True
                                         output.ttft = timestamp - st
@@ -237,7 +245,7 @@ async def async_request_openai_chat_completions(
                                         output.itl.append(timestamp - last_token_timestamp)
                                         last_token_timestamp = timestamp
 
-                                    generated_text += content
+                                    generated_text += text
                             if usage := data.get("usage"):
                                 # Capture token count from trailing usage event
                                 output.output_tokens = usage.get("completion_tokens")
@@ -252,7 +260,7 @@ async def async_request_openai_chat_completions(
                     else:
                         output.success = False
                         output.error = (
-                            "Never received a non-empty content delta to calculate TTFT. "
+                            "Never received a non-empty content or reasoning delta to calculate TTFT. "
                             "This response will be marked as failed!"
                         )
                 else:

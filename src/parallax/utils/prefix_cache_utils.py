@@ -8,7 +8,7 @@ from mlx_lm.models.base import scaled_dot_product_attention
 from parallax.server.cache.base import BaseCache
 
 
-def compute_attention_with_prefix_cache(
+def prepare_attention_with_prefix_cache(
     queries: mx.array,
     keys_new: mx.array,
     values_new: mx.array,
@@ -16,38 +16,11 @@ def compute_attention_with_prefix_cache(
     block_tables: mx.array,
     prefix_lens: mx.array,
     target_len: int,
-    scale: float,
     num_kv_heads: int,
-    mask: Optional[mx.array] = None,
-    sinks: Optional[mx.array] = None,
+    context_lengths: Optional[mx.array] = None,
     window_size: Optional[int] = None,
-) -> mx.array:
-    """
-    Compute attention with prefix cache support.
-
-    This function handles the common pattern of:
-    1. Reading prefix KV from cache
-    2. Concatenating with new KV
-    3. Creating causal mask
-    4. Computing attention
-
-    Args:
-        queries: (batch, n_heads, target_len, head_dim) - Query tensors
-        keys_new: (batch, n_kv_heads, target_len, head_dim) - New key tensors
-        values_new: (batch, n_kv_heads, target_len, head_dim) - New value tensors
-        cache: BaseCache object containing the layer cache
-        block_tables: (batch, max_blocks) - PagedKV block tables
-        prefix_lens: (batch,) - Number of prefix tokens already cached
-        target_len: Length of new tokens
-        scale: Attention scale factor
-        num_kv_heads: Number of KV heads
-        mask: Optional attention mask (used when no prefix cache)
-        sinks: Optional sink tokens for attention
-        window_size: Optional sliding window size for attention
-
-    Returns:
-        output: (batch, target_len, n_heads * head_dim) - Output hidden states
-    """
+):
+    """Read prefix KV, concatenate with new KV, and build a prefix-aware mask."""
     batch = queries.shape[0]
     max_prefix_len = int(mx.max(prefix_lens))
 
@@ -58,11 +31,12 @@ def compute_attention_with_prefix_cache(
     if max_prefix_len > 0:
         # Initialize prefix KV arrays with zeros for padding
         head_dim = k_new.shape[-1]
+        value_dim = v_new.shape[-1]
         prefix_k_batch = mx.zeros(
             (batch, num_kv_heads, max_prefix_len, head_dim), dtype=k_new.dtype
         )  # (batch, n_kv_heads, max_prefix_len, head_dim)
         prefix_v_batch = mx.zeros(
-            (batch, num_kv_heads, max_prefix_len, head_dim), dtype=v_new.dtype
+            (batch, num_kv_heads, max_prefix_len, value_dim), dtype=v_new.dtype
         )  # (batch, n_kv_heads, max_prefix_len, head_dim)
 
         # Batch read prefix KV for all requests
@@ -86,56 +60,72 @@ def compute_attention_with_prefix_cache(
         k_full = k_new
         v_full = v_new
 
-    # Create batch causal mask
-    full_len = k_full.shape[2]  # max_prefix_len + target_len
+    row_indices = mx.arange(target_len, dtype=mx.int32)
+    if context_lengths is None:
+        new_lens = mx.full(prefix_lens.shape, target_len, dtype=mx.int32)
+    else:
+        new_lens = context_lengths - prefix_lens
+    q_positions = prefix_lens[:, None] + row_indices[None, :]
 
-    # Create mask: (batch, target_len, full_len)
-    row_indices = mx.arange(target_len)[None, :, None]  # (1, target_len, 1)
-    col_indices = mx.arange(full_len)[None, None, :]  # (1, 1, full_len)
-    prefix_lens_expanded = prefix_lens[:, None, None]  # (batch, 1, 1)
+    if max_prefix_len > 0:
+        prefix_positions = mx.arange(max_prefix_len, dtype=mx.int32)
+        prefix_positions = mx.broadcast_to(prefix_positions[None, :], (batch, max_prefix_len))
+        prefix_valid = prefix_positions < prefix_lens[:, None]
+    else:
+        prefix_positions = mx.zeros((batch, 0), dtype=mx.int32)
+        prefix_valid = mx.zeros((batch, 0), dtype=mx.bool_)
 
-    # Initialize mask: all positions are allowed by default
-    causal_mask = mx.zeros((batch, target_len, full_len), dtype=queries.dtype)
+    new_positions = prefix_lens[:, None] + row_indices[None, :]
+    new_valid = row_indices[None, :] < new_lens[:, None]
+    key_positions = mx.concatenate([prefix_positions, new_positions], axis=1)
+    key_valid = mx.concatenate([prefix_valid, new_valid], axis=1)
+    query_valid = new_valid
+    causal = key_positions[:, None, :] <= q_positions[:, :, None]
+    valid = key_valid[:, None, :] & query_valid[:, :, None] & causal
 
-    # Mask 1: Invalid prefix positions for requests with shorter prefix
-    invalid_prefix_mask = mx.logical_and(
-        col_indices >= prefix_lens_expanded, col_indices < max_prefix_len
-    )  # (batch, 1, full_len)
-    causal_mask = mx.where(
-        invalid_prefix_mask, float("-inf"), causal_mask
-    )  # (batch, target_len, full_len)
-
-    # Mask 2: Causal mask for new tokens
-    new_token_start = max_prefix_len
-    new_token_col_indices = col_indices - new_token_start
-    is_new_token_pos = col_indices >= new_token_start
-    causal_mask_new = mx.where(
-        mx.logical_and(is_new_token_pos, new_token_col_indices > row_indices), float("-inf"), 0.0
-    )
-    causal_mask = causal_mask + causal_mask_new  # (batch, target_len, full_len)
-
-    # Mask 3: Apply window_size mask if needed
     if window_size is not None:
-        # For prefix_cache case with window_size:
-        # Sliding window means: position i can only attend to positions in [max(0, i - window_size + 1), i]
-        # But for prefix tokens, they can all attend to each other (no window restriction)
-        # For new tokens, apply sliding window on the full sequence (including prefix)
-        row_positions = (
-            mx.arange(target_len, dtype=mx.int32)[None, :, None] + prefix_lens_expanded
-        )  # (batch, target_len, 1) - absolute positions of new tokens
-        col_positions = mx.arange(full_len, dtype=mx.int32)[
-            None, None, :
-        ]  # (1, 1, full_len) - all positions
+        window_start = mx.maximum(0, q_positions[:, :, None] - window_size + 1)
+        valid = valid & (key_positions[:, None, :] >= window_start)
 
-        # Apply sliding window: can attend to positions >= (row_pos - window_size + 1)
-        window_start = mx.maximum(0, row_positions - window_size + 1)  # (batch, target_len, 1)
-        in_window = (col_positions >= window_start) & (col_positions <= row_positions)
+    causal_mask = mx.where(valid[:, None], 0.0, -float("inf")).astype(queries.dtype)
+    return k_full, v_full, causal_mask, q_positions, key_positions
 
-        window_mask = mx.where(in_window, 0.0, float("-inf"))
-        causal_mask = causal_mask + window_mask  # (batch, target_len, full_len)
 
-    # Reshape mask: (batch, 1, target_len, full_len)
-    causal_mask = causal_mask[:, None, :, :].astype(queries.dtype)
+def compute_attention_with_prefix_cache(
+    queries: mx.array,
+    keys_new: mx.array,
+    values_new: mx.array,
+    cache: BaseCache,
+    block_tables: mx.array,
+    prefix_lens: mx.array,
+    target_len: int,
+    scale: float,
+    num_kv_heads: int,
+    mask: Optional[mx.array] = None,
+    sinks: Optional[mx.array] = None,
+    window_size: Optional[int] = None,
+) -> mx.array:
+    """
+    Compute attention with prefix cache support.
+
+    This function handles the common pattern of:
+    1. Reading prefix KV from cache
+    2. Concatenating with new KV
+    3. Creating causal mask
+    4. Computing attention
+    """
+    batch = queries.shape[0]
+    k_full, v_full, causal_mask, _, _ = prepare_attention_with_prefix_cache(
+        queries,
+        keys_new,
+        values_new,
+        cache,
+        block_tables,
+        prefix_lens,
+        target_len,
+        num_kv_heads,
+        window_size=window_size,
+    )
 
     # Batch compute attention
     attention_kwargs = {}

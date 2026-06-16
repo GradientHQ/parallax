@@ -187,6 +187,7 @@ class SGLExecutor(BaseExecutor):
             enable_weight_refit=enable_weight_refit,
             weight_refit_mode=weight_refit_mode,
             chunked_prefill_size=self.chunked_prefill_size,
+            kv_block_size=self.model_runner.page_size,
             conn=conn,
         )
         self.cur_batch = None

@@ -123,6 +123,9 @@ class RooflinePerformanceModel:
         Returns:
             Total latency (ms) combining decoder layers and optional endpoints.
         """
+        if num_current_layers <= 0:
+            return float("inf")
+
         decoder_layer_compute_latency = self.get_compute_roofline_latency_ms(
             self.model_info.decoder_layer_flops(
                 batch_size=self.batch_size,
@@ -422,13 +425,3 @@ class Node:
     def remove_request(self):
         """Remove a request from this node."""
         self.current_requests -= 1
-
-    def clear_serving_state(self) -> None:
-        """Clear serving/runtime state for this node.
-
-        TODO: Verify the worker side / p2p server side state is kept in sync with this reset
-        (e.g. any runtime KV cache, in-flight request bookkeeping, and broadcasted metrics).
-        """
-        self.clear_layer_allocation()
-        self.current_requests = 0
-        self.avg_layer_latency_ms = None

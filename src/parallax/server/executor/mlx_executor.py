@@ -131,6 +131,8 @@ class MLXExecutor(BaseExecutor):
             f"MLX sharded model loaded in {(time.time() - t0) * 1000:.1f} ms; num_layers={self.config.get('num_hidden_layers')}"
         )
 
+        is_minimax_m3 = self.config.get("model_type") == "minimax_m3"
+
         # TODO: Duplicate code to BaseExecutor since num_shard_layers and dtype are needed for initializing kv cache
         self.num_shard_layers = end_layer - start_layer
         self.dtype = get_device_dtype(dtype, device)
@@ -218,6 +220,7 @@ class MLXExecutor(BaseExecutor):
             head_dim_v=v_head_dim,
             index_head_dim=index_head_dim,
             index_n_heads=index_n_heads,
+            sparse_cache_type="minimax_m3" if is_minimax_m3 else None,
             layer_types=layer_types,
             max_num_seqs=max_batch_size // micro_batch_ratio,
             conv_dim=conv_dim,
@@ -258,6 +261,7 @@ class MLXExecutor(BaseExecutor):
             enable_weight_refit=enable_weight_refit,
             weight_refit_mode=weight_refit_mode,
             chunked_prefill_size=self.chunked_prefill_size,
+            kv_block_size=kv_block_size,
             conn=conn,
         )
 

@@ -3,6 +3,8 @@
 
 #include "kernels/paged_attention.h"
 #include "kernels/reshape_and_cache.h"
+#include "kernels/sparse_indexer.h"
+#include "kernels/sparse_paged_attention.h"
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -86,6 +88,115 @@ NB_MODULE(_ext, m) {
 
         Returns:
             array: ``Paged attention result``
+      )");
+
+  m.def(
+      "sparse_paged_attention",
+      &parallax_ext::sparse_paged_attention,
+      "query"_a,
+      "key_cache"_a,
+      "value_cache"_a,
+      "block_tables"_a,
+      "seq_lens"_a,
+      "token_positions"_a,
+      "token_positions_valid"_a,
+      "num_kv_heads"_a,
+      "block_size"_a,
+      "max_num_positions"_a,
+      "scale"_a,
+      nb::kw_only(),
+      "stream"_a = nb::none(),
+      R"(
+        Token-sparse paged attention operation
+
+        Args:
+            query (array): Input array [num_seqs, num_heads, head_size].
+            key_cache (array): Input array [num_blocks, num_heads, head_size/x, block_size, x].
+            value_cache (array): Input array [num_blocks, num_heads, head_size, block_size].
+            block_tables (array): Input array [num_seqs, max_num_blocks_per_seq].
+            seq_lens (array): Input array [num_seqs].
+            token_positions (array): Token positions to attend over [num_seqs, max_num_positions].
+            token_positions_valid (array): Validity mask for token_positions.
+            num_kv_heads (int): Input parameter.
+            block_size (int): KV cache block size.
+            max_num_positions (int): Number of sparse token positions per sequence.
+            scale (float): Attention scale.
+            stream (Stream or Device): Stream on which to schedule the operation.
+
+        Returns:
+            array: ``Sparse paged attention result``
+      )");
+
+  m.def(
+      "sparse_token_indexer",
+      &parallax_ext::sparse_token_indexer,
+      "index_query"_a,
+      "index_key_cache"_a,
+      "block_tables"_a,
+      "seq_lens"_a,
+      "max_context_len"_a,
+      "sparse_block_size"_a,
+      "sparse_topk_blocks"_a,
+      "sparse_init_blocks"_a,
+      "sparse_local_blocks"_a,
+      "scale"_a,
+      nb::kw_only(),
+      "stream"_a = nb::none(),
+      R"(
+        Sparse token indexer operation
+
+        Args:
+            index_query (array): Index query [num_seqs, index_heads, index_dim].
+            index_key_cache (array): Paged index-key cache [1, num_blocks, index_key_heads, block_size, index_dim].
+            block_tables (array): Input array [num_seqs, max_num_blocks_per_seq].
+            seq_lens (array): Input array [num_seqs].
+            max_context_len (int): Maximum context length in this batch.
+            sparse_block_size (int): Sparse index block size.
+            sparse_topk_blocks (int): Number of sparse index blocks to select.
+            sparse_init_blocks (int): Initial sparse blocks to force include.
+            sparse_local_blocks (int): Local tail sparse blocks to force include.
+            scale (float): Index attention scale.
+            stream (Stream or Device): Stream on which to schedule the operation.
+
+        Returns:
+            array: ``Sparse token positions, with -1 for invalid slots``
+      )");
+
+  m.def(
+      "sparse_token_indexer_with_update",
+      &parallax_ext::sparse_token_indexer_with_update,
+      "index_query"_a,
+      "index_key_update"_a,
+      "index_key_cache"_a,
+      "block_tables"_a,
+      "seq_lens"_a,
+      "max_context_len"_a,
+      "sparse_block_size"_a,
+      "sparse_topk_blocks"_a,
+      "sparse_init_blocks"_a,
+      "sparse_local_blocks"_a,
+      "scale"_a,
+      nb::kw_only(),
+      "stream"_a = nb::none(),
+      R"(
+        Sparse token indexer operation with decode index-cache update
+
+        Args:
+            index_query (array): Index query [num_seqs, index_heads, index_dim].
+            index_key_update (array): Current index key [num_seqs, index_key_heads, index_dim].
+            index_key_cache (array): Paged index-key cache [1, num_blocks, index_key_heads, block_size, index_dim].
+            block_tables (array): Input array [num_seqs, max_num_blocks_per_seq].
+            seq_lens (array): Input array [num_seqs].
+            max_context_len (int): Maximum context length in this batch.
+            sparse_block_size (int): Sparse index block size.
+            sparse_topk_blocks (int): Number of sparse index blocks to select.
+            sparse_init_blocks (int): Initial sparse blocks to force include.
+            sparse_local_blocks (int): Local tail sparse blocks to force include.
+            scale (float): Index attention scale.
+            stream (Stream or Device): Stream on which to schedule the operation.
+
+        Returns:
+            array: ``Sparse token positions, with -1 for invalid slots``
       )");
 
   m.def(
