@@ -223,8 +223,9 @@ def test_sparse_token_indexer_with_update_stores_current_index_key(m3_deps):
         sparse_local_blocks=attention.sparse_local_blocks,
         scale=attention.scale,
     )
+    mx.eval(token_positions)
     written = cache.read_index_k(block_tables[0], 6)
-    mx.eval(token_positions, written)
+    mx.eval(written)
 
     assert m3_deps.np.array(token_positions[0]).tolist() == [4, 5]
     assert m3_deps.np.array(written[0, 5]).tolist() == [12.0, 0.0, 0.0, 0.0]
