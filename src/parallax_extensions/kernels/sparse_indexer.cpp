@@ -170,6 +170,7 @@ void SparseTokenIndexer::eval_gpu(
 
       compute_encoder.set_input_array(index_key_update, 0);
       compute_encoder.set_input_array(index_key_cache, 1);
+      compute_encoder.register_output_array(index_key_cache);
       compute_encoder.set_input_array(block_tables, 2);
       compute_encoder.set_input_array(seq_lens, 3);
       compute_encoder.set_bytes(index_key_heads_32, 4);
@@ -187,6 +188,7 @@ void SparseTokenIndexer::eval_gpu(
       MTL::Size store_grid = MTL::Size(num_seqs, 1, 1);
       MTL::Size store_threadgroup = MTL::Size(store_threads, 1, 1);
       compute_encoder.dispatch_threadgroups(store_grid, store_threadgroup);
+      compute_encoder.barrier();
     }
 
     auto score_kernel = d.get_kernel(score_name, lib);
