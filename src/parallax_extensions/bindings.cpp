@@ -4,6 +4,7 @@
 #include "kernels/paged_attention.h"
 #include "kernels/reshape_and_cache.h"
 #include "kernels/sparse_indexer.h"
+#include "kernels/sparse_paged_attention.h"
 
 namespace nb = nanobind;
 using namespace nb::literals;
