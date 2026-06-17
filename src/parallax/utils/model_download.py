@@ -108,26 +108,28 @@ def selective_model_download(
             logger.debug("Could not determine specific weight files, downloading all")
             download_model_snapshot(repo_id=repo_id, local_files_only=local_files_only)
         else:
-            # Step 3: Download only the needed weight files
-            logger.info(f"Downloading {len(needed_weight_files)} weight files")
+            missing_weight_files = [
+                weight_file
+                for weight_file in needed_weight_files
+                if not (model_path / weight_file).exists()
+            ]
 
-            for weight_file in needed_weight_files:
-                # Check if file already exists in local cache before downloading
-                weight_file_path = model_path / weight_file
-                if weight_file_path.exists():
-                    continue
-
-                logger.debug(f"Downloading {weight_file}")
+            if missing_weight_files:
+                logger.info(f"Downloading {len(missing_weight_files)} weight files")
+                logger.debug(f"Downloading weight files: {missing_weight_files}")
                 try:
-                    download_model_file(
+                    download_model_snapshot(
                         repo_id=repo_id,
-                        filename=weight_file,
+                        allow_patterns=missing_weight_files,
                         local_files_only=local_files_only,
                     )
                 except Exception as e:
-                    logger.error(f"Failed to download {weight_file} for {repo_id}: {e}")
                     logger.error(
-                        "This node cannot reach Hugging Face Hub to download weight files. "
+                        f"Failed to download weight files {missing_weight_files} "
+                        f"for {repo_id}: {e}"
+                    )
+                    logger.error(
+                        "This node cannot reach the model hub to download weight files. "
                         "Please check network connectivity or pre-download the model."
                     )
                     raise
