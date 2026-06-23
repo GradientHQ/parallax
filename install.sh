@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXTRAS="${PARALLAX_EXTRAS:-}"
 PYTHON_VERSION="${PARALLAX_PYTHON_VERSION:-3.12}"
 VENV_DIR="$SCRIPT_DIR/.venv"
-VLLM_REF="${VLLM_REF:-main}"
+VLLM_REF="${VLLM_REF:-0a1c5034f5e4fe736db672010cda33d9d850f87e}"
 
 show_help() {
     cat <<'EOF'
@@ -30,7 +30,7 @@ Options:
 Environment:
   PARALLAX_EXTRAS         Same as --extras.
   PARALLAX_PYTHON_VERSION Same as --python.
-  VLLM_REF                vLLM git branch/tag to clone.
+  VLLM_REF                vLLM git branch, tag, or full commit hash to clone.
 EOF
 }
 
@@ -246,10 +246,7 @@ build_vllm_rust_frontend() {
     vllm_clone_root="$CLONE_PARENT/vllm"
     trap cleanup_clone EXIT
 
-    echo "Cloning vLLM from https://github.com/vllm-project/vllm.git (ref: $VLLM_REF)"
-    git clone --depth 1 --branch "$VLLM_REF" \
-        https://github.com/vllm-project/vllm.git \
-        "$vllm_clone_root"
+    clone_vllm_ref "$vllm_clone_root"
 
     rust_dir="$vllm_clone_root/rust"
 
@@ -281,6 +278,33 @@ build_vllm_rust_frontend() {
     echo "Installed vllm-rs to $target_path"
     cleanup_clone
     trap - EXIT
+}
+
+clone_vllm_ref() {
+    local clone_root="$1"
+    local repo_url="https://github.com/vllm-project/vllm.git"
+    local fetched=false
+
+    echo "Cloning vLLM from $repo_url (ref: $VLLM_REF)"
+    git init "$clone_root"
+    git -C "$clone_root" remote add origin "$repo_url"
+
+    if git -C "$clone_root" fetch --depth 1 origin "refs/heads/$VLLM_REF" 2>/dev/null; then
+        fetched=true
+    elif git -C "$clone_root" fetch --depth 1 origin "refs/tags/$VLLM_REF" 2>/dev/null; then
+        fetched=true
+    elif git -C "$clone_root" fetch --depth 1 origin "$VLLM_REF"; then
+        fetched=true
+    fi
+
+    if [[ "$fetched" != true ]]; then
+        echo "Unable to fetch vLLM ref: $VLLM_REF" >&2
+        echo "Set VLLM_REF to a valid vLLM branch, tag, or full commit hash." >&2
+        exit 1
+    fi
+
+    git -C "$clone_root" checkout --detach FETCH_HEAD
+    echo "Checked out vLLM commit $(git -C "$clone_root" rev-parse HEAD)"
 }
 
 cleanup_clone() {
