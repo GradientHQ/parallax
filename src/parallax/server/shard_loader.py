@@ -315,7 +315,14 @@ class MLXModelLoader:
         return weight_array
 
     @staticmethod
-    def _load_mlx_lm_module_and_args(model_type: str, config: Dict[str, Any]):
+    def _load_mlx_lm_module_and_args(
+        model_type: str,
+        config: Dict[str, Any],
+        block_class: Optional[type] = None,
+    ):
+        if block_class is not None and hasattr(block_class, "prepare_mlx_lm_config"):
+            config = block_class.prepare_mlx_lm_config(config)
+
         if model_type in MODEL_CLASS_MAP:
             model_class = MODEL_CLASS_MAP[model_type]
         else:
@@ -327,7 +334,10 @@ class MLXModelLoader:
         else:
             model_args_class = getattr(arch_module, "ModelArgs")
 
-        return arch_module, model_args_class.from_dict(config)
+        model_args = model_args_class.from_dict(config)
+        if block_class is not None and hasattr(block_class, "attach_mlx_lm_model_args"):
+            block_class.attach_mlx_lm_model_args(config, model_args)
+        return arch_module, model_args
 
     def load(
         self, lazy: bool = False, strict: bool = False, use_selective_download: bool = True
@@ -384,9 +394,15 @@ class MLXModelLoader:
         model_type = config.get("model_type")
         if not model_type:
             raise ValueError("model_type not found in config.json")
+        if hasattr(block_class, "validate_shard_start"):
+            block_class.validate_shard_start(config, current_start_layer)
 
         try:
-            arch_module, model_args = self._load_mlx_lm_module_and_args(model_type, config)
+            arch_module, model_args = self._load_mlx_lm_module_and_args(
+                model_type,
+                config,
+                block_class,
+            )
             self.arch_module = arch_module
             self.model_args = model_args
 

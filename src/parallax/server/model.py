@@ -160,16 +160,25 @@ class ShardedModel(nn.Module):
         if target_len > 1 and mask is None:
             raise ValueError("ShardedModel: mask cannot be None for prefill.")
 
+        prev_topk = None
         for _, layer_module in enumerate(self.layers):
-            h = layer_module(
+            layer_kwargs = kwargs
+            if hasattr(layer_module, "is_full_indexer_layer"):
+                layer_kwargs = {**kwargs, "prev_topk": prev_topk}
+
+            layer_output = layer_module(
                 h,
                 mask=mask,
                 cache=cache,
                 block_tables=block_tables,
                 context_lengths=context_lengths,
                 slot_mapping=slot_mapping,
-                **kwargs,
+                **layer_kwargs,
             )
+            if isinstance(layer_output, tuple):
+                h, prev_topk = layer_output
+            else:
+                h = layer_output
 
         if self.is_last_shard:
             if self.norm is None or self.lm_head is None:

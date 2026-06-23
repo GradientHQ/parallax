@@ -99,6 +99,13 @@ def store_indexer_cache(
 
     num_layers = key_cache.shape[0]
     num_blocks = key_cache.shape[1]
+    cache_num_heads = key_cache.shape[2]
+
+    if num_heads not in (1, cache_num_heads):
+        raise ValueError(
+            "Indexer cache store expects input heads to be 1 or match the cache head count; "
+            f"got input_heads={num_heads}, cache_heads={cache_num_heads}."
+        )
 
     key_stride = num_heads * head_dim
 
@@ -111,6 +118,7 @@ def store_indexer_cache(
         slot_mapping,
         mk_int(key_stride),
         mk_int(num_heads),
+        mk_int(cache_num_heads),
         mk_int(head_dim),
         mk_int(block_size),
         mk_int(num_layers),
@@ -122,7 +130,8 @@ def store_indexer_cache(
         "key_cache",
         "slot_mapping",
         "key_stride",
-        "num_heads",
+        "input_num_heads",
+        "cache_num_heads",
         "head_dim",
         "block_size",
         "num_layers",
@@ -137,8 +146,8 @@ def store_indexer_cache(
         dtype=dtype,
     )
 
-    grid = (num_heads * head_dim, num_tokens, 1)
-    thread_group = (min(1024, num_heads * head_dim), 1, 1)
+    grid = (cache_num_heads * head_dim, num_tokens, 1)
+    thread_group = (min(1024, cache_num_heads * head_dim), 1, 1)
 
     outputs = kernel(
         inputs=inputs,

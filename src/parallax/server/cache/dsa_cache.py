@@ -36,3 +36,22 @@ class DeepSeekSparseCache(KVCache):
 
     def get_indexer_cache(self) -> Optional[mx.array]:
         return self.indexer_key_cache
+
+    def read_index_k(
+        self,
+        block_table: mx.array,
+        context_len: int,
+    ) -> mx.array:
+        """
+        Read sparse index keys for one request.
+
+        Returns:
+            index_k: (index_heads, context_len, index_head_dim)
+        """
+        positions = mx.arange(context_len)
+        block_indices = positions // self.block_size
+        offsets = positions % self.block_size
+        physical_blocks = block_table[block_indices]
+
+        index_k = self.indexer_key_cache[0, physical_blocks, :, offsets, :]
+        return index_k.transpose(1, 0, 2)

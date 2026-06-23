@@ -1,23 +1,96 @@
 # Copyright © 2025 Apple Inc.
 from typing import Any, List, Optional
 
-from parallax_utils.logging_config import get_logger
-
-logger = get_logger(__name__)
-
 import mlx.core as mx
+import mlx.nn as nn
 from mlx_lm.models.base import scaled_dot_product_attention
 from mlx_lm.models.deepseek_v32 import DeepseekV32Attention as MLXDeepseekV32Attention
 from mlx_lm.models.deepseek_v32 import DeepseekV32DecoderLayer as MLXDeepseekV32Block
 from mlx_lm.models.deepseek_v32 import Indexer as MLXDeepseekV32Indexer
 from mlx_lm.models.deepseek_v32 import ModelArgs
+from mlx_lm.models.rope_utils import initialize_rope
 
 from parallax.metal.indexer.kernel import q_dot_k, store_indexer_cache
 from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
 from parallax.server.cache.base import BaseCache
+from parallax.server.cache.dsa_cache import DeepSeekSparseCache
+from parallax_utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+
+def derive_indexer_types(
+    num_layers: int,
+    index_topk_freq: int = 1,
+    indexer_types: Optional[Any] = None,
+    first_k_dense_replace: int = 0,
+    index_skip_topk_offset: Optional[int] = None,
+) -> List[str]:
+    """Return per-layer DSA indexer modes.
+
+    "full" layers run the indexer; "shared" layers reuse the previous full
+    layer's top-k. The default keeps DeepSeek-V3.2 behavior: every layer is full.
+    """
+    if indexer_types is not None:
+        return list(indexer_types)
+
+    if index_topk_freq <= 1:
+        return ["full"] * num_layers
+
+    if index_skip_topk_offset is None:
+        index_skip_topk_offset = index_topk_freq - 1
+
+    return [
+        "full"
+        if (
+            i < first_k_dense_replace
+            or (i - first_k_dense_replace) % index_topk_freq
+            == index_skip_topk_offset
+        )
+        else "shared"
+        for i in range(num_layers)
+    ]
+
+
+GLM_MOE_DSA_DEFAULTS = {
+    "topk_method": "noaux_tc",
+    "scoring_func": "sigmoid",
+    "moe_layer_freq": 1,
+    "index_topk_freq": 1,
+    "indexer_types": None,
+    "index_skip_topk_offset": None,
+    "indexer_rope_traditional": False,
+    "indexer_norm_eps": 1e-6,
+}
+
+GLM_MOE_DSA_EXTRA_ARG_KEYS = (
+    "index_topk_freq",
+    "indexer_types",
+    "index_skip_topk_offset",
+    "indexer_rope_traditional",
+    "indexer_norm_eps",
+)
+
+
+def _is_glm_moe_dsa_config(config: dict) -> bool:
+    return config.get("model_type") == "glm_moe_dsa"
 
 
 class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
+    def __init__(self, args: ModelArgs):
+        super().__init__(args)
+        self.k_norm = nn.LayerNorm(
+            self.head_dim,
+            eps=getattr(args, "indexer_norm_eps", 1e-5),
+        )
+        self.rope = initialize_rope(
+            dims=args.qk_rope_head_dim,
+            base=args.rope_theta,
+            traditional=getattr(args, "indexer_rope_traditional", True),
+            max_position_embeddings=args.max_position_embeddings,
+            scaling_config=args.rope_scaling,
+        )
+
     def __call__(
         self,
         x: mx.array,
@@ -53,14 +126,16 @@ class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
         q = mx.concatenate([q_pe, q_nope], axis=-1)
         k = mx.concatenate([k_pe, k_nope], axis=-1)
 
-        store_indexer_cache(
-            k.transpose(0, 2, 1, 3),
-            cache,
-            block_tables,
-            context_lengths,
-            block_size=block_size,
-            slot_mapping=slot_mapping,
-        )
+        indexer_cache = cache.get_indexer_cache() if isinstance(cache, DeepSeekSparseCache) else cache
+        if indexer_cache is not None:
+            store_indexer_cache(
+                k.transpose(0, 2, 1, 3),
+                indexer_cache,
+                block_tables,
+                context_lengths,
+                block_size=block_size,
+                slot_mapping=slot_mapping,
+            )
 
         if target_len == 1:
             topk_list = []
@@ -71,7 +146,7 @@ class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
                 else:
                     score = q_dot_k(
                         q[i],
-                        k[i],
+                        indexer_cache,
                         block_size=block_size,
                         block_table=block_tables[i],
                         context_length=context_lengths[i],
@@ -89,10 +164,70 @@ class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
                     score = score.squeeze(0)  # shape: (context_len,)
                     topk_indices = mx.argpartition(score, kth=-self.index_topk, axis=-1)[
                         -self.index_topk :
-                    ]
+                    ].astype(mx.int32)
                     topk_list.append(topk_indices)
             return mx.array(topk_list)
         else:
+            has_prefix_cache = (
+                isinstance(cache, DeepSeekSparseCache)
+                and prefix_lens is not None
+                and bool(mx.any(prefix_lens > 0))
+            )
+            if has_prefix_cache:
+                max_prefix_len = int(mx.max(prefix_lens))
+                k_full = k
+                if max_prefix_len > 0:
+                    prefix_k = mx.zeros(
+                        (batch, self.n_heads, max_prefix_len, self.head_dim),
+                        dtype=k.dtype,
+                    )
+                    for i in range(batch):
+                        prefix_len = int(prefix_lens[i])
+                        if prefix_len <= 0:
+                            continue
+                        index_k_i = cache.read_index_k(block_tables[i], prefix_len)
+                        prefix_k[i, :, :prefix_len, :] = index_k_i
+                    k_local = k
+                    if k_local.shape[1] == 1 and self.n_heads > 1:
+                        k_local = mx.repeat(k_local, self.n_heads, axis=1)
+                    k_full = mx.concatenate([prefix_k, k_local], axis=2)
+
+                full_len = k_full.shape[2]
+                if full_len <= self.index_topk:
+                    return mx.full((batch, target_len, self.index_topk), -1, dtype=mx.int32)
+
+                scores = q @ k_full.swapaxes(-1, -2)
+                scores = mx.maximum(scores, 0)
+                weights = self.weights_proj(x) * (self.n_heads**-0.5)
+                weights = (weights * self.softmax_scale).swapaxes(-1, -2)[..., None]
+                scores = (scores * weights).sum(axis=1)
+
+                row_indices = mx.arange(target_len, dtype=mx.int32)
+                prefix_positions = mx.arange(max_prefix_len, dtype=mx.int32)
+                prefix_positions = mx.broadcast_to(
+                    prefix_positions[None, :], (batch, max_prefix_len)
+                )
+                prefix_valid = prefix_positions < prefix_lens[:, None]
+                new_positions = prefix_lens[:, None] + row_indices[None, :]
+                new_lens = context_lengths - prefix_lens
+                new_valid = row_indices[None, :] < new_lens[:, None]
+                key_positions = mx.concatenate([prefix_positions, new_positions], axis=1)
+                key_valid = mx.concatenate([prefix_valid, new_valid], axis=1)
+                q_positions = prefix_lens[:, None] + row_indices[None, :]
+                valid = key_valid[:, None, :] & (key_positions[:, None, :] <= q_positions[:, :, None])
+                valid = valid & new_valid[:, :, None]
+
+                scores = mx.where(valid, scores, -float("inf"))
+                topk_indices = mx.argpartition(scores, kth=-self.index_topk, axis=-1)[
+                    ..., -self.index_topk :
+                ].astype(mx.int32)
+                valid_count = valid.sum(axis=-1)
+                return mx.where(
+                    valid_count[..., None] <= self.index_topk,
+                    mx.full(topk_indices.shape, -1, dtype=mx.int32),
+                    topk_indices,
+                )
+
             if target_len < self.index_topk:
                 return mx.full((batch, target_len, self.index_topk), -1, dtype=mx.int32)
             scores = q @ k.swapaxes(-1, -2)
@@ -108,14 +243,17 @@ class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
                     scores = mx.where(mask, scores, -float("inf"))
                 else:
                     scores = scores + mask.astype(scores.dtype)
-            return mx.argpartition(scores, kth=-self.index_topk, axis=-1)[..., -self.index_topk :]
+            return mx.argpartition(scores, kth=-self.index_topk, axis=-1)[
+                ..., -self.index_topk :
+            ].astype(mx.int32)
 
 
 class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
 
-    def __init__(self, args: ModelArgs):
+    def __init__(self, args: ModelArgs, is_full: bool = True):
         super().__init__(args)
-        self.indexer = ParallaxDeepSeekV32Indexer(args)
+        self.is_full = is_full
+        self.indexer = ParallaxDeepSeekV32Indexer(args) if is_full else None
 
     def __call__(
         self,
@@ -126,8 +264,9 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
         prefix_lens: Optional[mx.array] = None,
+        prev_topk: Optional[mx.array] = None,
         **kwargs,
-    ) -> mx.array:
+    ):
         batch, target_len, _ = x.shape
 
         if self.q_lora_rank is None:
@@ -147,7 +286,6 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
         k_nope = self.embed_q(kv_latent, transpose=False)
         values = self.unembed_out(kv_latent).transpose(0, 2, 1, 3)
         key_cache_global, value_cache_global = cache.get_cache()
-        indexer_cache = cache.get_indexer_cache()
 
         # Compute current_pos for all batches using array operations
         if target_len == 1:
@@ -175,17 +313,24 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
             slot_mapping=slot_mapping,
         )
 
-        topk_indices = self.indexer(
-            x,
-            qr,
-            mask,
-            cache=indexer_cache,
-            block_tables=block_tables,
-            context_lengths=context_lengths,
-            block_size=block_size,
-            slot_mapping=slot_mapping,
-            prefix_lens=prefix_lens,
-        )
+        if self.is_full:
+            topk_indices = self.indexer(
+                x,
+                qr,
+                mask,
+                cache=cache,
+                block_tables=block_tables,
+                context_lengths=context_lengths,
+                block_size=block_size,
+                slot_mapping=slot_mapping,
+                prefix_lens=prefix_lens,
+            )
+        else:
+            if prev_topk is None:
+                raise ValueError(
+                    "DSA shared layer requires top-k from a previous full layer in the same shard."
+                )
+            topk_indices = prev_topk
 
         if target_len == 1:
             output = paged_attention(
@@ -284,24 +429,15 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
 
                 # Apply sparse attention mask if topk_indices is available
                 if topk_indices is not None:
-                    # Process topk_indices for all batches
-                    k_seq = target_len
+                    # topk_indices are in the full prefix+new key space.
+                    k_seq = full_len
                     sparse_mask = mx.zeros((batch, target_len, k_seq), dtype=mx.bool_)
                     sparse_mask = mx.put_along_axis(
                         sparse_mask, topk_indices, mx.array(True), axis=-1
                     )
                     all_minus_one = (topk_indices == -1).all(axis=-1, keepdims=True)
                     sparse_mask = mx.where(all_minus_one, True, sparse_mask)
-
-                    # Expand sparse_mask to include prefix: (batch, target_len, max_prefix_len + target_len)
-                    # For prefix positions, allow all (True), for new positions, use sparse_mask
-                    prefix_sparse_mask = mx.ones(
-                        (batch, target_len, max_prefix_len), dtype=mx.bool_
-                    )
-                    full_sparse_mask = mx.concatenate([prefix_sparse_mask, sparse_mask], axis=2)
-                    full_sparse_mask = full_sparse_mask[
-                        :, None, :, :
-                    ]  # (batch, 1, target_len, full_len)
+                    full_sparse_mask = sparse_mask[:, None, :, :]
 
                     # Combine causal mask with sparse mask
                     causal_mask = mx.where(full_sparse_mask, causal_mask, float("-inf"))
@@ -341,13 +477,64 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
                     cache=None,
                 )
                 output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
-        return self.o_proj(output)
+        return self.o_proj(output), topk_indices
 
 
 class ParallaxDeepSeekV32Block(MLXDeepseekV32Block):
+    @classmethod
+    def prepare_mlx_lm_config(cls, config: dict) -> dict:
+        if not _is_glm_moe_dsa_config(config):
+            return config
+
+        prepared = dict(config)
+        for key, value in GLM_MOE_DSA_DEFAULTS.items():
+            prepared.setdefault(key, value)
+        return prepared
+
+    @classmethod
+    def attach_mlx_lm_model_args(cls, config: dict, model_args: Any) -> None:
+        if not _is_glm_moe_dsa_config(config):
+            return
+
+        for key in GLM_MOE_DSA_EXTRA_ARG_KEYS:
+            setattr(model_args, key, config.get(key, GLM_MOE_DSA_DEFAULTS[key]))
+
+    @classmethod
+    def validate_shard_start(cls, config: dict, start_layer: int) -> None:
+        if not _is_glm_moe_dsa_config(config) or start_layer == 0:
+            return
+
+        indexer_types = derive_indexer_types(
+            config.get("num_hidden_layers", 0),
+            config.get("index_topk_freq", GLM_MOE_DSA_DEFAULTS["index_topk_freq"]),
+            config.get("indexer_types"),
+            config.get("first_k_dense_replace", 0),
+            config.get("index_skip_topk_offset"),
+        )
+        if start_layer >= len(indexer_types):
+            return
+
+        if indexer_types[start_layer] != "full":
+            raise ValueError(
+                "GLM DSA shard starts must be layer 0 or a full indexer layer because "
+                "Parallax does not transfer DSA top-k across nodes. "
+                f"Got start_layer={start_layer} with indexer_type={indexer_types[start_layer]!r}."
+            )
+
     def __init__(self, args: ModelArgs, layer_idx: int, local_layer_idx: int):
         super().__init__(args, layer_idx=layer_idx)
-        self.self_attn = ParallaxDeepSeekV32Attention(args)
+        indexer_types = derive_indexer_types(
+            args.num_hidden_layers,
+            getattr(args, "index_topk_freq", 1),
+            getattr(args, "indexer_types", None),
+            getattr(args, "first_k_dense_replace", 0),
+            getattr(args, "index_skip_topk_offset", None),
+        )
+        self.is_full_indexer_layer = indexer_types[layer_idx] == "full"
+        self.self_attn = ParallaxDeepSeekV32Attention(
+            args,
+            is_full=self.is_full_indexer_layer,
+        )
         self.layer_idx = layer_idx
         self.local_layer_idx = local_layer_idx
 
@@ -359,22 +546,24 @@ class ParallaxDeepSeekV32Block(MLXDeepseekV32Block):
         block_tables: Optional[mx.array] = None,
         context_lengths: Optional[mx.array] = None,
         slot_mapping: Optional[mx.array] = None,
+        prev_topk: Optional[mx.array] = None,
         **kwargs,
     ):
 
-        r = self.self_attn(
+        r, topk = self.self_attn(
             self.input_layernorm(x),
             mask,
             cache[self.local_layer_idx],
             block_tables=block_tables,
             context_lengths=context_lengths,
             slot_mapping=slot_mapping,
+            prev_topk=prev_topk,
             **kwargs,
         )
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         out = h + r
-        return out
+        return out, topk
 
     @classmethod
     def get_architecture(cls):
