@@ -316,6 +316,7 @@ class MLXExecutor(BaseExecutor):
 
     def handle_input_requests(self, requests: List[Request]):
         """Update requests states and status in scheduler and cache manager."""
+        mx.eval(mx.zeros(1024))
         if self.tp_size > 1:
             requests = self._tensor_parallel_broadcast_pyobj(requests)
 
