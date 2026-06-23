@@ -12,7 +12,6 @@ import time
 
 import mlx.core as mx
 
-
 GIB = 1024**3
 
 
@@ -59,7 +58,9 @@ def timed_eval(name: str, fn) -> float:
     mx.eval(out)
     # mx.synchronize()
     elapsed_ms = (time.perf_counter() - start) * 1000
-    print(f"{name}: {elapsed_ms:.3f}ms, new_size: {out.nbytes / 2**20}MiB, {memory_gib()}", flush=True)
+    print(
+        f"{name}: {elapsed_ms:.3f}ms, new_size: {out.nbytes / 2**20}MiB, {memory_gib()}", flush=True
+    )
     return elapsed_ms
 
 
@@ -113,7 +114,9 @@ def main() -> None:
     if not args.skip_wired_limit:
         try:
             mx.set_wired_limit(info["max_recommended_working_set_size"] - 2**30)
-            print(f"wired_limit={info['max_recommended_working_set_size'] / GIB:.3f}GiB", flush=True)
+            print(
+                f"wired_limit={info['max_recommended_working_set_size'] / GIB:.3f}GiB", flush=True
+            )
         except Exception as exc:
             print(f"set_wired_limit failed: {exc}", flush=True)
 
