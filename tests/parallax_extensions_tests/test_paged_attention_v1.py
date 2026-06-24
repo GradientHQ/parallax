@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 
 from parallax_extensions.ops import (
+    msa_paged_attention,
     paged_attention_v1,
     reshape_and_cache,
-    msa_paged_attention,
 )
 
 

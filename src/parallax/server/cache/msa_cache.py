@@ -5,7 +5,7 @@ import mlx.core as mx
 from parallax.server.cache.kv_cache import KVCachePacked
 
 
-class MiniMaxM3SparseCache(KVCachePacked):
+class MSACache(KVCachePacked):
     """
     Paged KV cache with an additional MiniMax-M3 sparse index-key cache.
 

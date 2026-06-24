@@ -831,9 +831,7 @@ class MLXExecutor(BaseExecutor):
                 token_pos = context_len - 1
                 block_idx = token_pos // self.cache_manager.block_size
                 block_offset = token_pos % self.cache_manager.block_size
-                slots.append(
-                    block_table[block_idx] * self.cache_manager.block_size + block_offset
-                )
+                slots.append(block_table[block_idx] * self.cache_manager.block_size + block_offset)
             slot_mapping_tensor = mx.array(slots, dtype=mx.int64)
 
         # Prepare state slot mapping if needed

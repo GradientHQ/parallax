@@ -16,15 +16,12 @@ def m3_deps():
         ModelArgs,
         ParallaxMiniMaxM3Block,
     )
-    from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
+    from parallax.server.cache.msa_cache import MSACache
     from parallax.utils.utils import (
         combine_padding_and_causal_masks,
         create_causal_mask,
     )
-    from parallax_extensions.ops import (
-        msa_token_indexer,
-        msa_token_indexer_with_update,
-    )
+    from parallax_extensions.ops import msa_token_indexer, msa_token_indexer_with_update
 
     return SimpleNamespace(
         mx=mx,
@@ -32,7 +29,7 @@ def m3_deps():
         MiniMaxAttention=MiniMaxAttention,
         ModelArgs=ModelArgs,
         ParallaxMiniMaxM3Block=ParallaxMiniMaxM3Block,
-        MiniMaxM3SparseCache=MiniMaxM3SparseCache,
+        MSACache=MSACache,
         combine_padding_and_causal_masks=combine_padding_and_causal_masks,
         create_causal_mask=create_causal_mask,
         scaled_dot_product_attention=scaled_dot_product_attention,
@@ -70,7 +67,7 @@ def _tiny_args(deps):
 
 
 def _cache(deps, args, num_blocks=2, block_size=8):
-    return deps.MiniMaxM3SparseCache(
+    return deps.MSACache(
         num_blocks=num_blocks,
         block_size=block_size,
         num_kv_heads=args.num_key_value_heads,

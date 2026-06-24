@@ -9,13 +9,13 @@ from mlx_lm.models.rope_utils import initialize_rope
 from mlx_lm.models.switch_layers import SwitchGLU, SwitchLinear
 
 from parallax.server.cache.base import BaseCache
-from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
+from parallax.server.cache.msa_cache import MSACache
 from parallax.utils.prefix_cache_utils import prepare_attention_with_prefix_cache
 from parallax_extensions.ops import (
-    paged_attention_v1,
-    reshape_and_cache,
     msa_paged_attention,
     msa_token_indexer_with_update,
+    paged_attention_v1,
+    reshape_and_cache,
     store_indexer_cache,
 )
 
@@ -567,7 +567,7 @@ class MiniMaxAttention(nn.Module):
     def _read_prefix_index_keys(
         self,
         idx_keys_new: mx.array,
-        cache: MiniMaxM3SparseCache,
+        cache: MSACache,
         block_tables: mx.array,
         prefix_lens: mx.array,
     ) -> mx.array:
@@ -614,7 +614,7 @@ class MiniMaxAttention(nn.Module):
         queries: mx.array,
         idx_queries: mx.array,
         idx_keys: mx.array,
-        cache: MiniMaxM3SparseCache,
+        cache: MSACache,
         block_tables: mx.array,
         context_lengths: mx.array,
         slot_mapping: Optional[mx.array] = None,
@@ -723,8 +723,8 @@ class MiniMaxAttention(nn.Module):
                 )
         else:
             if self.has_sparse_index:
-                if not isinstance(cache, MiniMaxM3SparseCache):
-                    raise TypeError("MiniMax-M3 sparse layers require MiniMaxM3SparseCache.")
+                if not isinstance(cache, MSACache):
+                    raise TypeError("MiniMax-M3 sparse layers require MSACache.")
                 store_indexer_cache(
                     idx_keys.transpose(0, 2, 1, 3),
                     cache.get_indexer_cache(),
@@ -736,8 +736,8 @@ class MiniMaxAttention(nn.Module):
 
             has_prefix_cache = prefix_lens is not None and bool(mx.any(prefix_lens > 0))
             if has_prefix_cache:
-                if not isinstance(cache, MiniMaxM3SparseCache):
-                    raise TypeError("MiniMax-M3 prefix cache requires MiniMaxM3SparseCache.")
+                if not isinstance(cache, MSACache):
+                    raise TypeError("MiniMax-M3 prefix cache requires MSACache.")
                 (
                     keys_full,
                     values_full,

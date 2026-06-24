@@ -8,7 +8,7 @@ from parallax.server.cache.base import BaseCache
 from parallax.server.cache.dsa_cache import DeepSeekSparseCache
 from parallax.server.cache.kv_cache import KVCachePacked
 from parallax.server.cache.linear_cache import LinearCache
-from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
+from parallax.server.cache.msa_cache import MSACache
 from parallax.utils.layer_types import (
     ATTENTION,
     ATTENTION_LAYER_TYPES,
@@ -231,7 +231,7 @@ class CacheManager:
 
         if layer_type == MSA_ATTENTION:
             self._validate_index_cache_params(layer_type)
-            return MiniMaxM3SparseCache(
+            return MSACache(
                 num_blocks=self.num_gpu_blocks,
                 block_size=self.block_size,
                 num_kv_heads=self.num_kv_heads,
