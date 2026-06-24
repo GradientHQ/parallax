@@ -256,9 +256,17 @@ def main():
             print_rank("\nOOM during decoding")
             break
 
-        block_table = mx.array([cache_manager.get_block_table(request.request_id)], dtype=mx.int32)
-        context_lengths = mx.array(
-            [cache_manager.get_context_length(request.request_id)], dtype=mx.int32
+        block_table_list = cache_manager.get_block_table(request.request_id)
+        context_length = cache_manager.get_context_length(request.request_id)
+        block_table = mx.array([block_table_list], dtype=mx.int32)
+        context_lengths = mx.array([context_length], dtype=mx.int32)
+        token_pos = context_length - 1
+        block_idx = token_pos // cache_manager.block_size
+        block_offset = token_pos % cache_manager.block_size
+        physical_block = block_table_list[block_idx]
+        slot_mapping = mx.array(
+            [physical_block * cache_manager.block_size + block_offset],
+            dtype=mx.int64,
         )
         logits = model(
             mx.expand_dims(next_token_id, axis=0),
@@ -266,6 +274,7 @@ def main():
             mask=None,
             block_tables=block_table,
             context_lengths=context_lengths,
+            slot_mapping=slot_mapping,
             state_slot_mapping=state_slot_mapping,
         )
 

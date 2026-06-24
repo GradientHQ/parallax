@@ -99,6 +99,7 @@ def test_dsa_token_indexer_with_update_matches_reference_and_updates_cache():
         context_lengths,
         weights,
         index_topk,
+        slot_mapping=mx.array([5], dtype=mx.int64),
     )
     keys = mx.concatenate([initial_keys, key_update[0]], axis=0)
     ref_topk = _reference_topk(index_query[0], keys, weights[0], index_topk)
@@ -124,6 +125,7 @@ def test_dsa_token_indexer_with_update_returns_dense_row_for_short_context():
         mx.array([3], dtype=mx.int32),
         mx.ones((1, 2), dtype=mx.float32),
         4,
+        slot_mapping=mx.array([2], dtype=mx.int64),
     )
     read_back = cache.read_index_k(block_tables[0], 3)
     mx.eval(topk, read_back)
@@ -149,6 +151,7 @@ def test_dsa_token_indexer_with_update_glm_index_dimensions_smoke():
         mx.array([seq_len + 1], dtype=mx.int32),
         mx.ones((1, heads), dtype=mx.float32),
         2,
+        slot_mapping=mx.array([seq_len], dtype=mx.int64),
     )
     mx.eval(topk)
 

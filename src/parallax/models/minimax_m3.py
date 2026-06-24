@@ -14,8 +14,8 @@ from parallax.utils.prefix_cache_utils import prepare_attention_with_prefix_cach
 from parallax_extensions.ops import (
     paged_attention_v1,
     reshape_and_cache,
-    sparse_paged_attention,
-    sparse_token_indexer_with_update,
+    msa_paged_attention,
+    msa_token_indexer_with_update,
     store_indexer_cache,
 )
 
@@ -617,13 +617,14 @@ class MiniMaxAttention(nn.Module):
         cache: MiniMaxM3SparseCache,
         block_tables: mx.array,
         context_lengths: mx.array,
+        slot_mapping: Optional[mx.array] = None,
     ) -> mx.array:
         B = queries.shape[0]
         key_cache_global, value_cache_global = cache.get_cache()
         block_size = key_cache_global.shape[3]
         max_len = block_tables.shape[1] * block_size
 
-        token_positions = sparse_token_indexer_with_update(
+        token_positions = msa_token_indexer_with_update(
             idx_queries,
             idx_keys,
             cache.get_indexer_cache(),
@@ -635,9 +636,10 @@ class MiniMaxAttention(nn.Module):
             self.sparse_init_blocks,
             self.sparse_local_blocks,
             self.scale,
+            slot_mapping=slot_mapping,
         )
 
-        output = sparse_paged_attention(
+        output = msa_paged_attention(
             queries,
             key_cache_global,
             value_cache_global,
@@ -707,7 +709,13 @@ class MiniMaxAttention(nn.Module):
         if L == 1:
             if self.has_sparse_index:
                 output = self._sparse_decode_from_cache(
-                    queries, idx_queries, idx_keys, cache, block_tables, context_lengths
+                    queries,
+                    idx_queries,
+                    idx_keys,
+                    cache,
+                    block_tables,
+                    context_lengths,
+                    slot_mapping=slot_mapping,
                 )
             else:
                 output = self._dense_decode_from_cache(

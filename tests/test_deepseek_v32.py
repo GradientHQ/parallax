@@ -64,6 +64,7 @@ def test_attention_decode_forward_uses_glm_style_kv_cache():
         cache=cache,
         block_tables=mx.array([[0]], dtype=mx.int32),
         context_lengths=mx.array([1], dtype=mx.int32),
+        slot_mapping=mx.array([0], dtype=mx.int64),
     )
     mx.eval(output)
 
@@ -129,6 +130,7 @@ def test_attention_decode_after_prefill_uses_sparse_mla_cache():
         cache=cache,
         block_tables=block_tables,
         context_lengths=mx.array([6], dtype=mx.int32),
+        slot_mapping=mx.array([5], dtype=mx.int64),
     )
     mx.eval(output, topk)
 

@@ -8,7 +8,7 @@ import pytest
 from parallax_extensions.ops import (
     paged_attention_v1,
     reshape_and_cache,
-    sparse_paged_attention,
+    msa_paged_attention,
 )
 
 
@@ -176,7 +176,7 @@ def _bench_new(
 
 class TestPagedAttentionV1:
 
-    def test_sparse_paged_attention_matches_selected_token_reference(self):
+    def test_msa_paged_attention_matches_selected_token_reference(self):
         mx.random.seed(7)
         np.random.seed(7)
 
@@ -217,7 +217,7 @@ class TestPagedAttentionV1:
         token_positions = mx.array([[0, 2, 7, 9, 0]], dtype=mx.int32)
         token_valid = mx.array([[1, 1, 1, 1, 0]], dtype=mx.int32)
         try:
-            out = sparse_paged_attention(
+            out = msa_paged_attention(
                 q,
                 key_cache,
                 value_cache,
@@ -327,9 +327,10 @@ class TestPagedAttentionV1:
         # Seq Lens (Context lengths)
         seq_lens = mx.array([20, 5], dtype=mx.int32)
 
-        # --- Write to Cache (Decode Mode - automatic slot mapping) ---
+        # --- Write to Cache (Decode Mode) ---
         k_new = mx.random.normal(shape=(BATCH_SIZE, NUM_KV_HEADS, HEAD_DIM)).astype(dtype)
         v_new = mx.random.normal(shape=(BATCH_SIZE, NUM_KV_HEADS, HEAD_DIM)).astype(dtype)
+        slot_mapping = mx.array([19, 36], dtype=mx.int64)
 
         reshape_and_cache(
             key=k_new,
@@ -339,6 +340,7 @@ class TestPagedAttentionV1:
             block_tables=block_tables,
             context_lengths=seq_lens,
             block_size=BLOCK_SIZE,
+            slot_mapping=slot_mapping,
         )
 
         # --- Verification 1: Cache Write ---

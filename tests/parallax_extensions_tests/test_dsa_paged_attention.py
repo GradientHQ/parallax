@@ -316,6 +316,7 @@ def test_dsa_reshape_and_cache_supports_mla_dims():
         block_tables,
         mx.array([5], dtype=mx.int32),
         cache.block_size,
+        slot_mapping=mx.array([4], dtype=mx.int64),
     )
     mx.eval(cache.latent_cache, cache.rope_cache)
     mx.synchronize()
