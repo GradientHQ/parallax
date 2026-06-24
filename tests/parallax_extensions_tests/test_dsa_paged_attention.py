@@ -4,7 +4,11 @@ import mlx.core as mx
 import pytest
 
 from parallax.server.cache.dsa_cache import DeepSeekSparseCache
-from parallax_extensions.ops import dsa_paged_attention, mla_paged_attention, reshape_and_cache
+from parallax_extensions.ops import (
+    dsa_paged_attention,
+    mla_paged_attention,
+    reshape_and_cache,
+)
 
 pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
 

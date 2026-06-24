@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import mlx.core as mx
 import numpy as np
 
-from parallax.utils.layer_types import INDEX_CACHE_LAYER_TYPES, MLA_CACHE_LAYER_TYPES
 from parallax.server.cache_manager import CacheManager
 from parallax.server.executor.base_executor import BaseExecutor
 from parallax.server.request import (
@@ -25,6 +24,7 @@ from parallax.utils.chunked_prefill import (
     complete_local_middle_chunk,
     filter_middle_chunk_next_batch,
 )
+from parallax.utils.layer_types import INDEX_CACHE_LAYER_TYPES, MLA_CACHE_LAYER_TYPES
 from parallax.utils.mac_prefill_adder import AddReqResult, MACPrefillAdder
 from parallax.utils.utils import (
     combine_padding_and_causal_masks,

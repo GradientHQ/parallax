@@ -7,7 +7,6 @@ if sys.platform != "darwin":
 
 import mlx.core as mx
 
-from parallax.utils.layer_types import DSA_ATTENTION, MLA_ATTENTION
 from parallax.models.deepseek_v32 import (
     ModelArgs,
     ParallaxDeepSeekV32Attention,
@@ -17,6 +16,7 @@ from parallax.models.deepseek_v32 import (
 from parallax.server.cache.dsa_cache import DeepSeekSparseCache
 from parallax.server.cache.kv_cache import KVCachePacked
 from parallax.server.cache_manager import CacheManager
+from parallax.utils.layer_types import DSA_ATTENTION, MLA_ATTENTION
 from parallax.utils.utils import create_causal_mask
 
 

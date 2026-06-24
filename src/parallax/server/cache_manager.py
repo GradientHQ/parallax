@@ -2,6 +2,13 @@ from typing import Dict, List, Optional, Tuple
 
 import mlx.core as mx
 
+from parallax.server.block_radix_cache import BlockRadixCache
+from parallax.server.cache.allocator import BlockAllocator, SlotAllocator
+from parallax.server.cache.base import BaseCache
+from parallax.server.cache.dsa_cache import DeepSeekSparseCache
+from parallax.server.cache.kv_cache import KVCachePacked
+from parallax.server.cache.linear_cache import LinearCache
+from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
 from parallax.utils.layer_types import (
     ATTENTION,
     ATTENTION_LAYER_TYPES,
@@ -10,13 +17,6 @@ from parallax.utils.layer_types import (
     MLA_ATTENTION,
     MSA_ATTENTION,
 )
-from parallax.server.block_radix_cache import BlockRadixCache
-from parallax.server.cache.allocator import BlockAllocator, SlotAllocator
-from parallax.server.cache.base import BaseCache
-from parallax.server.cache.dsa_cache import DeepSeekSparseCache
-from parallax.server.cache.kv_cache import KVCachePacked
-from parallax.server.cache.linear_cache import LinearCache
-from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
 from parallax_utils.logging_config import get_logger
 
 logger = get_logger(__name__)

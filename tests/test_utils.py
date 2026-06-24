@@ -1,8 +1,13 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from parallax.utils.layer_types import DSA_ATTENTION, LINEAR, MLA_ATTENTION, MSA_ATTENTION
 from parallax.utils import utils
+from parallax.utils.layer_types import (
+    DSA_ATTENTION,
+    LINEAR,
+    MLA_ATTENTION,
+    MSA_ATTENTION,
+)
 
 
 def test_is_metal_available_uses_mlx_metal_is_available(monkeypatch):
