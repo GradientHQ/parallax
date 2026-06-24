@@ -10,6 +10,7 @@ from parallax.models.deepseek_v32 import (
     derive_indexer_types,
 )
 from parallax.server.cache.dsa_cache import DeepSeekSparseCache
+from parallax.server.cache_manager import CacheManager
 from parallax.utils.utils import create_causal_mask
 
 pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
@@ -33,19 +34,26 @@ def _tiny_args():
     )
 
 
-def test_attention_decode_forward_uses_glm_style_kv_cache():
-    args = _tiny_args()
-    attention = ParallaxDeepSeekV32Attention(args)
-    cache = DeepSeekSparseCache(
-        num_blocks=1,
-        block_size=8,
+def _tiny_cache(args, *, num_blocks=1, block_size=8):
+    return DeepSeekSparseCache(
+        num_blocks=num_blocks,
+        block_size=block_size,
         num_kv_heads=args.num_key_value_heads,
         head_dim=args.qk_nope_head_dim + args.qk_rope_head_dim,
         head_dim_v=args.v_head_dim,
         dtype=mx.float32,
         index_head_dim=args.index_head_dim,
         index_n_heads=args.index_n_heads,
+        kv_lora_rank=args.kv_lora_rank,
+        qk_rope_head_dim=args.qk_rope_head_dim,
+        index_key_heads=1,
     )
+
+
+def test_attention_decode_forward_uses_glm_style_kv_cache():
+    args = _tiny_args()
+    attention = ParallaxDeepSeekV32Attention(args)
+    cache = _tiny_cache(args)
 
     output, topk = attention(
         mx.zeros((1, 1, args.hidden_size), dtype=mx.float32),
@@ -62,16 +70,7 @@ def test_attention_decode_forward_uses_glm_style_kv_cache():
 def test_attention_prefix_prefill_reads_prefix_index_cache():
     args = _tiny_args()
     attention = ParallaxDeepSeekV32Attention(args)
-    cache = DeepSeekSparseCache(
-        num_blocks=1,
-        block_size=8,
-        num_kv_heads=args.num_key_value_heads,
-        head_dim=args.qk_nope_head_dim + args.qk_rope_head_dim,
-        head_dim_v=args.v_head_dim,
-        dtype=mx.float32,
-        index_head_dim=args.index_head_dim,
-        index_n_heads=args.index_n_heads,
-    )
+    cache = _tiny_cache(args)
     block_tables = mx.array([[0]], dtype=mx.int32)
 
     prefix, _ = attention(
@@ -86,8 +85,8 @@ def test_attention_prefix_prefill_reads_prefix_index_cache():
 
     index_k = cache.read_index_k(mx.array([0], dtype=mx.int32), 4)
     mx.eval(index_k)
-    assert index_k.shape == (args.index_n_heads, 4, args.index_head_dim)
-    assert float(mx.sum(mx.abs(index_k[1]))) > 0
+    assert index_k.shape == (1, 4, args.index_head_dim)
+    assert float(mx.sum(mx.abs(index_k[0]))) > 0
 
     chunk, topk = attention(
         mx.full((1, 2, args.hidden_size), 2.0, dtype=mx.float32),
@@ -103,6 +102,74 @@ def test_attention_prefix_prefill_reads_prefix_index_cache():
     assert chunk.shape == (1, 2, args.hidden_size)
     assert topk.shape == (1, 2, args.index_topk)
     assert bool(mx.all((topk == -1) | ((topk >= 0) & (topk < 6))).item())
+
+
+def test_attention_decode_after_prefill_uses_sparse_mla_cache():
+    args = _tiny_args()
+    attention = ParallaxDeepSeekV32Attention(args)
+    cache = _tiny_cache(args, num_blocks=2, block_size=8)
+    block_tables = mx.array([[0, 1]], dtype=mx.int32)
+
+    prefill, _ = attention(
+        mx.ones((1, 5, args.hidden_size), dtype=mx.float32),
+        mask=create_causal_mask(5, 5, mx.float32),
+        cache=cache,
+        block_tables=block_tables,
+        context_lengths=mx.array([5], dtype=mx.int32),
+        slot_mapping=mx.array([0, 1, 2, 3, 4], dtype=mx.int64),
+    )
+    mx.eval(prefill, cache.get_cache()[0], cache.get_cache()[1], cache.get_indexer_cache())
+
+    output, topk = attention(
+        mx.full((1, 1, args.hidden_size), 2.0, dtype=mx.float32),
+        cache=cache,
+        block_tables=block_tables,
+        context_lengths=mx.array([6], dtype=mx.int32),
+    )
+    mx.eval(output, topk)
+
+    assert output.shape == (1, 1, args.hidden_size)
+    assert topk.shape == (1, args.index_topk)
+    assert not bool(mx.all(topk == -1).item())
+    assert bool(mx.all((topk >= 0) & (topk < 6)).item())
+
+
+def test_deepseek_sparse_cache_uses_compressed_mla_shapes():
+    args = _tiny_args()
+    cache = _tiny_cache(args, num_blocks=2, block_size=4)
+    latent_cache, rope_cache = cache.get_cache()
+
+    assert latent_cache.shape == (1, 2, 1, 4, args.kv_lora_rank)
+    assert rope_cache.shape == (1, 2, 1, 4, args.qk_rope_head_dim)
+    assert cache.get_indexer_cache().shape == (1, 2, 1, 4, args.index_head_dim)
+
+
+def test_cache_manager_counts_compressed_mla_and_unexpanded_indexer_bytes(monkeypatch):
+    monkeypatch.setattr(
+        mx.metal,
+        "device_info",
+        lambda: {"max_recommended_working_set_size": 1024 * 1024},
+    )
+    monkeypatch.setattr(mx, "get_active_memory", lambda: 0)
+
+    manager = CacheManager(
+        num_layers=2,
+        num_kv_heads=2,
+        head_dim=4,
+        head_dim_v=4,
+        dtype=mx.float32,
+        block_size=4,
+        cache_memory_fraction=1.0,
+        index_head_dim=4,
+        index_n_heads=2,
+        index_key_heads=1,
+        kv_lora_rank=4,
+        qk_rope_head_dim=2,
+    )
+
+    dtype_size = 4
+    expected = 2 * 4 * (4 + 2 + 4) * dtype_size
+    assert manager._calculate_kv_block_bytes(dtype_size) == expected
 
 
 def test_indexer_types_default_to_all_full():

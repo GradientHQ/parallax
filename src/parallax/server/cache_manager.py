@@ -32,6 +32,9 @@ class CacheManager:
         head_dim_v: Optional[int] = None,
         index_head_dim: Optional[int] = None,
         index_n_heads: Optional[int] = None,
+        index_key_heads: Optional[int] = None,
+        kv_lora_rank: Optional[int] = None,
+        qk_rope_head_dim: Optional[int] = None,
         sparse_cache_type: Optional[str] = None,
         # Hybrid Config: List of 'attention' or 'linear' or None (default 'attention')
         layer_types: Optional[List[str]] = None,
@@ -53,6 +56,9 @@ class CacheManager:
         self.head_dim_v = head_dim_v if head_dim_v is not None else head_dim
         self.index_head_dim = index_head_dim
         self.index_n_heads = index_n_heads
+        self.index_key_heads = index_key_heads
+        self.kv_lora_rank = kv_lora_rank
+        self.qk_rope_head_dim = qk_rope_head_dim
         self.sparse_cache_type = sparse_cache_type
         self.dtype = dtype
         self.block_size = block_size
@@ -169,6 +175,12 @@ class CacheManager:
                         dtype=self.dtype,
                         index_head_dim=self.index_head_dim,
                         index_n_heads=self.index_n_heads,
+                        index_key_heads=self.index_key_heads or 1,
+                    )
+                if self.kv_lora_rank is None or self.qk_rope_head_dim is None:
+                    raise ValueError(
+                        "DeepSeek/GLM DSA cache requires kv_lora_rank and qk_rope_head_dim "
+                        "for compressed MLA storage."
                     )
                 return DeepSeekSparseCache(
                     num_blocks=self.num_gpu_blocks,
@@ -179,6 +191,9 @@ class CacheManager:
                     dtype=self.dtype,
                     index_head_dim=self.index_head_dim,
                     index_n_heads=self.index_n_heads,
+                    kv_lora_rank=self.kv_lora_rank,
+                    qk_rope_head_dim=self.qk_rope_head_dim,
+                    index_key_heads=self.index_key_heads or 1,
                 )
             else:
                 return KVCachePacked(
@@ -242,12 +257,35 @@ class CacheManager:
 
     def _calculate_kv_block_bytes(self, dtype_size: int) -> int:
         """Calculate memory needed for one KV block across all attention layers."""
-        one_layer_block_bytes = (
-            self.num_kv_heads * self.block_size * (self.head_dim + self.head_dim_v) * dtype_size
-        )
+        if (
+            self.index_head_dim is not None
+            and self.index_n_heads is not None
+            and self.sparse_cache_type != "minimax_m3"
+            and self.kv_lora_rank is not None
+            and self.qk_rope_head_dim is not None
+        ):
+            one_layer_block_bytes = (
+                self.block_size * (self.kv_lora_rank + self.qk_rope_head_dim) * dtype_size
+            )
+        else:
+            one_layer_block_bytes = (
+                self.num_kv_heads
+                * self.block_size
+                * (self.head_dim + self.head_dim_v)
+                * dtype_size
+            )
         if self.index_head_dim is not None and self.index_n_heads is not None:
+            if self.sparse_cache_type == "minimax_m3":
+                index_heads = self.index_key_heads or 1
+            elif (
+                self.kv_lora_rank is not None
+                and self.qk_rope_head_dim is not None
+            ):
+                index_heads = self.index_key_heads or 1
+            else:
+                index_heads = self.index_n_heads
             one_layer_block_bytes += (
-                self.index_n_heads * self.block_size * self.index_head_dim * dtype_size
+                index_heads * self.block_size * self.index_head_dim * dtype_size
             )
 
         return one_layer_block_bytes * self.layer_types.count("attention")

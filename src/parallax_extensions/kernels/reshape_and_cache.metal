@@ -124,6 +124,102 @@ instantiate_reshape_and_cache(float, uchar);
 instantiate_reshape_and_cache(bfloat16_t, uchar);
 instantiate_reshape_and_cache(half, uchar);
 
+template <typename KV_T, typename CACHE_T>
+[[kernel]] void dsa_reshape_and_cache(
+    const device KV_T *__restrict__ key
+    [[buffer(0)]], // [num_tokens, num_heads, key_dim]
+    const device KV_T *__restrict__ value
+    [[buffer(1)]], // [num_tokens, num_heads, value_dim]
+    device CACHE_T *__restrict__ key_cache
+    [[buffer(2)]], // [1, num_blocks, num_heads, block_size, key_dim]
+    device CACHE_T *__restrict__ value_cache
+    [[buffer(3)]], // [1, num_blocks, num_heads, block_size, value_dim]
+    const device int64_t *__restrict__ slot_mapping
+    [[buffer(4)]], // [num_tokens]
+    device const int &key_stride [[buffer(5)]],
+    device const int &key_head_stride [[buffer(6)]],
+    device const int &value_stride [[buffer(7)]],
+    device const int &value_head_stride [[buffer(8)]],
+    device const int &key_cache_block_stride [[buffer(9)]],
+    device const int &key_cache_head_stride [[buffer(10)]],
+    device const int &key_cache_token_stride [[buffer(11)]],
+    device const int &value_cache_block_stride [[buffer(12)]],
+    device const int &value_cache_head_stride [[buffer(13)]],
+    device const int &value_cache_token_stride [[buffer(14)]],
+    device const int &num_heads [[buffer(15)]],
+    device const int &key_dim [[buffer(16)]],
+    device const int &value_dim [[buffer(17)]],
+    device const int &block_size [[buffer(18)]],
+    uint gid [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint threads_per_threadgroup [[threads_per_threadgroup]]) {
+  const int64_t token_idx = gid;
+  const int64_t slot_idx = slot_mapping[token_idx];
+  if (slot_idx < 0) {
+    return;
+  }
+
+  const int64_t block_idx = slot_idx / block_size;
+  const int64_t block_offset = slot_idx % block_size;
+
+  const int key_total = num_heads * key_dim;
+  for (int i = tid; i < key_total; i += threads_per_threadgroup) {
+    const int head_idx = i / key_dim;
+    const int dim_idx = i - head_idx * key_dim;
+    const int64_t src_idx =
+        token_idx * key_stride + head_idx * key_head_stride + dim_idx;
+    const int64_t dst_idx =
+        block_idx * key_cache_block_stride +
+        head_idx * key_cache_head_stride +
+        block_offset * key_cache_token_stride + dim_idx;
+    key_cache[dst_idx] = to_cache<KV_T, CACHE_T>(key[src_idx]);
+  }
+
+  const int value_total = num_heads * value_dim;
+  for (int i = tid; i < value_total; i += threads_per_threadgroup) {
+    const int head_idx = i / value_dim;
+    const int dim_idx = i - head_idx * value_dim;
+    const int64_t src_idx =
+        token_idx * value_stride + head_idx * value_head_stride + dim_idx;
+    const int64_t dst_idx =
+        block_idx * value_cache_block_stride +
+        head_idx * value_cache_head_stride +
+        block_offset * value_cache_token_stride + dim_idx;
+    value_cache[dst_idx] = to_cache<KV_T, CACHE_T>(value[src_idx]);
+  }
+}
+
+#define instantiate_dsa_reshape_and_cache(kv_type, cache_type)                \
+  template [[host_name("dsa_reshape_and_cache_kv_" #kv_type                   \
+                       "_cache_" #cache_type)]] [[kernel]] void               \
+  dsa_reshape_and_cache<kv_type, cache_type>(                                 \
+      const device kv_type *__restrict__ key [[buffer(0)]],                   \
+      const device kv_type *__restrict__ value [[buffer(1)]],                 \
+      device cache_type *__restrict__ key_cache [[buffer(2)]],                \
+      device cache_type *__restrict__ value_cache [[buffer(3)]],              \
+      const device int64_t *__restrict__ slot_mapping [[buffer(4)]],          \
+      device const int &key_stride [[buffer(5)]],                             \
+      device const int &key_head_stride [[buffer(6)]],                        \
+      device const int &value_stride [[buffer(7)]],                           \
+      device const int &value_head_stride [[buffer(8)]],                      \
+      device const int &key_cache_block_stride [[buffer(9)]],                 \
+      device const int &key_cache_head_stride [[buffer(10)]],                 \
+      device const int &key_cache_token_stride [[buffer(11)]],                \
+      device const int &value_cache_block_stride [[buffer(12)]],              \
+      device const int &value_cache_head_stride [[buffer(13)]],               \
+      device const int &value_cache_token_stride [[buffer(14)]],              \
+      device const int &num_heads [[buffer(15)]],                             \
+      device const int &key_dim [[buffer(16)]],                               \
+      device const int &value_dim [[buffer(17)]],                             \
+      device const int &block_size [[buffer(18)]],                            \
+      uint gid [[threadgroup_position_in_grid]],                              \
+      uint tid [[thread_position_in_threadgroup]],                            \
+      uint threads_per_threadgroup [[threads_per_threadgroup]]);
+
+instantiate_dsa_reshape_and_cache(float, float);
+instantiate_dsa_reshape_and_cache(bfloat16_t, bfloat16_t);
+instantiate_dsa_reshape_and_cache(half, half);
+
 // Flash version with different cache layout: [num_blocks, block_size,
 // num_heads, head_size]
 template <typename T>

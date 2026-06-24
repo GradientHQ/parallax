@@ -3,8 +3,8 @@ import unittest
 import mlx.core as mx
 import numpy as np
 
-from parallax.metal.paged_attention.kernel import reshape_and_cache
 from parallax.server.cache_manager import CacheManager
+from parallax_extensions.ops import reshape_and_cache
 from parallax.utils.utils import is_metal_available
 
 
