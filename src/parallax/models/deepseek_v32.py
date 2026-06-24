@@ -385,9 +385,6 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
         else:
             has_prefix_cache = prefix_lens is not None and bool(mx.any(prefix_lens > 0))
 
-            logger.debug("Prefill phase: prefix_lens=%s", prefix_lens)
-            logger.debug("Prefill phase: has_prefix_cache=%s", has_prefix_cache)
-
             if has_prefix_cache:
                 max_prefix_len = int(mx.max(prefix_lens))
                 if max_prefix_len > 0:
