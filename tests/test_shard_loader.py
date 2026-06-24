@@ -197,6 +197,7 @@ def _glm_moe_dsa_config(**overrides):
     return config
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
 def test_glm_moe_dsa_uses_mlx_lm_args_with_parallax_defaults():
     loader = MLXModelLoader("test_model_path")
     block_class = loader.block_class_map["GlmMoeDsaForCausalLM"]
@@ -217,6 +218,7 @@ def test_glm_moe_dsa_uses_mlx_lm_args_with_parallax_defaults():
     assert model_args.indexer_norm_eps == 1e-6
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
 def test_glm_moe_dsa_shard_start_rejects_shared_layer():
     loader = MLXModelLoader("test_model_path")
     block_class = loader.block_class_map["GlmMoeDsaForCausalLM"]
@@ -230,6 +232,7 @@ def test_glm_moe_dsa_shard_start_rejects_shared_layer():
     block_class.validate_shard_start(config, 3)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
 def test_glm_moe_dsa_shard_start_uses_config_indexer_pattern():
     loader = MLXModelLoader("test_model_path")
     block_class = loader.block_class_map["GlmMoeDsaForCausalLM"]

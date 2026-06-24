@@ -1,7 +1,11 @@
 import sys
 
-import mlx.core as mx
 import pytest
+
+if sys.platform != "darwin":
+    pytest.skip("MLX tests require macOS", allow_module_level=True)
+
+import mlx.core as mx
 
 from parallax.models.deepseek_v32 import (
     ModelArgs,
@@ -12,8 +16,6 @@ from parallax.models.deepseek_v32 import (
 from parallax.server.cache.dsa_cache import DeepSeekSparseCache
 from parallax.server.cache_manager import CacheManager
 from parallax.utils.utils import create_causal_mask
-
-pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
 
 
 def _tiny_args():
