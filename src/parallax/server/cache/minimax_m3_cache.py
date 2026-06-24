@@ -24,6 +24,7 @@ class MiniMaxM3SparseCache(KVCachePacked):
         dtype: mx.Dtype,
         index_head_dim: int,
         index_n_heads: int,
+        index_key_heads: int = 1,
     ):
         super().__init__(
             num_blocks=num_blocks,
@@ -35,11 +36,12 @@ class MiniMaxM3SparseCache(KVCachePacked):
         )
         self.index_head_dim = index_head_dim
         self.index_n_heads = index_n_heads
+        self.index_key_heads = index_key_heads
         self.index_key_cache = mx.zeros(
             (
                 1,
                 num_blocks,
-                index_n_heads,
+                index_key_heads,
                 block_size,
                 index_head_dim,
             ),
@@ -59,7 +61,7 @@ class MiniMaxM3SparseCache(KVCachePacked):
         Read index keys for one request.
 
         Returns:
-            index_k: (index_heads, context_len, index_head_dim)
+            index_k: (index_key_heads, context_len, index_head_dim)
         """
         positions = mx.arange(context_len)
         block_indices = positions // self.block_size

@@ -161,6 +161,96 @@ def test_qwen35_moe_uses_qwen35_text_args_and_sanitizer_module():
     assert model_args.moe_intermediate_size == 512
 
 
+def _glm_moe_dsa_config(**overrides):
+    config = {
+        "model_type": "glm_moe_dsa",
+        "architectures": ["GlmMoeDsaForCausalLM"],
+        "vocab_size": 1024,
+        "hidden_size": 128,
+        "index_head_dim": 64,
+        "index_n_heads": 4,
+        "index_topk": 8,
+        "intermediate_size": 256,
+        "moe_intermediate_size": 256,
+        "num_hidden_layers": 4,
+        "num_attention_heads": 4,
+        "num_key_value_heads": 4,
+        "n_shared_experts": 1,
+        "n_routed_experts": 4,
+        "routed_scaling_factor": 2.5,
+        "kv_lora_rank": 64,
+        "q_lora_rank": 64,
+        "qk_rope_head_dim": 64,
+        "v_head_dim": 16,
+        "qk_nope_head_dim": 32,
+        "norm_topk_prob": True,
+        "n_group": 1,
+        "topk_group": 1,
+        "num_experts_per_tok": 2,
+        "first_k_dense_replace": 1,
+        "max_position_embeddings": 4096,
+        "rms_norm_eps": 1e-5,
+        "rope_parameters": {"rope_theta": 10000, "rope_type": "default"},
+        "attention_bias": False,
+    }
+    config.update(overrides)
+    return config
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
+def test_glm_moe_dsa_uses_mlx_lm_args_with_parallax_defaults():
+    loader = MLXModelLoader("test_model_path")
+    block_class = loader.block_class_map["GlmMoeDsaForCausalLM"]
+    sanitizer_module, model_args = loader._load_mlx_lm_module_and_args(
+        "glm_moe_dsa",
+        _glm_moe_dsa_config(),
+        block_class,
+    )
+
+    assert sanitizer_module.__name__ == "mlx_lm.models.glm_moe_dsa"
+    assert model_args.topk_method == "noaux_tc"
+    assert model_args.scoring_func == "sigmoid"
+    assert model_args.moe_layer_freq == 1
+    assert model_args.index_topk_freq == 1
+    assert model_args.indexer_types is None
+    assert model_args.index_skip_topk_offset is None
+    assert model_args.indexer_rope_traditional is False
+    assert model_args.indexer_norm_eps == 1e-6
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
+def test_glm_moe_dsa_shard_start_rejects_shared_layer():
+    loader = MLXModelLoader("test_model_path")
+    block_class = loader.block_class_map["GlmMoeDsaForCausalLM"]
+    config = _glm_moe_dsa_config(indexer_types=["full", "full", "shared", "full"])
+
+    with pytest.raises(ValueError, match="does not transfer DSA top-k"):
+        block_class.validate_shard_start(config, 2)
+
+    block_class.validate_shard_start(config, 0)
+    block_class.validate_shard_start(config, 1)
+    block_class.validate_shard_start(config, 3)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="MLX tests require macOS")
+def test_glm_moe_dsa_shard_start_uses_config_indexer_pattern():
+    loader = MLXModelLoader("test_model_path")
+    block_class = loader.block_class_map["GlmMoeDsaForCausalLM"]
+    config = _glm_moe_dsa_config(
+        num_hidden_layers=12,
+        first_k_dense_replace=3,
+        index_topk_freq=4,
+        index_skip_topk_offset=3,
+    )
+
+    with pytest.raises(ValueError, match="does not transfer DSA top-k"):
+        block_class.validate_shard_start(config, 3)
+
+    block_class.validate_shard_start(config, 0)
+    block_class.validate_shard_start(config, 2)
+    block_class.validate_shard_start(config, 6)
+
+
 def _minimax_m3_vl_config():
     return {
         "model_type": "minimax_m3_vl",

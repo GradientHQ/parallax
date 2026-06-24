@@ -14,6 +14,7 @@ EXTRAS="${PARALLAX_EXTRAS:-}"
 PYTHON_VERSION="${PARALLAX_PYTHON_VERSION:-3.12}"
 VENV_DIR="$SCRIPT_DIR/.venv"
 VLLM_REF="${VLLM_REF:-0a1c5034f5e4fe736db672010cda33d9d850f87e}"
+VLLM_MINIJINJA_VERSION="${VLLM_MINIJINJA_VERSION-2.20.0}"
 
 show_help() {
     cat <<'EOF'
@@ -31,6 +32,8 @@ Environment:
   PARALLAX_EXTRAS         Same as --extras.
   PARALLAX_PYTHON_VERSION Same as --python.
   VLLM_REF                vLLM git branch, tag, or full commit hash to clone.
+  VLLM_MINIJINJA_VERSION  MiniJinja/minijinja-contrib version to use when
+                          building vllm-rs. Defaults to 2.20.0.
 EOF
 }
 
@@ -219,24 +222,26 @@ build_vllm_rust_frontend() {
     local parallax_scripts_dir
     local target_path
     local target_version_path
+    local target_version
     local existing_version
     local toolchain
 
     parallax_scripts_dir="$(resolve_venv_bin_dir)"
     target_path="$parallax_scripts_dir/vllm-rs"
     target_version_path="$target_path.version"
+    target_version="$(vllm_rust_frontend_version)"
 
     if [[ -f "$target_path" ]]; then
         existing_version=""
         if [[ -f "$target_version_path" ]]; then
             existing_version="$(<"$target_version_path")"
         fi
-        if [[ "$existing_version" != "$VLLM_REF" ]]; then
-            echo "Existing vllm-rs version (${existing_version:-unknown}) does not match $VLLM_REF, rebuilding."
+        if [[ "$existing_version" != "$target_version" ]]; then
+            echo "Existing vllm-rs version (${existing_version:-unknown}) does not match $target_version, rebuilding."
             rm -f "$target_path" "$target_version_path"
         else
             chmod +x "$target_path"
-            printf '%s\n' "$VLLM_REF" > "$target_version_path"
+            printf '%s\n' "$target_version" > "$target_version_path"
             echo "vllm-rs already exists at $target_path, skipping Rust build."
             return
         fi
@@ -265,6 +270,7 @@ build_vllm_rust_frontend() {
 
     ensure_rust_toolchain "$toolchain"
     ensure_protoc
+    update_vllm_minijinja "$rust_dir" "$toolchain"
 
     cargo +"$toolchain" build --release \
         --manifest-path "$rust_dir/Cargo.toml" \
@@ -274,10 +280,37 @@ build_vllm_rust_frontend() {
     mkdir -p "$(dirname "$target_path")"
     cp "$rust_dir/target/release/vllm-rs" "$target_path"
     chmod +x "$target_path"
-    printf '%s\n' "$VLLM_REF" > "$target_version_path"
+    printf '%s\n' "$target_version" > "$target_version_path"
     echo "Installed vllm-rs to $target_path"
     cleanup_clone
     trap - EXIT
+}
+
+vllm_rust_frontend_version() {
+    if [[ -n "$VLLM_MINIJINJA_VERSION" ]]; then
+        printf '%s+minijinja-%s\n' "$VLLM_REF" "$VLLM_MINIJINJA_VERSION"
+    else
+        printf '%s\n' "$VLLM_REF"
+    fi
+}
+
+update_vllm_minijinja() {
+    local rust_dir="$1"
+    local toolchain="$2"
+
+    if [[ -z "$VLLM_MINIJINJA_VERSION" ]]; then
+        return
+    fi
+
+    echo "Updating vLLM Rust MiniJinja dependencies to $VLLM_MINIJINJA_VERSION"
+    cargo +"$toolchain" update \
+        --manifest-path "$rust_dir/Cargo.toml" \
+        -p minijinja \
+        --precise "$VLLM_MINIJINJA_VERSION"
+    cargo +"$toolchain" update \
+        --manifest-path "$rust_dir/Cargo.toml" \
+        -p minijinja-contrib \
+        --precise "$VLLM_MINIJINJA_VERSION"
 }
 
 clone_vllm_ref() {

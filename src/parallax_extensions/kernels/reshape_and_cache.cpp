@@ -32,6 +32,24 @@ mx::array reshape_and_cache(
         /* const std::vector<array>& inputs = */ inputs);
 }
 
+mx::array dsa_reshape_and_cache(
+    const mx::array& key,
+    const mx::array& value,
+    const mx::array& key_cache,
+    const mx::array& value_cache,
+    const mx::array& slot_mapping,
+    mx::StreamOrDevice s /* = {} */
+) {
+    auto key_shape = key.shape();
+    auto key_dtype = key.dtype();
+    const std::vector<mx::array> inputs = {key, value, key_cache, value_cache, slot_mapping};
+    return mx::array(
+        key_shape,
+        key_dtype,
+        std::make_shared<DSAReshapeAndCache>(to_stream(s)),
+        inputs);
+}
+
 /** Evaluate primitive on CPU */
 void ReshapeAndCache::eval_cpu(
   const std::vector<mx::array>& inputs,
@@ -125,7 +143,122 @@ void ReshapeAndCache::eval_gpu(
 
 /** Equivalence check **/
 bool ReshapeAndCache::is_equivalent(const mx::Primitive& other) const {
-  const ReshapeAndCache& r_other = static_cast<const ReshapeAndCache&>(other);
+  const ReshapeAndCache& r_other =
+      static_cast<const ReshapeAndCache&>(other);
+  return true;
+}
+
+void DSAReshapeAndCache::eval_cpu(
+  const std::vector<mx::array>& inputs,
+  std::vector<mx::array>& outputs) {
+    return;
+}
+
+void DSAReshapeAndCache::eval_gpu(
+  const std::vector<mx::array>& inputs,
+  std::vector<mx::array>& outputs) {
+    assert(inputs.size() == 5);
+    auto& key = inputs[0];
+    auto& value = inputs[1];
+    auto& key_cache = inputs[2];
+    auto& value_cache = inputs[3];
+    auto& slot_mapping = inputs[4];
+    auto& out = outputs[0];
+
+    if (key.dtype() != value.dtype() || key.dtype() != key_cache.dtype() ||
+        key.dtype() != value_cache.dtype()) {
+      throw std::runtime_error(
+          "DSAReshapeAndCache requires key, value, and caches to share dtype");
+    }
+    if (key.shape().size() != 3 || value.shape().size() != 3 ||
+        key_cache.shape().size() != 5 || value_cache.shape().size() != 5) {
+      throw std::runtime_error(
+          "DSAReshapeAndCache expects key/value [tokens, heads, dim] and "
+          "caches [1, blocks, heads, block_size, dim]");
+    }
+    if (key_cache.shape(0) != 1 || value_cache.shape(0) != 1) {
+      throw std::runtime_error(
+          "DSAReshapeAndCache expects single-layer cache tensors");
+    }
+    if (key.shape(0) != value.shape(0) || key.shape(1) != value.shape(1)) {
+      throw std::runtime_error(
+          "DSAReshapeAndCache key/value token and head dimensions must match");
+    }
+    if (key_cache.shape(2) != key.shape(1) ||
+        value_cache.shape(2) != value.shape(1)) {
+      throw std::runtime_error(
+          "DSAReshapeAndCache cache head dimensions must match inputs");
+    }
+    if (key_cache.shape(4) != key.shape(2) ||
+        value_cache.shape(4) != value.shape(2)) {
+      throw std::runtime_error(
+          "DSAReshapeAndCache cache dims must match input dims");
+    }
+
+    auto& s = stream();
+    auto& d = mx::metal::device(s.device);
+
+    out.set_data(mlx::core::allocator::malloc(out.nbytes()));
+
+    const int64_t num_tokens = key.shape(0);
+    const int64_t num_heads = key.shape(1);
+    const int64_t key_dim = key.shape(2);
+    const int64_t value_dim = value.shape(2);
+    const int64_t block_size = key_cache.shape(3);
+
+    std::string kname = "dsa_reshape_and_cache_kv_" + get_type_string(key.dtype());
+    kname += "_cache_" + get_type_string(key_cache.dtype());
+    auto lib = d.get_library("parallax_ext", current_binary_dir());
+    auto kernel = d.get_kernel(kname, lib);
+
+    auto& compute_encoder = mx::metal::get_command_encoder(s);
+    compute_encoder.set_compute_pipeline_state(kernel);
+
+    int32_t key_stride = static_cast<int32_t>(key.strides(0));
+    int32_t key_head_stride = static_cast<int32_t>(key.strides(1));
+    int32_t value_stride = static_cast<int32_t>(value.strides(0));
+    int32_t value_head_stride = static_cast<int32_t>(value.strides(1));
+    int32_t key_cache_block_stride = static_cast<int32_t>(key_cache.strides(1));
+    int32_t key_cache_head_stride = static_cast<int32_t>(key_cache.strides(2));
+    int32_t key_cache_token_stride = static_cast<int32_t>(key_cache.strides(3));
+    int32_t value_cache_block_stride = static_cast<int32_t>(value_cache.strides(1));
+    int32_t value_cache_head_stride = static_cast<int32_t>(value_cache.strides(2));
+    int32_t value_cache_token_stride = static_cast<int32_t>(value_cache.strides(3));
+    int32_t num_heads_32 = static_cast<int32_t>(num_heads);
+    int32_t key_dim_32 = static_cast<int32_t>(key_dim);
+    int32_t value_dim_32 = static_cast<int32_t>(value_dim);
+    int32_t block_size_32 = static_cast<int32_t>(block_size);
+
+    compute_encoder.set_input_array(key, 0);
+    compute_encoder.set_input_array(value, 1);
+    compute_encoder.set_input_array(key_cache, 2);
+    compute_encoder.set_input_array(value_cache, 3);
+    compute_encoder.set_input_array(slot_mapping, 4);
+    compute_encoder.set_bytes(key_stride, 5);
+    compute_encoder.set_bytes(key_head_stride, 6);
+    compute_encoder.set_bytes(value_stride, 7);
+    compute_encoder.set_bytes(value_head_stride, 8);
+    compute_encoder.set_bytes(key_cache_block_stride, 9);
+    compute_encoder.set_bytes(key_cache_head_stride, 10);
+    compute_encoder.set_bytes(key_cache_token_stride, 11);
+    compute_encoder.set_bytes(value_cache_block_stride, 12);
+    compute_encoder.set_bytes(value_cache_head_stride, 13);
+    compute_encoder.set_bytes(value_cache_token_stride, 14);
+    compute_encoder.set_bytes(num_heads_32, 15);
+    compute_encoder.set_bytes(key_dim_32, 16);
+    compute_encoder.set_bytes(value_dim_32, 17);
+    compute_encoder.set_bytes(block_size_32, 18);
+
+    const uint64_t max_dim = std::max<int64_t>(key_dim, value_dim);
+    const uint64_t num_threads = std::min<uint64_t>(512, num_heads * max_dim);
+    MTL::Size grid = MTL::Size(num_tokens, 1, 1);
+    MTL::Size threadgroup = MTL::Size(num_threads, 1, 1);
+    compute_encoder.dispatch_threadgroups(grid, threadgroup);
+}
+
+bool DSAReshapeAndCache::is_equivalent(const mx::Primitive& other) const {
+  const DSAReshapeAndCache& r_other =
+      static_cast<const DSAReshapeAndCache&>(other);
   return true;
 }
 

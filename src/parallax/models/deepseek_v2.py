@@ -14,9 +14,10 @@ from mlx_lm.models.deepseek_v2 import DeepseekV2Attention as MLXDeepseekV2Attent
 from mlx_lm.models.deepseek_v2 import DeepseekV2DecoderLayer as MLXDeepseekV2Block
 from mlx_lm.models.deepseek_v2 import ModelArgs
 
-from parallax.metal.paged_attention.kernel import paged_attention, reshape_and_cache
+from parallax.metal.paged_attention.kernel import paged_attention
 from parallax.server.cache.base import BaseCache
 from parallax.utils.prefix_cache_utils import compute_attention_with_prefix_cache
+from parallax_extensions.ops import reshape_and_cache
 
 
 class ParallaxDeepSeekV2Attention(MLXDeepseekV2Attention):

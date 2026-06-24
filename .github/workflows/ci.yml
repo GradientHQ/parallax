@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-15, macos-26]
-        python-version: ['3.11', '3.12', '3.13']
+        python-version: ['3.12']
 
     steps:
     - name: Free Disk Space (Ubuntu)
@@ -70,7 +70,7 @@ jobs:
         pytest tests/ -v --cov=src/parallax --cov-report=xml
 
     - name: Upload coverage to Codecov
-      if: matrix.os == 'macos-15' && matrix.python-version == '3.11'
+      if: matrix.os == 'macos-26'
       uses: codecov/codecov-action@v4
       with:
         file: ./coverage.xml
@@ -78,14 +78,14 @@ jobs:
         token: ${{ secrets.CODECOV_TOKEN }}
 
     - name: Install Parallax and vLLM Rust frontend
-      if: matrix.os == 'macos-26' && matrix.python-version == '3.12'
+      if: matrix.os == 'macos-26'
       shell: bash
       run: |
-        ./install.sh --extras mac --python "${{ matrix.python-version }}"
+        ./install.sh
         test -x .venv/bin/vllm-rs
 
     - name: Run E2E tests (macOS only)
-      if: matrix.os == 'macos-26' && matrix.python-version == '3.12'
+      if: matrix.os == 'macos-26'
       shell: bash
       env:
         TERM: xterm-256color

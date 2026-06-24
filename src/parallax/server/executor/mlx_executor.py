@@ -172,6 +172,15 @@ class MLXExecutor(BaseExecutor):
 
         index_head_dim = self.config.get("index_head_dim", None)
         index_n_heads = self.config.get("index_n_heads", None)
+        kv_lora_rank = self.config.get("kv_lora_rank", None)
+        is_mla_dsa = (
+            index_head_dim is not None
+            and index_n_heads is not None
+            and not is_minimax_m3
+            and kv_lora_rank is not None
+            and qk_rope_head_dim is not None
+        )
+        index_key_heads = 1 if (is_mla_dsa or is_minimax_m3) else None
 
         layer_types = get_layer_types(self.config, start_layer, end_layer)
         sliding_window = self.config.get("sliding_window", None)
@@ -220,6 +229,9 @@ class MLXExecutor(BaseExecutor):
             head_dim_v=v_head_dim,
             index_head_dim=index_head_dim,
             index_n_heads=index_n_heads,
+            index_key_heads=index_key_heads,
+            kv_lora_rank=kv_lora_rank if is_mla_dsa else None,
+            qk_rope_head_dim=qk_rope_head_dim if is_mla_dsa else None,
             sparse_cache_type="minimax_m3" if is_minimax_m3 else None,
             layer_types=layer_types,
             max_num_seqs=max_batch_size // micro_batch_ratio,

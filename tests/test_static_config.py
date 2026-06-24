@@ -7,6 +7,10 @@ def test_glm_5_1_uses_mlx_community_model():
     assert MODELS["zai-org/GLM-5.1"] == "mlx-community/GLM-5.1"
 
 
+def test_glm_5_2_uses_mlx_community_mxfp4_model():
+    assert MODELS["zai-org/GLM-5.2"] == "mlx-community/GLM-5.2-mxfp4"
+
+
 def test_qwen3_6_mxfp4_is_scheduler_supported():
     assert MODELS["Qwen/Qwen3.6-27B"] == "mlx-community/Qwen3.6-27B-mxfp4"
     assert "mlx-community/Qwen3.6-27B-mxfp4" not in MODELS

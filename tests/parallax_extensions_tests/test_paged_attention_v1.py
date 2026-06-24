@@ -6,14 +6,13 @@ import numpy as np
 import pytest
 
 from parallax.metal.paged_attention.kernel import paged_attention as old_paged_attention
-from parallax.metal.paged_attention.kernel import (
-    reshape_and_cache as old_reshape_and_cache,
-)
 from parallax_extensions.ops import (
     paged_attention_v1,
     reshape_and_cache,
     sparse_paged_attention,
 )
+
+old_reshape_and_cache = reshape_and_cache
 
 
 def get_packing_factor(dtype):

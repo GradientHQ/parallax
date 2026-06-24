@@ -14,6 +14,15 @@ mx::array reshape_and_cache(
     mx::StreamOrDevice s /* = {} */ // Stream on which to schedule the operation
 );
 
+mx::array dsa_reshape_and_cache(
+    const mx::array& key,           // [num_tokens, num_heads, key_dim]
+    const mx::array& value,         // [num_tokens, num_heads, value_dim]
+    const mx::array& key_cache,     // [1, num_blocks, num_heads, block_size, key_dim]
+    const mx::array& value_cache,   // [1, num_blocks, num_heads, block_size, value_dim]
+    const mx::array& slot_mapping,  // [num_tokens]
+    mx::StreamOrDevice s /* = {} */ // Stream on which to schedule the operation
+);
+
 class ReshapeAndCache : public mx::Primitive {
   public:
     explicit ReshapeAndCache(mx::Stream stream) : mx::Primitive(stream){};
@@ -31,6 +40,26 @@ class ReshapeAndCache : public mx::Primitive {
     }
 
     /** Equivalence check **/
+    bool is_equivalent(const mx::Primitive& other) const override;
+
+  private:
+};
+
+class DSAReshapeAndCache : public mx::Primitive {
+  public:
+    explicit DSAReshapeAndCache(mx::Stream stream) : mx::Primitive(stream){};
+
+    void eval_cpu(
+        const std::vector<mx::array>& inputs,
+        std::vector<mx::array>& outputs) override;
+    void eval_gpu(
+        const std::vector<mx::array>& inputs,
+        std::vector<mx::array>& outputs) override;
+
+    const char* name() const override {
+      return "DSAReshapeAndCache";
+    }
+
     bool is_equivalent(const mx::Primitive& other) const override;
 
   private:

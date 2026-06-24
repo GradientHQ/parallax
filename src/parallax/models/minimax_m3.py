@@ -8,7 +8,6 @@ from mlx_lm.models.base import BaseModelArgs, scaled_dot_product_attention
 from mlx_lm.models.rope_utils import initialize_rope
 from mlx_lm.models.switch_layers import SwitchGLU, SwitchLinear
 
-from parallax.metal.indexer.kernel import store_indexer_cache
 from parallax.server.cache.base import BaseCache
 from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
 from parallax.utils.prefix_cache_utils import prepare_attention_with_prefix_cache
@@ -17,6 +16,7 @@ from parallax_extensions.ops import (
     reshape_and_cache,
     sparse_paged_attention,
     sparse_token_indexer_with_update,
+    store_indexer_cache,
 )
 
 
@@ -577,7 +577,7 @@ class MiniMaxAttention(nn.Module):
             return idx_keys_new
 
         prefix_idx = mx.zeros(
-            (B, cache.index_n_heads, max_prefix_len, self.index_dim),
+            (B, cache.index_key_heads, max_prefix_len, self.index_dim),
             dtype=idx_keys_new.dtype,
         )
         for i in range(B):
@@ -704,19 +704,6 @@ class MiniMaxAttention(nn.Module):
             slot_mapping=slot_mapping,
         )
 
-        defer_index_store = self.has_sparse_index and L == 1
-        if self.has_sparse_index and not defer_index_store:
-            if not isinstance(cache, MiniMaxM3SparseCache):
-                raise TypeError("MiniMax-M3 sparse layers require MiniMaxM3SparseCache.")
-            store_indexer_cache(
-                idx_keys.transpose(0, 2, 1, 3),
-                cache.get_indexer_cache(),
-                block_tables,
-                context_lengths,
-                block_size=block_size,
-                slot_mapping=slot_mapping,
-            )
-
         if L == 1:
             if self.has_sparse_index:
                 output = self._sparse_decode_from_cache(
@@ -727,6 +714,18 @@ class MiniMaxAttention(nn.Module):
                     queries, cache, block_tables, context_lengths
                 )
         else:
+            if self.has_sparse_index:
+                if not isinstance(cache, MiniMaxM3SparseCache):
+                    raise TypeError("MiniMax-M3 sparse layers require MiniMaxM3SparseCache.")
+                store_indexer_cache(
+                    idx_keys.transpose(0, 2, 1, 3),
+                    cache.get_indexer_cache(),
+                    block_tables,
+                    context_lengths,
+                    block_size=block_size,
+                    slot_mapping=slot_mapping,
+                )
+
             has_prefix_cache = prefix_lens is not None and bool(mx.any(prefix_lens > 0))
             if has_prefix_cache:
                 if not isinstance(cache, MiniMaxM3SparseCache):
