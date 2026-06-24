@@ -7,6 +7,7 @@ if sys.platform != "darwin":
 
 import mlx.core as mx
 
+from parallax.utils.layer_types import DSA_ATTENTION, MLA_ATTENTION
 from parallax.models.deepseek_v32 import (
     ModelArgs,
     ParallaxDeepSeekV32Attention,
@@ -14,6 +15,7 @@ from parallax.models.deepseek_v32 import (
     derive_indexer_types,
 )
 from parallax.server.cache.dsa_cache import DeepSeekSparseCache
+from parallax.server.cache.kv_cache import KVCachePacked
 from parallax.server.cache_manager import CacheManager
 from parallax.utils.utils import create_causal_mask
 
@@ -167,11 +169,68 @@ def test_cache_manager_counts_compressed_mla_and_unexpanded_indexer_bytes(monkey
         index_key_heads=1,
         kv_lora_rank=4,
         qk_rope_head_dim=2,
+        layer_types=[DSA_ATTENTION, DSA_ATTENTION],
     )
 
     dtype_size = 4
     expected = 2 * 4 * (4 + 2 + 4) * dtype_size
     assert manager._calculate_kv_block_bytes(dtype_size) == expected
+
+
+def test_cache_manager_counts_dense_mla_without_indexer(monkeypatch):
+    monkeypatch.setattr(
+        mx.metal,
+        "device_info",
+        lambda: {"max_recommended_working_set_size": 1024 * 1024},
+    )
+    monkeypatch.setattr(mx, "get_active_memory", lambda: 0)
+
+    manager = CacheManager(
+        num_layers=2,
+        num_kv_heads=2,
+        head_dim=4,
+        head_dim_v=4,
+        dtype=mx.float32,
+        block_size=4,
+        cache_memory_fraction=1.0,
+        kv_lora_rank=4,
+        qk_rope_head_dim=2,
+        layer_types=[MLA_ATTENTION, MLA_ATTENTION],
+    )
+
+    dtype_size = 4
+    expected = 2 * 4 * (4 + 2) * dtype_size
+    assert manager._calculate_kv_block_bytes(dtype_size) == expected
+    assert isinstance(manager.caches[0], DeepSeekSparseCache)
+    assert manager.caches[0].get_indexer_cache() is None
+
+
+def test_cache_manager_does_not_infer_cache_type_from_sparse_params(monkeypatch):
+    monkeypatch.setattr(
+        mx.metal,
+        "device_info",
+        lambda: {"max_recommended_working_set_size": 1024 * 1024},
+    )
+    monkeypatch.setattr(mx, "get_active_memory", lambda: 0)
+
+    manager = CacheManager(
+        num_layers=1,
+        num_kv_heads=2,
+        head_dim=4,
+        head_dim_v=4,
+        dtype=mx.float32,
+        block_size=4,
+        cache_memory_fraction=1.0,
+        index_head_dim=4,
+        index_n_heads=2,
+        kv_lora_rank=4,
+        qk_rope_head_dim=2,
+    )
+
+    dtype_size = 4
+    expected = 2 * 4 * (4 + 4) * dtype_size
+    assert manager._calculate_kv_block_bytes(dtype_size) == expected
+    assert isinstance(manager.caches[0], KVCachePacked)
 
 
 def test_indexer_types_default_to_all_full():

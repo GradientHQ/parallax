@@ -5,14 +5,11 @@ import mlx.core as mx
 import numpy as np
 import pytest
 
-from parallax.metal.paged_attention.kernel import paged_attention as old_paged_attention
 from parallax_extensions.ops import (
     paged_attention_v1,
     reshape_and_cache,
     sparse_paged_attention,
 )
-
-old_reshape_and_cache = reshape_and_cache
 
 
 def get_packing_factor(dtype):
@@ -127,57 +124,6 @@ def reference_paged_attention(
         output = output[:, :, None, :]
 
     return output
-
-
-def _bench_old(
-    q_old,
-    k_cache,
-    v_cache,
-    block_tables,
-    context_lengths,
-    block_size,
-    scale,
-    num_kv_heads,
-    iters,
-    warmup,
-    window_size=None,
-    sinks=None,
-):
-    kwargs = {}
-    if window_size is not None:
-        kwargs["window_size"] = window_size
-    if sinks is not None:
-        kwargs["sinks"] = sinks
-    for _ in range(warmup):
-        out = old_paged_attention(
-            q_old,
-            k_cache,
-            v_cache,
-            block_tables,
-            context_lengths,
-            block_size,
-            scale,
-            num_kv_heads,
-            **kwargs,
-        )
-        mx.eval(out)
-    mx.synchronize()
-    start = time.perf_counter()
-    for _ in range(iters):
-        out = old_paged_attention(
-            q_old,
-            k_cache,
-            v_cache,
-            block_tables,
-            context_lengths,
-            block_size,
-            scale,
-            num_kv_heads,
-            **kwargs,
-        )
-        mx.eval(out)
-    mx.synchronize()
-    return (time.perf_counter() - start) / iters * 1000.0
 
 
 def _bench_new(
@@ -558,20 +504,6 @@ class TestPagedAttentionV1:
         k_prefill = k_seq.transpose(0, 2, 1, 3)
         v_prefill = v_seq.transpose(0, 2, 1, 3)
 
-        old_key_cache = mx.zeros((1, num_blocks, num_kv_heads, block_size, head_dim), dtype=dtype)
-        old_value_cache = mx.zeros((1, num_blocks, num_kv_heads, block_size, head_dim), dtype=dtype)
-
-        old_reshape_and_cache(
-            k_prefill,
-            v_prefill,
-            old_key_cache,
-            old_value_cache,
-            block_tables,
-            context_lengths,
-            block_size,
-            slot_mapping=slot_mapping,
-        )
-
         x = get_packing_factor(dtype)
         new_key_cache = mx.zeros(
             (num_blocks, num_kv_heads, head_dim // x, block_size, x), dtype=dtype
@@ -589,12 +521,12 @@ class TestPagedAttentionV1:
             slot_mapping=slot_mapping,
         )
 
-        mx.eval(old_key_cache, old_value_cache, new_key_cache, new_value_cache)
+        mx.eval(new_key_cache, new_value_cache)
         mx.synchronize()
 
         sinks = mx.array(np.random.uniform(-0.5, 0.5, size=(num_heads,)), dtype=mx.float32)
         window_sizes = [block_size // 2, block_size]
-        cases = [{"name": "baseline", "window_size": 0, "sinks": None, "use_old": True}]
+        cases = [{"name": "baseline", "window_size": 0, "sinks": None}]
         for ws in window_sizes:
             cases.append({"name": f"window-{ws}", "window_size": ws, "sinks": None})
         cases.append({"name": "sink-only", "window_size": 0, "sinks": sinks})
@@ -604,7 +536,6 @@ class TestPagedAttentionV1:
         for case in cases:
             window_size = case["window_size"]
             sinks_case = case["sinks"]
-            use_old = case.get("use_old", False)
 
             ref_output = reference_paged_attention(
                 q,
@@ -619,24 +550,6 @@ class TestPagedAttentionV1:
             mx.eval(ref_output)
 
             atol = 1e-2 if sinks_case is not None else 1e-3
-            if use_old:
-                old_output = old_paged_attention(
-                    q,
-                    old_key_cache,
-                    old_value_cache,
-                    block_tables,
-                    context_lengths,
-                    block_size,
-                    scale,
-                    num_kv_heads,
-                )
-                mx.eval(old_output)
-                diff_old = mx.abs(ref_output.astype(mx.float32) - old_output.astype(mx.float32))
-                max_diff_old = mx.max(diff_old).item()
-                assert mx.allclose(
-                    ref_output.astype(mx.float32), old_output.astype(mx.float32), atol=1e-3
-                ).item(), f"Old kernel mismatch (max diff {max_diff_old:.6f})"
-
             new_output = paged_attention_v1(
                 q,
                 new_key_cache,
@@ -681,11 +594,6 @@ class TestPagedAttentionV1:
         q = mx.random.normal(shape=(bs, n_heads, dim)).astype(dtype)
         k_cont = mx.random.normal(shape=(bs, n_kv_heads, seq_len, dim)).astype(dtype)
         v_cont = mx.random.normal(shape=(bs, n_kv_heads, seq_len, dim)).astype(dtype)
-        q_old = q[:, :, None, :]
-
-        old_k_cache = mx.random.normal((1, total_blocks, n_kv_heads, block_size, dim)).astype(dtype)
-        old_v_cache = mx.random.normal((1, total_blocks, n_kv_heads, block_size, dim)).astype(dtype)
-        mx.eval(old_k_cache, old_v_cache)
 
         print(f"\n[Benchmark BS={bs}, Len={seq_len}, Float16]")
 
@@ -714,21 +622,6 @@ class TestPagedAttentionV1:
             sinks_case = case["sinks"]
             label = case["name"]
 
-            old_ws = None if ws == 0 else ws
-            old_ms = _bench_old(
-                q_old,
-                old_k_cache,
-                old_v_cache,
-                block_tables,
-                seq_lens,
-                block_size,
-                scale,
-                n_kv_heads,
-                iters=100,
-                warmup=10,
-                window_size=old_ws,
-                sinks=sinks_case,
-            )
             new_ms = _bench_new(
                 q,
                 key_cache,
@@ -743,7 +636,4 @@ class TestPagedAttentionV1:
                 window_size=ws,
                 sinks=sinks_case,
             )
-            speedup = old_ms / new_ms if new_ms > 0 else float("inf")
-            print(f"Old kernel ({label}): {old_ms:.3f} ms")
             print(f"Paged Attn V1 ({label}): {new_ms:.3f} ms")
-            print(f"Speedup ({label}): {speedup:.2f}x")

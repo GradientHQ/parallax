@@ -2,6 +2,14 @@ from typing import Dict, List, Optional, Tuple
 
 import mlx.core as mx
 
+from parallax.utils.layer_types import (
+    ATTENTION,
+    ATTENTION_LAYER_TYPES,
+    DSA_ATTENTION,
+    LINEAR,
+    MLA_ATTENTION,
+    MSA_ATTENTION,
+)
 from parallax.server.block_radix_cache import BlockRadixCache
 from parallax.server.cache.allocator import BlockAllocator, SlotAllocator
 from parallax.server.cache.base import BaseCache
@@ -35,8 +43,7 @@ class CacheManager:
         index_key_heads: Optional[int] = None,
         kv_lora_rank: Optional[int] = None,
         qk_rope_head_dim: Optional[int] = None,
-        sparse_cache_type: Optional[str] = None,
-        # Hybrid Config: List of 'attention' or 'linear' or None (default 'attention')
+        # Hybrid Config: List of cache layer types or None (default 'attention')
         layer_types: Optional[List[str]] = None,
         # Linear Model / State Cache Params
         conv_dim: Optional[int] = None,
@@ -59,7 +66,6 @@ class CacheManager:
         self.index_key_heads = index_key_heads
         self.kv_lora_rank = kv_lora_rank
         self.qk_rope_head_dim = qk_rope_head_dim
-        self.sparse_cache_type = sparse_cache_type
         self.dtype = dtype
         self.block_size = block_size
         self.max_num_seqs = max_num_seqs
@@ -82,14 +88,14 @@ class CacheManager:
 
         # Determine layer types
         if layer_types is None:
-            self.layer_types = ["attention"] * num_layers
+            self.layer_types = [ATTENTION] * num_layers
         else:
             assert len(layer_types) == num_layers, "layer_types length must match num_layers"
             self.layer_types = layer_types
 
         # Check if we need blocks (any attention layer) and slots (any linear layer)
-        self.needs_blocks = any(t == "attention" for t in self.layer_types)
-        self.needs_slots = any(t == "linear" for t in self.layer_types)
+        self.needs_blocks = any(t in ATTENTION_LAYER_TYPES for t in self.layer_types)
+        self.needs_slots = any(t == LINEAR for t in self.layer_types)
 
         self.num_gpu_blocks, self.num_linear_prefix_slots = self._calculate_cache_allocation(
             self.cache_memory_fraction, self.dtype
@@ -115,12 +121,12 @@ class CacheManager:
 
         if self.needs_blocks:
             logger.info(
-                f"Allocated Paged KV Cache for {self.layer_types.count('attention')} layers: "
+                f"Allocated Paged KV Cache for {self._num_attention_layers()} layers: "
                 f"{self.num_gpu_blocks} blocks, {self.block_size} block_size, max_tokens: {self.num_gpu_blocks * self.block_size}"
             )
         if self.needs_slots:
             logger.info(
-                f"Allocated Linear State Cache for {self.layer_types.count('linear')} layers: "
+                f"Allocated Linear State Cache for {self._num_linear_layers()} layers: "
                 f"{self.max_num_seqs} active slots, "
                 f"{self.num_linear_prefix_slots} prefix slots"
             )
@@ -162,50 +168,82 @@ class CacheManager:
             self.prefix_slot_allocator.free(slot)
             logger.debug(f"Freed evicted prefix linear slot: {slot}")
 
-    def _create_cache(self, layer_type: str) -> BaseCache:
-        if layer_type == "attention":
-            if self.index_head_dim is not None and self.index_n_heads is not None:
-                if self.sparse_cache_type == "minimax_m3":
-                    return MiniMaxM3SparseCache(
-                        num_blocks=self.num_gpu_blocks,
-                        block_size=self.block_size,
-                        num_kv_heads=self.num_kv_heads,
-                        head_dim=self.head_dim,
-                        head_dim_v=self.head_dim_v,
-                        dtype=self.dtype,
-                        index_head_dim=self.index_head_dim,
-                        index_n_heads=self.index_n_heads,
-                        index_key_heads=self.index_key_heads or 1,
-                    )
-                if self.kv_lora_rank is None or self.qk_rope_head_dim is None:
-                    raise ValueError(
-                        "DeepSeek/GLM DSA cache requires kv_lora_rank and qk_rope_head_dim "
-                        "for compressed MLA storage."
-                    )
-                return DeepSeekSparseCache(
-                    num_blocks=self.num_gpu_blocks,
-                    block_size=self.block_size,
-                    num_kv_heads=self.num_kv_heads,
-                    head_dim=self.head_dim,
-                    head_dim_v=self.head_dim_v,
-                    dtype=self.dtype,
-                    index_head_dim=self.index_head_dim,
-                    index_n_heads=self.index_n_heads,
-                    kv_lora_rank=self.kv_lora_rank,
-                    qk_rope_head_dim=self.qk_rope_head_dim,
-                    index_key_heads=self.index_key_heads or 1,
-                )
-            else:
-                return KVCachePacked(
-                    num_blocks=self.num_gpu_blocks,
-                    block_size=self.block_size,
-                    num_kv_heads=self.num_kv_heads,
-                    head_dim=self.head_dim,
-                    head_dim_v=self.head_dim_v,
-                    dtype=self.dtype,
-                )
+    def _num_attention_layers(self) -> int:
+        return sum(1 for t in self.layer_types if t in ATTENTION_LAYER_TYPES)
 
-        elif layer_type == "linear":
+    def _num_linear_layers(self) -> int:
+        return sum(1 for t in self.layer_types if t == LINEAR)
+
+    def _validate_mla_cache_params(self, layer_type: str):
+        if self.kv_lora_rank is None or self.qk_rope_head_dim is None:
+            raise ValueError(
+                f"{layer_type} requires kv_lora_rank and qk_rope_head_dim "
+                "for compressed MLA storage."
+            )
+
+    def _validate_index_cache_params(self, layer_type: str):
+        if self.index_head_dim is None or self.index_n_heads is None:
+            raise ValueError(f"{layer_type} requires index_head_dim and index_n_heads.")
+
+    def _create_cache(self, layer_type: str) -> BaseCache:
+        if layer_type == ATTENTION:
+            return KVCachePacked(
+                num_blocks=self.num_gpu_blocks,
+                block_size=self.block_size,
+                num_kv_heads=self.num_kv_heads,
+                head_dim=self.head_dim,
+                head_dim_v=self.head_dim_v,
+                dtype=self.dtype,
+            )
+
+        if layer_type == MLA_ATTENTION:
+            self._validate_mla_cache_params(layer_type)
+            return DeepSeekSparseCache(
+                num_blocks=self.num_gpu_blocks,
+                block_size=self.block_size,
+                num_kv_heads=self.num_kv_heads,
+                head_dim=self.head_dim,
+                head_dim_v=self.head_dim_v,
+                dtype=self.dtype,
+                index_head_dim=None,
+                index_n_heads=None,
+                kv_lora_rank=self.kv_lora_rank,
+                qk_rope_head_dim=self.qk_rope_head_dim,
+                index_key_heads=None,
+            )
+
+        if layer_type == DSA_ATTENTION:
+            self._validate_mla_cache_params(layer_type)
+            self._validate_index_cache_params(layer_type)
+            return DeepSeekSparseCache(
+                num_blocks=self.num_gpu_blocks,
+                block_size=self.block_size,
+                num_kv_heads=self.num_kv_heads,
+                head_dim=self.head_dim,
+                head_dim_v=self.head_dim_v,
+                dtype=self.dtype,
+                index_head_dim=self.index_head_dim,
+                index_n_heads=self.index_n_heads,
+                kv_lora_rank=self.kv_lora_rank,
+                qk_rope_head_dim=self.qk_rope_head_dim,
+                index_key_heads=self.index_key_heads or 1,
+            )
+
+        if layer_type == MSA_ATTENTION:
+            self._validate_index_cache_params(layer_type)
+            return MiniMaxM3SparseCache(
+                num_blocks=self.num_gpu_blocks,
+                block_size=self.block_size,
+                num_kv_heads=self.num_kv_heads,
+                head_dim=self.head_dim,
+                head_dim_v=self.head_dim_v,
+                dtype=self.dtype,
+                index_head_dim=self.index_head_dim,
+                index_n_heads=self.index_n_heads,
+                index_key_heads=self.index_key_heads or 1,
+            )
+
+        if layer_type == LINEAR:
             # We assume uniform linear config for all linear layers for now
             return LinearCache(
                 max_num_seqs=self.max_linear_slots,
@@ -217,8 +255,8 @@ class CacheManager:
                 linear_num_v_heads=self.linear_num_v_heads,
                 dtype=self.dtype,
             )
-        else:
-            raise ValueError(f"Unknown layer type: {layer_type}")
+
+        raise ValueError(f"Unknown layer type: {layer_type}")
 
     def _needs_prefix_linear_slots(self) -> bool:
         return self.enable_prefix_cache and self.needs_blocks and self.needs_slots
@@ -228,7 +266,7 @@ class CacheManager:
 
     def _calculate_linear_slot_bytes(self, dtype_size: int) -> int:
         """Calculate memory needed for one linear slot across all linear layers."""
-        num_linear_layers = self.layer_types.count("linear")
+        num_linear_layers = self._num_linear_layers()
         if num_linear_layers == 0:
             return 0
 
@@ -257,32 +295,39 @@ class CacheManager:
 
     def _calculate_kv_block_bytes(self, dtype_size: int) -> int:
         """Calculate memory needed for one KV block across all attention layers."""
-        if (
-            self.index_head_dim is not None
-            and self.index_n_heads is not None
-            and self.sparse_cache_type != "minimax_m3"
-            and self.kv_lora_rank is not None
-            and self.qk_rope_head_dim is not None
-        ):
-            one_layer_block_bytes = (
-                self.block_size * (self.kv_lora_rank + self.qk_rope_head_dim) * dtype_size
-            )
-        else:
-            one_layer_block_bytes = (
-                self.num_kv_heads * self.block_size * (self.head_dim + self.head_dim_v) * dtype_size
-            )
-        if self.index_head_dim is not None and self.index_n_heads is not None:
-            if self.sparse_cache_type == "minimax_m3":
-                index_heads = self.index_key_heads or 1
-            elif self.kv_lora_rank is not None and self.qk_rope_head_dim is not None:
-                index_heads = self.index_key_heads or 1
+        total_bytes = 0
+        standard_block_bytes = (
+            self.num_kv_heads * self.block_size * (self.head_dim + self.head_dim_v) * dtype_size
+        )
+        for layer_type in self.layer_types:
+            if layer_type == ATTENTION:
+                total_bytes += standard_block_bytes
+            elif layer_type == MLA_ATTENTION:
+                self._validate_mla_cache_params(layer_type)
+                total_bytes += (
+                    self.block_size * (self.kv_lora_rank + self.qk_rope_head_dim) * dtype_size
+                )
+            elif layer_type == DSA_ATTENTION:
+                self._validate_mla_cache_params(layer_type)
+                self._validate_index_cache_params(layer_type)
+                total_bytes += (
+                    self.block_size * (self.kv_lora_rank + self.qk_rope_head_dim) * dtype_size
+                )
+                total_bytes += (
+                    (self.index_key_heads or 1) * self.block_size * self.index_head_dim * dtype_size
+                )
+            elif layer_type == MSA_ATTENTION:
+                self._validate_index_cache_params(layer_type)
+                total_bytes += standard_block_bytes
+                total_bytes += (
+                    (self.index_key_heads or 1) * self.block_size * self.index_head_dim * dtype_size
+                )
+            elif layer_type == LINEAR:
+                continue
             else:
-                index_heads = self.index_n_heads
-            one_layer_block_bytes += (
-                index_heads * self.block_size * self.index_head_dim * dtype_size
-            )
+                raise ValueError(f"Unknown layer type: {layer_type}")
 
-        return one_layer_block_bytes * self.layer_types.count("attention")
+        return total_bytes
 
     def _calculate_prefix_linear_bytes(
         self,
@@ -325,14 +370,14 @@ class CacheManager:
         )
 
         # Total bytes per block = Sum over all attention layers
-        num_attention_layers = self.layer_types.count("attention")
+        num_attention_layers = self._num_attention_layers()
         total_block_bytes = self._calculate_kv_block_bytes(dtype_size)
 
         if total_block_bytes == 0:
             if active_linear_cache_bytes > 0:
                 logger.info(
                     f"Linear cache will use {active_linear_cache_bytes / 1024**3:.2f} GB "
-                    f"for {self.layer_types.count('linear')} layers "
+                    f"for {self._num_linear_layers()} layers "
                     f"({self.max_num_seqs} active slots, 0 prefix slots)"
                 )
             return 0, 0
@@ -368,7 +413,7 @@ class CacheManager:
             )
             logger.info(
                 f"Linear cache will use {total_linear_cache_bytes / 1024**3:.2f} GB "
-                f"for {self.layer_types.count('linear')} layers "
+                f"for {self._num_linear_layers()} layers "
                 f"({self.max_num_seqs} active slots, "
                 f"{num_linear_prefix_slots} prefix slots)"
             )

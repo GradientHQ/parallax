@@ -124,16 +124,8 @@ class Scheduler:
         """Gets a request that is currently in the running state."""
         return self._running_requests.get(request_id)
 
-    def _prompt_string_to_request(self, request_str: str) -> InitialRequest:
-        """Convert the prompt string to InitialRequest."""
-        assert self.is_first_peer, "Only first peer can enqueue InitialRequest."
-        input_ids = self.tokenizer.encode(request_str)
-        return InitialRequest.from_prompt_ids(input_ids, self.max_new_tokens, self.max_total_length)
-
-    def enque_request(self, request: Request | str):
+    def enque_request(self, request: Request):
         """Enque a request to the scheduler's wait queue."""
-        if isinstance(request, str):
-            request = self._prompt_string_to_request(request)
 
         if request.is_finished:
             logger.warning(

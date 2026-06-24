@@ -12,6 +12,13 @@ import psutil
 import torch
 import zmq
 
+from parallax.utils.layer_types import (
+    ATTENTION,
+    DSA_ATTENTION,
+    LINEAR,
+    MLA_ATTENTION,
+    MSA_ATTENTION,
+)
 from parallax.utils.model_download import download_model_file
 
 
@@ -420,8 +427,27 @@ def initialize_nccl_port():
     return nccl_port
 
 
+def _attention_cache_layer_type(config: dict) -> str:
+    model_type = config.get("model_type")
+    if model_type == "minimax_m3":
+        return MSA_ATTENTION
+
+    has_mla_cache = (
+        config.get("kv_lora_rank") is not None and config.get("qk_rope_head_dim") is not None
+    )
+    has_dsa_index = (
+        config.get("index_head_dim") is not None and config.get("index_n_heads") is not None
+    )
+    if has_mla_cache and has_dsa_index:
+        return DSA_ATTENTION
+    if has_mla_cache and model_type in {"deepseek_v3", "kimi_k2"}:
+        return MLA_ATTENTION
+    return ATTENTION
+
+
 def get_layer_types(config: dict, start_layer: int, end_layer: int) -> List[str]:
     num_shard_layers = end_layer - start_layer
+    attention_type = _attention_cache_layer_type(config)
 
     # Case 1: Explicit layer types (e.g., DeepSeek with layers_block_type)
     layer_types = config.get("layers_block_type", None)
@@ -429,7 +455,7 @@ def get_layer_types(config: dict, start_layer: int, end_layer: int) -> List[str]
         if len(layer_types) >= end_layer:
             layer_types = layer_types[start_layer:end_layer]
         return [
-            "linear" if t in ["mamba", "linear_attention"] else "attention" for t in layer_types
+            LINEAR if t in ["mamba", "linear_attention"] else attention_type for t in layer_types
         ]
 
     # Case 2: linear_attn_config with full_attn_layers (e.g., Kimi)
@@ -439,9 +465,9 @@ def get_layer_types(config: dict, start_layer: int, end_layer: int) -> List[str]
         layer_types = []
         for i in range(start_layer, end_layer):
             if i in full_attn_layers:
-                layer_types.append("attention")
+                layer_types.append(attention_type)
             else:
-                layer_types.append("linear")
+                layer_types.append(LINEAR)
         return layer_types
 
     # Case 3: full_attention_interval (e.g., Qwen3Next)
@@ -450,8 +476,8 @@ def get_layer_types(config: dict, start_layer: int, end_layer: int) -> List[str]
         layer_types = []
         for i in range(start_layer, end_layer):
             is_linear = (i + 1) % full_attention_interval != 0
-            layer_types.append("linear" if is_linear else "attention")
+            layer_types.append(LINEAR if is_linear else attention_type)
         return layer_types
 
     # Default: all attention layers
-    return ["attention"] * num_shard_layers
+    return [attention_type] * num_shard_layers
