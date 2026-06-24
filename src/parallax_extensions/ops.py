@@ -45,17 +45,27 @@ def load_extension_module() -> ModuleType:
 
 
 _ext = load_extension_module()
-_ext_dsa_indexer_scores_with_update = _ext.dsa_indexer_scores_with_update
-_ext_mla_paged_attention = _ext.mla_paged_attention
-_ext_dsa_paged_attention = _ext.dsa_paged_attention
+
+# MHA, GQA
 _ext_paged_attention_v1 = _ext.paged_attention_v1
 _ext_paged_attention_v2 = _ext.paged_attention_v2
-_ext_reshape_and_cache = _ext.reshape_and_cache
+
+# MLA
+_ext_mla_paged_attention = _ext.mla_paged_attention
+
+# DSA
+_ext_dsa_paged_attention = _ext.dsa_paged_attention
 _ext_dsa_reshape_and_cache = _ext.dsa_reshape_and_cache
+_ext_dsa_indexer_scores_with_update = _ext.dsa_indexer_scores_with_update
+
+# MSA
+_ext_msa_paged_attention = _ext.msa_paged_attention
+_ext_msa_token_indexer = _ext.msa_token_indexer
+_ext_msa_token_indexer_with_update = _ext.msa_token_indexer_with_update
+
+# Cache
+_ext_reshape_and_cache = _ext.reshape_and_cache
 _ext_store_indexer_cache = _ext.store_indexer_cache
-_ext_sparse_paged_attention = _ext.sparse_paged_attention
-_ext_sparse_token_indexer = _ext.sparse_token_indexer
-_ext_sparse_token_indexer_with_update = _ext.sparse_token_indexer_with_update
 
 _PAGED_ATTENTION_V1_MAX_LENGTH = 8192
 
@@ -117,7 +127,7 @@ def store_indexer_cache(
     block_tables: mx.array,
     context_lengths: mx.array,
     block_size: int,
-    slot_mapping: Optional[mx.array] = None,
+    slot_mapping: mx.array,
 ):
     """Store index keys into the paged index-key cache."""
     if key_cache.ndim != 5:
@@ -133,36 +143,23 @@ def store_indexer_cache(
         )
 
     if slot_mapping is None:
-        batch_size = key.shape[0]
-        if key.ndim == 4:
-            if key.shape[1] == 1:
-                key = key.squeeze(1)
-            elif key.shape[2] == 1:
-                key = key.squeeze(2)
-        if key.ndim != 3:
-            raise ValueError(
-                "Decode index key must be shaped "
-                "(batch, heads, dim), (batch, 1, heads, dim), or "
-                "(batch, heads, 1, dim)."
-            )
-
-        indices = context_lengths - 1
-        block_indices_in_table = indices // block_size
-        offsets = indices % block_size
-        batch_indices = mx.arange(batch_size)
-        physical_blocks = block_tables[batch_indices, block_indices_in_table]
-        slot_mapping = physical_blocks.astype(mx.int64) * block_size + offsets.astype(mx.int64)
-    else:
-        if key.ndim == 4:
+        raise ValueError("slot_mapping is required for index-cache update.")
+    if slot_mapping.dtype != mx.int64:
+        slot_mapping = slot_mapping.astype(mx.int64)
+    if key.ndim == 4:
+        if slot_mapping.shape[0] == key.shape[0] and key.shape[1] == 1:
+            key = key.squeeze(1)
+        elif slot_mapping.shape[0] == key.shape[0] and key.shape[2] == 1:
+            key = key.squeeze(2)
+        else:
             batch, target_len, heads, dim = key.shape
             key = key.reshape(batch * target_len, heads, dim)
-        if key.ndim != 3:
-            raise ValueError(
-                "Prefill index key must be shaped "
-                "(tokens, heads, dim) or (batch, tokens, heads, dim)."
-            )
-        if slot_mapping.dtype != mx.int64:
-            slot_mapping = slot_mapping.astype(mx.int64)
+    if key.ndim != 3:
+        raise ValueError(
+            "index key must be shaped (tokens, heads, dim), "
+            "(batch, tokens, heads, dim), (batch, 1, heads, dim), or "
+            "(batch, heads, 1, dim)."
+        )
 
     if key.shape[1] != key_cache.shape[2]:
         raise ValueError(
@@ -256,6 +253,7 @@ def dsa_indexer_scores_with_update(
     context_lengths: mx.array,
     index_weights: mx.array,
     max_context_len: int,
+    slot_mapping: mx.array,
 ) -> mx.array:
     """Store the decode index key and compute GLM/DeepSeek DSA token scores."""
     if index_queries.ndim == 4:
@@ -305,6 +303,12 @@ def dsa_indexer_scores_with_update(
         raise ValueError("index_weights must match index query batch/head dimensions.")
     if max_context_len <= 0:
         raise ValueError("max_context_len must be positive.")
+    if slot_mapping is None:
+        raise ValueError("slot_mapping is required for decode index-cache update.")
+    if slot_mapping.dtype != mx.int64:
+        slot_mapping = slot_mapping.astype(mx.int64)
+    if slot_mapping.ndim != 1 or slot_mapping.shape[0] != index_queries.shape[0]:
+        raise ValueError("slot_mapping must be shaped (batch,).")
 
     return _ext_dsa_indexer_scores_with_update(
         mx.contiguous(index_queries),
@@ -313,6 +317,7 @@ def dsa_indexer_scores_with_update(
         mx.contiguous(block_tables.astype(mx.int32)),
         mx.contiguous(context_lengths.astype(mx.int32)),
         mx.contiguous(index_weights.astype(mx.float32)),
+        mx.contiguous(slot_mapping),
         max_context_len,
     )
 
@@ -325,6 +330,7 @@ def dsa_token_indexer_with_update(
     context_lengths: mx.array,
     index_weights: mx.array,
     index_topk: int,
+    slot_mapping: mx.array,
 ) -> mx.array:
     """
     Decode helper for GLM/DeepSeek DSA indexer.
@@ -350,6 +356,7 @@ def dsa_token_indexer_with_update(
         context_lengths,
         index_weights,
         max_context_len,
+        slot_mapping=slot_mapping,
     )
     topk = mx.argpartition(scores, kth=-index_topk, axis=-1)[:, -index_topk:].astype(mx.int32)
     dense_rows = context_lengths.astype(mx.int32) <= index_topk
@@ -368,54 +375,35 @@ def reshape_and_cache(
     block_tables: mx.array,
     context_lengths: mx.array,
     block_size: int,
-    slot_mapping: Optional[mx.array] = None,
+    slot_mapping: mx.array,
 ):
     """
     Wrapper for C++ reshape_and_cache kernel.
-    Handles slot_mapping calculation for Decode phase if not provided.
     """
 
     dsa_cache_layout = key_cache.ndim == 5 and value_cache.ndim == 5
 
-    # Decode Mode
     if slot_mapping is None:
-        batch_size = key.shape[0]
-
-        # (B, H, 1, D) -> (B, H, D)
-        if key.ndim == 4:
-            if key.shape[2] == 1:
-                key = key.squeeze(2)
-                value = value.squeeze(2)
-            elif key.shape[1] == 1:  # (B, 1, H, D) case
-                key = key.squeeze(1)
-                value = value.squeeze(1)
-        key = mx.contiguous(key)
-        value = mx.contiguous(value)
-
-        # Calculate Slot Mapping
-        indices = context_lengths - 1
-        block_indices_in_table = indices // block_size
-        offsets = indices % block_size
-        # Find Physical Block
-        batch_indices = mx.arange(batch_size)
-        physical_block_numbers = block_tables[batch_indices, block_indices_in_table]
-        # Calculate Physical Slot Index
-        slot_mapping = physical_block_numbers * block_size + offsets
+        raise ValueError("slot_mapping is required for KV-cache update.")
+    if slot_mapping.dtype != mx.int64:
         slot_mapping = slot_mapping.astype(mx.int64)
-
-    # Prefill Mode
-    else:
-        # (B, T, H, D) -> (B*T, H, D)
-        if key.ndim == 4:
+    if key.ndim == 4:
+        if slot_mapping.shape[0] == key.shape[0] and key.shape[2] == 1:
+            key = key.squeeze(2)
+            value = value.squeeze(2)
+        elif slot_mapping.shape[0] == key.shape[0] and key.shape[1] == 1:
+            key = key.squeeze(1)
+            value = value.squeeze(1)
+        else:
             B, T, H, D = key.shape
             key = key.reshape(B * T, H, D)
             V_D = value.shape[-1]
             value = value.reshape(B * T, H, V_D)
-        key = mx.contiguous(key)
-        value = mx.contiguous(value)
+    key = mx.contiguous(key)
+    value = mx.contiguous(value)
 
-        if slot_mapping.dtype != mx.int64:
-            slot_mapping = slot_mapping.astype(mx.int64)
+    if slot_mapping.ndim != 1 or slot_mapping.shape[0] != key.shape[0]:
+        raise ValueError("slot_mapping length must match number of KV tokens.")
 
     if dsa_cache_layout:
         op = _ext_dsa_reshape_and_cache(key, value, key_cache, value_cache, slot_mapping)
@@ -603,7 +591,7 @@ def paged_attention_v1(
     return output[:, :, None, :]
 
 
-def sparse_paged_attention(
+def msa_paged_attention(
     queries: mx.array,
     key_cache: mx.array,
     value_cache: mx.array,
@@ -616,7 +604,7 @@ def sparse_paged_attention(
     num_kv_heads: int,
 ) -> mx.array:
     """
-    Token-sparse paged attention in parallax_extensions.
+    MSA paged attention in parallax_extensions.
 
     The sparse pattern is expressed directly as logical token positions. The
     native kernel maps those positions through block_tables into the packed KV
@@ -624,14 +612,14 @@ def sparse_paged_attention(
     """
     if queries.ndim == 4:
         if queries.shape[2] != 1:
-            raise ValueError("sparse_paged_attention only supports one query token.")
+            raise ValueError("msa_paged_attention only supports one query token.")
         queries = queries.squeeze(2)
     if queries.ndim != 3:
         raise ValueError("queries must be shaped (batch, heads, dim) or (batch, heads, 1, dim).")
     if key_cache.ndim != 5 or value_cache.ndim != 4:
-        raise ValueError("sparse_paged_attention requires packed paged KV cache tensors.")
+        raise ValueError("msa_paged_attention requires packed paged KV cache tensors.")
     if value_cache.shape[2] != queries.shape[2]:
-        raise ValueError("sparse_paged_attention requires value head dim to match query head dim.")
+        raise ValueError("msa_paged_attention requires value head dim to match query head dim.")
 
     if token_positions.ndim == 3:
         if token_positions.shape[1] != 1:
@@ -658,7 +646,7 @@ def sparse_paged_attention(
     token_positions_valid = mx.contiguous(token_positions_valid.astype(mx.int32))
     max_num_positions = token_positions.shape[1]
 
-    output = _ext_sparse_paged_attention(
+    output = _ext_msa_paged_attention(
         queries,
         key_cache,
         value_cache,
@@ -674,7 +662,7 @@ def sparse_paged_attention(
     return output[:, :, None, :]
 
 
-def sparse_token_indexer(
+def msa_token_indexer(
     index_queries: mx.array,
     index_key_cache: mx.array,
     block_tables: mx.array,
@@ -695,7 +683,7 @@ def sparse_token_indexer(
     """
     if index_queries.ndim == 4:
         if index_queries.shape[2] != 1:
-            raise ValueError("sparse_token_indexer only supports one query token.")
+            raise ValueError("msa_token_indexer only supports one query token.")
         index_queries = index_queries.squeeze(2)
     if index_queries.ndim != 3:
         raise ValueError(
@@ -716,7 +704,7 @@ def sparse_token_indexer(
     if max_context_len <= 0:
         raise ValueError("max_context_len must be positive.")
 
-    return _ext_sparse_token_indexer(
+    return _ext_msa_token_indexer(
         mx.contiguous(index_queries),
         index_key_cache,
         mx.contiguous(block_tables.astype(mx.int32)),
@@ -730,7 +718,7 @@ def sparse_token_indexer(
     )
 
 
-def sparse_token_indexer_with_update(
+def msa_token_indexer_with_update(
     index_queries: mx.array,
     index_key_update: mx.array,
     index_key_cache: mx.array,
@@ -742,6 +730,7 @@ def sparse_token_indexer_with_update(
     sparse_init_blocks: int,
     sparse_local_blocks: int,
     scale: float,
+    slot_mapping: mx.array,
 ) -> mx.array:
     """
     Decode helper that stores the current index key and returns sparse token positions.
@@ -752,7 +741,7 @@ def sparse_token_indexer_with_update(
     """
     if index_queries.ndim == 4:
         if index_queries.shape[2] != 1:
-            raise ValueError("sparse_token_indexer_with_update only supports one query token.")
+            raise ValueError("msa_token_indexer_with_update only supports one query token.")
         index_queries = index_queries.squeeze(2)
     if index_queries.ndim != 3:
         raise ValueError(
@@ -792,13 +781,20 @@ def sparse_token_indexer_with_update(
         raise ValueError("sparse_block_size must be positive.")
     if max_context_len <= 0:
         raise ValueError("max_context_len must be positive.")
+    if slot_mapping is None:
+        raise ValueError("slot_mapping is required for decode index-cache update.")
+    if slot_mapping.dtype != mx.int64:
+        slot_mapping = slot_mapping.astype(mx.int64)
+    if slot_mapping.ndim != 1 or slot_mapping.shape[0] != index_queries.shape[0]:
+        raise ValueError("slot_mapping must be shaped (batch,).")
 
-    return _ext_sparse_token_indexer_with_update(
+    return _ext_msa_token_indexer_with_update(
         mx.contiguous(index_queries),
         mx.contiguous(index_key_update),
         index_key_cache,
         mx.contiguous(block_tables.astype(mx.int32)),
         mx.contiguous(context_lengths.astype(mx.int32)),
+        mx.contiguous(slot_mapping),
         max_context_len,
         sparse_block_size,
         sparse_topk_blocks,

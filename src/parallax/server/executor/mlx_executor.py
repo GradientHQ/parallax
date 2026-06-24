@@ -824,6 +824,16 @@ class MLXExecutor(BaseExecutor):
         block_tables_tensor = mx.array(padded_block_tables, dtype=mx.int32)
         context_lengths_tensor = mx.array(context_lengths_list, dtype=mx.int32)
 
+        slot_mapping_tensor = None
+        if self.cache_manager.needs_blocks:
+            slots = []
+            for block_table, context_len in zip(block_tables_list, context_lengths_list):
+                token_pos = context_len - 1
+                block_idx = token_pos // self.cache_manager.block_size
+                block_offset = token_pos % self.cache_manager.block_size
+                slots.append(block_table[block_idx] * self.cache_manager.block_size + block_offset)
+            slot_mapping_tensor = mx.array(slots, dtype=mx.int64)
+
         # Prepare state slot mapping if needed
         state_slot_mapping = None
         if self.cache_manager.needs_slots:
@@ -838,7 +848,7 @@ class MLXExecutor(BaseExecutor):
             "requests": valid_requests,
             "block_tables": block_tables_tensor,
             "context_lengths": context_lengths_tensor,
-            "slot_mapping": None,
+            "slot_mapping": slot_mapping_tensor,
             "state_slot_mapping": state_slot_mapping,
         }
         logger.debug(f"Prepared MLX decode batch (size={batch_size})")

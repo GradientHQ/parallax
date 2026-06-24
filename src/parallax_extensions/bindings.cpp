@@ -1,13 +1,14 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/variant.h>
 
-#include "kernels/dsa_indexer.h"
-#include "kernels/dsa_paged_attention.h"
-#include "kernels/mla_paged_attention.h"
-#include "kernels/paged_attention.h"
-#include "kernels/reshape_and_cache.h"
-#include "kernels/sparse_indexer.h"
-#include "kernels/sparse_paged_attention.h"
+#include "kernels/dsa/dsa_indexer.h"
+#include "kernels/dsa/dsa_paged_attention.h"
+#include "kernels/indexer_cache/store_indexer_cache.h"
+#include "kernels/mla/mla_paged_attention.h"
+#include "kernels/msa/msa_indexer.h"
+#include "kernels/msa/msa_paged_attention.h"
+#include "kernels/paged_attention/paged_attention.h"
+#include "kernels/reshape_and_cache/reshape_and_cache.h"
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -24,7 +25,7 @@ NB_MODULE(_ext, m) {
       nb::kw_only(),
       "stream"_a = nb::none(),
       R"(
-        Store sparse index keys into paged index cache.
+        Store index keys into paged index cache.
 
         Args:
             index_key (array): Input array [num_tokens, index_key_heads, index_dim].
@@ -110,6 +111,7 @@ NB_MODULE(_ext, m) {
       "block_tables"_a,
       "seq_lens"_a,
       "index_weights"_a,
+      "slot_mapping"_a,
       "max_context_len"_a,
       nb::kw_only(),
       "stream"_a = nb::none(),
@@ -123,6 +125,7 @@ NB_MODULE(_ext, m) {
             block_tables (array): Input array [num_seqs, max_num_blocks_per_seq].
             seq_lens (array): Input array [num_seqs].
             index_weights (array): Per-query-head weights [num_seqs, index_heads].
+            slot_mapping (array): Physical cache slots [num_seqs].
             max_context_len (int): Maximum scored context length in this batch.
             stream (Stream or Device): Stream on which to schedule the operation.
 
@@ -209,8 +212,8 @@ NB_MODULE(_ext, m) {
       )");
 
   m.def(
-      "sparse_paged_attention",
-      &parallax_ext::sparse_paged_attention,
+      "msa_paged_attention",
+      &parallax_ext::msa_paged_attention,
       "query"_a,
       "key_cache"_a,
       "value_cache"_a,
@@ -225,7 +228,7 @@ NB_MODULE(_ext, m) {
       nb::kw_only(),
       "stream"_a = nb::none(),
       R"(
-        Token-sparse paged attention operation
+        MSA paged attention operation
 
         Args:
             query (array): Input array [num_seqs, num_heads, head_size].
@@ -242,12 +245,12 @@ NB_MODULE(_ext, m) {
             stream (Stream or Device): Stream on which to schedule the operation.
 
         Returns:
-            array: ``Sparse paged attention result``
+            array: ``MSA paged attention result``
       )");
 
   m.def(
-      "sparse_token_indexer",
-      &parallax_ext::sparse_token_indexer,
+      "msa_token_indexer",
+      &parallax_ext::msa_token_indexer,
       "index_query"_a,
       "index_key_cache"_a,
       "block_tables"_a,
@@ -261,7 +264,7 @@ NB_MODULE(_ext, m) {
       nb::kw_only(),
       "stream"_a = nb::none(),
       R"(
-        Sparse token indexer operation
+        MSA token indexer operation
 
         Args:
             index_query (array): Index query [num_seqs, index_heads, index_dim].
@@ -277,17 +280,18 @@ NB_MODULE(_ext, m) {
             stream (Stream or Device): Stream on which to schedule the operation.
 
         Returns:
-            array: ``Sparse token positions, with -1 for invalid slots``
+            array: ``MSA token positions, with -1 for invalid slots``
       )");
 
   m.def(
-      "sparse_token_indexer_with_update",
-      &parallax_ext::sparse_token_indexer_with_update,
+      "msa_token_indexer_with_update",
+      &parallax_ext::msa_token_indexer_with_update,
       "index_query"_a,
       "index_key_update"_a,
       "index_key_cache"_a,
       "block_tables"_a,
       "seq_lens"_a,
+      "slot_mapping"_a,
       "max_context_len"_a,
       "sparse_block_size"_a,
       "sparse_topk_blocks"_a,
@@ -297,7 +301,7 @@ NB_MODULE(_ext, m) {
       nb::kw_only(),
       "stream"_a = nb::none(),
       R"(
-        Sparse token indexer operation with decode index-cache update
+        MSA token indexer operation with decode index-cache update
 
         Args:
             index_query (array): Index query [num_seqs, index_heads, index_dim].
@@ -305,6 +309,7 @@ NB_MODULE(_ext, m) {
             index_key_cache (array): Paged index-key cache [1, num_blocks, index_key_heads, block_size, index_dim].
             block_tables (array): Input array [num_seqs, max_num_blocks_per_seq].
             seq_lens (array): Input array [num_seqs].
+            slot_mapping (array): Physical cache slots [num_seqs].
             max_context_len (int): Maximum context length in this batch.
             sparse_block_size (int): Sparse index block size.
             sparse_topk_blocks (int): Number of sparse index blocks to select.
@@ -314,7 +319,7 @@ NB_MODULE(_ext, m) {
             stream (Stream or Device): Stream on which to schedule the operation.
 
         Returns:
-            array: ``Sparse token positions, with -1 for invalid slots``
+            array: ``MSA token positions, with -1 for invalid slots``
       )");
 
   m.def(

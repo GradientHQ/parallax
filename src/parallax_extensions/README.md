@@ -14,13 +14,18 @@ MLX official instructions for custom extensions: https://ml-explore.github.io/ml
 │   ├── _ext.cpython-313-darwin.so # Python 3.13 binding
 │   ├── libparallax_ext.dylib      # C++ extension library
 │   └── parallax_ext.metallib      # Metal library
-├── paged_attention_v1             # Kernel Source Code Directories
-│   ├── float8.metal
-│   ├── paged_attention.cpp
-│   ├── paged_attention.h
-│   ├── paged_attention.metal
-│   ├── reshape_and_cache.metal
-│   └── utils.metal
+├── kernels                         # Kernel source code directories
+│   ├── common
+│   │   ├── float8.metal
+│   │   ├── utils.cpp
+│   │   ├── utils.h
+│   │   └── utils.metal
+│   ├── dsa
+│   ├── indexer_cache
+│   ├── mla
+│   ├── msa
+│   ├── paged_attention
+│   └── reshape_and_cache
 ├── README.md
 └── setup.py                       # Setup Tools Script
 ```

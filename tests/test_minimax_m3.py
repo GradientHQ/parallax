@@ -16,15 +16,12 @@ def m3_deps():
         ModelArgs,
         ParallaxMiniMaxM3Block,
     )
-    from parallax.server.cache.minimax_m3_cache import MiniMaxM3SparseCache
+    from parallax.server.cache.msa_cache import MSACache
     from parallax.utils.utils import (
         combine_padding_and_causal_masks,
         create_causal_mask,
     )
-    from parallax_extensions.ops import (
-        sparse_token_indexer,
-        sparse_token_indexer_with_update,
-    )
+    from parallax_extensions.ops import msa_token_indexer, msa_token_indexer_with_update
 
     return SimpleNamespace(
         mx=mx,
@@ -32,12 +29,12 @@ def m3_deps():
         MiniMaxAttention=MiniMaxAttention,
         ModelArgs=ModelArgs,
         ParallaxMiniMaxM3Block=ParallaxMiniMaxM3Block,
-        MiniMaxM3SparseCache=MiniMaxM3SparseCache,
+        MSACache=MSACache,
         combine_padding_and_causal_masks=combine_padding_and_causal_masks,
         create_causal_mask=create_causal_mask,
         scaled_dot_product_attention=scaled_dot_product_attention,
-        sparse_token_indexer=sparse_token_indexer,
-        sparse_token_indexer_with_update=sparse_token_indexer_with_update,
+        msa_token_indexer=msa_token_indexer,
+        msa_token_indexer_with_update=msa_token_indexer_with_update,
     )
 
 
@@ -70,7 +67,7 @@ def _tiny_args(deps):
 
 
 def _cache(deps, args, num_blocks=2, block_size=8):
-    return deps.MiniMaxM3SparseCache(
+    return deps.MSACache(
         num_blocks=num_blocks,
         block_size=block_size,
         num_kv_heads=args.num_key_value_heads,
@@ -162,7 +159,7 @@ def test_sparse_mask_selects_topk_blocks_not_topk_tokens(m3_deps):
     assert allowed == [False, False, True, True, False, False]
 
 
-def test_sparse_token_indexer_expands_selected_blocks_to_token_positions(m3_deps):
+def test_msa_token_indexer_expands_selected_blocks_to_token_positions(m3_deps):
     mx = m3_deps.mx
     args = _tiny_args(m3_deps)
     attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
@@ -178,7 +175,7 @@ def test_sparse_token_indexer_expands_selected_blocks_to_token_positions(m3_deps
     cache.index_key_cache = mx.array(index_cache, dtype=mx.float32)
 
     idx_queries = mx.ones((1, attention.index_heads, 1, attention.index_dim), dtype=mx.float32)
-    token_positions = m3_deps.sparse_token_indexer(
+    token_positions = m3_deps.msa_token_indexer(
         idx_queries,
         cache.get_indexer_cache(),
         block_tables,
@@ -195,7 +192,7 @@ def test_sparse_token_indexer_expands_selected_blocks_to_token_positions(m3_deps
     assert m3_deps.np.array(token_positions[0]).tolist() == [2, 3]
 
 
-def test_sparse_token_indexer_with_update_stores_current_index_key(m3_deps):
+def test_msa_token_indexer_with_update_stores_indexer_cache(m3_deps):
     mx = m3_deps.mx
     args = _tiny_args(m3_deps)
     attention = m3_deps.MiniMaxAttention(args, layer_idx=0)
@@ -210,7 +207,7 @@ def test_sparse_token_indexer_with_update_stores_current_index_key(m3_deps):
 
     idx_queries = mx.ones((1, attention.index_heads, 1, attention.index_dim), dtype=mx.float32)
     idx_key_update = mx.array([[[12.0, 0.0, 0.0, 0.0]]], dtype=mx.float32)
-    token_positions = m3_deps.sparse_token_indexer_with_update(
+    token_positions = m3_deps.msa_token_indexer_with_update(
         idx_queries,
         idx_key_update,
         cache.get_indexer_cache(),
@@ -222,6 +219,7 @@ def test_sparse_token_indexer_with_update_stores_current_index_key(m3_deps):
         sparse_init_blocks=attention.sparse_init_blocks,
         sparse_local_blocks=attention.sparse_local_blocks,
         scale=attention.scale,
+        slot_mapping=mx.array([5], dtype=mx.int64),
     )
     mx.eval(token_positions)
     written = cache.read_index_k(block_tables[0], 6)
@@ -242,7 +240,7 @@ def test_sparse_token_positions_marks_context_tail_padding_invalid(m3_deps):
     cache.index_key_cache = mx.ones(cache.index_key_cache.shape, dtype=mx.float32)
     idx_queries = mx.ones((1, attention.index_heads, 1, attention.index_dim), dtype=mx.float32)
 
-    token_positions = m3_deps.sparse_token_indexer(
+    token_positions = m3_deps.msa_token_indexer(
         idx_queries,
         cache.get_indexer_cache(),
         block_tables,
@@ -324,6 +322,7 @@ def test_sparse_decode_kernel_matches_dense_reference(m3_deps):
         cache,
         block_tables,
         context_lengths,
+        slot_mapping=mx.array([5], dtype=mx.int64),
     )
     dense = _sparse_decode_dense_reference(
         m3_deps,
@@ -366,6 +365,7 @@ def test_attention_prefill_and_decode_write_kv_and_index_cache(m3_deps):
         cache=cache,
         block_tables=mx.array([[0]], dtype=mx.int32),
         context_lengths=mx.array([6], dtype=mx.int32),
+        slot_mapping=mx.array([5], dtype=mx.int64),
     )
     mx.eval(decode)
 

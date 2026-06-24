@@ -145,6 +145,7 @@ class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
                 context_lengths,
                 weights,
                 self.index_topk,
+                slot_mapping=slot_mapping,
             )
         else:
             if indexer_cache is not None:
