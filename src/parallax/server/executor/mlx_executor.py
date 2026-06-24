@@ -24,6 +24,7 @@ from parallax.utils.chunked_prefill import (
     complete_local_middle_chunk,
     filter_middle_chunk_next_batch,
 )
+from parallax.utils.layer_types import INDEX_CACHE_LAYER_TYPES, MLA_CACHE_LAYER_TYPES
 from parallax.utils.mac_prefill_adder import AddReqResult, MACPrefillAdder
 from parallax.utils.utils import (
     combine_padding_and_causal_masks,
@@ -131,8 +132,6 @@ class MLXExecutor(BaseExecutor):
             f"MLX sharded model loaded in {(time.time() - t0) * 1000:.1f} ms; num_layers={self.config.get('num_hidden_layers')}"
         )
 
-        is_minimax_m3 = self.config.get("model_type") == "minimax_m3"
-
         # TODO: Duplicate code to BaseExecutor since num_shard_layers and dtype are needed for initializing kv cache
         self.num_shard_layers = end_layer - start_layer
         self.dtype = get_device_dtype(dtype, device)
@@ -173,16 +172,11 @@ class MLXExecutor(BaseExecutor):
         index_head_dim = self.config.get("index_head_dim", None)
         index_n_heads = self.config.get("index_n_heads", None)
         kv_lora_rank = self.config.get("kv_lora_rank", None)
-        is_mla_dsa = (
-            index_head_dim is not None
-            and index_n_heads is not None
-            and not is_minimax_m3
-            and kv_lora_rank is not None
-            and qk_rope_head_dim is not None
-        )
-        index_key_heads = 1 if (is_mla_dsa or is_minimax_m3) else None
 
         layer_types = get_layer_types(self.config, start_layer, end_layer)
+        uses_mla_cache = any(t in MLA_CACHE_LAYER_TYPES for t in layer_types)
+        uses_index_cache = any(t in INDEX_CACHE_LAYER_TYPES for t in layer_types)
+        index_key_heads = 1 if uses_index_cache else None
         sliding_window = self.config.get("sliding_window", None)
         use_sliding_window = self.config.get("use_sliding_window", None)
         if use_sliding_window is False:
@@ -227,12 +221,11 @@ class MLXExecutor(BaseExecutor):
             block_size=kv_block_size,
             cache_memory_fraction=kv_cache_memory_fraction,
             head_dim_v=v_head_dim,
-            index_head_dim=index_head_dim,
-            index_n_heads=index_n_heads,
+            index_head_dim=index_head_dim if uses_index_cache else None,
+            index_n_heads=index_n_heads if uses_index_cache else None,
             index_key_heads=index_key_heads,
-            kv_lora_rank=kv_lora_rank if is_mla_dsa else None,
-            qk_rope_head_dim=qk_rope_head_dim if is_mla_dsa else None,
-            sparse_cache_type="minimax_m3" if is_minimax_m3 else None,
+            kv_lora_rank=kv_lora_rank if uses_mla_cache else None,
+            qk_rope_head_dim=qk_rope_head_dim if uses_mla_cache else None,
             layer_types=layer_types,
             max_num_seqs=max_batch_size // micro_batch_ratio,
             conv_dim=conv_dim,

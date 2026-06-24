@@ -3,6 +3,7 @@
 
 #include "kernels/dsa_indexer.h"
 #include "kernels/dsa_paged_attention.h"
+#include "kernels/mla_paged_attention.h"
 #include "kernels/paged_attention.h"
 #include "kernels/reshape_and_cache.h"
 #include "kernels/sparse_indexer.h"
@@ -32,6 +33,37 @@ NB_MODULE(_ext, m) {
 
         Returns:
             array: ``Dummy output``
+      )");
+
+  m.def(
+      "mla_paged_attention",
+      &parallax_ext::mla_paged_attention,
+      "q_latent"_a,
+      "q_pe"_a,
+      "latent_cache"_a,
+      "rope_cache"_a,
+      "block_tables"_a,
+      "seq_lens"_a,
+      "block_size"_a,
+      "scale"_a,
+      nb::kw_only(),
+      "stream"_a = nb::none(),
+      R"(
+        Decode dense MLA paged attention over compressed MLA cache.
+
+        Args:
+            q_latent (array): MLA latent query [num_seqs, num_heads, latent_dim].
+            q_pe (array): RoPE query [num_seqs, num_heads, rope_dim].
+            latent_cache (array): Paged MLA latent cache [1, num_blocks, 1, block_size, latent_dim].
+            rope_cache (array): Paged RoPE key cache [1, num_blocks, 1, block_size, rope_dim].
+            block_tables (array): Input array [num_seqs, max_num_blocks_per_seq].
+            seq_lens (array): Input array [num_seqs].
+            block_size (int): Cache block size.
+            scale (float): Attention scale.
+            stream (Stream or Device): Stream on which to schedule the operation.
+
+        Returns:
+            array: latent-space attention result [num_seqs, num_heads, latent_dim]
       )");
 
   m.def(

@@ -46,6 +46,7 @@ def load_extension_module() -> ModuleType:
 
 _ext = load_extension_module()
 _ext_dsa_indexer_scores_with_update = _ext.dsa_indexer_scores_with_update
+_ext_mla_paged_attention = _ext.mla_paged_attention
 _ext_dsa_paged_attention = _ext.dsa_paged_attention
 _ext_paged_attention_v1 = _ext.paged_attention_v1
 _ext_paged_attention_v2 = _ext.paged_attention_v2
@@ -57,6 +58,57 @@ _ext_sparse_token_indexer = _ext.sparse_token_indexer
 _ext_sparse_token_indexer_with_update = _ext.sparse_token_indexer_with_update
 
 _PAGED_ATTENTION_V1_MAX_LENGTH = 8192
+
+
+def mla_paged_attention(
+    q_latent: mx.array,
+    q_pe: mx.array,
+    latent_cache: mx.array,
+    rope_cache: mx.array,
+    block_tables: mx.array,
+    context_lengths: mx.array,
+    block_size: int,
+    scale: float,
+) -> mx.array:
+    """
+    Dense MLA decode attention over compressed paged cache.
+
+    Computes:
+      softmax(scale * (q_latent @ latent_cache.T + q_pe @ rope_cache.T)) @ latent_cache
+    over the full logical context for each sequence.
+    """
+    if q_latent.ndim == 4:
+        if q_latent.shape[2] != 1:
+            raise ValueError("mla_paged_attention only supports one query token.")
+        q_latent = q_latent.squeeze(2)
+    if q_pe.ndim == 4:
+        if q_pe.shape[2] != 1:
+            raise ValueError("mla_paged_attention only supports one query token.")
+        q_pe = q_pe.squeeze(2)
+    if q_latent.ndim != 3 or q_pe.ndim != 3:
+        raise ValueError("q_latent and q_pe must be shaped (batch, heads, dim).")
+    if q_latent.shape[:2] != q_pe.shape[:2]:
+        raise ValueError("q_latent and q_pe batch/head dimensions must match.")
+    if latent_cache.ndim != 5 or rope_cache.ndim != 5:
+        raise ValueError("latent_cache and rope_cache must be paged cache tensors.")
+    if latent_cache.shape[2] != 1 or rope_cache.shape[2] != 1:
+        raise ValueError("mla_paged_attention expects one MLA cache head.")
+    if latent_cache.shape[-1] != q_latent.shape[-1]:
+        raise ValueError("latent cache dim must match q_latent dim.")
+    if rope_cache.shape[-1] != q_pe.shape[-1]:
+        raise ValueError("rope cache dim must match q_pe dim.")
+
+    output = _ext_mla_paged_attention(
+        mx.contiguous(q_latent),
+        mx.contiguous(q_pe),
+        latent_cache,
+        rope_cache,
+        mx.contiguous(block_tables.astype(mx.int32)),
+        mx.contiguous(context_lengths.astype(mx.int32)),
+        block_size,
+        scale,
+    )
+    return output[:, :, None, :]
 
 
 def store_indexer_cache(

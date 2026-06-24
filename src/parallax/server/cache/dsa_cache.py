@@ -25,10 +25,10 @@ class DeepSeekSparseCache(BaseCache):
         head_dim: int,
         head_dim_v: int,
         dtype: mx.Dtype,
-        index_head_dim: int,
-        index_n_heads: int,
         kv_lora_rank: int,
         qk_rope_head_dim: int,
+        index_head_dim: Optional[int] = None,
+        index_n_heads: Optional[int] = None,
         index_key_heads: int = 1,
     ):
         self.num_blocks = num_blocks
@@ -39,6 +39,9 @@ class DeepSeekSparseCache(BaseCache):
         self.dtype = dtype
         self.kv_lora_rank = kv_lora_rank
         self.qk_rope_head_dim = qk_rope_head_dim
+        if (index_head_dim is None) != (index_n_heads is None):
+            raise ValueError("index_head_dim and index_n_heads must be provided together.")
+
         self.index_head_dim = index_head_dim
         self.index_n_heads = index_n_heads
         self.index_key_heads = index_key_heads
@@ -51,17 +54,21 @@ class DeepSeekSparseCache(BaseCache):
             (1, num_blocks, 1, block_size, qk_rope_head_dim),
             dtype=dtype,
         )
-        self.indexer_key_cache = mx.zeros(
-            (
-                1,
-                num_blocks,
-                index_key_heads,
-                block_size,
-                index_head_dim,
-            ),
-            dtype=dtype,
-        )
-        mx.eval(self.latent_cache, self.rope_cache, self.indexer_key_cache)
+        self.indexer_key_cache = None
+        if index_head_dim is not None:
+            self.indexer_key_cache = mx.zeros(
+                (
+                    1,
+                    num_blocks,
+                    index_key_heads,
+                    block_size,
+                    index_head_dim,
+                ),
+                dtype=dtype,
+            )
+            mx.eval(self.latent_cache, self.rope_cache, self.indexer_key_cache)
+        else:
+            mx.eval(self.latent_cache, self.rope_cache)
 
     def get_cache(self) -> Tuple[mx.array, mx.array]:
         return self.latent_cache, self.rope_cache
@@ -133,6 +140,9 @@ class DeepSeekSparseCache(BaseCache):
         Returns:
             index_k: (index_heads, context_len, index_head_dim)
         """
+        if self.indexer_key_cache is None:
+            raise ValueError("DeepSeekSparseCache was created without an indexer cache.")
+
         positions = mx.arange(context_len)
         block_indices = positions // self.block_size
         offsets = positions % self.block_size

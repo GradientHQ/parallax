@@ -14,10 +14,9 @@ from mlx_lm.models.deepseek_v3 import DeepseekV3Attention as MLXDeepseekV3Attent
 from mlx_lm.models.deepseek_v3 import DeepseekV3DecoderLayer as MLXDeepseekV3Block
 from mlx_lm.models.deepseek_v3 import ModelArgs
 
-from parallax.metal.paged_attention.kernel import paged_attention
 from parallax.server.cache.base import BaseCache
-from parallax.utils.prefix_cache_utils import compute_attention_with_prefix_cache
-from parallax_extensions.ops import reshape_and_cache
+from parallax.server.cache.dsa_cache import DeepSeekSparseCache
+from parallax_extensions.ops import mla_paged_attention, reshape_and_cache
 
 
 class ParallaxDeepSeekV3Attention(MLXDeepseekV3Attention):
@@ -26,6 +25,62 @@ class ParallaxDeepSeekV3Attention(MLXDeepseekV3Attention):
     We apply explicit KV cache handling and passing in `offset` directly from Request.
     This version returns the new K and V states for external caching.
     """
+
+    def _read_mla_batch(
+        self,
+        cache: DeepSeekSparseCache,
+        block_tables: mx.array,
+        lengths: mx.array,
+        max_len: int,
+        dtype: mx.Dtype,
+    ) -> tuple[mx.array, mx.array]:
+        batch = lengths.shape[0]
+        latent = mx.zeros((batch, 1, max_len, self.kv_lora_rank), dtype=dtype)
+        rope = mx.zeros((batch, 1, max_len, self.qk_rope_head_dim), dtype=dtype)
+
+        for i in range(batch):
+            length = int(lengths[i])
+            if length <= 0:
+                continue
+            latent_i, rope_i = cache.read_prefix_mla(block_tables[i], length)
+            latent[i, :, :length, :] = latent_i
+            rope[i, :, :length, :] = rope_i
+        return latent, rope
+
+    def _mla_attention(
+        self,
+        q_nope: mx.array,
+        q_pe: mx.array,
+        kv_latent: mx.array,
+        k_pe: mx.array,
+        mask: Optional[mx.array],
+    ) -> mx.array:
+        pe_scores = (q_pe * self.scale) @ k_pe.swapaxes(-1, -2)
+        if mask is not None:
+            pe_scores = pe_scores + mask.astype(pe_scores.dtype)
+
+        if q_nope.shape[2] == 1:
+            q_latent = self.embed_q(q_nope)
+            output = scaled_dot_product_attention(
+                q_latent,
+                kv_latent,
+                kv_latent,
+                scale=self.scale,
+                mask=pe_scores,
+                cache=None,
+            )
+            return self.unembed_out(output)
+
+        k_nope = self.embed_q(kv_latent, transpose=False)
+        values = self.unembed_out(kv_latent)
+        return scaled_dot_product_attention(
+            q_nope,
+            k_nope,
+            values,
+            scale=self.scale,
+            mask=pe_scores,
+            cache=None,
+        )
 
     def __call__(
         self,
@@ -56,6 +111,9 @@ class ParallaxDeepSeekV3Attention(MLXDeepseekV3Attention):
             output_h: (batch, target_len, hidden_dim) - Output hidden states.
         """
         batch, target_len, _ = x.shape
+        if not isinstance(cache, DeepSeekSparseCache):
+            raise TypeError("ParallaxDeepSeekV3Attention requires DeepSeekSparseCache.")
+
         if self.q_lora_rank is None:
             q = self.q_proj(x)
         else:
@@ -66,13 +124,8 @@ class ParallaxDeepSeekV3Attention(MLXDeepseekV3Attention):
         compressed_kv = self.kv_a_proj_with_mqa(x)
         compressed_kv, k_pe = mx.split(compressed_kv, [self.kv_lora_rank], axis=-1)
         k_pe = k_pe.reshape(batch, target_len, 1, self.qk_rope_head_dim).transpose(0, 2, 1, 3)
-        kv = self.kv_b_proj(self.kv_a_layernorm(compressed_kv))
-
-        kv = kv.reshape(batch, target_len, self.num_heads, -1)
-        k_nope, values = mx.split(kv, [self.qk_nope_head_dim], axis=-1)
-        k_nope = k_nope.transpose(0, 2, 1, 3)
-
-        key_cache_global, value_cache_global = cache.get_cache()
+        kv_latent = self.kv_a_layernorm(compressed_kv)
+        kv_latent = kv_latent[:, None, :, :]
 
         # Compute RoPE offsets using array operations instead of loops
         if target_len == 1:
@@ -89,73 +142,87 @@ class ParallaxDeepSeekV3Attention(MLXDeepseekV3Attention):
         q_pe = self.rope(q_pe, offset=current_pos)
         k_pe = self.rope(k_pe, offset=current_pos)
 
-        k_pe = mx.repeat(k_pe, self.num_heads, axis=1)
-        queries = mx.concatenate([q_nope, q_pe], axis=-1)
-        keys = mx.concatenate([k_nope, k_pe], axis=-1)
-
-        block_size = key_cache_global.shape[3]
+        latent_cache, rope_cache = cache.get_cache()
 
         reshape_and_cache(
-            keys.transpose(0, 2, 1, 3),
-            values,
-            key_cache_global,
-            value_cache_global,
+            kv_latent.transpose(0, 2, 1, 3),
+            k_pe.transpose(0, 2, 1, 3),
+            latent_cache,
+            rope_cache,
             block_tables,
             context_lengths,
-            block_size,
+            cache.block_size,
             slot_mapping=slot_mapping,
         )
 
         if target_len == 1:
-            # Decode phase: Use Paged Attention
-            output = paged_attention(
-                queries,
-                key_cache_global,
-                value_cache_global,
+            q_latent = self.embed_q(q_nope)
+            output = mla_paged_attention(
+                q_latent,
+                q_pe,
+                latent_cache,
+                rope_cache,
                 block_tables,
                 context_lengths,
-                block_size,
+                cache.block_size,
                 self.scale,
-                self.num_heads,
-                v_head_dim=values.shape[-1],
             )
+            output = self.unembed_out(output)
             output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
         else:
-            # Prefill Phase: Need to attend to both cached prefix and new tokens
-            # Check if any request has prefix cache
             has_prefix_cache = prefix_lens is not None and bool(mx.any(prefix_lens > 0))
 
             if has_prefix_cache:
-                # Use shared prefix cache handling with batch processing
-                # keys: (batch, num_heads, target_len, head_dim)
-                # values: (batch, target_len, num_heads, head_dim) -> transpose to (batch, num_heads, target_len, head_dim)
-                k_new = keys  # (batch, num_heads, target_len, head_dim)
-                v_new = values.transpose(0, 2, 1, 3)  # (batch, num_heads, target_len, head_dim)
-                output = compute_attention_with_prefix_cache(
-                    queries,  # (batch, num_heads, target_len, head_dim)
-                    k_new,
-                    v_new,
-                    cache,
-                    block_tables,
-                    prefix_lens,
-                    target_len,
-                    self.scale,
-                    self.num_heads,  # In deepseek_v3, num_heads equals n_kv_heads after MQA processing
-                    mask=mask,
-                )
-            else:
-                # No prefix cache, use standard self-attention on local data only
-                if mask is not None:
-                    mask = mx.array(mask, dtype=queries.dtype)
+                max_prefix_len = int(mx.max(prefix_lens))
+                if max_prefix_len > 0:
+                    prefix_latent, prefix_k_pe = self._read_mla_batch(
+                        cache,
+                        block_tables,
+                        prefix_lens,
+                        max_prefix_len,
+                        kv_latent.dtype,
+                    )
+                    kv_full = mx.concatenate([prefix_latent, kv_latent], axis=2)
+                    k_pe_full = mx.concatenate([prefix_k_pe, k_pe], axis=2)
+                else:
+                    kv_full = kv_latent
+                    k_pe_full = k_pe
 
-                output = scaled_dot_product_attention(
-                    queries,
-                    keys,
-                    values.transpose(0, 2, 1, 3),
-                    scale=self.scale,
-                    mask=mask,
-                    cache=None,
-                )
+                row_indices = mx.arange(target_len, dtype=mx.int32)
+                new_lens = context_lengths - prefix_lens
+                q_positions = prefix_lens[:, None] + row_indices[None, :]
+
+                if max_prefix_len > 0:
+                    prefix_positions = mx.arange(max_prefix_len, dtype=mx.int32)
+                    prefix_positions = mx.broadcast_to(
+                        prefix_positions[None, :], (batch, max_prefix_len)
+                    )
+                    prefix_valid = prefix_positions < prefix_lens[:, None]
+                else:
+                    prefix_positions = mx.zeros((batch, 0), dtype=mx.int32)
+                    prefix_valid = mx.zeros((batch, 0), dtype=mx.bool_)
+
+                new_positions = prefix_lens[:, None] + row_indices[None, :]
+                new_valid = row_indices[None, :] < new_lens[:, None]
+                key_positions = mx.concatenate([prefix_positions, new_positions], axis=1)
+                key_valid = mx.concatenate([prefix_valid, new_valid], axis=1)
+                valid = key_valid[:, None, :] & new_valid[:, :, None]
+                valid = valid & (key_positions[:, None, :] <= q_positions[:, :, None])
+                mask = mx.where(valid[:, None, :, :], 0.0, -float("inf")).astype(q_nope.dtype)
+
+                output = self._mla_attention(q_nope, q_pe, kv_full, k_pe_full, mask)
+                output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
+            else:
+                if mask is not None:
+                    if mask.ndim == 2:
+                        mask = mask[None, None, :, :]
+                    elif mask.ndim == 3:
+                        mask = mask[:, None, :, :]
+                    if mask.dtype == mx.bool_:
+                        mask = mx.where(mask, 0.0, -float("inf"))
+                    mask = mask.astype(q_nope.dtype)
+
+                output = self._mla_attention(q_nope, q_pe, kv_latent, k_pe, mask)
                 output = output.transpose(0, 2, 1, 3).reshape(batch, target_len, -1)
 
         return self.o_proj(output)
