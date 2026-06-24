@@ -70,8 +70,7 @@ def store_indexer_cache(
     """Store index keys into the paged index-key cache."""
     if key_cache.ndim != 5:
         raise ValueError(
-            "key_cache must be shaped "
-            "(1, num_blocks, index_key_heads, block_size, index_dim)."
+            "key_cache must be shaped (1, num_blocks, index_key_heads, block_size, index_dim)."
         )
     if key_cache.shape[0] != 1:
         raise ValueError("store_indexer_cache expects a single-layer index cache.")
@@ -300,9 +299,7 @@ def dsa_token_indexer_with_update(
         index_weights,
         max_context_len,
     )
-    topk = mx.argpartition(scores, kth=-index_topk, axis=-1)[
-        :, -index_topk:
-    ].astype(mx.int32)
+    topk = mx.argpartition(scores, kth=-index_topk, axis=-1)[:, -index_topk:].astype(mx.int32)
     dense_rows = context_lengths.astype(mx.int32) <= index_topk
     return mx.where(
         dense_rows[:, None],

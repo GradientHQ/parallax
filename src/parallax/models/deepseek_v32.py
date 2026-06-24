@@ -45,13 +45,14 @@ def derive_indexer_types(
         index_skip_topk_offset = index_topk_freq - 1
 
     return [
-        "full"
-        if (
-            i < first_k_dense_replace
-            or (i - first_k_dense_replace) % index_topk_freq
-            == index_skip_topk_offset
+        (
+            "full"
+            if (
+                i < first_k_dense_replace
+                or (i - first_k_dense_replace) % index_topk_freq == index_skip_topk_offset
+            )
+            else "shared"
         )
-        else "shared"
         for i in range(num_layers)
     ]
 
@@ -130,7 +131,9 @@ class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
         q = mx.concatenate([q_pe, q_nope], axis=-1)
         k = mx.concatenate([k_pe, k_nope], axis=-1)
 
-        indexer_cache = cache.get_indexer_cache() if isinstance(cache, DeepSeekSparseCache) else cache
+        indexer_cache = (
+            cache.get_indexer_cache() if isinstance(cache, DeepSeekSparseCache) else cache
+        )
         if target_len == 1:
             weights = self.weights_proj(x).squeeze(1)
             weights = weights * (self.n_heads**-0.5 * self.softmax_scale)
@@ -198,7 +201,9 @@ class ParallaxDeepSeekV32Indexer(MLXDeepseekV32Indexer):
                 key_positions = mx.concatenate([prefix_positions, new_positions], axis=1)
                 key_valid = mx.concatenate([prefix_valid, new_valid], axis=1)
                 q_positions = prefix_lens[:, None] + row_indices[None, :]
-                valid = key_valid[:, None, :] & (key_positions[:, None, :] <= q_positions[:, :, None])
+                valid = key_valid[:, None, :] & (
+                    key_positions[:, None, :] <= q_positions[:, :, None]
+                )
                 valid = valid & new_valid[:, :, None]
 
                 scores = mx.where(valid, scores, -float("inf"))
@@ -431,9 +436,7 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
                     valid_topk = topk_for_mask >= 0
                     safe_topk = mx.where(valid_topk, topk_for_mask, 0)
                     sparse_mask = mx.zeros((batch, target_len, full_len), dtype=mx.bool_)
-                    sparse_mask = mx.put_along_axis(
-                        sparse_mask, safe_topk, valid_topk, axis=-1
-                    )
+                    sparse_mask = mx.put_along_axis(sparse_mask, safe_topk, valid_topk, axis=-1)
                     dense_rows = (topk_for_mask == -1).all(axis=-1, keepdims=True)
                     sparse_mask = mx.where(dense_rows, True, sparse_mask)
                     sparse_mask = mx.where(sparse_mask[:, None, :, :], 0.0, -float("inf")).astype(
@@ -460,9 +463,7 @@ class ParallaxDeepSeekV32Attention(MLXDeepseekV32Attention):
                     valid_topk = topk_for_mask >= 0
                     safe_topk = mx.where(valid_topk, topk_for_mask, 0)
                     sparse_mask = mx.zeros((batch, target_len, target_len), dtype=mx.bool_)
-                    sparse_mask = mx.put_along_axis(
-                        sparse_mask, safe_topk, valid_topk, axis=-1
-                    )
+                    sparse_mask = mx.put_along_axis(sparse_mask, safe_topk, valid_topk, axis=-1)
                     dense_rows = (topk_for_mask == -1).all(axis=-1, keepdims=True)
                     sparse_mask = mx.where(dense_rows, True, sparse_mask)
                     sparse_mask = mx.where(sparse_mask[:, None, :, :], 0.0, -float("inf")).astype(

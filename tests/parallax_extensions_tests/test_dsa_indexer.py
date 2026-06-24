@@ -136,13 +136,9 @@ def test_dsa_token_indexer_with_update_glm_index_dimensions_smoke():
     heads = 32
     dim = 128
     seq_len = 5
-    initial_keys = (mx.arange(seq_len * dim, dtype=mx.float32) / 1000).reshape(
-        seq_len, dim
-    )
+    initial_keys = (mx.arange(seq_len * dim, dtype=mx.float32) / 1000).reshape(seq_len, dim)
     cache, block_tables = _make_index_cache(initial_keys)
-    index_query = (mx.arange(heads * dim, dtype=mx.float32) / 2000).reshape(
-        1, heads, dim
-    )
+    index_query = (mx.arange(heads * dim, dtype=mx.float32) / 2000).reshape(1, heads, dim)
     key_update = (mx.arange(dim, dtype=mx.float32) / 3000).reshape(1, 1, dim)
 
     topk = dsa_token_indexer_with_update(

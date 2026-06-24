@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 
 from parallax.metal.paged_attention.kernel import paged_attention
-from parallax_extensions.ops import reshape_and_cache
 from parallax.utils.utils import is_metal_available
+from parallax_extensions.ops import reshape_and_cache
 
 
 def ref_masked_attention(q, k, v, scale):

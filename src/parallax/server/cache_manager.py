@@ -269,18 +269,12 @@ class CacheManager:
             )
         else:
             one_layer_block_bytes = (
-                self.num_kv_heads
-                * self.block_size
-                * (self.head_dim + self.head_dim_v)
-                * dtype_size
+                self.num_kv_heads * self.block_size * (self.head_dim + self.head_dim_v) * dtype_size
             )
         if self.index_head_dim is not None and self.index_n_heads is not None:
             if self.sparse_cache_type == "minimax_m3":
                 index_heads = self.index_key_heads or 1
-            elif (
-                self.kv_lora_rank is not None
-                and self.qk_rope_head_dim is not None
-            ):
+            elif self.kv_lora_rank is not None and self.qk_rope_head_dim is not None:
                 index_heads = self.index_key_heads or 1
             else:
                 index_heads = self.index_n_heads

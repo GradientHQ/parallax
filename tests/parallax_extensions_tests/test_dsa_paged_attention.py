@@ -50,9 +50,7 @@ def _make_cache(latent_seq, rope_seq, *, block_size=4):
 def _reference(q_latent, q_pe, latent_seq, rope_seq, positions, scale):
     latent_selected = latent_seq[positions]
     rope_selected = rope_seq[positions]
-    scores = scale * (
-        q_latent[0] @ latent_selected.T + q_pe[0] @ rope_selected.T
-    )
+    scores = scale * (q_latent[0] @ latent_selected.T + q_pe[0] @ rope_selected.T)
     weights = _softmax(scores)
     return weights @ latent_selected
 
@@ -155,9 +153,7 @@ def test_dsa_paged_attention_glm_dimensions_smoke():
     latent_seq = (mx.arange(seq_len * latent_dim, dtype=mx.float32) / 1000).reshape(
         seq_len, latent_dim
     )
-    rope_seq = (mx.arange(seq_len * rope_dim, dtype=mx.float32) / 2000).reshape(
-        seq_len, rope_dim
-    )
+    rope_seq = (mx.arange(seq_len * rope_dim, dtype=mx.float32) / 2000).reshape(seq_len, rope_dim)
     cache, block_tables = _make_cache(latent_seq, rope_seq)
 
     q_latent = (mx.arange(latent_dim, dtype=mx.float32) / 3000).reshape(1, 1, latent_dim)

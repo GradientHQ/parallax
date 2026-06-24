@@ -201,13 +201,16 @@ def test_indexer_types_match_glm_5_2_config_pattern():
 def test_indexer_types_explicit_config_wins():
     indexer_types = ["full", "shared", "full"]
 
-    assert derive_indexer_types(
-        3,
-        index_topk_freq=4,
-        indexer_types=indexer_types,
-        first_k_dense_replace=3,
-        index_skip_topk_offset=3,
-    ) == indexer_types
+    assert (
+        derive_indexer_types(
+            3,
+            index_topk_freq=4,
+            indexer_types=indexer_types,
+            first_k_dense_replace=3,
+            index_skip_topk_offset=3,
+        )
+        == indexer_types
+    )
 
 
 def test_block_marks_shared_indexer_layers_from_config():
