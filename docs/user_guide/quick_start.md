@@ -150,7 +150,7 @@ Developers can start Parallax backend engine without a scheduler. Pipeline paral
 
 For a standalone single-machine server:
 ```sh
-parallax serve --m Qwen/Qwen3-0.6B
+parallax serve -m Qwen/Qwen3-0.6B
 ```
 
 An example of serving Qwen3-0.6B with 2-nodes:

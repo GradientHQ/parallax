@@ -1,4 +1,4 @@
-## Parallax MLX Kernel Extentions
+## Parallax MLX Kernel Extensions
 Extended kernels built for MLX backend.
 MLX official instructions for custom extensions: https://ml-explore.github.io/mlx/build/html/dev/extensions.html
 
@@ -33,9 +33,13 @@ MLX official instructions for custom extensions: https://ml-explore.github.io/ml
 ### Package Build and Install
 Build inplace for development using:
 ```sh
-python setup.py build_ext -j8 --inplace
+cd src/parallax_extensions
+../../.venv/bin/python setup.py build_ext -j8 --inplace
 ```
-Then you can try to install in the directory using the command ```python -m pip install .```.
+Then you can try to install the package using
+```sh
+../../.venv/bin/python -m pip install .
+```
 The pre-built package should be already installed in the parallax project.
 
 When multiple prebuilt `_ext.cpython-<ver>-darwin.so` files are present in `lib/`,
