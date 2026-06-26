@@ -21,15 +21,15 @@
 
 </div>
 
-| [**Gradient**](https://gradient.network)
-| [**Blog**](https://gradient.network/blog/parallax-the-sovereign-ai-os)
-| [**X(Twitter)(Gradient)**](https://x.com/Gradient_HQ)
-| [**X(Twitter)(Parallax)**](https://x.com/tryParallax)
-| [**Discord**](https://discord.gg/parallaxai)
-| [**Arxiv**](https://arxiv.org/pdf/2509.26182v1)
+[**Gradient**](https://gradient.network) |
+[**Blog**](https://gradient.network/blog/parallax-the-sovereign-ai-os) |
+[**X/Twitter (Gradient)**](https://x.com/Gradient_HQ) |
+[**X/Twitter (Parallax)**](https://x.com/tryParallax) |
+[**Discord**](https://discord.gg/parallaxai) |
+[**Arxiv**](https://arxiv.org/pdf/2509.26182v1)
 
 ## News
-- [2026/2] 🦞 Parallax now supports OpenClaw integration! See [Docs](./docs/user_guide/work_with_openclaw.md)
+- [2026/02] 🦞 Parallax now supports OpenClaw integration! See [Docs](./docs/user_guide/work_with_openclaw.md)
 - [2025/10] 🔥 Parallax won #1 Product of The Day on Product Hunt!
 - [2025/10] 🔥 Parallax version 0.0.1 has been released!
 
@@ -46,7 +46,7 @@ The backend architecture:
 
 * P2P communication powered by [Lattica](https://github.com/GradientHQ/lattica)
 * GPU backend powered by [SGLang](https://github.com/sgl-project/sglang) and [vLLM](https://github.com/vllm-project/vllm)
-* MAC backend powered by [MLX LM](https://github.com/ml-explore/mlx-lm)
+* Mac backend powered by [MLX LM](https://github.com/ml-explore/mlx-lm)
 
 ## User Guide
 
@@ -63,12 +63,6 @@ cd parallax
 source .venv/bin/activate
 ```
 
-The install script installs `uv` if needed, creates `.venv`, installs Parallax,
-and builds the `vllm-rs` frontend binary into `.venv/bin`. Use
-`./install.sh --extras gpu` on Linux/WSL GPU hosts or `./install.sh --extras mac`
-on Apple silicon macOS. For development dependencies, use `--extras gpu,dev` or
-`--extras mac,dev`.
-
 ## Contributing
 
 We warmly welcome contributions of all kinds! For guidelines on how to get involved, please refer to our [Contributing Guide](./docs/CONTRIBUTING.md).
@@ -77,10 +71,11 @@ We warmly welcome contributions of all kinds! For guidelines on how to get invol
 
 |              | Provider     | HuggingFace Collection  |  Blog  | Description |
 |:-------------|:-------------|:----------------------------:|:----------------------------:|:----------------------------|
-|DeepSeek      | Deepseek     | [DeepSeek-V3.2](https://huggingface.co/deepseek-ai/DeepSeek-V3.2)<br>[DeepSeek-R1](https://huggingface.co/collections/deepseek-ai/deepseek-r1) <br>| [Deep Seek AI Launches Revolutionary Language Model](https://deepseek.ai/blog/deepseek-v32) | Deep Seek AI is proud to announce the launch of our latest language model, setting new standards in natural language processing and understanding. This breakthrough represents a significant step forward in AI technology, offering unprecedented capabilities in text generation, comprehension, and analysis. |
-|MiniMax-M2    | MiniMax AI  | [MiniMax-M2](https://huggingface.co/MiniMaxAI/MiniMax-M2)<br>[MiniMax-M2.1](https://huggingface.co/MiniMaxAI/MiniMax-M2.1)<br>[MiniMax-M2.7](https://huggingface.co/MiniMaxAI/MiniMax-M2.7) | [MiniMax M2.1: Significantly Enhanced Multi-Language Programming](https://www.minimax.io/news/minimax-m21) | MiniMax-M2.7 and MiniMax-M2.1 are enhanced sparse MoE models (about 230B parameters, 10B active) built for advanced coding and agentic workflows. They offer state-of-the-art intelligence, delivering efficient, reliable tool use and strong multi-step reasoning. |
-|GLM           | Z AI | [GLM-5](https://huggingface.co/zai-org/GLM-5) <br>[GLM-5.1](https://huggingface.co/zai-org/GLM-5.1) | [GLM-5.1 Overview](https://docs.z.ai/guides/llm/glm-5.1) | "GLM" is an advanced large language model series from Z AI, including GLM-5 and GLM-5.1. These models feature long-context support, strong coding and reasoning performance, enhanced tool-use and agent integration, and competitive results across leading open-source benchmarks. |
-|Kimi-K2       | Moonshot AI  | [Kimi-K2](https://huggingface.co/collections/moonshotai/kimi-k2-6871243b990f2af5ba60617d) | [Kimi K2: Open Agentic Intelligence](https://moonshotai.github.io/Kimi-K2/) | "Kimi-K2" is Moonshot AI's Kimi-K2 model family, including Kimi-K2-Base, Kimi-K2-Instruct and Kimi-K2-Thinking. Kimi K2 Thinking is a state-of-the-art open-source agentic model designed for deep, step-by-step reasoning and dynamic tool use. It features native INT4 quantization and a 256k context window for fast, memory-efficient inference. Uniquely stable in long-horizon tasks, Kimi K2 enables reliable autonomous workflows with consistent performance across hundreds of tool calls.
-|Qwen          | Qwen         | [Qwen3-Next](https://huggingface.co/collections/Qwen/qwen3-next-68c25fd6838e585db8eeea9d) <br>[Qwen3](https://huggingface.co/collections/Qwen/qwen3-67dd247413f0e2e4f653967f) <br>[Qwen2.5](https://huggingface.co/collections/Qwen/qwen25-66e81a666513e518adb90d9e)| [Qwen3-Next: Towards Ultimate Training & Inference Efficiency](https://qwen.ai/blog?id=4074cca80393150c248e508aa62983f9cb7d27cd&from=research.latest-advancements-list) | The Qwen series is a family of large language models developed by Alibaba's Qwen team. It includes multiple generations such as Qwen2.5, Qwen3, and Qwen3-Next, which improve upon model architecture, efficiency, and capabilities. The models are available in various sizes and instruction-tuned versions, with support for cutting-edge features like long context and quantization. Suitable for a wide range of language tasks and open-source use cases. |
-|gpt-oss       | OpenAI       | [gpt-oss](https://huggingface.co/collections/openai/gpt-oss-68911959590a1634ba11c7a4) <br>[gpt-oss-safeguard](https://huggingface.co/collections/openai/gpt-oss-safeguard) | [Introducing gpt-oss-safeguard](https://openai.com/index/introducing-gpt-oss-safeguard/) | gpt-oss are OpenAI’s open-weight GPT models (20B & 120B). The gpt-oss-safeguard variants are reasoning-based safety classification models: developers provide their own policy at inference, and the model uses chain-of-thought to classify content and explain its reasoning. This allows flexible, policy-driven moderation in complex or evolving domains, with open weights under Apache 2.0. |
-|Meta Llama 3  | Meta         | [Meta Llama 3](https://huggingface.co/collections/meta-llama/meta-llama-3-66214712577ca38149ebb2b6) <br>[Llama 3.1](https://huggingface.co/collections/meta-llama/llama-31-669fc079a0c406a149a5738f) <br>[Llama 3.2](https://huggingface.co/collections/meta-llama/llama-32-66f448ffc8c32f949b04c8cf) <br>[Llama 3.3](https://huggingface.co/collections/meta-llama/llama-33-67531d5c405ec5d08a852000) | [Introducing Meta Llama 3: The most capable openly available LLM to date](https://ai.meta.com/blog/meta-llama-3/) | "Meta Llama 3" is Meta's third-generation Llama model, available in sizes such as 8B and 70B parameters. Includes instruction-tuned and quantized (e.g., FP8) variants. |
+|DeepSeek      | Deepseek     | [DeepSeek-V3.2](https://huggingface.co/deepseek-ai/DeepSeek-V3.2)<br>[DeepSeek-R1](https://huggingface.co/collections/deepseek-ai/deepseek-r1) <br>| [DeepSeek-V3.2 Release](https://api-docs.deepseek.com/news/news251201) | DeepSeek-V3.2 is built for stronger reasoning and agent workflows, adding thinking-aware tool use while keeping both thinking and non-thinking tool-use modes available. |
+|MiniMax       | MiniMax AI  | [MiniMax-M3](https://huggingface.co/MiniMaxAI/MiniMax-M3)<br>[MiniMax-M2.7](https://huggingface.co/MiniMaxAI/MiniMax-M2.7) | [MiniMax M3: Frontier Coding, 1M Context, Native Multimodality](https://www.minimax.io/blog/minimax-m3) | MiniMax-M3 is a sparse-attention model for coding, agentic work, long-context tasks, and multimodal input, with MiniMax-M2.7 kept as a supported sibling model. |
+|GLM           | Z AI | [GLM-5.2](https://huggingface.co/zai-org/GLM-5.2)<br>[GLM-5.1](https://huggingface.co/zai-org/GLM-5.1)<br>[GLM-4.7](https://huggingface.co/zai-org/GLM-4.7) | [GLM-5.2: Built for Long-Horizon Tasks](https://z.ai/blog/glm-5.2) | GLM-5.2 is Z AI's latest flagship model for long-horizon coding agents, large-scale implementation, automated research, and performance optimization. |
+|Kimi-K2       | Moonshot AI  | [Kimi-K2-Thinking](https://huggingface.co/moonshotai/Kimi-K2-Thinking)<br>[Kimi-K2-Instruct-0905](https://huggingface.co/moonshotai/Kimi-K2-Instruct-0905) | [Kimi K2 Thinking](https://moonshotai.github.io/Kimi-K2/thinking.html) | Kimi-K2-Thinking is the reasoning-focused Kimi-K2 variant for long-horizon agentic workflows, multi-step reasoning, and tool-heavy tasks. |
+|Qwen          | Qwen         | [Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)<br>[Qwen3-Next](https://huggingface.co/collections/Qwen/qwen3-next-68c25fd6838e585db8eeea9d)<br>[Qwen3-235B-A22B-Instruct-2507-FP8](https://huggingface.co/Qwen/Qwen3-235B-A22B-Instruct-2507-FP8)| [Qwen3.6-35B-A3B: Agentic Coding Power, Now Open to All](https://qwen.ai/blog?id=qwen3.6-35b-a3b) | Qwen3.6-35B-A3B is an open-weight MoE model focused on stable, practical coding and agentic workflows, with Qwen3-Next and larger Qwen3 MoE variants also represented. |
+|gpt-oss       | OpenAI       | [gpt-oss-120b](https://huggingface.co/openai/gpt-oss-120b)<br>[gpt-oss-safeguard-120b](https://huggingface.co/openai/gpt-oss-safeguard-120b) | [Introducing gpt-oss-safeguard](https://openai.com/index/introducing-gpt-oss-safeguard/) | gpt-oss-120b is OpenAI's open-weight GPT model; gpt-oss-safeguard-120b adds policy-driven reasoning classification for flexible moderation and safety workflows. |
+|Meta Llama 3  | Meta         | [Llama-3.3-70B-Instruct-FP8](https://huggingface.co/nvidia/Llama-3.3-70B-Instruct-FP8) | [Llama-3.3-70B-Instruct](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct) | Llama-3.3-70B-Instruct is a multilingual instruction-tuned Llama 3 model; Parallax lists the NVIDIA FP8 variants for efficient serving. |
+|Step          | StepFun      | [Step-3.5-Flash](https://huggingface.co/stepfun-ai/Step-3.5-Flash) | [Step 3.5 Flash](https://static.stepfun.com/blog/step-3.5-flash/) | Step-3.5-Flash is a sparse MoE foundation model for efficient reasoning and agentic workflows, activating a small subset of its total parameters per token. |

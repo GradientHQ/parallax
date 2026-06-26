@@ -455,11 +455,7 @@ class MLXModelLoader:
         # loading only what we need.
         shard_weights = {}
 
-        for file_idx, wf in enumerate(weight_files):
-            logger.debug(
-                f"Scanning weight file {file_idx + 1}/{len(weight_files)}: {pathlib.Path(wf).name}"
-            )
-
+        for wf in weight_files:
             f = mx.load(wf)
             for key in f.keys():
                 model_key = normalize_language_model_weight_key(key)

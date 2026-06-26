@@ -1,10 +1,13 @@
 # Parallax Web UI
 
-This is the front-end source code for Parallax, based on React and build by Vite.
+This is the frontend source code for Parallax, built with React and Vite.
+
+The built assets in `dist/` are served by the Parallax scheduler and chat
+servers. You only need the Node.js toolchain below when editing the web UI.
 
 ## Build
 
-Run the command to build this project (you need to prepare the front-end environment):
+Run this command after preparing the frontend environment:
 
 ```bash
 pnpm run build
@@ -14,9 +17,9 @@ The output directory is `./dist`.
 
 ## Local Debugging and Development
 
-Prepare front-end environment (MacOS or Linux):
+Prepare the frontend environment (macOS or Linux):
 
-- `nvm` to install and manage versions of Node.js.
+- Node.js `>=22`. `nvm` is one way to install and manage Node.js versions.
 - `pnpm` as package manager to install dependencies.
 
 ```bash
@@ -51,4 +54,4 @@ Run the hot-reload preview service:
 pnpm run dev
 ```
 
-Open the url `http://localhost:5173`, edit code and preview in browser.
+Open `http://localhost:5173`, edit code, and preview in your browser.

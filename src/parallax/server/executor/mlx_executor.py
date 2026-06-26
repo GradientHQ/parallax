@@ -110,7 +110,7 @@ class MLXExecutor(BaseExecutor):
         )
 
         try:
-            mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
+            mx.set_wired_limit(mx.device_info()["max_recommended_working_set_size"])
         except Exception:
             logger.warning("Using mlx without metal backend.")
 

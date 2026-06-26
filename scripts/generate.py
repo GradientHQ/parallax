@@ -115,7 +115,7 @@ def main():
     tp_rank = group.rank()
     tp_size = group.size()
 
-    mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
+    mx.set_wired_limit(mx.device_info()["max_recommended_working_set_size"])
 
     # 1. Load Model
     print_rank(f"Loading model from {args.model}...")
@@ -160,7 +160,7 @@ def main():
         num_kv_heads=num_kv_heads // tp_size,  # Shard heads
         head_dim=head_dim,
         dtype=model.dtype,
-        block_size=32,
+        block_size=1,
         cache_memory_fraction=0.1,
         max_num_seqs=1,
         head_dim_v=v_head_dim,
