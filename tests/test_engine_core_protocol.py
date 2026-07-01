@@ -112,6 +112,8 @@ def test_engine_core_ready_payload_matches_m3_release_schema():
         "dp_stats_address": None,
         "dtype": "bfloat16",
         "vllm_version": PARALLAX_ENGINE_CORE_VERSION,
+        "world_size": 1,
+        "data_parallel_size": 1,
     }
 
 

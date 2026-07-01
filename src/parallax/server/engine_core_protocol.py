@@ -162,6 +162,8 @@ def engine_core_ready_payload(
     block_size: int = 16,
     num_gpu_blocks: int = 0,
     dp_stats_address: Optional[str] = None,
+    world_size: int = 1,
+    data_parallel_size: int = 1,
 ) -> bytes:
     """Build the registration payload sent by the engine DEALER socket."""
     return _pack_msgpack(
@@ -172,6 +174,8 @@ def engine_core_ready_payload(
             "dp_stats_address": dp_stats_address,
             "dtype": dtype,
             "vllm_version": PARALLAX_ENGINE_CORE_VERSION,
+            "world_size": int(world_size),
+            "data_parallel_size": int(data_parallel_size),
         }
     )
 
