@@ -162,9 +162,11 @@ def _determine_needed_weight_files_for_download(
     is_first_shard = start_layer == 0
 
     is_last_shard = False
+    tie_word_embeddings = False
     if config:
         num_hidden_layers = config.get("num_hidden_layers", 0)
         is_last_shard = end_layer >= num_hidden_layers
+        tie_word_embeddings = config.get("tie_word_embeddings", False)
     else:
         config_file = model_path / "config.json"
         if config_file.exists():
@@ -174,6 +176,7 @@ def _determine_needed_weight_files_for_download(
                 cfg = normalize_model_config(json.load(f))
                 num_hidden_layers = cfg.get("num_hidden_layers", 0)
                 is_last_shard = end_layer >= num_hidden_layers
+                tie_word_embeddings = cfg.get("tie_word_embeddings", False)
 
     index_file = model_path / "model.safetensors.index.json"
 
@@ -200,10 +203,6 @@ def _determine_needed_weight_files_for_download(
     if not weight_map:
         logger.debug("weight_map is empty in index file")
         return []
-
-    tie_word_embeddings = False
-    if config:
-        tie_word_embeddings = config.get("tie_word_embeddings", False)
 
     needed_files: Set[str] = set()
 
