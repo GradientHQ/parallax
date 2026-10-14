@@ -274,4 +274,7 @@ if __name__ == "__main__":
     host = args.host
     port = args.port
 
-    uvicorn.run(app, host=host, port=port, log_level="info", loop="uvloop")
+    # "auto" (uvicorn's own default) picks uvloop when it's installed and
+    # falls back to the stdlib event loop otherwise -- uvloop has no Windows
+    # build, so hardcoding "uvloop" here made this unusable on Windows.
+    uvicorn.run(app, host=host, port=port, log_level="info", loop="auto")
