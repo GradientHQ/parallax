@@ -30,7 +30,11 @@ dependencies = [
   "httpx[socks]>=0.26.0",
   "aiohttp",
   "uvicorn",
-  "uvloop",
+  # uvloop has no Windows build (it wraps libuv's POSIX-only bindings) --
+  # as an unconditional dependency, `pip install` itself failed on Windows
+  # before any of our own code ran. src/parallax/p2p/utils.py already
+  # falls back to the stdlib event loop when uvloop isn't importable.
+  "uvloop; sys_platform != 'win32'",
   "fastapi",
   "pydantic",
   "protobuf==6.31.1",

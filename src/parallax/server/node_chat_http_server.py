@@ -293,7 +293,10 @@ class NodeChatHttpServer:
             host=self.host,
             port=self.port,
             timeout_keep_alive=5,
-            loop="uvloop",
+            # "auto" picks uvloop when installed, falls back otherwise --
+            # uvloop has no Windows build, so hardcoding "uvloop" broke this
+            # on Windows.
+            loop="auto",
         )
         server = uvicorn.Server(config)
         await server.serve()

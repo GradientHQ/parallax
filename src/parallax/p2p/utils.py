@@ -10,17 +10,30 @@ from concurrent.futures import Future
 from threading import Thread
 from typing import Awaitable
 
-import uvloop
+try:
+    # uvloop has no Windows build (it wraps libuv's POSIX-only bindings) --
+    # importing it unconditionally made this entire module, and everything
+    # that transitively imports it (the P2P layer), fail to load at all on
+    # Windows. Falling back to the stdlib asyncio event loop there instead
+    # of uvloop's faster one is a performance cost, not a correctness one.
+    import uvloop
+
+    _HAS_UVLOOP = True
+except ImportError:
+    _HAS_UVLOOP = False
 
 
 def switch_to_uvloop() -> asyncio.AbstractEventLoop:
-    """stop any running event loops; install uvloop; then create, set and return a new event loop"""
+    """stop any running event loops; install uvloop if available; then create, set and
+    return a new event loop. Falls back to the stdlib event loop on platforms (Windows)
+    where uvloop isn't installable."""
     try:
         # if we're in jupyter, get rid of its built-in event loop
         asyncio.get_event_loop().stop()
     except RuntimeError:
         pass  # this allows running DHT from background threads with no event loop
-    uvloop.install()
+    if _HAS_UVLOOP:
+        uvloop.install()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     return loop
