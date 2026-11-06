@@ -15,6 +15,12 @@ pnpm run build
 
 The output directory is `./dist`.
 
+## Stream tests
+
+With Node.js 22.18+ or 24+, run `pnpm test` from `src/frontend` to test the
+chat stream reader. These tests use local synthetic response streams; no model,
+GPU, scheduler, or remote service is needed.
+
 ## Local Debugging and Development
 
 Prepare the frontend environment (macOS or Linux):
